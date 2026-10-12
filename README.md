@@ -34,6 +34,14 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_DB_BUSY_TIMEOUT` | `5s` | Kilitli veritabanı için bekleme süresi |
 | `UPTIME_READ_HEADER_TIMEOUT` | `5s` | HTTP istek başlığı okuma süresi |
 | `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi için süre |
+| `UPTIME_SCHEDULER_TICK` | `1s` | Zamanı gelen monitor'ların ve monitor değişikliklerinin kontrol sıklığı |
+| `UPTIME_MAX_JITTER` | `5s` | İlk kontrolden önceki rastgele gecikmenin üst sınırı |
+| `UPTIME_WORKERS` | `20` | Aynı anda çalışabilecek kontrol sayısı |
+| `UPTIME_RESULT_BATCH_SIZE` | `100` | Tek seferde yazılan en fazla sonuç sayısı |
+| `UPTIME_RESULT_FLUSH_INTERVAL` | `1s` | Dolmamış batch'in yazılma aralığı |
+| `UPTIME_RETENTION` | `168h` | Ham kontrol sonuçlarının saklanma süresi |
+| `UPTIME_RETENTION_INTERVAL` | `1h` | Eski sonuçların silinme sıklığı |
+| `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | HTTP kontrollerinde TLS sertifika doğrulamasını kapatır |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 

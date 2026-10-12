@@ -8,10 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/yusufceng/Kubeat/backend/internal/api"
+	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
+	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -37,6 +40,30 @@ func main() {
 	}
 	defer db.Close()
 
+	// Background work stops on the same signal as the HTTP server and is
+	// waited for before the database is closed.
+	var background sync.WaitGroup
+	sched := scheduler.New(db, checker.New(checker.Options{
+		InsecureSkipVerify: cfg.HTTPInsecureSkipVerify,
+		UserAgent:          "kubeat/" + version,
+	}), scheduler.Options{
+		Tick:          cfg.SchedulerTick,
+		MaxJitter:     cfg.MaxJitter,
+		Workers:       cfg.Workers,
+		BatchSize:     cfg.ResultBatchSize,
+		FlushInterval: cfg.ResultFlushInterval,
+		Logger:        logger,
+	})
+	background.Add(2)
+	go func() {
+		defer background.Done()
+		sched.Run(ctx)
+	}()
+	go func() {
+		defer background.Done()
+		scheduler.RunRetention(ctx, db, cfg.Retention, cfg.RetentionInterval, logger)
+	}()
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           api.NewHandler(version),
@@ -57,9 +84,12 @@ func main() {
 	logger.Info("server listening", "addr", cfg.Addr, "version", version, "db", cfg.DBPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server failed", "error", err)
+		stop()
+		background.Wait()
 		db.Close()
 		os.Exit(1)
 	}
 	// ListenAndServe returns as soon as Shutdown starts; wait for it to drain.
 	<-shutdownDone
+	background.Wait()
 }
