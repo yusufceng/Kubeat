@@ -54,6 +54,7 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 | `GET` | `/api/v1/monitors?window=24h` | Monitor'lar; son durum ve uptime ile |
 | `POST` | `/api/v1/monitors` | Monitor ekler |
 | `GET` | `/api/v1/monitors/{id}?window=24h` | Tek monitor |
+| `PATCH` | `/api/v1/monitors/{id}` | Monitor'u düzenler; `{"enabled": false}` ile durdurur |
 | `DELETE` | `/api/v1/monitors/{id}` | Monitor'u ve sonuçlarını siler |
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
 | `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |

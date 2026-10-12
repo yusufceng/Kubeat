@@ -20,7 +20,11 @@ const maxBodyBytes = 1 << 20
 type Store interface {
 	CreateMonitor(ctx context.Context, m store.Monitor) (store.Monitor, error)
 	ListMonitors(ctx context.Context) ([]store.Monitor, error)
+	GetMonitor(ctx context.Context, id int64) (store.Monitor, error)
+	UpdateMonitor(ctx context.Context, m store.Monitor) (store.Monitor, error)
 	DeleteMonitor(ctx context.Context, id int64) error
+	GetOpenIncident(ctx context.Context, monitorID int64) (store.Incident, error)
+	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (store.MonitorStatus, error)
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]store.CheckResult, error)
@@ -66,7 +70,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 1
+const Revision = 2
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -88,6 +92,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/monitors", h.listMonitors)
 	mux.HandleFunc("POST /api/v1/monitors", h.createMonitor)
 	mux.HandleFunc("GET /api/v1/monitors/{id}", h.getMonitor)
+	mux.HandleFunc("PATCH /api/v1/monitors/{id}", h.updateMonitor)
 	mux.HandleFunc("DELETE /api/v1/monitors/{id}", h.deleteMonitor)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/results", h.listResults)
 	mux.HandleFunc("GET /api/v1/discovery", h.discoveryStatus)

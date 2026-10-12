@@ -10,7 +10,9 @@ import {
   deleteMonitor,
   importCandidates,
   type MonitorType,
+  type MonitorChanges,
   testChannel,
+  updateMonitor,
 } from "@/lib/api";
 
 /** Field values as submitted, so a rejected form can be shown filled in again. */
@@ -53,6 +55,34 @@ export async function createMonitorAction(
   }
   refresh();
   return { error: null, values: null };
+}
+
+/** null before the first save; afterwards whether it was accepted. */
+export type EditState = { saved: boolean; error: string | null } | null;
+
+export async function updateMonitorAction(_prev: EditState, formData: FormData): Promise<EditState> {
+  const changes: MonitorChanges = {
+    target: String(formData.get("target") ?? ""),
+    interval_seconds: Number(formData.get("interval_seconds")),
+    timeout_seconds: Number(formData.get("timeout_seconds")),
+    failure_threshold: Number(formData.get("failure_threshold")),
+  };
+  // Discovered monitors are named after their source and have no name field.
+  const name = formData.get("name");
+  if (name !== null) changes.name = String(name);
+
+  try {
+    await updateMonitor(Number(formData.get("id")), changes);
+  } catch (err) {
+    return { saved: false, error: describe(err) };
+  }
+  refresh();
+  return { saved: true, error: null };
+}
+
+export async function setMonitorEnabledAction(formData: FormData): Promise<void> {
+  await updateMonitor(Number(formData.get("id")), { enabled: formData.get("enabled") === "true" });
+  refresh();
 }
 
 export async function deleteMonitorAction(formData: FormData): Promise<void> {

@@ -5,9 +5,10 @@ import type { CheckResult, Monitor } from "@/lib/api";
  * incident state: one failed check is not yet an outage, and one successful
  * check does not always end one.
  */
-export type DisplayState = "up" | "down" | "verifying" | "recovering" | "pending";
+export type DisplayState = "up" | "down" | "verifying" | "recovering" | "pending" | "paused";
 
 export function displayState(m: Pick<Monitor, "status" | "open_incident">): DisplayState {
+  if (m.status === "paused") return "paused";
   if (m.open_incident) return m.status === "up" ? "recovering" : "down";
   return m.status === "down" ? "verifying" : m.status;
 }
@@ -26,6 +27,7 @@ const styles: Record<DisplayState, { dot: string; text: string; label: string }>
     label: "Toparlanıyor",
   },
   pending: { dot: "bg-zinc-400", text: "text-zinc-500", label: "Bekleniyor" },
+  paused: { dot: "bg-zinc-400", text: "text-zinc-500", label: "Durduruldu" },
 };
 
 export function StatusBadge({ state }: { state: DisplayState }) {

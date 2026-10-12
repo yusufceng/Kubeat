@@ -95,6 +95,11 @@ func (e *Engine) evaluate(ctx context.Context, monitorID int64) error {
 	if err != nil {
 		return err
 	}
+	if !m.Enabled {
+		// A check that was already running when the monitor was paused must
+		// not open an incident nobody is watching for.
+		return nil
+	}
 
 	incident, err := e.store.GetOpenIncident(ctx, monitorID)
 	switch {

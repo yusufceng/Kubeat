@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 1;
+export const REQUIRED_API_REVISION = 2;
 
 export type Health = {
   status: string;
@@ -60,7 +60,7 @@ export type Monitor = {
   failure_threshold: number;
   enabled: boolean;
   created_at: string;
-  status: "up" | "down" | "pending";
+  status: "up" | "down" | "pending" | "paused";
   last_result: CheckResult | null;
   open_incident: Incident | null;
   window_seconds: number;
@@ -124,6 +124,16 @@ export const listResults = (id: number, limit: number) =>
 
 export const createMonitor = (monitor: NewMonitor) =>
   request<Monitor>("/monitors", { method: "POST", body: JSON.stringify(monitor) });
+
+export type MonitorChanges = Partial<
+  Pick<
+    Monitor,
+    "name" | "target" | "interval_seconds" | "timeout_seconds" | "failure_threshold" | "enabled"
+  >
+>;
+
+export const updateMonitor = (id: number, changes: MonitorChanges) =>
+  request<Monitor>(`/monitors/${id}`, { method: "PATCH", body: JSON.stringify(changes) });
 
 export const deleteMonitor = (id: number) =>
   request<void>(`/monitors/${id}`, { method: "DELETE" });

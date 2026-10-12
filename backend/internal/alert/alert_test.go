@@ -392,3 +392,20 @@ func TestWebhookSender(t *testing.T) {
 		t.Error("an unreachable webhook was treated as delivered")
 	}
 }
+
+func TestPausedMonitorOpensNoIncident(t *testing.T) {
+	f := newFixture(t, 2, 1)
+	f.check(false)
+
+	paused := f.monitor
+	paused.Enabled = false
+	if _, err := f.db.UpdateMonitor(context.Background(), paused); err != nil {
+		t.Fatal(err)
+	}
+	f.check(false) // a result from a check that was in flight when paused
+	f.check(false)
+
+	if got := f.incidents(); len(got) != 0 {
+		t.Errorf("paused monitor opened an incident: %+v", got)
+	}
+}

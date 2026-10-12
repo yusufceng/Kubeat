@@ -303,6 +303,33 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 	return statuses, rows.Err()
 }
 
+func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
+	res, err := s.write.ExecContext(ctx,
+		`UPDATE monitors
+		 SET name = ?, target = ?, interval_seconds = ?, timeout_seconds = ?, failure_threshold = ?, enabled = ?
+		 WHERE id = ?`,
+		m.Name, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.FailureThreshold, m.Enabled, m.ID)
+	if isUniqueViolation(err) {
+		return Monitor{}, ErrConflict
+	}
+	if err != nil {
+		return Monitor{}, fmt.Errorf("update monitor: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return Monitor{}, fmt.Errorf("update monitor: %w", err)
+	}
+	if n == 0 {
+		return Monitor{}, ErrNotFound
+	}
+	// Read back through the writer so the answer reflects this update.
+	updated, err := scanMonitor(s.write.QueryRowContext(ctx, "SELECT "+monitorColumns+" FROM monitors WHERE id = ?", m.ID))
+	if err != nil {
+		return Monitor{}, fmt.Errorf("update monitor: %w", err)
+	}
+	return updated, nil
+}
+
 func (s *SQLite) DeleteMonitor(ctx context.Context, id int64) error {
 	res, err := s.write.ExecContext(ctx, "DELETE FROM monitors WHERE id = ?", id)
 	if err != nil {

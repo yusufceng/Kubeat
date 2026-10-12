@@ -348,3 +348,55 @@ func TestMonitorSource(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateMonitor(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	discovered := newMonitor("shop/service/api:80")
+	discovered.Namespace, discovered.Source = "shop", "service/api:80"
+	created, err := s.CreateMonitor(ctx, discovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMonitor(ctx, newMonitor("other")); err != nil {
+		t.Fatal(err)
+	}
+
+	change := created
+	change.Name = "renamed"
+	change.Target = "https://example.com/ready"
+	change.Interval = time.Minute
+	change.Timeout = 10 * time.Second
+	change.FailureThreshold = 5
+	change.Enabled = false
+	// Attempts to change the immutable fields are ignored.
+	change.Type = MonitorTCP
+	change.Namespace, change.Source = "elsewhere", "route/x"
+
+	updated, err := s.UpdateMonitor(ctx, change)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	want := change
+	want.Type, want.Namespace, want.Source = created.Type, created.Namespace, created.Source
+	if updated != want {
+		t.Errorf("updated = %+v, want %+v", updated, want)
+	}
+	if got, _ := s.GetMonitor(ctx, created.ID); got != want {
+		t.Errorf("stored = %+v, want %+v", got, want)
+	}
+
+	change.Name = "other"
+	if _, err := s.UpdateMonitor(ctx, change); !errors.Is(err, ErrConflict) {
+		t.Errorf("rename onto an existing name: err = %v, want ErrConflict", err)
+	}
+	change.Name, change.Interval = "renamed", 0
+	if _, err := s.UpdateMonitor(ctx, change); err == nil {
+		t.Error("zero interval was accepted")
+	}
+	change.ID, change.Interval = 999, time.Minute
+	if _, err := s.UpdateMonitor(ctx, change); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown id: err = %v, want ErrNotFound", err)
+	}
+}

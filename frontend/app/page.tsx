@@ -55,13 +55,18 @@ async function Monitors() {
           value={count("verifying")}
           className="text-amber-600 dark:text-amber-400"
         />
-        <Stat label="Bekleniyor" value={count("pending")} className="text-zinc-500" />
+        <Stat
+          label="Bekleniyor / durduruldu"
+          value={count("pending", "paused")}
+          className="text-zinc-500"
+        />
       </dl>
 
       {namespaces.map((ns) => {
         const rows = groups.get(ns)!;
         const up = rows.filter((i) => states[i] === "up").length;
         const down = rows.filter((i) => states[i] === "down" || states[i] === "recovering").length;
+        const paused = rows.filter((i) => states[i] === "paused").length;
         return (
           <section key={ns} aria-label={ns || "Elle eklenenler"}>
             <div className="mb-2 flex items-baseline justify-between gap-3">
@@ -75,7 +80,8 @@ async function Monitors() {
                 )}
               </h2>
               <p className="text-xs text-zinc-500">
-                {up}/{rows.length} çalışıyor
+                {up}/{rows.length - paused} çalışıyor
+                {paused > 0 && ` · ${paused} durduruldu`}
                 {down > 0 && (
                   <span className="font-medium text-red-600 dark:text-red-400">
                     {" "}

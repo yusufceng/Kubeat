@@ -19,6 +19,7 @@ const (
 	statusUp      = "up"
 	statusDown    = "down"
 	statusPending = "pending" // no check has run yet
+	statusPaused  = "paused"  // disabled by a user; not being checked
 )
 
 type monitorResponse struct {
@@ -97,6 +98,9 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		if st.Last.Up {
 			resp.Status = statusUp
 		}
+	}
+	if !st.Enabled {
+		resp.Status = statusPaused
 	}
 	if st.Checks > 0 {
 		pct := 100 * float64(st.UpChecks) / float64(st.Checks)
@@ -262,6 +266,132 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toMonitorResponse(store.MonitorStatus{Monitor: m}, h.opts.StatsWindow))
+}
+
+// updateMonitorRequest carries only the fields to change.
+type updateMonitorRequest struct {
+	Name             *string `json:"name"`
+	Target           *string `json:"target"`
+	IntervalSeconds  *int    `json:"interval_seconds"`
+	TimeoutSeconds   *int    `json:"timeout_seconds"`
+	FailureThreshold *int    `json:"failure_threshold"`
+	Enabled          *bool   `json:"enabled"`
+}
+
+func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	var req updateMonitorRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	current, err := h.opts.Store.GetMonitor(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+
+	// Apply the changes on top of the current values and validate the result
+	// with the same rules as a new monitor.
+	merged := createMonitorRequest{
+		Name:             current.Name,
+		Type:             string(current.Type),
+		Target:           current.Target,
+		IntervalSeconds:  int(current.Interval / time.Second),
+		TimeoutSeconds:   int(current.Timeout / time.Second),
+		FailureThreshold: current.FailureThreshold,
+	}
+	if req.Name != nil {
+		merged.Name = *req.Name
+	}
+	if req.Target != nil {
+		merged.Target = *req.Target
+	}
+	if req.IntervalSeconds != nil {
+		merged.IntervalSeconds = *req.IntervalSeconds
+	}
+	if req.TimeoutSeconds != nil {
+		merged.TimeoutSeconds = *req.TimeoutSeconds
+	}
+	if req.FailureThreshold != nil {
+		if *req.FailureThreshold < 1 {
+			writeError(w, http.StatusBadRequest, "failure_threshold must be at least 1")
+			return
+		}
+		merged.FailureThreshold = *req.FailureThreshold
+	}
+	if err := merged.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	change := current
+	change.Name = merged.Name
+	change.Target = merged.Target
+	change.Interval = time.Duration(merged.IntervalSeconds) * time.Second
+	change.Timeout = time.Duration(merged.TimeoutSeconds) * time.Second
+	change.FailureThreshold = merged.FailureThreshold
+	if req.Enabled != nil {
+		change.Enabled = *req.Enabled
+	}
+
+	updated, err := h.opts.Store.UpdateMonitor(r.Context(), change)
+	switch {
+	case errors.Is(err, store.ErrConflict):
+		writeError(w, http.StatusConflict, "a monitor with this name already exists")
+		return
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	case err != nil:
+		h.internalError(w, r, err)
+		return
+	}
+
+	// A paused monitor produces no results, so nothing would ever resolve an
+	// incident left open on it.
+	if current.Enabled && !updated.Enabled {
+		if err := h.closeIncident(r, updated); err != nil {
+			h.internalError(w, r, err)
+			return
+		}
+	}
+
+	st, err := h.opts.Store.GetMonitorStatus(r.Context(), id, time.Now().Add(-h.opts.StatsWindow))
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toMonitorResponse(st, h.opts.StatsWindow))
+}
+
+// closeIncident resolves the monitor's open incident, if any, without
+// notifying: the target did not recover, it just stopped being watched.
+func (h *handler) closeIncident(r *http.Request, m store.Monitor) error {
+	incident, err := h.opts.Store.GetOpenIncident(r.Context(), m.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	h.opts.Logger.Info("incident closed because its monitor was paused", "monitor", m.Name, "incident_id", incident.ID)
+	err = h.opts.Store.ResolveIncident(r.Context(), incident.ID, time.Now().UTC())
+	if errors.Is(err, store.ErrNotFound) {
+		return nil // resolved in the meantime
+	}
+	return err
 }
 
 func (h *handler) deleteMonitor(w http.ResponseWriter, r *http.Request) {

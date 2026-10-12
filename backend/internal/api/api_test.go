@@ -232,3 +232,68 @@ func TestBadQueryAndPath(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateMonitor(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	do(t, "POST", base, validMonitor, nil)
+	do(t, "POST", base, strings.Replace(validMonitor, `"api"`, `"web"`, 1), nil)
+
+	var got monitorResponse
+	body := `{"target":"https://example.com/ready","interval_seconds":60,"failure_threshold":5}`
+	if code := do(t, "PATCH", base+"/1", body, &got); code != http.StatusOK {
+		t.Fatalf("update status = %d, want 200", code)
+	}
+	if got.Target != "https://example.com/ready" || got.IntervalSeconds != 60 || got.FailureThreshold != 5 {
+		t.Errorf("changed fields = %+v", got)
+	}
+	// Fields left out keep their values.
+	if got.Name != "api" || got.TimeoutSeconds != 5 || !got.Enabled || got.Type != "http" {
+		t.Errorf("untouched fields changed: %+v", got)
+	}
+
+	tests := map[string]struct {
+		body string
+		want int
+	}{
+		"name taken":         {`{"name":"web"}`, http.StatusConflict},
+		"empty name":         {`{"name":" "}`, http.StatusBadRequest},
+		"bad target":         {`{"target":"example.com"}`, http.StatusBadRequest},
+		"short interval":     {`{"interval_seconds":1}`, http.StatusBadRequest},
+		"timeout > interval": {`{"timeout_seconds":61}`, http.StatusBadRequest},
+		"zero threshold":     {`{"failure_threshold":0}`, http.StatusBadRequest},
+		"type is immutable":  {`{"type":"tcp"}`, http.StatusBadRequest},
+		"not JSON":           {`{`, http.StatusBadRequest},
+	}
+	for name, tt := range tests {
+		if code := do(t, "PATCH", base+"/1", tt.body, nil); code != tt.want {
+			t.Errorf("%s: status = %d, want %d", name, code, tt.want)
+		}
+	}
+	if code := do(t, "PATCH", base+"/999", `{"name":"x"}`, nil); code != http.StatusNotFound {
+		t.Errorf("unknown monitor: status = %d, want 404", code)
+	}
+	if do(t, "GET", base+"/1", "", &got); got.Target != "https://example.com/ready" || got.Name != "api" {
+		t.Errorf("rejected updates changed the monitor: %+v", got)
+	}
+
+	// Pausing closes the open incident; resuming does not reopen it.
+	ctx := context.Background()
+	if _, err := db.OpenIncident(ctx, store.Incident{MonitorID: 1, StartedAt: time.Now().Add(-time.Minute), Cause: "timeout"}); err != nil {
+		t.Fatal(err)
+	}
+	if code := do(t, "PATCH", base+"/1", `{"enabled":false}`, &got); code != http.StatusOK {
+		t.Fatalf("pause status = %d", code)
+	}
+	if got.Enabled || got.Status != statusPaused || got.OpenIncident != nil {
+		t.Errorf("paused monitor = enabled:%v status:%s incident:%+v", got.Enabled, got.Status, got.OpenIncident)
+	}
+	incidents, err := db.ListIncidents(ctx, 1, 10)
+	if err != nil || len(incidents) != 1 || incidents[0].Open() {
+		t.Errorf("incident after pause = %+v, %v", incidents, err)
+	}
+
+	if do(t, "PATCH", base+"/1", `{"enabled":true}`, &got); !got.Enabled || got.Status == statusPaused || got.OpenIncident != nil {
+		t.Errorf("resumed monitor = enabled:%v status:%s incident:%+v", got.Enabled, got.Status, got.OpenIncident)
+	}
+}

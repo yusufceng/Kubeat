@@ -13,11 +13,11 @@ import {
 import { config } from "@/lib/config";
 import { dateTime, duration, uptime } from "@/lib/format";
 import { LiveRefresh } from "@/app/ui/live-refresh";
-import { DeleteMonitorButton } from "@/app/ui/delete-monitor-button";
 import { BackendError } from "@/app/ui/backend-error";
 import { IncidentTable } from "@/app/ui/incident-table";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
+import { EditMonitorForm, MonitorActions } from "@/app/ui/monitor-settings";
 import { displayState, HistoryStrip, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 
@@ -56,7 +56,7 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
             {monitor.type.toUpperCase()} · {monitor.target}
           </p>
         </div>
-        <DeleteMonitorButton id={monitor.id} name={monitor.name} />
+        <MonitorActions monitor={monitor} />
       </header>
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -77,6 +77,12 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
         </Field>
       </dl>
 
+      {!monitor.enabled && (
+        <p className="rounded-lg border border-black/10 bg-black/5 p-4 text-sm dark:border-white/15 dark:bg-white/5">
+          Bu monitor durduruldu; kontrol yapılmıyor ve alarm üretilmiyor.
+        </p>
+      )}
+
       {monitor.open_incident && (
         <p
           role="alert"
@@ -86,7 +92,7 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
         </p>
       )}
 
-      {monitor.last_result?.error && (
+      {monitor.enabled && monitor.last_result?.error && (
         <p
           role="alert"
           className="rounded-lg border border-red-600/40 bg-red-600/5 p-4 text-sm text-red-700 dark:text-red-400"
@@ -100,6 +106,13 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
         <h2 className="mb-2 text-sm font-semibold">Son {config.historyLimit} kontrol</h2>
         <HistoryStrip results={results} slots={config.historyLimit} />
       </section>
+
+      <details className="rounded-lg border border-black/10 dark:border-white/15">
+        <summary className="cursor-pointer px-5 py-3 text-sm font-semibold">Ayarlar</summary>
+        <div className="border-t border-black/10 p-5 dark:border-white/15">
+          <EditMonitorForm monitor={monitor} />
+        </div>
+      </details>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold">Olaylar</h2>

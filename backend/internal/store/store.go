@@ -102,6 +102,10 @@ type Store interface {
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]MonitorStatus, error)
 	// GetMonitorStatus is ListMonitorStatuses for a single monitor.
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (MonitorStatus, error)
+	// UpdateMonitor changes the editable fields of the monitor with m.ID:
+	// name, target, interval, timeout, failure threshold and enabled. Type,
+	// namespace and source never change.
+	UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error)
 	// DeleteMonitor removes the monitor and all of its check results.
 	DeleteMonitor(ctx context.Context, id int64) error
 
