@@ -6,8 +6,10 @@ FRONTEND_PORT ?= 3000
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.6.0
+VERSION ?= 0.7.0
 CHART := deploy/helm/kubeat
+# Ek helm ayarları, örn. HELM_ARGS="--set prometheus.url=http://..."
+HELM_ARGS ?=
 
 .PHONY: dev backend frontend test lint build images minikube-deploy minikube-open minikube-demo
 
@@ -43,12 +45,13 @@ minikube-deploy: images
 	helm --kube-context $(KUBE_CONTEXT) upgrade --install kubeat $(CHART) \
 		--namespace $(NAMESPACE) --create-namespace \
 		--set backend.image.tag=$(VERSION) --set frontend.image.tag=$(VERSION) \
-		--set podSecurityContext.fsGroup=1001 --wait
+		--set podSecurityContext.fsGroup=1001 $(HELM_ARGS) --wait
 
 # Arayüzü http://localhost:$(FRONTEND_PORT) adresine açar.
 minikube-open:
 	kubectl --context $(KUBE_CONTEXT) -n $(NAMESPACE) port-forward svc/kubeat-frontend $(FRONTEND_PORT):3000
 
-# Keşfi denemek için örnek bir namespace (shop-demo) kurar.
+# Denemek için örnek bir namespace (shop-demo) ve pod metrikleri için küçük
+# bir Prometheus (monitoring-demo) kurar.
 minikube-demo:
-	kubectl --context $(KUBE_CONTEXT) apply -f deploy/demo/shop.yaml
+	kubectl --context $(KUBE_CONTEXT) apply -f deploy/demo/shop.yaml -f deploy/demo/prometheus.yaml

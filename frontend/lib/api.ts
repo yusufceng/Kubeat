@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 7;
+export const REQUIRED_API_REVISION = 8;
 
 export type Health = {
   status: string;
@@ -278,3 +278,32 @@ export const createMaintenance = (window: NewMaintenance) =>
 
 export const deleteMaintenance = (id: number) =>
   request<void>(`/maintenance/${id}`, { method: "DELETE" });
+
+export type Pod = {
+  name: string;
+  /** Whether the pod receives traffic. */
+  ready: boolean;
+  ready_containers: number;
+  containers: number;
+  restarts: number;
+  /** The phase, or the reason the pod is not running normally. */
+  status: string;
+  started_at: string | null;
+  node: string;
+  /** null when the metrics server has no value for the pod. */
+  cpu_cores: number | null;
+  memory_bytes: number | null;
+};
+
+export type Workload = {
+  /** False when there are no pods to show; reason says why. */
+  available: boolean;
+  reason?: string;
+  service?: string;
+  ready: number;
+  total: number;
+  pods: Pod[];
+  metrics: { available: boolean; reason?: string };
+};
+
+export const getWorkload = (id: number) => request<Workload>(`/monitors/${id}/workload`);

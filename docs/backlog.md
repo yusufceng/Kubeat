@@ -8,6 +8,11 @@ kadar yapılacak iş değildir.
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
 başarılı döner. İki olası çözüm konuşuldu (2026-10-12):
 
+Güncelleme (2026-10-12): monitor sayfasına "Pod'lar" paneli eklendi. Panel
+hazır pod sayısını, pod durumlarını ve restart'ları cluster API'sinden canlı
+okur, CPU/belleği Prometheus'tan alır. Aşağıdaki iki madde hâlâ geçerli:
+panel yalnızca gösterir, saklamaz ve alarm üretmez.
+
 1. **Hazır/istenen replika oranı ve restart sayıları.** Bu veri OCP'nin kendi
    Prometheus'unda (kube-state-metrics) zaten var ve hazır alarm kuralları ile
    geliyor (`KubeDeploymentReplicasMismatch`, `KubePodCrashLooping`). Kendimiz

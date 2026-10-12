@@ -34,6 +34,19 @@ frontend:
     limits:
       memory: 512Mi
 
+# Where pod CPU and memory usage is read from: any Prometheus-compatible
+# API. Leave the URL empty to show pods without resource usage.
+prometheus:
+  url: ""
+  # OpenShift: https://thanos-querier.openshift-monitoring.svc:9091 with the
+  # pod's own service account token and the service CA.
+  tokenFile: ""      # e.g. /var/run/secrets/kubernetes.io/serviceaccount/token
+  caFile: ""         # e.g. /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+  insecureSkipVerify: false
+  # OpenShift only: binds the service account to cluster-monitoring-view,
+  # which Thanos Querier requires.
+  openshiftMonitoringView: false
+
 # The backend serves Prometheus metrics at /metrics on its service port.
 metrics:
   # Creates a ServiceMonitor so the cluster's Prometheus scrapes them. Needs

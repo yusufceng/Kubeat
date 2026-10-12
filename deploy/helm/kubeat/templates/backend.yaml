@@ -37,7 +37,7 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       serviceAccountName: {{ .Release.Name }}
-      automountServiceAccountToken: {{ .Values.discovery.enabled }}
+      automountServiceAccountToken: {{ or .Values.discovery.enabled (ne .Values.prometheus.tokenFile "") }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -57,6 +57,24 @@ spec:
               value: /data/uptime.db
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
+            {{- with .Values.prometheus }}
+            {{- if .url }}
+            - name: UPTIME_PROMETHEUS_URL
+              value: {{ .url | quote }}
+            {{- with .tokenFile }}
+            - name: UPTIME_PROMETHEUS_TOKEN_FILE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .caFile }}
+            - name: UPTIME_PROMETHEUS_CA_FILE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .insecureSkipVerify }}
+            - name: UPTIME_PROMETHEUS_INSECURE_SKIP_VERIFY
+              value: "true"
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.heartbeat }}
             {{- if .urlSecret.name }}
             - name: UPTIME_HEARTBEAT_URL

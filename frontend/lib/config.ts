@@ -31,7 +31,7 @@ export const config = {
   /** Number of recent checks drawn in a history strip. */
   historyLimit: positiveInt(process.env.HISTORY_LIMIT, 40),
   /** Number of recent checks listed on a monitor's page. */
-  resultsLimit: positiveInt(process.env.RESULTS_LIMIT, 100),
+  resultsLimit: positiveInt(process.env.RESULTS_LIMIT, 30),
   /** Periods for which a monitor's uptime is shown, in seconds. */
   uptimeWindows: durationList(process.env.UPTIME_WINDOWS, "24h,168h,720h"),
   /** Ranges offered for a monitor's charts, in seconds; the first is the default. */

@@ -20,6 +20,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/heartbeat"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
+	"github.com/yusufceng/Kubeat/backend/internal/prom"
 	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -139,7 +140,12 @@ func main() {
 		scheduler.RunRetention(ctx, db, cfg.Retention, cfg.RetentionInterval, logger)
 	}()
 
-	var discovery api.Discovery
+	// These stay nil interfaces when unavailable, which the API checks for.
+	var (
+		discovery  api.Discovery
+		workloads  api.Workloads
+		podMetrics api.PodMetrics
+	)
 	discoveryStatus := "disabled by UPTIME_DISCOVERY_ENABLED"
 	if cfg.DiscoveryEnabled {
 		client, err := k8s.Connect(k8s.Options{Kubeconfig: cfg.Kubeconfig, Context: cfg.KubeContext, Timeout: cfg.KubeTimeout})
@@ -147,9 +153,27 @@ func main() {
 			discoveryStatus = err.Error()
 			logger.Info("cluster discovery unavailable", "reason", err.Error())
 		} else {
-			discovery, discoveryStatus = client, client.Mode
+			discovery, workloads, discoveryStatus = client, client, client.Mode
 			logger.Info("cluster discovery enabled", "mode", client.Mode)
 		}
+	}
+	if cfg.PrometheusURL != "" {
+		client, err := prom.New(prom.Options{
+			URL:                cfg.PrometheusURL,
+			TokenFile:          cfg.PrometheusTokenFile,
+			CAFile:             cfg.PrometheusCAFile,
+			InsecureSkipVerify: cfg.PrometheusInsecureSkipVerify,
+			Timeout:            cfg.PrometheusTimeout,
+			RateWindow:         cfg.PrometheusRateWindow,
+			CPUQuery:           cfg.PrometheusCPUQuery,
+			MemoryQuery:        cfg.PrometheusMemoryQuery,
+		})
+		if err != nil {
+			logger.Error("invalid metrics server configuration", "error", err)
+			os.Exit(1)
+		}
+		podMetrics = client
+		logger.Info("pod metrics enabled", "url", cfg.PrometheusURL)
 	}
 
 	srv := &http.Server{
@@ -164,6 +188,8 @@ func main() {
 			Metrics:          meter.Handler(),
 			EmailEnabled:     senders.EmailEnabled(),
 			Discovery:        discovery,
+			Workloads:        workloads,
+			PodMetrics:       podMetrics,
 			DiscoveryStatus:  discoveryStatus,
 			Logger:           logger,
 

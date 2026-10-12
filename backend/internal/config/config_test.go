@@ -50,6 +50,9 @@ func TestLoadDefaults(t *testing.T) {
 		NotifyRetryDelay:        5 * time.Second,
 		NotifyTimeout:           5 * time.Second,
 
+		PrometheusTimeout:    10 * time.Second,
+		PrometheusRateWindow: 5 * time.Minute,
+
 		HeartbeatInterval: time.Minute,
 		HeartbeatTimeout:  10 * time.Second,
 		MetricsTimeout:    5 * time.Second,

@@ -25,6 +25,7 @@ import { LiveDuration } from "@/app/ui/live-duration";
 import { LocalTime } from "@/app/ui/local-time";
 import { SilenceForm } from "@/app/ui/maintenance-forms";
 import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
+import { PodsPanel } from "@/app/ui/pods-panel";
 import { EditMonitorForm, MonitorActions } from "@/app/ui/monitor-settings";
 import { displayState, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
@@ -223,6 +224,16 @@ async function MonitorDetail({
           Her nokta {duration(series.bucket_seconds)} içindeki başarılı kontrollerin ortalamasıdır.
         </p>
       </section>
+
+      {monitor.source && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold">Pod&apos;lar</h2>
+          {/* Its own boundary: a slow cluster must not hold back the page. */}
+          <Suspense fallback={<p className="text-sm text-zinc-500">Cluster okunuyor…</p>}>
+            <PodsPanel monitorId={monitor.id} />
+          </Suspense>
+        </section>
+      )}
 
       <section>
         <h2 className="mb-2 text-sm font-semibold">Son {config.historyLimit} kontrol</h2>

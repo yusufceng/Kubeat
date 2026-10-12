@@ -35,3 +35,17 @@ export function span(ms: number): string {
   if (hours < 24) return `${hours} sa ${minutes % 60} dk`;
   return `${Math.floor(hours / 24)} gün ${hours % 24} sa`;
 }
+
+/** CPU in Kubernetes units: 0.25 -> "250m", 1.5 -> "1,5", 0.0002 -> "<1m". */
+export function cpu(cores: number): string {
+  if (cores > 0 && cores < 0.0005) return "<1m"; // in use, but would round to zero
+  if (cores < 1) return `${Math.round(cores * 1000)}m`;
+  return cores.toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+}
+
+/** Memory in binary units: 104857600 -> "100 Mi". */
+export function memory(bytes: number): string {
+  const mi = bytes / 2 ** 20;
+  if (mi < 1024) return `${Math.round(mi)} Mi`;
+  return `${(mi / 1024).toLocaleString("tr-TR", { maximumFractionDigits: 1 })} Gi`;
+}

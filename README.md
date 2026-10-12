@@ -60,6 +60,7 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
 | `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş |
 | `GET` | `/api/v1/monitors/{id}/uptime?windows=24h,168h` | İstenen her dönem için uptime |
+| `GET` | `/api/v1/monitors/{id}/workload` | Monitor'un arkasındaki pod'lar; hazır olma, restart, CPU ve bellek |
 | `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
 | `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
@@ -111,6 +112,44 @@ ham sonuçlardan, ham verinin ötesine geçen aralıklar özetlerden hesaplanır
 Yanıt süresi yalnızca başarılı kontrollerden hesaplanır; başarısız bir
 kontrolün süresi çoğunlukla zaman aşımıdır ve yanıt süresi hakkında bir şey
 söylemez.
+
+## Pod'lar ve kaynak kullanımı
+
+Service üzerinden yapılan bir kontrol her seferinde tek bir pod'a düşer;
+arkadaki pod'lardan birkaçı bozukken kontrollerin çoğu yine başarılı olur.
+Bu yüzden keşifle oluşturulmuş bir monitor'un sayfasında, o hedefin
+arkasındaki pod'lar da gösterilir: kaçı hazır, her birinin durumu
+(`CrashLoopBackOff` gibi), restart sayısı, yaşı ve node'u.
+
+Bu bilgi sayfa açıldığında cluster API'sinden canlı okunur; Kubeat bunu
+saklamaz ve bunun için alarm üretmez. Replika eksikliği ya da sürekli
+yeniden başlayan pod alarmları cluster'ın kendi izleme altyapısının işidir.
+
+Route ve Ingress monitor'ları yönlendirdikleri Service üzerinden çözülür.
+
+`UPTIME_PROMETHEUS_URL` ayarlanırsa her pod için CPU ve bellek kullanımı da
+gösterilir. Değerler Prometheus uyumlu bir API'den okunur; OpenShift'te bu
+Thanos Querier'dır:
+
+```
+helm upgrade --install kubeat deploy/helm/kubeat \
+  --set prometheus.url=https://thanos-querier.openshift-monitoring.svc:9091 \
+  --set prometheus.tokenFile=/var/run/secrets/kubernetes.io/serviceaccount/token \
+  --set prometheus.caFile=/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt \
+  --set prometheus.openshiftMonitoringView=true
+```
+
+Minikube'da denemek için `make minikube-demo` küçük bir Prometheus kurar;
+ardından:
+
+```
+make minikube-deploy HELM_ARGS="--set prometheus.url=http://prometheus.monitoring-demo.svc:9090"
+```
+
+Varsayılan sorgular pod düzeyindeki cgroup serilerini okur. Ortamınızda
+farklıysa `UPTIME_PROMETHEUS_CPU_QUERY` ve `UPTIME_PROMETHEUS_MEMORY_QUERY`
+ile değiştirilebilir; sorguda `%NAMESPACE%`, `%PODS%` ve `%WINDOW%` yer
+tutucuları kullanılır ve sonuç her pod için `pod` etiketli tek seri olmalıdır.
 
 ## Aracın kendi sağlığı
 
@@ -265,6 +304,14 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_KUBECONFIG` | – | Cluster dışında çalışırken kullanılacak kubeconfig dosyası |
 | `UPTIME_KUBE_CONTEXT` | – | Kubeconfig içindeki bağlam; kubeconfig verildiyse zorunlu |
 | `UPTIME_KUBE_TIMEOUT` | `10s` | Cluster API istekleri için zaman aşımı |
+| `UPTIME_PROMETHEUS_URL` | – | Pod CPU/bellek kullanımının okunduğu Prometheus uyumlu API; boşsa kullanım gösterilmez |
+| `UPTIME_PROMETHEUS_TOKEN_FILE` | – | Her istekte okunan bearer token dosyası |
+| `UPTIME_PROMETHEUS_CA_FILE` | – | Sunucu sertifikasının doğrulanacağı CA dosyası |
+| `UPTIME_PROMETHEUS_INSECURE_SKIP_VERIFY` | `false` | Sunucu sertifikasını doğrulamaz |
+| `UPTIME_PROMETHEUS_TIMEOUT` | `10s` | Sorgu zaman aşımı |
+| `UPTIME_PROMETHEUS_RATE_WINDOW` | `5m` | CPU kullanımının ortalamasının alındığı süre |
+| `UPTIME_PROMETHEUS_CPU_QUERY` | – | Varsayılan CPU sorgusunun yerine kullanılır |
+| `UPTIME_PROMETHEUS_MEMORY_QUERY` | – | Varsayılan bellek sorgusunun yerine kullanılır |
 | `UPTIME_HEARTBEAT_URL` | – | Dead man's switch adresi; boşsa heartbeat gönderilmez |
 | `UPTIME_HEARTBEAT_INTERVAL` | `1m` | Heartbeat aralığı; `UPTIME_SCHEDULER_TICK`'in en az iki katı |
 | `UPTIME_HEARTBEAT_TIMEOUT` | `10s` | Heartbeat isteğinin zaman aşımı |
@@ -279,7 +326,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `HISTORY_LIMIT` | `40` | Geçmiş şeridinde gösterilen kontrol sayısı |
-| `RESULTS_LIMIT` | `100` | Monitor sayfasında listelenen kontrol sayısı |
+| `RESULTS_LIMIT` | `30` | Monitor sayfasında listelenen kontrol sayısı |
 | `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |
 | `MAINTENANCE_DURATIONS` | `30m,1h,2h,4h,8h,24h` | Susturma ve bakım için sunulan süreler |
 | `MAINTENANCE_LIMIT` | `50` | Listelenen bakım penceresi sayısı |

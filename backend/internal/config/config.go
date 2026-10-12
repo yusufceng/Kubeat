@@ -44,6 +44,17 @@ type Config struct {
 	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
 	NotifyTimeout           time.Duration // UPTIME_NOTIFY_TIMEOUT
 
+	// A Prometheus-compatible server (on OpenShift, Thanos Querier) from
+	// which pod CPU and memory usage is read; off while the URL is empty.
+	PrometheusURL                string        // UPTIME_PROMETHEUS_URL
+	PrometheusTokenFile          string        // UPTIME_PROMETHEUS_TOKEN_FILE
+	PrometheusCAFile             string        // UPTIME_PROMETHEUS_CA_FILE
+	PrometheusInsecureSkipVerify bool          // UPTIME_PROMETHEUS_INSECURE_SKIP_VERIFY
+	PrometheusTimeout            time.Duration // UPTIME_PROMETHEUS_TIMEOUT
+	PrometheusRateWindow         time.Duration // UPTIME_PROMETHEUS_RATE_WINDOW
+	PrometheusCPUQuery           string        // UPTIME_PROMETHEUS_CPU_QUERY
+	PrometheusMemoryQuery        string        // UPTIME_PROMETHEUS_MEMORY_QUERY
+
 	// Heartbeats go to an external dead man's switch; off while the URL is
 	// empty. MetricsTimeout bounds the database read done for a scrape.
 	HeartbeatURL      string        // UPTIME_HEARTBEAT_URL
@@ -76,6 +87,12 @@ func Load() (Config, error) {
 		DBPath: envString("UPTIME_DB_PATH", "uptime.db"),
 
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
+
+		PrometheusURL:         envString("UPTIME_PROMETHEUS_URL", ""),
+		PrometheusTokenFile:   envString("UPTIME_PROMETHEUS_TOKEN_FILE", ""),
+		PrometheusCAFile:      envString("UPTIME_PROMETHEUS_CA_FILE", ""),
+		PrometheusCPUQuery:    envString("UPTIME_PROMETHEUS_CPU_QUERY", ""),
+		PrometheusMemoryQuery: envString("UPTIME_PROMETHEUS_MEMORY_QUERY", ""),
 
 		SMTPHost:     envString("UPTIME_SMTP_HOST", ""),
 		SMTPUsername: envString("UPTIME_SMTP_USERNAME", ""),
@@ -111,6 +128,8 @@ func Load() (Config, error) {
 		{&cfg.HeartbeatInterval, "UPTIME_HEARTBEAT_INTERVAL", time.Minute},
 		{&cfg.HeartbeatTimeout, "UPTIME_HEARTBEAT_TIMEOUT", 10 * time.Second},
 		{&cfg.MetricsTimeout, "UPTIME_METRICS_TIMEOUT", 5 * time.Second},
+		{&cfg.PrometheusTimeout, "UPTIME_PROMETHEUS_TIMEOUT", 10 * time.Second},
+		{&cfg.PrometheusRateWindow, "UPTIME_PROMETHEUS_RATE_WINDOW", 5 * time.Minute},
 	}
 	for _, d := range durations {
 		v, err := envDuration(d.key, d.def)
@@ -160,6 +179,9 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL: must be at least 1s, got %s", cfg.MinCheckInterval)
 	}
 	if cfg.ReminderInterval, err = envDurationOrZero("UPTIME_REMINDER_INTERVAL", 0); err != nil {
+		return Config{}, err
+	}
+	if cfg.PrometheusInsecureSkipVerify, err = envBool("UPTIME_PROMETHEUS_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err
 	}
 	if cfg.DiscoveryEnabled, err = envBool("UPTIME_DISCOVERY_ENABLED", true); err != nil {

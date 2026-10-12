@@ -78,14 +78,19 @@ type Options struct {
 	// says why. Otherwise DiscoveryStatus describes the connection.
 	Discovery       Discovery
 	DiscoveryStatus string
-	Logger          *slog.Logger
+	// Workloads reads the pods behind discovered monitors; nil without a
+	// cluster. PodMetrics adds their resource usage; nil when no metrics
+	// server is configured.
+	Workloads  Workloads
+	PodMetrics PodMetrics
+	Logger     *slog.Logger
 }
 
 // Revision identifies the shape of the API. Increase it whenever a response
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 7
+const Revision = 8
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -115,6 +120,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/monitors/{id}/results", h.listResults)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/series", h.monitorSeries)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/uptime", h.monitorUptime)
+	mux.HandleFunc("GET /api/v1/monitors/{id}/workload", h.monitorWorkload)
 	mux.HandleFunc("GET /api/v1/discovery", h.discoveryStatus)
 	mux.HandleFunc("GET /api/v1/discovery/namespaces", h.discoveryNamespaces)
 	mux.HandleFunc("GET /api/v1/discovery/candidates", h.discoveryCandidates)
