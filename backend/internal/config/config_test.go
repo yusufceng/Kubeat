@@ -32,6 +32,10 @@ func TestLoadDefaults(t *testing.T) {
 		ResultFlushInterval: time.Second,
 		Retention:           7 * 24 * time.Hour,
 		RetentionInterval:   time.Hour,
+
+		MinCheckInterval: 5 * time.Second,
+		StatsWindow:      24 * time.Hour,
+		MaxResults:       1000,
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)
@@ -90,5 +94,12 @@ func TestLoadRejectsInvalidNumbersAndBools(t *testing.T) {
 	t.Setenv("UPTIME_HTTP_INSECURE_SKIP_VERIFY", "maybe")
 	if _, err := Load(); err == nil {
 		t.Error("UPTIME_HTTP_INSECURE_SKIP_VERIFY=maybe was accepted")
+	}
+}
+
+func TestLoadRejectsSubSecondMinInterval(t *testing.T) {
+	t.Setenv("UPTIME_MIN_CHECK_INTERVAL", "500ms")
+	if _, err := Load(); err == nil {
+		t.Error("UPTIME_MIN_CHECK_INTERVAL=500ms was accepted")
 	}
 }

@@ -8,8 +8,13 @@ import (
 	"time"
 )
 
-// ErrNotFound is returned when a requested row does not exist.
-var ErrNotFound = errors.New("store: not found")
+var (
+	// ErrNotFound is returned when a requested row does not exist.
+	ErrNotFound = errors.New("store: not found")
+	// ErrConflict is returned when a row violates a uniqueness rule, such as
+	// two monitors with the same name.
+	ErrConflict = errors.New("store: conflict")
+)
 
 // MonitorType is the kind of check a monitor performs.
 type MonitorType string
@@ -41,12 +46,27 @@ type CheckResult struct {
 	Error      string // empty on success
 }
 
+// MonitorStatus is a monitor together with its latest result and its
+// statistics over a time window.
+type MonitorStatus struct {
+	Monitor
+	Last       *CheckResult // nil until the first check has run
+	Checks     int          // results in the window
+	UpChecks   int          // of which successful
+	AvgLatency time.Duration
+}
+
 // Store persists monitors and their check results.
 type Store interface {
 	// CreateMonitor inserts m and returns it with ID and CreatedAt set.
 	CreateMonitor(ctx context.Context, m Monitor) (Monitor, error)
 	GetMonitor(ctx context.Context, id int64) (Monitor, error)
 	ListMonitors(ctx context.Context) ([]Monitor, error)
+	// ListMonitorStatuses returns every monitor with its latest result and
+	// statistics computed over results at or after since.
+	ListMonitorStatuses(ctx context.Context, since time.Time) ([]MonitorStatus, error)
+	// GetMonitorStatus is ListMonitorStatuses for a single monitor.
+	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (MonitorStatus, error)
 	// DeleteMonitor removes the monitor and all of its check results.
 	DeleteMonitor(ctx context.Context, id int64) error
 

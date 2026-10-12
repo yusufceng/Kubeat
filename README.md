@@ -22,6 +22,27 @@ make frontend   # UI   -> http://localhost:3000
 make test
 ```
 
+## API
+
+| Metot | Yol | Açıklama |
+| --- | --- | --- |
+| `GET` | `/api/v1/health` | Backend sağlık durumu |
+| `GET` | `/api/v1/monitors?window=24h` | Monitor'lar; son durum ve uptime ile |
+| `POST` | `/api/v1/monitors` | Monitor ekler |
+| `GET` | `/api/v1/monitors/{id}?window=24h` | Tek monitor |
+| `DELETE` | `/api/v1/monitors/{id}` | Monitor'u ve sonuçlarını siler |
+| `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
+
+```
+curl -X POST localhost:8090/api/v1/monitors -d '{
+  "name": "ornek", "type": "http", "target": "https://example.com",
+  "interval_seconds": 30, "timeout_seconds": 5
+}'
+```
+
+`type` değeri `http` (2xx/3xx yanıt başarılı sayılır) ya da `tcp`
+(`host:port` bağlantısı kurulabiliyorsa başarılı) olabilir.
+
 ## Yapılandırma
 
 Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
@@ -42,6 +63,9 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_RETENTION` | `168h` | Ham kontrol sonuçlarının saklanma süresi |
 | `UPTIME_RETENTION_INTERVAL` | `1h` | Eski sonuçların silinme sıklığı |
 | `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | HTTP kontrollerinde TLS sertifika doğrulamasını kapatır |
+| `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
+| `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
+| `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 

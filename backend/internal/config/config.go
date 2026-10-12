@@ -26,6 +26,10 @@ type Config struct {
 	RetentionInterval   time.Duration // UPTIME_RETENTION_INTERVAL
 
 	HTTPInsecureSkipVerify bool // UPTIME_HTTP_INSECURE_SKIP_VERIFY
+
+	MinCheckInterval time.Duration // UPTIME_MIN_CHECK_INTERVAL
+	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
+	MaxResults       int           // UPTIME_MAX_RESULTS
 }
 
 // Load reads the configuration from the environment, falling back to
@@ -49,6 +53,8 @@ func Load() (Config, error) {
 		{&cfg.ResultFlushInterval, "UPTIME_RESULT_FLUSH_INTERVAL", time.Second},
 		{&cfg.Retention, "UPTIME_RETENTION", 7 * 24 * time.Hour},
 		{&cfg.RetentionInterval, "UPTIME_RETENTION_INTERVAL", time.Hour},
+		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
+		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
 	}
 	for _, d := range durations {
 		v, err := envDuration(d.key, d.def)
@@ -64,6 +70,13 @@ func Load() (Config, error) {
 	}
 	if cfg.ResultBatchSize, err = envPositiveInt("UPTIME_RESULT_BATCH_SIZE", 100); err != nil {
 		return Config{}, err
+	}
+	if cfg.MaxResults, err = envPositiveInt("UPTIME_MAX_RESULTS", 1000); err != nil {
+		return Config{}, err
+	}
+	if cfg.MinCheckInterval < time.Second {
+		// Intervals are stored in whole seconds.
+		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL: must be at least 1s, got %s", cfg.MinCheckInterval)
 	}
 	if cfg.HTTPInsecureSkipVerify, err = envBool("UPTIME_HTTP_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err

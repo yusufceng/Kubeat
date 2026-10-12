@@ -65,8 +65,15 @@ func main() {
 	}()
 
 	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           api.NewHandler(version),
+		Addr: cfg.Addr,
+		Handler: api.NewHandler(api.Options{
+			Version:          version,
+			Store:            db,
+			MinCheckInterval: cfg.MinCheckInterval,
+			StatsWindow:      cfg.StatsWindow,
+			MaxResults:       cfg.MaxResults,
+			Logger:           logger,
+		}),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 	}
 

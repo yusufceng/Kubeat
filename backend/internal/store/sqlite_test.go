@@ -50,8 +50,8 @@ func TestMonitorCRUD(t *testing.T) {
 		t.Errorf("get = %+v, want %+v", got, created)
 	}
 
-	if _, err := s.CreateMonitor(ctx, newMonitor("api")); err == nil {
-		t.Error("duplicate name was accepted")
+	if _, err := s.CreateMonitor(ctx, newMonitor("api")); !errors.Is(err, ErrConflict) {
+		t.Errorf("duplicate name: err = %v, want ErrConflict", err)
 	}
 
 	if _, err := s.CreateMonitor(ctx, newMonitor("web")); err != nil {
@@ -234,5 +234,77 @@ func TestConcurrentWritersAndReaders(t *testing.T) {
 	}
 	if want := writers * batches * batchSize; len(got) != want {
 		t.Errorf("rows = %d, want %d", len(got), want)
+	}
+}
+
+func TestMonitorStatuses(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	api, err := s.CreateMonitor(ctx, newMonitor("api"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	idle, err := s.CreateMonitor(ctx, newMonitor("never-checked"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	base := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	err = s.InsertCheckResults(ctx, []CheckResult{
+		// Before the window: must not count towards the statistics.
+		{MonitorID: api.ID, CheckedAt: base.Add(-time.Hour), Up: false, Latency: 900 * time.Millisecond, Error: "old"},
+		{MonitorID: api.ID, CheckedAt: base, Up: true, Latency: 100 * time.Millisecond, StatusCode: 200},
+		{MonitorID: api.ID, CheckedAt: base.Add(time.Minute), Up: true, Latency: 200 * time.Millisecond, StatusCode: 200},
+		{MonitorID: api.ID, CheckedAt: base.Add(2 * time.Minute), Up: true, Latency: 300 * time.Millisecond, StatusCode: 200},
+		{MonitorID: api.ID, CheckedAt: base.Add(3 * time.Minute), Up: false, Latency: 400 * time.Millisecond, StatusCode: 503, Error: "unexpected status 503"},
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	statuses, err := s.ListMonitorStatuses(ctx, base)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("len = %d, want 2", len(statuses))
+	}
+
+	got := statuses[0]
+	if got.Monitor != api {
+		t.Errorf("monitor = %+v, want %+v", got.Monitor, api)
+	}
+	if got.Checks != 4 || got.UpChecks != 3 || got.AvgLatency != 250*time.Millisecond {
+		t.Errorf("Checks=%d UpChecks=%d AvgLatency=%s, want 4, 3, 250ms", got.Checks, got.UpChecks, got.AvgLatency)
+	}
+	wantLast := CheckResult{MonitorID: api.ID, CheckedAt: base.Add(3 * time.Minute), Up: false,
+		Latency: 400 * time.Millisecond, StatusCode: 503, Error: "unexpected status 503"}
+	if got.Last == nil || *got.Last != wantLast {
+		t.Errorf("Last = %+v, want %+v", got.Last, wantLast)
+	}
+
+	if st := statuses[1]; st.ID != idle.ID || st.Last != nil || st.Checks != 0 || st.AvgLatency != 0 {
+		t.Errorf("never-checked monitor: %+v", st)
+	}
+
+	one, err := s.GetMonitorStatus(ctx, api.ID, base)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if one.ID != api.ID || one.Checks != 4 || one.Last == nil {
+		t.Errorf("GetMonitorStatus = %+v", one)
+	}
+	if _, err := s.GetMonitorStatus(ctx, 999, base); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown id: err = %v, want ErrNotFound", err)
+	}
+
+	// With the window after the last result the latest result is still shown.
+	statuses, err = s.ListMonitorStatuses(ctx, base.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if statuses[0].Checks != 0 || statuses[0].Last == nil {
+		t.Errorf("empty window: %+v", statuses[0])
 	}
 }

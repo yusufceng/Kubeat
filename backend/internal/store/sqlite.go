@@ -11,7 +11,8 @@ import (
 	"sort"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 //go:embed migrations/*.sql
@@ -152,6 +153,9 @@ func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 		`INSERT INTO monitors (name, type, target, interval_seconds, timeout_seconds, enabled, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		m.Name, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.Enabled, m.CreatedAt.UnixMilli())
+	if isUniqueViolation(err) {
+		return Monitor{}, ErrConflict
+	}
 	if err != nil {
 		return Monitor{}, fmt.Errorf("create monitor: %w", err)
 	}
@@ -192,6 +196,94 @@ func (s *SQLite) ListMonitors(ctx context.Context) ([]Monitor, error) {
 		return nil, fmt.Errorf("list monitors: %w", err)
 	}
 	return monitors, nil
+}
+
+// isUniqueViolation reports whether err is a UNIQUE constraint failure.
+func isUniqueViolation(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+}
+
+// statusQuery joins each monitor with its newest result (found through the
+// (monitor_id, checked_at) index) and with its aggregates since a cutoff.
+const statusQuery = `
+SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.timeout_seconds, m.enabled, m.created_at,
+       r.checked_at, r.up, r.latency_ms, r.status_code, r.error,
+       COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.avg_latency_ms, 0)
+FROM monitors m
+LEFT JOIN check_results r ON r.id = (
+    SELECT id FROM check_results
+    WHERE monitor_id = m.id
+    ORDER BY checked_at DESC, id DESC LIMIT 1)
+LEFT JOIN (
+    SELECT monitor_id, COUNT(*) AS checks, SUM(up) AS up_checks, AVG(latency_ms) AS avg_latency_ms
+    FROM check_results
+    WHERE checked_at >= ?1
+    GROUP BY monitor_id) a ON a.monitor_id = m.id
+WHERE ?2 = 0 OR m.id = ?2
+ORDER BY m.id`
+
+func (s *SQLite) ListMonitorStatuses(ctx context.Context, since time.Time) ([]MonitorStatus, error) {
+	statuses, err := s.queryStatuses(ctx, since, 0)
+	if err != nil {
+		return nil, fmt.Errorf("list monitor statuses: %w", err)
+	}
+	return statuses, nil
+}
+
+func (s *SQLite) GetMonitorStatus(ctx context.Context, id int64, since time.Time) (MonitorStatus, error) {
+	statuses, err := s.queryStatuses(ctx, since, id)
+	if err != nil {
+		return MonitorStatus{}, fmt.Errorf("get monitor status: %w", err)
+	}
+	if len(statuses) == 0 {
+		return MonitorStatus{}, ErrNotFound
+	}
+	return statuses[0], nil
+}
+
+// queryStatuses runs statusQuery for one monitor, or for all when id is 0.
+func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) ([]MonitorStatus, error) {
+	rows, err := s.read.QueryContext(ctx, statusQuery, since.UnixMilli(), id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var statuses []MonitorStatus
+	for rows.Next() {
+		var (
+			st                           MonitorStatus
+			interval, timeout, createdAt int64
+			checkedAt, latencyMS         sql.NullInt64
+			up                           sql.NullBool
+			statusCode                   sql.NullInt64
+			errText                      sql.NullString
+			avgLatencyMS                 float64
+		)
+		err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Target, &interval, &timeout, &st.Enabled, &createdAt,
+			&checkedAt, &up, &latencyMS, &statusCode, &errText,
+			&st.Checks, &st.UpChecks, &avgLatencyMS)
+		if err != nil {
+			return nil, err
+		}
+		st.Interval = time.Duration(interval) * time.Second
+		st.Timeout = time.Duration(timeout) * time.Second
+		st.CreatedAt = time.UnixMilli(createdAt).UTC()
+		st.AvgLatency = time.Duration(avgLatencyMS * float64(time.Millisecond))
+		if checkedAt.Valid {
+			st.Last = &CheckResult{
+				MonitorID:  st.ID,
+				CheckedAt:  time.UnixMilli(checkedAt.Int64).UTC(),
+				Up:         up.Bool,
+				Latency:    time.Duration(latencyMS.Int64) * time.Millisecond,
+				StatusCode: int(statusCode.Int64),
+				Error:      errText.String,
+			}
+		}
+		statuses = append(statuses, st)
+	}
+	return statuses, rows.Err()
 }
 
 func (s *SQLite) DeleteMonitor(ctx context.Context, id int64) error {
