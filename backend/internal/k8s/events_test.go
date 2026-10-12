@@ -29,6 +29,8 @@ func TestEventsAboutThePodsAndWhatManagesThem(t *testing.T) {
 		event("e5", "Pod", "other-123", "Warning", "Failed", now, 1),                         // another workload
 		event("e6", "Pod", "web-7d9f-abc", "Warning", "Unhealthy", now.Add(-3*time.Hour), 1), // too old
 		event("e7", "Deployment", "webshop", "Normal", "Scaled", now, 1),                     // name is a prefix but not a parent
+		event("e8", "Deployment", "web", "Warning", "FailedCreate", now, 1),                  // a parent only of web-7d9f-*, not of web-admin-*
+		event("e9", "StatefulSet", "web", "Normal", "SuccessfulCreate", now, 1),              // would own "web-0", not these pods
 	)
 	c := NewClient(core, newDynamic(), "test")
 
@@ -36,7 +38,7 @@ func TestEventsAboutThePodsAndWhatManagesThem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Deployment/web ScalingReplicaSet", "ReplicaSet/web-7d9f SuccessfulCreate", "Pod/web-7d9f-abc BackOff", "Pod/web-7d9f-xyz Pulled"}
+	want := []string{"Deployment/web FailedCreate", "Deployment/web ScalingReplicaSet", "ReplicaSet/web-7d9f SuccessfulCreate", "Pod/web-7d9f-abc BackOff", "Pod/web-7d9f-xyz Pulled"}
 	if len(got) != len(want) {
 		t.Fatalf("Events = %+v, want %v", got, want)
 	}
@@ -45,11 +47,20 @@ func TestEventsAboutThePodsAndWhatManagesThem(t *testing.T) {
 			t.Errorf("event %d = %s %s, want %s", i, got[i].Object, got[i].Reason, w)
 		}
 	}
-	if got[2].Count != 12 || got[2].Message != "BackOff happened" || got[2].Type != "Warning" {
-		t.Errorf("backoff event = %+v", got[2])
+	if got[3].Count != 12 || got[3].Message != "BackOff happened" || got[3].Type != "Warning" {
+		t.Errorf("backoff event = %+v", got[3])
 	}
 
-	if got, _ := c.Events(context.Background(), "shop", []string{"web-7d9f-abc"}, now.Add(-time.Hour), 1); len(got) != 1 || got[0].Reason != "ScalingReplicaSet" {
+	// The pods of "web-admin" belong to web-admin, not to "web".
+	got, err = c.Events(context.Background(), "shop", []string{"web-admin-5c6d-qwe"}, now.Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("events for web-admin's pod = %+v, want none of web's", got)
+	}
+
+	if got, _ := c.Events(context.Background(), "shop", []string{"web-7d9f-abc"}, now.Add(-time.Hour), 1); len(got) != 1 || got[0].Object != "Deployment/web" {
 		t.Errorf("limit 1 = %+v", got)
 	}
 }

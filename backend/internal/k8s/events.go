@@ -26,8 +26,8 @@ type Event struct {
 
 // Events returns the events of the last window about the given pods, and
 // about the ReplicaSets, Deployments, StatefulSets and DaemonSets they
-// belong to (recognised by the pod names starting with the object's name).
-// Newest first, at most limit.
+// belong to, recognised by the shape of the pod names. Newest first, at
+// most limit.
 func (c *Client) Events(ctx context.Context, namespace string, pods []string, since time.Time, limit int) ([]Event, error) {
 	list, err := c.core.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -65,7 +65,14 @@ func eventTime(e corev1.Event) time.Time {
 	}
 }
 
+// concerns says whether an event's object is one of the pods or manages
+// one of them. A pod's name is its manager's name plus generated parts:
+// one for a ReplicaSet, StatefulSet, DaemonSet or ReplicationController
+// ("web-7d9f-abc12", "db-0"), two for a Deployment or DeploymentConfig
+// ("web-7d9f-abc12", "app-3-xk2p9"). Counting them keeps "web" from
+// claiming the pods of "web-admin".
 func concerns(obj corev1.ObjectReference, pods []string) bool {
+	generated := 0
 	switch obj.Kind {
 	case "Pod":
 		for _, p := range pods {
@@ -73,11 +80,18 @@ func concerns(obj corev1.ObjectReference, pods []string) bool {
 				return true
 			}
 		}
-	case "ReplicaSet", "Deployment", "StatefulSet", "DaemonSet", "DeploymentConfig", "ReplicationController":
-		for _, p := range pods {
-			if strings.HasPrefix(p, obj.Name+"-") {
-				return true
-			}
+		return false
+	case "ReplicaSet", "StatefulSet", "DaemonSet", "ReplicationController":
+		generated = 1
+	case "Deployment", "DeploymentConfig":
+		generated = 2
+	default:
+		return false
+	}
+	for _, p := range pods {
+		rest, ok := strings.CutPrefix(p, obj.Name+"-")
+		if ok && strings.Count(rest, "-") == generated-1 {
+			return true
 		}
 	}
 	return false

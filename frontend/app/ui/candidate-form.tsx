@@ -31,9 +31,12 @@ const inputClass = "field";
 export function CandidateForm({
   namespace,
   candidates,
+  defaults,
 }: {
   namespace: string;
   candidates: Candidate[];
+  /** What the imported monitors start with; the same as a monitor made by hand. */
+  defaults: { interval: number; timeout: number; failureThreshold: number };
 }) {
   const [state, action, pending] = useActionState<ImportState, FormData>(
     importCandidatesAction,
@@ -136,7 +139,7 @@ export function CandidateForm({
             name="interval_seconds"
             type="number"
             min={1}
-            defaultValue={30}
+            defaultValue={defaults.interval}
             required
             className={inputClass}
           />
@@ -147,7 +150,7 @@ export function CandidateForm({
             name="timeout_seconds"
             type="number"
             min={1}
-            defaultValue={5}
+            defaultValue={defaults.timeout}
             required
             className={inputClass}
           />
@@ -158,7 +161,7 @@ export function CandidateForm({
             name="failure_threshold"
             type="number"
             min={1}
-            defaultValue={3}
+            defaultValue={defaults.failureThreshold}
             required
             className={inputClass}
           />

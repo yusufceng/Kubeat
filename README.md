@@ -111,13 +111,14 @@ Benzetimi kaldırmak: `helm -n kubeat-ocp uninstall kubeat`; CRD'ler ve
 
 ## Güvenlik
 
-Backend API'si, `UPTIME_API_TOKEN` ayarlandığında yalnızca bu anahtarı
-`Authorization: Bearer ...` başlığıyla gönderen isteklere yanıt verir.
-Arayüz aynı anahtarı `BACKEND_TOKEN` ile gönderir. Sağlık kontrolü
-(`/api/v1/health`) ve `/metrics` anahtarsız okunabilir; ikisi de bir şey
-değiştirmez. Push raporları (`/api/push/{token}`) da anahtar istemez: adresteki
-token o monitor'un sırrıdır ve yalnızca o monitor'a rapor yazabilir. Anahtar
-ayarlanmazsa API açıktır ve backend bunu açılışta uyarı olarak loglar.
+Backend API'si her istekte ya giriş yapmış bir kullanıcının oturumunu ya da
+`UPTIME_API_TOKEN` anahtarını (`Authorization: Bearer ...`) ister; arayüz
+oturumla, betikler anahtarla konuşur (bkz. "Hesaplar ve giriş"). Anahtar
+ayarlanmazsa API yalnızca oturumla kullanılabilir. Sağlık kontrolü
+(`/api/v1/health`), `/metrics`, yayımlanmış durum sayfaları ve rozetler
+kimlik istemez; hiçbiri bir şey değiştirmez. Push raporları
+(`/api/push/{token}`) da anahtar istemez: adresteki token o monitor'un
+sırrıdır ve yalnızca o monitor'a rapor yazabilir.
 
 Helm chart anahtarı ilk kurulumda rastgele üretir, bir Secret'ta saklar ve
 güncellemelerde korur. Ek olarak `networkPolicy.enabled=true`, backend'e

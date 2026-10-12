@@ -314,7 +314,7 @@ func main() {
 	}()
 
 	if cfg.APIToken == "" {
-		logger.Warn("the API is not protected: UPTIME_API_TOKEN is not set, so anything that can reach this address can change monitors and channels")
+		logger.Info("UPTIME_API_TOKEN is not set: the API accepts signed-in users only; set a token for scripts and automation")
 	}
 	logger.Info("server listening", "addr", cfg.Addr, "version", version, "db", cfg.DBPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {

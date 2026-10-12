@@ -93,7 +93,7 @@ async function Reports({ searchParams }: { searchParams: Promise<Record<string, 
             <Link
               key={p}
               href={`/reports?days=${p}${namespace !== undefined ? `&namespace=${encodeURIComponent(namespace)}` : ""}`}
-              className={`rounded-md px-3 py-1 ${p === days ? "bg-surface font-medium shadow-sm" : "text-muted hover:text-ink"}`}
+              className={`rounded-md px-3 py-1 ${p === days ? "bg-panel font-medium shadow-sm" : "text-muted hover:text-ink"}`}
             >
               {p === 1 ? "24 saat" : `${p} gün`}
             </Link>

@@ -17,16 +17,12 @@ export function BackendError({ what, err }: { what: string; err?: unknown }) {
       </p>
     );
   }
-  const unauthorized = false;
   return (
     <p
       role="alert"
       className="rounded-lg border border-down/40 bg-down/8 p-4 text-sm text-down"
     >
-      {unauthorized
-        ? "Backend API anahtarını kabul etmedi: arayüzdeki BACKEND_TOKEN ile backend'deki UPTIME_API_TOKEN aynı olmalı."
-        : "Backend'e ulaşılamıyor."}{" "}
-      {what} gösterilemiyor.
+      Backend&apos;e ulaşılamıyor. {what} gösterilemiyor.
     </p>
   );
 }

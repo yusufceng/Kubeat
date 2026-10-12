@@ -92,7 +92,16 @@ Hâlâ gerçek OpenShift gerektirenler:
 - Backend tek replica çalışır; güncelleme sırasında birkaç saniye kontrol
   yapılmaz.
 - Giriş kilidi sayacı backend belleğindedir; yeniden başlatınca sıfırlanır.
-  Tek replica olduğu için şimdilik sorun değildir.
+  Tek replica olduğu için şimdilik sorun değildir. Kilit kullanıcı adına
+  göredir: adını bilen biri bir hesabı `UPTIME_LOGIN_MAX_FAILURES` yanlış
+  denemeyle `UPTIME_LOGIN_LOCKOUT` süresince kilitleyebilir; IP bazlı sınır
+  yoktur.
+- `/metrics` kimlik istemez ve monitor adlarını, namespace'lerini ve
+  sertifika bitişlerini açığa çıkarır; backend'e kimlerin ulaşabileceğini
+  NetworkPolicy belirler.
+- Yayımlanmış bir durum sayfasının her görüntülenmesi tüm monitor'ların
+  durumunu okur; önbellek yoktur. Çok ziyaret edilen bir sayfa için önüne
+  bir önbellek konmalıdır.
 - Gizli değerler `UPTIME_SECRET_KEY` ile şifrelenir; anahtar değiştirme
   (rotation) yoktur ve push token'ları şifrelenmez.
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye

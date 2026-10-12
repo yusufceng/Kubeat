@@ -8,6 +8,7 @@ import {
   listNamespaces,
 } from "@/lib/api";
 import { BackendError } from "@/app/ui/backend-error";
+import { config } from "@/lib/config";
 import { LocalTime } from "@/app/ui/local-time";
 import { currentUser } from "@/lib/auth";
 import { CandidateForm } from "@/app/ui/candidate-form";
@@ -203,7 +204,7 @@ async function Discovery({
       {candidates && candidates.length > 0 && (
         // Keyed so that selection state starts fresh for another namespace.
         me.can_edit ? (
-          <CandidateForm key={namespace} namespace={namespace} candidates={candidates} />
+          <CandidateForm key={namespace} namespace={namespace} candidates={candidates} defaults={config.newMonitor} />
         ) : (
           <ReadOnlyCandidates candidates={candidates} />
         )
