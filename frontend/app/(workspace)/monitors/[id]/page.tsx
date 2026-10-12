@@ -75,6 +75,9 @@ function checkSettings(m: Monitor): [string, React.ReactNode][] {
     if (d.query) rows.push(["Sorgu", d.query]);
     rows.push(["TLS", d.tls ? `açık, sertifika ${tls(d.tls_skip_verify)}` : "kapalı"]);
   }
+  if (m.workload) {
+    rows.push(["Hazır olması gereken", m.workload.min_ready > 0 ? `en az ${m.workload.min_ready} pod` : "tüm pod'lar"]);
+  }
   if (m.websocket) {
     if (m.websocket.subprotocol) rows.push(["Alt protokol", m.websocket.subprotocol]);
     if (m.websocket.tls_skip_verify) rows.push(["TLS sertifikası", tls(true)]);
@@ -304,7 +307,7 @@ async function MonitorDetail({
         </p>
       </section>
 
-      {monitor.source && (
+      {(monitor.source || monitor.type === "workload") && (
         <section>
           <h2 className="mb-2 text-sm font-semibold">Pod&apos;lar</h2>
           {/* Its own boundary: a slow cluster must not hold back the page. */}

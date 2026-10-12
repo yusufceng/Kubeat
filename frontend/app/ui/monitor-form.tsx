@@ -475,6 +475,27 @@ export function MonitorForm({
         </Section>
       )}
 
+      {type === "workload" && (
+        <Section
+          title="Workload ayarları"
+          hint="Tür deployment, statefulset ya da daemonset olabilir. Kubeat cluster'a bağlı olmalıdır; pod'lara ağ erişimi gerekmez."
+        >
+          <Field
+            label="En az hazır pod"
+            span={3}
+            hint="0: workload'un olması gereken tüm pod'ları hazır olmalı. Örneğin 3 kopyalı bir serviste 2 yazarsanız tek pod'un düşmesi alarm üretmez."
+          >
+            <input
+              name="workload_min_ready"
+              type="number"
+              min={0}
+              defaultValue={monitor?.workload?.min_ready ?? 0}
+              className="field"
+            />
+          </Field>
+        </Section>
+      )}
+
       {type === "websocket" && (
         <Section title="WebSocket ayarları">
           <Field label="Alt protokol (isteğe bağlı)" span={6} hint="Verilirse sunucunun onu kabul etmesi gerekir.">

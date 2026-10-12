@@ -76,8 +76,19 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Where the pods are: behind the object the monitor was discovered
+	// from, or, for a workload monitor, in the workload it names.
+	namespace, source := m.Namespace, m.Source
+	if m.Type == store.MonitorWorkload {
+		ns, kind, name, err := k8s.ParseWorkloadTarget(m.Target)
+		if err != nil {
+			writeJSON(w, http.StatusOK, unavailable(err.Error()))
+			return
+		}
+		namespace, source = ns, string(kind)+"/"+name
+	}
 	switch {
-	case m.Source == "":
+	case source == "":
 		writeJSON(w, http.StatusOK, unavailable("the monitor was not created from a cluster object"))
 		return
 	case h.opts.Workloads == nil:
@@ -85,7 +96,7 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workload, err := h.opts.Workloads.Workload(r.Context(), m.Namespace, m.Source)
+	workload, err := h.opts.Workloads.Workload(r.Context(), namespace, source)
 	if errors.Is(err, k8s.ErrNoWorkload) {
 		writeJSON(w, http.StatusOK, unavailable(err.Error()))
 		return
@@ -107,7 +118,7 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 	case h.opts.PodMetrics == nil:
 		resp.Metrics.Reason = "no metrics server is configured (UPTIME_PROMETHEUS_URL)"
 	default:
-		usage, err = h.opts.PodMetrics.PodUsage(r.Context(), m.Namespace, names)
+		usage, err = h.opts.PodMetrics.PodUsage(r.Context(), namespace, names)
 		if err != nil {
 			usage = nil // never show values from a failed read
 			h.opts.Logger.Warn("reading pod metrics failed", "monitor", m.Name, "error", err)

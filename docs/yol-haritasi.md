@@ -20,7 +20,8 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 12 | Tekrarlayan bakım pencereleri | Tamamlandı |
 | 13 | Bildirim sağlayıcıları: Telegram, Discord, PagerDuty, Mattermost, Google Chat, ntfy, Gotify; kanal düzenleme ve namespace'e göre yönlendirme | Tamamlandı |
 | 14 | Veritabanı kontrolleri: PostgreSQL, MySQL/MariaDB, Redis | Tamamlandı |
-| 14b | MongoDB, Kafka, RabbitMQ kontrolleri; Kubernetes workload tipi | Planlandı |
+| 14b | Kubernetes workload tipi: hazır pod sayısı, keşifte workload'lar | Tamamlandı |
+| 14c | MongoDB, Kafka, RabbitMQ kontrolleri | Planlandı |
 | 15 | Ayarlar ekranı, kişisel hesaplar ve roller, API anahtarları | Planlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
@@ -36,8 +37,8 @@ karşılamak. Kuma'nın kaynağı (3.0 beta, 2026-10) incelenerek çıkarıldı.
 | HTTP: metot, gövde, header, kabul edilen kodlar, yönlendirme sınırı, keyword (ve tersi), JSON sorgusu, basic/bearer | Var. NTLM, OAuth2 ve mTLS yok |
 | TCP port, ping, DNS, push, gRPC, WebSocket | Var. gRPC'de keyword yerine standart sağlık protokolü |
 | Tekrar sayısı ve tekrar aralığı, ters mod, sertifika süresi bildirimi | Var |
-| Veritabanları (PostgreSQL, MySQL, SQL Server, MongoDB, Redis, Oracle), MQTT, Kafka, RabbitMQ, SMTP, SNMP, SFTP, NTP, RADIUS | PostgreSQL, MySQL/MariaDB ve Redis var. MongoDB, Kafka ve RabbitMQ 14b adımında; kalanı yok |
-| Docker container, PM2, sistem servisi | Yok; karşılığı Kubernetes workload tipi (14b adımı) ve bugünkü pod paneli |
+| Veritabanları (PostgreSQL, MySQL, SQL Server, MongoDB, Redis, Oracle), MQTT, Kafka, RabbitMQ, SMTP, SNMP, SFTP, NTP, RADIUS | PostgreSQL, MySQL/MariaDB ve Redis var. MongoDB, Kafka ve RabbitMQ 14c adımında; kalanı yok |
+| Docker container, PM2, sistem servisi | Karşılığı var: Kubernetes workload tipi (hazır pod sayısı) ve pod paneli |
 | Gerçek tarayıcı, oyun sunucuları, Steam, Tailscale, Globalping | Kapsam dışı |
 | Kenar çubuğunda liste, arama ve filtre, toplu seçim | Var |
 | Monitor sayfası: kalp atışı çubuğu, yanıt süresi grafiği, 24 sa / 30 gün / 1 yıl uptime, sertifika bilgisi, olay tablosu | Var |

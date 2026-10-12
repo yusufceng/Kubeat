@@ -152,3 +152,31 @@ func TestWorkloadUnavailableStates(t *testing.T) {
 		t.Errorf("no cluster: %+v", got)
 	}
 }
+
+// A workload monitor entered by hand has no source; its pods are looked up
+// through the workload its target names, in that workload's namespace.
+func TestWorkloadEndpointOfAWorkloadMonitor(t *testing.T) {
+	workloads := &fakeWorkloads{workload: k8s.Workload{Pods: []k8s.Pod{{Name: "web-1", Ready: true, Containers: 1, ReadyContainers: 1, Status: "Running"}}}}
+	metrics := &fakePodMetrics{}
+	srv := newWorkloadAPI(t, workloads, metrics)
+
+	var m monitorResponse
+	body := `{"name":"web-pods","type":"workload","target":"shop-demo/deployment/web","namespace":"Mağaza","interval_seconds":30,"timeout_seconds":5,"failure_threshold":3}`
+	if code := do(t, "POST", srv.URL+"/api/v1/monitors", body, &m); code != http.StatusCreated {
+		t.Fatalf("create: status = %d", code)
+	}
+	var resp workloadResponse
+	if code := do(t, "GET", srv.URL+"/api/v1/monitors/"+itoa(m.ID)+"/workload", "", &resp); code != http.StatusOK {
+		t.Fatalf("workload: status = %d", code)
+	}
+	if !resp.Available || resp.Total != 1 || resp.Ready != 1 || resp.Service != "" {
+		t.Errorf("response = %+v", resp)
+	}
+	// Asked in the workload's namespace, not in the monitor's group.
+	if len(workloads.asked) != 1 || workloads.asked[0] != "shop-demo deployment/web" {
+		t.Errorf("cluster was asked for %v", workloads.asked)
+	}
+	if len(metrics.asked) != 1 || metrics.asked[0] != "shop-demo[web-1]" {
+		t.Errorf("metrics were asked for %v", metrics.asked)
+	}
+}

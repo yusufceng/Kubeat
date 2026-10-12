@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -401,6 +402,14 @@ func validateTarget(typ store.MonitorType, target string) error {
 	case store.MonitorPing, store.MonitorDNS:
 		if !validHost(target) {
 			return errors.New("target must be a host name or an IP address, without a scheme or port")
+		}
+	case store.MonitorWorkload:
+		namespace, _, name, err := k8s.ParseWorkloadTarget(target)
+		if err != nil {
+			return err
+		}
+		if !validHost(namespace) || !validHost(name) {
+			return errors.New("target must name a namespace and a workload in it")
 		}
 	case store.MonitorPush:
 		if target != "" {

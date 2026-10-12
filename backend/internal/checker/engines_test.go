@@ -486,3 +486,47 @@ func TestTruncate(t *testing.T) {
 		t.Errorf("truncate = %q", got)
 	}
 }
+
+type fakeWorkloads struct {
+	desired, ready int
+	err            error
+}
+
+func (f fakeWorkloads) Replicas(context.Context, string) (int, int, error) {
+	return f.desired, f.ready, f.err
+}
+
+func TestWorkloadCheck(t *testing.T) {
+	check := func(w Workloads, minReady int) store.CheckResult {
+		m := store.Monitor{Type: store.MonitorWorkload, Target: "shop/deployment/web", Workload: store.WorkloadOptions{MinReady: minReady}}
+		return New(Options{Workloads: w}).Check(context.Background(), m)
+	}
+
+	if got := check(fakeWorkloads{desired: 3, ready: 3}, 0); !got.Up || got.Detail != "3 of 3 pods are ready" {
+		t.Errorf("all ready: %+v", got)
+	}
+	// Without a minimum, one missing pod is a failure.
+	if got := check(fakeWorkloads{desired: 3, ready: 2}, 0); got.Up || got.Error != "2 of 3 pods are ready" {
+		t.Errorf("one pod missing: %+v", got)
+	}
+	// With one, the workload may be short of pods as long as enough are ready.
+	if got := check(fakeWorkloads{desired: 3, ready: 2}, 2); !got.Up || got.Detail != "2 of 3 pods are ready" {
+		t.Errorf("enough ready: %+v", got)
+	}
+	if got := check(fakeWorkloads{desired: 3, ready: 1}, 2); got.Up || got.Error != "1 of 3 pods are ready, at least 2 are needed" {
+		t.Errorf("too few ready: %+v", got)
+	}
+	// More is asked for than the workload is meant to run.
+	if got := check(fakeWorkloads{desired: 1, ready: 1}, 2); got.Up {
+		t.Errorf("minimum above the replicas: %+v", got)
+	}
+	if got := check(fakeWorkloads{}, 0); got.Up || got.Error != "the workload is scaled to zero" {
+		t.Errorf("scaled to zero: %+v", got)
+	}
+	if got := check(fakeWorkloads{err: errors.New("deployment shop/web does not exist")}, 0); got.Up || !strings.Contains(got.Error, "does not exist") {
+		t.Errorf("missing workload: %+v", got)
+	}
+	if got := check(nil, 0); got.Up || !strings.Contains(got.Error, "cluster") {
+		t.Errorf("without a cluster: %+v", got)
+	}
+}

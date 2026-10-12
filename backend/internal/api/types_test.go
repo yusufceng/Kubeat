@@ -420,3 +420,39 @@ func TestDatabaseMonitors(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkloadMonitors(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+
+	var m monitorResponse
+	if code := do(t, "POST", base, monitorJSON("web-pods", "workload", "shop/deployment/web", `"workload":{"min_ready":2}`), &m); code != http.StatusCreated {
+		t.Fatalf("create: status = %d", code)
+	}
+	if m.Workload == nil || m.Workload.MinReady != 2 || m.Target != "shop/deployment/web" || m.HTTP != nil {
+		t.Errorf("created = %+v, workload %+v", m, m.Workload)
+	}
+	var plain monitorResponse
+	do(t, "POST", base, monitorJSON("agents", "workload", "kube-system/daemonset/agent", ""), &plain)
+	if plain.Workload == nil || plain.Workload.MinReady != 0 {
+		t.Errorf("without options = %+v", plain.Workload)
+	}
+	var updated monitorResponse
+	if code := do(t, "PATCH", base+"/1", `{"workload":{"min_ready":0},"target":"shop/statefulset/db"}`, &updated); code != http.StatusOK ||
+		updated.Workload.MinReady != 0 || updated.Target != "shop/statefulset/db" {
+		t.Errorf("update: status = %d, monitor = %+v", code, updated)
+	}
+
+	for name, body := range map[string]string{
+		"two parts":            monitorJSON("x", "workload", "shop/web", ""),
+		"a pod":                monitorJSON("x", "workload", "shop/pod/web", ""),
+		"namespace with a dot": monitorJSON("x", "workload", "Shop Demo/deployment/web", ""),
+		"negative minimum":     monitorJSON("x", "workload", "shop/deployment/web", `"workload":{"min_ready":-1}`),
+		"another block":        monitorJSON("x", "workload", "shop/deployment/web", `"tcp":{"tls":true}`),
+		"block on a tcp":       monitorJSON("x", "tcp", "x:1", `"workload":{"min_ready":1}`),
+	} {
+		if code := do(t, "POST", base, body, nil); code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, code)
+		}
+	}
+}

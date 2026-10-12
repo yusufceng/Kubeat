@@ -30,9 +30,12 @@ import (
 type Kind string
 
 const (
-	KindService Kind = "service"
-	KindIngress Kind = "ingress"
-	KindRoute   Kind = "route"
+	KindService     Kind = "service"
+	KindIngress     Kind = "ingress"
+	KindRoute       Kind = "route"
+	KindDeployment  Kind = "deployment"
+	KindStatefulSet Kind = "statefulset"
+	KindDaemonSet   Kind = "daemonset"
 )
 
 // Candidate is something in the cluster that could be monitored.
@@ -73,6 +76,7 @@ const (
 	ReasonTCPFallback    = "tcp-fallback"
 	ReasonRouteHost      = "route-host"
 	ReasonIngressRule    = "ingress-rule"
+	ReasonWorkload       = "workload"
 )
 
 var routeGVR = schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}
@@ -153,7 +157,7 @@ func (c *Client) Namespaces(ctx context.Context) ([]string, error) {
 }
 
 // Candidates lists everything monitorable in a namespace: service ports,
-// ingress rules and, on OpenShift, routes.
+// ingress rules, on OpenShift routes, and the workloads themselves.
 func (c *Client) Candidates(ctx context.Context, namespace string) ([]Candidate, error) {
 	services, err := c.serviceCandidates(ctx, namespace)
 	if err != nil {
@@ -168,7 +172,12 @@ func (c *Client) Candidates(ctx context.Context, namespace string) ([]Candidate,
 		return nil, err
 	}
 
-	all := append(append(routes, ingresses...), services...)
+	workloads, err := c.workloadCandidates(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	all := append(append(append(routes, ingresses...), services...), workloads...)
 	sort.SliceStable(all, func(i, j int) bool {
 		if all[i].Kind != all[j].Kind {
 			return kindOrder[all[i].Kind] < kindOrder[all[j].Kind]
@@ -178,8 +187,10 @@ func (c *Client) Candidates(ctx context.Context, namespace string) ([]Candidate,
 	return all, nil
 }
 
-// Externally reachable entry points first.
-var kindOrder = map[Kind]int{KindRoute: 0, KindIngress: 1, KindService: 2}
+// Externally reachable entry points first, what runs behind them last.
+var kindOrder = map[Kind]int{
+	KindRoute: 0, KindIngress: 1, KindService: 2, KindDeployment: 3, KindStatefulSet: 4, KindDaemonSet: 5,
+}
 
 func (c *Client) serviceCandidates(ctx context.Context, namespace string) ([]Candidate, error) {
 	services, err := c.core.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})

@@ -21,7 +21,8 @@ var ErrNoWorkload = errors.New("k8s: no workload behind this source")
 
 // Workload is the set of pods that serve a discovered monitor.
 type Workload struct {
-	// Service is the service the pods were found through.
+	// Service is the service the pods were found through; empty when they
+	// were found through the workload itself.
 	Service string
 	Pods    []Pod
 }
@@ -42,32 +43,41 @@ type Pod struct {
 }
 
 // Workload returns the pods behind a discovered monitor, identified by the
-// namespace and source stored on it (see Candidate.Source).
+// namespace and source stored on it (see Candidate.Source): the pods a
+// service selects, or the pods of a deployment, statefulset or daemonset.
 func (c *Client) Workload(ctx context.Context, namespace, source string) (Workload, error) {
-	service, err := c.serviceFor(ctx, namespace, source)
-	if err != nil {
-		return Workload{}, err
+	var (
+		w        Workload
+		selector labels.Selector
+	)
+	if kind, name, _ := strings.Cut(source, "/"); Kind(kind).IsWorkload() {
+		var err error
+		if selector, err = c.workloadSelector(ctx, namespace, Kind(kind), name); err != nil {
+			return Workload{}, err
+		}
+	} else {
+		service, err := c.serviceFor(ctx, namespace, source)
+		if err != nil {
+			return Workload{}, err
+		}
+		svc, err := c.core.CoreV1().Services(namespace).Get(ctx, service, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return Workload{}, fmt.Errorf("%w: service %s/%s does not exist", ErrNoWorkload, namespace, service)
+		}
+		if err != nil {
+			return Workload{}, fmt.Errorf("get service: %w", err)
+		}
+		if len(svc.Spec.Selector) == 0 {
+			return Workload{}, fmt.Errorf("%w: service %s/%s has no selector", ErrNoWorkload, namespace, service)
+		}
+		w.Service, selector = service, labels.SelectorFromSet(svc.Spec.Selector)
 	}
 
-	svc, err := c.core.CoreV1().Services(namespace).Get(ctx, service, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return Workload{}, fmt.Errorf("%w: service %s/%s does not exist", ErrNoWorkload, namespace, service)
-	}
-	if err != nil {
-		return Workload{}, fmt.Errorf("get service: %w", err)
-	}
-	if len(svc.Spec.Selector) == 0 {
-		return Workload{}, fmt.Errorf("%w: service %s/%s has no selector", ErrNoWorkload, namespace, service)
-	}
-
-	list, err := c.core.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: labels.SelectorFromSet(svc.Spec.Selector).String(),
-	})
+	list, err := c.core.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
 		return Workload{}, fmt.Errorf("list pods: %w", err)
 	}
-
-	w := Workload{Service: service, Pods: make([]Pod, 0, len(list.Items))}
+	w.Pods = make([]Pod, 0, len(list.Items))
 	for _, p := range list.Items {
 		w.Pods = append(w.Pods, podInfo(p))
 	}

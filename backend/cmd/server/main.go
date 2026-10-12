@@ -82,11 +82,32 @@ func main() {
 	alertCtx, stopAlerts := context.WithCancel(context.Background())
 	defer stopAlerts()
 
+	// The cluster, for discovery, the pods behind a monitor and workload
+	// checks. These stay nil interfaces when unavailable, which their users
+	// check for.
+	var (
+		discovery  api.Discovery
+		workloads  api.Workloads
+		replicas   checker.Workloads
+		podMetrics api.PodMetrics
+	)
+	discoveryStatus := "disabled by UPTIME_DISCOVERY_ENABLED"
+	if cfg.DiscoveryEnabled {
+		client, err := k8s.Connect(k8s.Options{Kubeconfig: cfg.Kubeconfig, Context: cfg.KubeContext, Timeout: cfg.KubeTimeout})
+		if err != nil {
+			discoveryStatus = err.Error()
+			logger.Info("cluster discovery unavailable", "reason", err.Error())
+		} else {
+			discovery, workloads, replicas, discoveryStatus = client, client, client, client.Mode
+			logger.Info("cluster discovery enabled", "mode", client.Mode)
+		}
+	}
 	sched := scheduler.New(db, checker.New(checker.Options{
 		InsecureSkipVerify: cfg.HTTPInsecureSkipVerify,
 		UserAgent:          userAgent,
 		BodyLimit:          int64(cfg.KeywordBodyLimit),
 		Pushes:             db,
+		Workloads:          replicas,
 	}), scheduler.Options{
 		Tick:          cfg.SchedulerTick,
 		MaxJitter:     cfg.MaxJitter,
@@ -167,23 +188,6 @@ func main() {
 		scheduler.RunRetention(ctx, db, cfg.Retention, cfg.RetentionInterval, logger)
 	}()
 
-	// These stay nil interfaces when unavailable, which the API checks for.
-	var (
-		discovery  api.Discovery
-		workloads  api.Workloads
-		podMetrics api.PodMetrics
-	)
-	discoveryStatus := "disabled by UPTIME_DISCOVERY_ENABLED"
-	if cfg.DiscoveryEnabled {
-		client, err := k8s.Connect(k8s.Options{Kubeconfig: cfg.Kubeconfig, Context: cfg.KubeContext, Timeout: cfg.KubeTimeout})
-		if err != nil {
-			discoveryStatus = err.Error()
-			logger.Info("cluster discovery unavailable", "reason", err.Error())
-		} else {
-			discovery, workloads, discoveryStatus = client, client, client.Mode
-			logger.Info("cluster discovery enabled", "mode", client.Mode)
-		}
-	}
 	if cfg.PrometheusURL != "" {
 		client, err := prom.New(prom.Options{
 			URL:                cfg.PrometheusURL,

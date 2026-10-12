@@ -38,7 +38,16 @@ type checkOptions struct {
 	WebSocket *websocketOptions `json:"websocket"`
 	// Database belongs to the postgres, mysql and redis types.
 	Database *databaseOptions `json:"database"`
+	Workload *workloadOptions `json:"workload"`
 }
+
+type workloadOptions struct {
+	// MinReady is how many pods must be ready; 0 means all of them.
+	MinReady int `json:"min_ready"`
+}
+
+// maxMinReady bounds the pods a workload monitor may ask for.
+const maxMinReady = 10000
 
 type httpOptions struct {
 	Method         string `json:"method"`
@@ -135,6 +144,8 @@ func toCheckOptions(m store.Monitor) checkOptions {
 		if d.Password != "" {
 			o.Database.Password = maskedValue
 		}
+	case store.MonitorWorkload:
+		o.Workload = &workloadOptions{MinReady: m.Workload.MinReady}
 	}
 	return o
 }
@@ -166,6 +177,7 @@ func (o checkOptions) apply(m *store.Monitor) error {
 	for name, present := range map[string]bool{
 		"http": o.HTTP != nil, "tcp": o.TCP != nil, "dns": o.DNS != nil,
 		"grpc": o.GRPC != nil, "websocket": o.WebSocket != nil, "database": o.Database != nil,
+		"workload": o.Workload != nil,
 	} {
 		if present && name != own {
 			return fmt.Errorf("%s options are not valid for a %s monitor", name, m.Type)
@@ -186,6 +198,11 @@ func (o checkOptions) apply(m *store.Monitor) error {
 		m.WebSocket, err = o.WebSocket.resolve()
 	case o.Database != nil:
 		m.Database, err = o.Database.resolve(m.Type, m.Database)
+	case o.Workload != nil:
+		if o.Workload.MinReady < 0 || o.Workload.MinReady > maxMinReady {
+			return fmt.Errorf("workload.min_ready must be between 0 and %d", maxMinReady)
+		}
+		m.Workload = store.WorkloadOptions{MinReady: o.Workload.MinReady}
 	}
 	return err
 }

@@ -33,6 +33,8 @@ type Options struct {
 	BodyLimit int64
 	// Pushes is required for push monitors.
 	Pushes Pushes
+	// Workloads is required for workload monitors; nil without a cluster.
+	Workloads Workloads
 }
 
 // Checker runs the checks of every monitor type. It is safe for concurrent
@@ -105,6 +107,8 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 		out = c.checkMySQL(ctx, m)
 	case store.MonitorRedis:
 		out = c.checkRedis(ctx, m)
+	case store.MonitorWorkload:
+		out = c.checkWorkload(ctx, m)
 	default:
 		out = failedf("unsupported monitor type %q", m.Type)
 	}

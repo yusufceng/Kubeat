@@ -39,7 +39,8 @@ export type MonitorType =
   | "websocket"
   | "postgres"
   | "mysql"
-  | "redis";
+  | "redis"
+  | "workload";
 
 /** One past check in the compact form the monitor list uses. */
 export type HistoryPoint = {
@@ -120,8 +121,14 @@ export type DatabaseOptions = {
   tls_skip_verify: boolean;
 };
 
+export type WorkloadOptions = {
+  /** How many pods must be ready; 0 means all the workload is meant to have. */
+  min_ready: number;
+};
+
 /** The check options of a monitor: only the one of its own type is set. */
 export type CheckOptions = {
+  workload: WorkloadOptions | null;
   /** For the postgres, mysql and redis types. */
   database: DatabaseOptions | null;
   http: HttpOptions | null;
@@ -244,6 +251,7 @@ export type MonitorSettings = {
   grpc?: Partial<GrpcOptions>;
   websocket?: Partial<WebSocketOptions>;
   database?: Partial<DatabaseOptions>;
+  workload?: WorkloadOptions;
 };
 
 export type NewMonitor = MonitorSettings & { type: MonitorType };
@@ -304,6 +312,7 @@ function withDefaults(m: Monitor): Monitor {
     grpc: m.grpc ?? null,
     websocket: m.websocket ?? null,
     database: m.database ?? null,
+    workload: m.workload ?? null,
     open_incident: m.open_incident ?? null,
     cert_warning: m.cert_warning ?? false,
     maintenance_until: m.maintenance_until ?? null,
@@ -369,14 +378,14 @@ export const testChannel = (id: number) =>
 export type DiscoveryStatus = { enabled: boolean; detail: string };
 
 export type Candidate = {
-  kind: "service" | "ingress" | "route";
+  kind: "service" | "ingress" | "route" | "deployment" | "statefulset" | "daemonset";
   namespace: string;
   name: string;
   port: number;
   source: string;
   type: MonitorType;
   target: string;
-  reason: "readiness-probe" | "liveness-probe" | "tcp-fallback" | "route-host" | "ingress-rule";
+  reason: "readiness-probe" | "liveness-probe" | "tcp-fallback" | "route-host" | "ingress-rule" | "workload";
   /** Set when the candidate is already monitored. */
   monitor_id: number | null;
 };
@@ -493,6 +502,7 @@ export type Workload = {
   /** False when there are no pods to show; reason says why. */
   available: boolean;
   reason?: string;
+  /** The service the pods were found through; absent when they are a workload's own. */
   service?: string;
   ready: number;
   total: number;

@@ -220,6 +220,7 @@ Her monitor'da ortak alanlar: `name`, `type`, `target`, `interval_seconds`,
 | `postgres` | `host:port` | PostgreSQL'e giriş yapıp sorgu çalıştırır |
 | `mysql` | `host:port` | MySQL ya da MariaDB'ye giriş yapıp sorgu çalıştırır |
 | `redis` | `host:port` | Redis'e bağlanır, gerekiyorsa giriş yapar, `PING` gönderir |
+| `workload` | `namespace/tür/ad` | Bir Deployment, StatefulSet ya da DaemonSet'in hazır pod sayısı |
 
 Tipe özel ayarlar, tipin adını taşıyan nesnede verilir (üç veritabanı tipi
 `database` nesnesini paylaşır). Güncellemede bu nesne
@@ -358,6 +359,31 @@ KUBEAT_TEST_POSTGRES=127.0.0.1:5432 KUBEAT_TEST_MYSQL=127.0.0.1:3306 \
 KUBEAT_TEST_REDIS=127.0.0.1:6379 go test ./internal/checker/
 ```
 
+### `workload`
+
+`"workload": {"min_ready": 0}`; hedef `shop/deployment/web` biçimindedir, tür
+`deployment`, `statefulset` ya da `daemonset` olabilir.
+
+Bir Service'e atılan istek, arkasındaki pod'lardan birine düşer: 30 pod'dan
+5'i hazır değilken servis kontrolü yine başarılı olabilir. Bu tip cluster'a
+doğrudan sorar: workload'un kaç pod'u olmalı, kaçı hazır?
+
+- `min_ready` `0` ise olması gereken **tüm** pod'lar hazır olmalıdır; bir pod
+  bile eksikse kontrol başarısızdır.
+- `min_ready` verilirse o kadar pod hazır olduğu sürece kontrol başarılıdır
+  (3 kopyalı serviste `2`: tek pod'un düşmesi alarm üretmez).
+- Sıfıra ölçeklenmiş bir workload başarısız sayılır.
+- Pod'lara ağ erişimi gerekmez, bu yüzden servisi olmayan işler (kuyruk
+  tüketicileri, agent'lar) için de çalışır. Kubeat'in cluster'a bağlı olması
+  ve `apps` grubundaki bu üç kaynağı okuyabilmesi gerekir; chart bu yetkiyi
+  verir.
+- "Hazır" Kubernetes'in tanımıdır: pod'un readiness probe'u geçiyor demektir.
+  Probe'u olmayan ya da probe'u gerçeği yansıtmayan bir pod hazır görünür.
+
+Monitor sayfasında workload'un pod'ları tek tek listelenir. Keşif sayfası
+workload'ları da önerir; bunlar seçili gelmez, çünkü önündeki servisin
+kontrolünün yerine geçmez, onu tamamlar.
+
 ### `websocket`
 
 `"websocket": {"subprotocol": "graphql-ws", "tls_skip_verify": false}`:
@@ -489,6 +515,7 @@ namespace'e göre gruplanır. Erişim yalnızca okuma amaçlıdır.
 | Service, pod'unda HTTP probe var | Service üzerinden probe'un yoluna HTTP |
 | Service, pod'unda gRPC probe var | Service üzerinden gRPC sağlık kontrolü, probe'un sorduğu servis adıyla |
 | Service, ikisi de yok | Porta TCP bağlantısı |
+| Deployment, StatefulSet, DaemonSet | Hazır pod sayısı (`workload`); seçili gelmez |
 
 Service için yol tahmin edilmez: uygulamanın kendi readiness (yoksa liveness)
 probe'u neyin "sağlıklı" anlamına geldiğini zaten söyler; rastgele bir yol 404

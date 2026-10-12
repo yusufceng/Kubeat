@@ -4,6 +4,9 @@ const kindLabels: Record<string, string> = {
   route: "Route",
   ingress: "Ingress",
   service: "Service",
+  deployment: "Deployment",
+  statefulset: "StatefulSet",
+  daemonset: "DaemonSet",
 };
 
 /**

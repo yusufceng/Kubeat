@@ -31,12 +31,13 @@ const (
 	MonitorPostgres  MonitorType = "postgres"  // a query on a PostgreSQL server
 	MonitorMySQL     MonitorType = "mysql"     // a query on a MySQL or MariaDB server
 	MonitorRedis     MonitorType = "redis"     // a PING to a Redis server
+	MonitorWorkload  MonitorType = "workload"  // the ready pods of a Kubernetes workload
 )
 
 // MonitorTypes lists every type.
 var MonitorTypes = []MonitorType{
 	MonitorHTTP, MonitorTCP, MonitorPing, MonitorDNS, MonitorPush, MonitorGRPC, MonitorWebSocket,
-	MonitorPostgres, MonitorMySQL, MonitorRedis,
+	MonitorPostgres, MonitorMySQL, MonitorRedis, MonitorWorkload,
 }
 
 // IsDatabase reports whether monitors of the type log in to a database.
@@ -87,6 +88,7 @@ type Monitor struct {
 	GRPC      GRPCOptions
 	WebSocket WebSocketOptions
 	Database  DatabaseOptions
+	Workload  WorkloadOptions
 }
 
 // Defaults of the check options, applied to monitors that do not set them.
@@ -187,6 +189,14 @@ type DatabaseOptions struct {
 	Query         string `json:"query,omitempty"`
 	TLS           bool   `json:"tls,omitempty"`
 	SkipTLSVerify bool   `json:"skip_tls_verify,omitempty"`
+}
+
+// WorkloadOptions configures the check of a Kubernetes workload, whose
+// target is namespace/kind/name.
+type WorkloadOptions struct {
+	// MinReady is how many pods must be ready. Zero means all the workload
+	// is meant to have, so that any pod missing is a failure.
+	MinReady int `json:"min_ready,omitempty"`
 }
 
 // PushReport is the latest report of a push monitor's source.

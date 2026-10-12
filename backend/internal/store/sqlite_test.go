@@ -490,6 +490,7 @@ func TestOptionsByType(t *testing.T) {
 		m.GRPC = GRPCOptions{Service: "shop.Cart", TLS: true}
 		m.WebSocket = WebSocketOptions{Subprotocol: "graphql-ws"}
 		m.Database = DatabaseOptions{Username: "probe", Password: "s3cret", Database: "shop", Query: "SELECT count(*) FROM orders", TLS: true}
+		m.Workload = WorkloadOptions{MinReady: 2}
 		return m
 	}
 
@@ -516,6 +517,8 @@ func TestOptionsByType(t *testing.T) {
 		case MonitorRedis:
 			// Redis has no database name or query to keep.
 			want.Database = DatabaseOptions{Username: "probe", Password: "s3cret", TLS: true}
+		case MonitorWorkload:
+			want.Workload = input.Workload
 		}
 		stored, err := s.GetMonitor(ctx, created.ID)
 		if err != nil {
@@ -523,7 +526,7 @@ func TestOptionsByType(t *testing.T) {
 		}
 		for _, got := range []Monitor{created, stored} {
 			if !reflect.DeepEqual(got.HTTP, want.HTTP) || got.TCP != want.TCP || got.DNS != want.DNS ||
-				got.GRPC != want.GRPC || got.WebSocket != want.WebSocket || got.Database != want.Database {
+				got.GRPC != want.GRPC || got.WebSocket != want.WebSocket || got.Database != want.Database || got.Workload != want.Workload {
 				t.Errorf("%s: options = %+v %+v %+v %+v %+v %+v", typ, got.HTTP, got.TCP, got.DNS, got.GRPC, got.WebSocket, got.Database)
 			}
 		}

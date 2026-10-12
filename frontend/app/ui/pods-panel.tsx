@@ -29,7 +29,13 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
         role="alert"
         className="rounded-lg border border-down/40 bg-down/8 p-4 text-sm text-down"
       >
-        <span className="font-mono">{workload.service}</span> servisinin arkasında hiç pod yok.
+        {workload.service ? (
+          <>
+            <span className="font-mono">{workload.service}</span> servisinin arkasında hiç pod yok.
+          </>
+        ) : (
+          "Bu workload'un hiç pod'u yok."
+        )}
       </p>
     );
   }
@@ -48,10 +54,12 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
         >
           {workload.ready}/{workload.total} pod hazır
         </span>
-        <span className="text-muted">
-          {" "}
-          · servis <span className="font-mono">{workload.service}</span>
-        </span>
+        {workload.service && (
+          <span className="text-muted">
+            {" "}
+            · servis <span className="font-mono">{workload.service}</span>
+          </span>
+        )}
       </p>
       <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">

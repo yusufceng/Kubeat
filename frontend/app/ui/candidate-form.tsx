@@ -10,7 +10,12 @@ const kindLabels: Record<Candidate["kind"], string> = {
   route: "Route",
   ingress: "Ingress",
   service: "Service",
+  deployment: "Deployment",
+  statefulset: "StatefulSet",
+  daemonset: "DaemonSet",
 };
+
+const workloadKinds: Candidate["kind"][] = ["deployment", "statefulset", "daemonset"];
 
 const reasonLabels: Record<Candidate["reason"], string> = {
   "readiness-probe": "Readiness probe'undan",
@@ -18,6 +23,7 @@ const reasonLabels: Record<Candidate["reason"], string> = {
   "tcp-fallback": "HTTP ya da gRPC probe yok, port bağlantısı",
   "route-host": "Route adresi",
   "ingress-rule": "Ingress kuralı",
+  workload: "Hazır pod sayısı",
 };
 
 const inputClass = "field";
@@ -34,8 +40,12 @@ export function CandidateForm({
     null,
   );
   const available = candidates.filter((c) => c.monitor_id === null);
-  // Everything not yet monitored starts selected.
-  const [selected, setSelected] = useState(() => new Set(available.map((c) => c.source)));
+  // What is reachable and not yet monitored starts selected. Workloads are
+  // offered without being selected: they say how many pods are ready, which
+  // adds to a check of the service in front of them rather than replacing it.
+  const [selected, setSelected] = useState(
+    () => new Set(available.filter((c) => !workloadKinds.includes(c.kind)).map((c) => c.source)),
+  );
 
   // Sources that have since been imported no longer count.
   const chosen = available.filter((c) => selected.has(c.source));

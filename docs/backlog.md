@@ -13,6 +13,10 @@ hazır pod sayısını, pod durumlarını ve restart'ları cluster API'sinden ca
 okur, CPU/belleği Prometheus'tan alır. Aşağıdaki iki madde hâlâ geçerli:
 panel yalnızca gösterir, saklamaz ve alarm üretmez.
 
+Güncelleme (2026-10-12, sonra): 1. madde `workload` monitor tipiyle
+karşılandı: hazır pod sayısı istenenin altına düşünce olay açılır ve bildirim
+gider. Restart sayıları için alarm yok; panelde görünür. 2. madde hâlâ açık.
+
 1. **Hazır/istenen replika oranı ve restart sayıları.** Bu veri OCP'nin kendi
    Prometheus'unda (kube-state-metrics) zaten var ve hazır alarm kuralları ile
    geliyor (`KubeDeploymentReplicasMismatch`, `KubePodCrashLooping`). Kendimiz

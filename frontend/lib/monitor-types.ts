@@ -55,6 +55,11 @@ export const monitorTypes: Record<MonitorType, TypeInfo> = {
     summary: "Sunucuya bağlanır, gerekiyorsa giriş yapar ve PING gönderir.",
     target: { label: "Adres", placeholder: "cache.shop.svc:6379" },
   },
+  workload: {
+    label: "Kubernetes workload",
+    summary: "Bir Deployment, StatefulSet ya da DaemonSet'in hazır pod sayısına bakar; servisi olmayan işler için de çalışır.",
+    target: { label: "Workload (namespace/tür/ad)", placeholder: "shop/deployment/web" },
+  },
   websocket: {
     label: "WebSocket",
     summary: "Bağlantının WebSocket'e yükseltilebildiğini denetler.",
@@ -73,6 +78,7 @@ export const monitorTypeOrder: MonitorType[] = [
   "postgres",
   "mysql",
   "redis",
+  "workload",
   "push",
 ];
 

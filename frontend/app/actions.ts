@@ -128,6 +128,9 @@ export async function saveMonitorAction(formData: FormData): Promise<{ error: st
         tls_skip_verify: checked("tls_skip_verify"),
       };
       break;
+    case "workload":
+      settings.workload = { min_ready: number("workload_min_ready") };
+      break;
     case "websocket":
       settings.websocket = {
         subprotocol: text("ws_subprotocol"),
