@@ -38,6 +38,7 @@ type Config struct {
 	DefaultFailureThreshold int           // UPTIME_DEFAULT_FAILURE_THRESHOLD
 	RecoveryThreshold       int           // UPTIME_RECOVERY_THRESHOLD
 	CertWarning             time.Duration // UPTIME_CERT_WARNING
+	ReminderInterval        time.Duration // UPTIME_REMINDER_INTERVAL; 0 = off
 	NotifyQueueSize         int           // UPTIME_NOTIFY_QUEUE_SIZE
 	NotifyAttempts          int           // UPTIME_NOTIFY_ATTEMPTS
 	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
@@ -141,6 +142,9 @@ func Load() (Config, error) {
 		// Intervals are stored in whole seconds.
 		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL: must be at least 1s, got %s", cfg.MinCheckInterval)
 	}
+	if cfg.ReminderInterval, err = envDurationOrZero("UPTIME_REMINDER_INTERVAL", 0); err != nil {
+		return Config{}, err
+	}
 	if cfg.DiscoveryEnabled, err = envBool("UPTIME_DISCOVERY_ENABLED", true); err != nil {
 		return Config{}, err
 	}
@@ -168,6 +172,22 @@ func envDuration(key string, def time.Duration) (time.Duration, error) {
 	}
 	if d <= 0 {
 		return 0, fmt.Errorf("%s: must be positive, got %s", key, v)
+	}
+	return d, nil
+}
+
+// envDurationOrZero is envDuration for settings where zero means "off".
+func envDurationOrZero(key string, def time.Duration) (time.Duration, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("%s: must not be negative, got %s", key, v)
 	}
 	return d, nil
 }

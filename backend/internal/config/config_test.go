@@ -129,3 +129,19 @@ func TestLoadRejectsUnknownSMTPSecurity(t *testing.T) {
 		t.Error("UPTIME_SMTP_SECURITY=ssl was accepted")
 	}
 }
+
+func TestReminderInterval(t *testing.T) {
+	for value, want := range map[string]time.Duration{"": 0, "0": 0, "0s": 0, "1h": time.Hour} {
+		t.Setenv("UPTIME_REMINDER_INTERVAL", value)
+		cfg, err := Load()
+		if err != nil || cfg.ReminderInterval != want {
+			t.Errorf("UPTIME_REMINDER_INTERVAL=%q: %s, %v; want %s", value, cfg.ReminderInterval, err, want)
+		}
+	}
+	for _, bad := range []string{"-1h", "soon"} {
+		t.Setenv("UPTIME_REMINDER_INTERVAL", bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("UPTIME_REMINDER_INTERVAL=%q was accepted", bad)
+		}
+	}
+}

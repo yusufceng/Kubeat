@@ -8,18 +8,20 @@ import (
 	"time"
 )
 
-const incidentColumns = "i.id, i.monitor_id, i.kind, m.name, i.started_at, i.resolved_at, i.cause"
+const incidentColumns = "i.id, i.monitor_id, i.kind, m.name, i.started_at, i.resolved_at, i.cause, i.last_notified_at"
 
 func scanIncident(row rowScanner) (Incident, error) {
 	var (
-		i          Incident
-		startedAt  int64
-		resolvedAt sql.NullInt64
+		i            Incident
+		startedAt    int64
+		resolvedAt   sql.NullInt64
+		lastNotified sql.NullInt64
 	)
-	if err := row.Scan(&i.ID, &i.MonitorID, &i.Kind, &i.MonitorName, &startedAt, &resolvedAt, &i.Cause); err != nil {
+	if err := row.Scan(&i.ID, &i.MonitorID, &i.Kind, &i.MonitorName, &startedAt, &resolvedAt, &i.Cause, &lastNotified); err != nil {
 		return Incident{}, err
 	}
 	i.StartedAt = time.UnixMilli(startedAt).UTC()
+	i.LastNotifiedAt = unixMilliOrZero(lastNotified)
 	if resolvedAt.Valid {
 		i.ResolvedAt = time.UnixMilli(resolvedAt.Int64).UTC()
 	}
@@ -30,9 +32,14 @@ func (s *SQLite) OpenIncident(ctx context.Context, i Incident) (Incident, error)
 	if i.Kind == "" {
 		i.Kind = IncidentDown
 	}
+	var lastNotified sql.NullInt64
+	if !i.LastNotifiedAt.IsZero() {
+		i.LastNotifiedAt = i.LastNotifiedAt.UTC().Truncate(time.Millisecond)
+		lastNotified = sql.NullInt64{Int64: i.LastNotifiedAt.UnixMilli(), Valid: true}
+	}
 	res, err := s.write.ExecContext(ctx,
-		"INSERT INTO incidents (monitor_id, kind, started_at, cause) VALUES (?, ?, ?, ?)",
-		i.MonitorID, i.Kind, i.StartedAt.UnixMilli(), i.Cause)
+		"INSERT INTO incidents (monitor_id, kind, started_at, cause, last_notified_at) VALUES (?, ?, ?, ?, ?)",
+		i.MonitorID, i.Kind, i.StartedAt.UnixMilli(), i.Cause, lastNotified)
 	if isUniqueViolation(err) {
 		return Incident{}, ErrConflict
 	}
@@ -56,6 +63,21 @@ func (s *SQLite) ResolveIncident(ctx context.Context, id int64, resolvedAt time.
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("resolve incident: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *SQLite) MarkIncidentNotified(ctx context.Context, id int64, at time.Time) error {
+	res, err := s.write.ExecContext(ctx, "UPDATE incidents SET last_notified_at = ? WHERE id = ?", at.UnixMilli(), id)
+	if err != nil {
+		return fmt.Errorf("mark incident notified: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("mark incident notified: %w", err)
 	}
 	if n == 0 {
 		return ErrNotFound

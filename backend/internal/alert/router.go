@@ -75,6 +75,8 @@ func Subject(n Notification) string {
 		return fmt.Sprintf("[Kubeat] %s erişilemiyor", n.Monitor.Name)
 	case EventUp:
 		return fmt.Sprintf("[Kubeat] %s tekrar çalışıyor", n.Monitor.Name)
+	case EventReminder:
+		return fmt.Sprintf("[Kubeat] %s hâlâ erişilemiyor", n.Monitor.Name)
 	case EventCertExpiring:
 		return fmt.Sprintf("[Kubeat] %s sertifikasının süresi bitiyor", n.Monitor.Name)
 	case EventCertRenewed:

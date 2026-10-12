@@ -283,3 +283,27 @@ func TestChannelsSurviveTheTypeMigration(t *testing.T) {
 		t.Errorf("new channel type after upgrade: %v", err)
 	}
 }
+
+func TestIncidentLastNotified(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	api, _ := s.CreateMonitor(ctx, newMonitor("api"))
+	base := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+
+	opened, err := s.OpenIncident(ctx, Incident{MonitorID: api.ID, StartedAt: base, Cause: "x", LastNotifiedAt: base.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetOpenIncident(ctx, api.ID, IncidentDown); !got.LastNotifiedAt.Equal(base.Add(time.Minute)) {
+		t.Errorf("LastNotifiedAt after open = %s", got.LastNotifiedAt)
+	}
+	if err := s.MarkIncidentNotified(ctx, opened.ID, base.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetOpenIncident(ctx, api.ID, IncidentDown); !got.LastNotifiedAt.Equal(base.Add(time.Hour)) {
+		t.Errorf("LastNotifiedAt after mark = %s", got.LastNotifiedAt)
+	}
+	if err := s.MarkIncidentNotified(ctx, 999, base); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown incident: err = %v, want ErrNotFound", err)
+	}
+}

@@ -588,3 +588,76 @@ func TestEvaluateUsesNewestResultOfABatch(t *testing.T) {
 		t.Errorf("incidents = %+v, want one: the newest result is outside the window", got)
 	}
 }
+
+func TestReminders(t *testing.T) {
+	f := newFixture(t, 2, 1)
+	f.engine.opts.ReminderInterval = 2 * time.Minute // four 30-second checks
+
+	f.check(false)
+	f.check(false) // opens; the "down" notification counts as the first
+	for i := 0; i < 3; i++ {
+		f.check(false)
+	}
+	f.flush()
+	if events := f.sender.events(); len(events) != 1 {
+		t.Fatalf("notifications 90s into the outage = %v, want only [down]", events)
+	}
+
+	f.check(false) // 2 minutes after the incident was announced
+	f.flush()
+	events := f.sender.events()
+	if len(events) != 2 || events[1] != EventReminder {
+		t.Fatalf("notifications = %v, want [down reminder]", events)
+	}
+	reminder := f.sender.sent[1]
+	if text := Text(reminder); !strings.Contains(text, "hâlâ erişilemiyor") || !strings.Contains(text, "2m30s") {
+		t.Errorf("reminder text = %q (the outage is 2m30s old)", text)
+	}
+
+	// The next one comes a full interval later, not on every check.
+	for i := 0; i < 3; i++ {
+		f.check(false)
+	}
+	f.flush()
+	if n := len(f.sender.events()); n != 2 {
+		t.Fatalf("%d notifications before the second interval elapsed, want 2", n)
+	}
+	f.check(false)
+	f.flush()
+	if n := len(f.sender.events()); n != 3 {
+		t.Fatalf("%d notifications after the second interval, want 3", n)
+	}
+
+	// Recovery ends the reminders.
+	f.check(true)
+	for i := 0; i < 6; i++ {
+		f.check(true)
+	}
+	f.flush()
+	events = f.sender.events()
+	if len(events) != 4 || events[3] != EventUp {
+		t.Errorf("notifications after recovery = %v, want [down reminder reminder up]", events)
+	}
+}
+
+func TestNoRemindersByDefaultOrInMaintenance(t *testing.T) {
+	f := newFixture(t, 1, 1) // ReminderInterval is zero
+	f.check(false)
+	for i := 0; i < 20; i++ {
+		f.check(false)
+	}
+	f.flush()
+	if events := f.sender.events(); len(events) != 1 {
+		t.Fatalf("reminders sent with the interval at zero: %v", events)
+	}
+
+	f.engine.opts.ReminderInterval = time.Minute
+	f.maintain(time.Hour)
+	for i := 0; i < 10; i++ {
+		f.check(false)
+	}
+	f.flush()
+	if events := f.sender.events(); len(events) != 1 {
+		t.Errorf("reminders sent during maintenance: %v", events)
+	}
+}

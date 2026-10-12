@@ -68,6 +68,9 @@ func Text(n Notification) string {
 	case EventUp:
 		return fmt.Sprintf("🟢 %s tekrar çalışıyor (%s). Kesinti süresi: %s",
 			n.Monitor.Name, n.Monitor.Target, n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second))
+	case EventReminder:
+		return fmt.Sprintf("🔴 %s hâlâ erişilemiyor (%s). Kesinti süresi: %s. Son hata: %s",
+			n.Monitor.Name, n.Monitor.Target, n.At.Sub(n.Incident.StartedAt).Round(time.Second), n.Incident.Cause)
 	case EventCertExpiring:
 		days := int(n.CertExpiresAt.Sub(n.Incident.StartedAt).Hours() / 24)
 		when := fmt.Sprintf("%d gün sonra", days)

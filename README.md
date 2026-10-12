@@ -147,6 +147,12 @@ HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
 açılır ve bildirim gider; sertifika yenilenince olay kapanır. Bu olay
 kesintilerden bağımsızdır: hedef çalışırken de açık olabilir.
 
+### Hatırlatma
+
+`UPTIME_REMINDER_INTERVAL` ayarlanırsa süren bir kesinti bu aralıkla yeniden
+bildirilir ("hâlâ erişilemiyor"). Varsayılan `0` olup hatırlatma gönderilmez.
+Bakım penceresi içinde hatırlatma gitmez.
+
 ### Bakım pencereleri ve susturma
 
 Bir bakım penceresi boyunca kapsamındaki monitor'lar kontrol edilmeye ve
@@ -187,8 +193,8 @@ okunabilir özettir.
 }
 ```
 
-`event` değeri `down`, `up`, `cert_expiring`, `cert_renewed` ya da `test`
-olur; `incident.kind` ise `down` ya da `cert`.
+`event` değeri `down`, `up`, `reminder`, `cert_expiring`, `cert_renewed` ya
+da `test` olur; `incident.kind` ise `down` ya da `cert`.
 
 ## Yapılandırma
 
@@ -220,6 +226,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_DEFAULT_FAILURE_THRESHOLD` | `3` | Monitor'da belirtilmezse, olay açmak için gereken art arda başarısız kontrol sayısı |
 | `UPTIME_RECOVERY_THRESHOLD` | `1` | Olayı kapatmak için gereken art arda başarılı kontrol sayısı |
 | `UPTIME_CERT_WARNING` | `336h` | Sertifika bitişine bu kadar kala uyarı olayı açılır |
+| `UPTIME_REMINDER_INTERVAL` | `0` | Süren kesintinin yeniden bildirilme aralığı; `0` kapalı |
 | `UPTIME_NOTIFY_ATTEMPTS` | `3` | Kanal başına bildirim deneme sayısı |
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |

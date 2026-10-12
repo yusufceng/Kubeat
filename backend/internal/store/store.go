@@ -100,6 +100,9 @@ type Incident struct {
 	StartedAt   time.Time
 	ResolvedAt  time.Time // zero while the incident is open
 	Cause       string
+	// LastNotifiedAt is when a notification about the incident was last
+	// sent; zero if unknown.
+	LastNotifiedAt time.Time
 }
 
 // Open reports whether the incident is still ongoing.
@@ -224,6 +227,9 @@ type Store interface {
 	// the monitor already has an open one of that kind.
 	OpenIncident(ctx context.Context, i Incident) (Incident, error)
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
+	// MarkIncidentNotified records that a notification about the incident
+	// was sent at the given time.
+	MarkIncidentNotified(ctx context.Context, id int64, at time.Time) error
 	// GetOpenIncident returns ErrNotFound when the monitor has none of that kind.
 	GetOpenIncident(ctx context.Context, monitorID int64, kind IncidentKind) (Incident, error)
 	// ListIncidents returns up to limit incidents, newest first, for one

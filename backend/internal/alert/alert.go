@@ -19,6 +19,8 @@ const (
 	EventUp   Event = "up"   // an incident resolved
 	EventTest Event = "test" // a channel test requested by a user
 
+	EventReminder Event = "reminder" // an outage is still going on
+
 	EventCertExpiring Event = "cert_expiring" // a certificate is about to expire
 	EventCertRenewed  Event = "cert_renewed"  // it was replaced in time
 )
@@ -30,6 +32,8 @@ type Notification struct {
 	Incident store.Incident
 	// CertExpiresAt is set for the certificate events.
 	CertExpiresAt time.Time
+	// At is the moment a reminder refers to.
+	At time.Time
 }
 
 // Store is the part of the persistence layer the engine needs.
@@ -39,6 +43,7 @@ type Store interface {
 	GetOpenIncident(ctx context.Context, monitorID int64, kind store.IncidentKind) (store.Incident, error)
 	OpenIncident(ctx context.Context, i store.Incident) (store.Incident, error)
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
+	MarkIncidentNotified(ctx context.Context, id int64, at time.Time) error
 	ListChannels(ctx context.Context) ([]store.Channel, error)
 	InMaintenance(ctx context.Context, m store.Monitor, at time.Time) (bool, error)
 }
@@ -54,6 +59,9 @@ type Options struct {
 	// open incident. Values above 1 keep a flapping target from producing a
 	// stream of down/up notifications.
 	RecoveryThreshold int
+	// ReminderInterval is how often an outage that is still going on is
+	// announced again; zero sends no reminders.
+	ReminderInterval time.Duration
 	// CertWarning is how long before a certificate's expiry a warning
 	// incident opens.
 	CertWarning time.Duration
@@ -126,22 +134,48 @@ func (e *Engine) evaluate(ctx context.Context, monitorID int64, at time.Time) er
 
 	// The two kinds are independent: a failing evaluation of one must not
 	// hide the other.
-	return errors.Join(e.evaluateDown(ctx, m, quiet), e.evaluateCert(ctx, m, quiet))
+	return errors.Join(e.evaluateDown(ctx, m, at, quiet), e.evaluateCert(ctx, m, quiet))
 }
 
-func (e *Engine) evaluateDown(ctx context.Context, m store.Monitor, quiet bool) error {
+func (e *Engine) evaluateDown(ctx context.Context, m store.Monitor, at time.Time, quiet bool) error {
 	incident, err := e.store.GetOpenIncident(ctx, m.ID, store.IncidentDown)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		if quiet {
 			return nil
 		}
-		return e.maybeOpen(ctx, m)
+		return e.maybeOpen(ctx, m, at)
 	case err != nil:
 		return err
-	default:
-		return e.maybeResolve(ctx, m, incident)
 	}
+
+	resolved, err := e.maybeResolve(ctx, m, incident)
+	if err != nil || resolved || quiet {
+		return err
+	}
+	return e.maybeRemind(ctx, m, incident, at)
+}
+
+// maybeRemind announces an outage again once ReminderInterval has passed
+// since the last notification about it.
+func (e *Engine) maybeRemind(ctx context.Context, m store.Monitor, incident store.Incident, at time.Time) error {
+	if e.opts.ReminderInterval <= 0 {
+		return nil
+	}
+	last := incident.LastNotifiedAt
+	if last.IsZero() {
+		last = incident.StartedAt
+	}
+	if at.Sub(last) < e.opts.ReminderInterval {
+		return nil
+	}
+	// Recorded before sending: a failure here must not turn into a reminder
+	// on every following check.
+	if err := e.store.MarkIncidentNotified(ctx, incident.ID, at); err != nil {
+		return err
+	}
+	e.enqueue(Notification{Event: EventReminder, Monitor: m, Incident: incident, At: at})
+	return nil
 }
 
 // evaluateCert opens a certificate incident when the newest result shows a
@@ -192,7 +226,7 @@ func (e *Engine) evaluateCert(ctx context.Context, m store.Monitor, quiet bool) 
 }
 
 // maybeOpen opens an incident when the newest FailureThreshold results all failed.
-func (e *Engine) maybeOpen(ctx context.Context, m store.Monitor) error {
+func (e *Engine) maybeOpen(ctx context.Context, m store.Monitor, at time.Time) error {
 	streak, err := e.streak(ctx, m.ID, m.FailureThreshold, false)
 	if err != nil || streak == nil {
 		return err
@@ -201,6 +235,8 @@ func (e *Engine) maybeOpen(ctx context.Context, m store.Monitor) error {
 		MonitorID: m.ID,
 		StartedAt: streak[len(streak)-1].CheckedAt, // the first failure of the streak
 		Cause:     streak[0].Error,                 // the most recent error
+
+		LastNotifiedAt: at,
 	})
 	if err != nil {
 		return err
@@ -212,19 +248,20 @@ func (e *Engine) maybeOpen(ctx context.Context, m store.Monitor) error {
 }
 
 // maybeResolve resolves the incident when the newest RecoveryThreshold results all succeeded.
-func (e *Engine) maybeResolve(ctx context.Context, m store.Monitor, incident store.Incident) error {
+// It reports whether the incident was resolved.
+func (e *Engine) maybeResolve(ctx context.Context, m store.Monitor, incident store.Incident) (bool, error) {
 	streak, err := e.streak(ctx, m.ID, e.opts.RecoveryThreshold, true)
 	if err != nil || streak == nil {
-		return err
+		return false, err
 	}
 	incident.ResolvedAt = streak[len(streak)-1].CheckedAt // the first success of the streak
 	if err := e.store.ResolveIncident(ctx, incident.ID, incident.ResolvedAt); err != nil {
-		return err
+		return false, err
 	}
 	e.opts.Logger.Info("incident resolved", "monitor", m.Name, "incident_id", incident.ID,
 		"duration", incident.ResolvedAt.Sub(incident.StartedAt).String())
 	e.enqueue(Notification{Event: EventUp, Monitor: m, Incident: incident})
-	return nil
+	return true, nil
 }
 
 // streak returns the newest n results (newest first) if there are n of them

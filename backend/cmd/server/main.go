@@ -58,6 +58,7 @@ func main() {
 	alerts := alert.New(db, senders, alert.Options{
 		RecoveryThreshold: cfg.RecoveryThreshold,
 		CertWarning:       cfg.CertWarning,
+		ReminderInterval:  cfg.ReminderInterval,
 		QueueSize:         cfg.NotifyQueueSize,
 		Attempts:          cfg.NotifyAttempts,
 		RetryDelay:        cfg.NotifyRetryDelay,
