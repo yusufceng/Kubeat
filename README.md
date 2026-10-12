@@ -57,6 +57,8 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 | `PATCH` | `/api/v1/monitors/{id}` | Monitor'u düzenler; `{"enabled": false}` ile durdurur |
 | `DELETE` | `/api/v1/monitors/{id}` | Monitor'u ve sonuçlarını siler |
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
+| `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş |
+| `GET` | `/api/v1/monitors/{id}/uptime?windows=24h,168h` | İstenen her dönem için uptime |
 | `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
 | `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
@@ -76,6 +78,18 @@ curl -X POST localhost:8090/api/v1/monitors -d '{
 
 `type` değeri `http` (2xx/3xx yanıt başarılı sayılır) ya da `tcp`
 (`host:port` bağlantısı kurulabiliyorsa başarılı) olabilir.
+
+## Geçmiş verisi
+
+Her kontrol sonucu `UPTIME_RETENTION` (varsayılan 7 gün) boyunca tek tek
+saklanır. Ayrıca her monitor için saatlik özet tutulur (kontrol sayısı,
+başarılı sayısı, başarılı kontrollerin yanıt süresi) ve bu özetler
+`UPTIME_ROLLUP_RETENTION` (varsayılan 1 yıl) boyunca kalır. Kısa aralıklar
+ham sonuçlardan, ham verinin ötesine geçen aralıklar özetlerden hesaplanır.
+
+Yanıt süresi yalnızca başarılı kontrollerden hesaplanır; başarısız bir
+kontrolün süresi çoğunlukla zaman aşımıdır ve yanıt süresi hakkında bir şey
+söylemez.
 
 ## Keşif
 
@@ -141,6 +155,9 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_RESULT_FLUSH_INTERVAL` | `1s` | Dolmamış batch'in yazılma aralığı |
 | `UPTIME_RETENTION` | `168h` | Ham kontrol sonuçlarının saklanma süresi |
 | `UPTIME_RETENTION_INTERVAL` | `1h` | Eski sonuçların silinme sıklığı |
+| `UPTIME_ROLLUP_INTERVAL` | `1m` | Saatlik özetlerin güncellenme sıklığı |
+| `UPTIME_ROLLUP_RETENTION` | `8760h` | Saatlik özetlerin saklanma süresi; grafik ve uptime en fazla bu kadar geriye gider |
+| `UPTIME_SERIES_POINTS` | `120` | Bir grafikteki yaklaşık nokta sayısı |
 | `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | HTTP kontrollerinde TLS sertifika doğrulamasını kapatır |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
@@ -161,6 +178,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `HISTORY_LIMIT` | `40` | Geçmiş şeridinde gösterilen kontrol sayısı |
 | `RESULTS_LIMIT` | `100` | Monitor sayfasında listelenen kontrol sayısı |
 | `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |
+| `UPTIME_WINDOWS` | `24h,168h,720h` | Monitor sayfasında uptime'ı gösterilen dönemler |
+| `CHART_RANGES` | `24h,1h,168h,720h` | Grafik için sunulan aralıklar; ilki varsayılandır |
 
 Süreler Go biçimindedir (`500ms`, `5s`, `1m30s`).
 

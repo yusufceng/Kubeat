@@ -9,11 +9,12 @@ export function timeAgo(iso: string, now: number): string {
   return `${Math.floor(hours / 24)} gün önce`;
 }
 
-/** 30 -> "30 sn", 90 -> "1,5 dk", 86400 -> "24 sa". */
+/** 30 -> "30 sn", 90 -> "1,5 dk", 86400 -> "24 sa", 604800 -> "7 gün". */
 export function duration(seconds: number): string {
   const format = (n: number) => n.toLocaleString("tr-TR", { maximumFractionDigits: 1 });
   if (seconds < 60) return `${seconds} sn`;
   if (seconds < 3600) return `${format(seconds / 60)} dk`;
+  if (seconds >= 2 * 86400 && seconds % 86400 === 0) return `${seconds / 86400} gün`;
   return `${format(seconds / 3600)} sa`;
 }
 

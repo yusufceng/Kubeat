@@ -72,7 +72,16 @@ func main() {
 		OnResults:     alerts.Evaluate,
 		Logger:        logger,
 	})
-	background.Add(3)
+	background.Add(4)
+	go func() {
+		defer background.Done()
+		scheduler.RunRollups(ctx, db, scheduler.RollupOptions{
+			RawRetention: cfg.Retention,
+			Interval:     cfg.RollupInterval,
+			Retention:    cfg.RollupRetention,
+			Logger:       logger,
+		})
+	}()
 	go func() {
 		defer background.Done()
 		sched.Run(ctx)
@@ -114,6 +123,9 @@ func main() {
 			Logger:           logger,
 
 			DefaultFailureThreshold: cfg.DefaultFailureThreshold,
+			RawRetention:            cfg.Retention,
+			HistoryRetention:        cfg.RollupRetention,
+			SeriesPoints:            cfg.SeriesPoints,
 		}),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 	}

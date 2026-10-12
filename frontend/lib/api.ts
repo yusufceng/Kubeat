@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 2;
+export const REQUIRED_API_REVISION = 3;
 
 export type Health = {
   status: string;
@@ -189,3 +189,36 @@ export const importCandidates = (body: {
   timeout_seconds: number;
   failure_threshold: number;
 }) => request<ImportResult>("/discovery/import", { method: "POST", body: JSON.stringify(body) });
+
+export type SeriesPoint = {
+  start: string;
+  checks: number;
+  up_checks: number;
+  /** Successful checks only; null when there were none in the bucket. */
+  avg_latency_ms: number | null;
+  max_latency_ms: number | null;
+};
+
+export type Series = {
+  range_seconds: number;
+  bucket_seconds: number;
+  from: string;
+  to: string;
+  /** Oldest first; buckets without checks are left out. */
+  points: SeriesPoint[];
+};
+
+export type UptimeWindow = {
+  window_seconds: number;
+  checks: number;
+  up_checks: number;
+  uptime_percent: number | null;
+};
+
+export const getSeries = (id: number, rangeSeconds: number) =>
+  request<Series>(`/monitors/${id}/series?range=${rangeSeconds}s`);
+
+export const getUptime = (id: number, windowsSeconds: number[]) =>
+  request<UptimeWindow[]>(
+    `/monitors/${id}/uptime?windows=${windowsSeconds.map((s) => `${s}s`).join(",")}`,
+  );

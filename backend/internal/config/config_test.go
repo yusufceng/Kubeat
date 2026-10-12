@@ -32,6 +32,9 @@ func TestLoadDefaults(t *testing.T) {
 		ResultFlushInterval: time.Second,
 		Retention:           7 * 24 * time.Hour,
 		RetentionInterval:   time.Hour,
+		RollupInterval:      time.Minute,
+		RollupRetention:     365 * 24 * time.Hour,
+		SeriesPoints:        120,
 
 		MinCheckInterval: 5 * time.Second,
 		StatsWindow:      24 * time.Hour,

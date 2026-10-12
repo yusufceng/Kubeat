@@ -37,6 +37,9 @@ func newTestAPI(t *testing.T) (*httptest.Server, *store.SQLite) {
 		Logger:           logger,
 
 		DefaultFailureThreshold: 3,
+		RawRetention:            48 * time.Hour,
+		HistoryRetention:        365 * 24 * time.Hour,
+		SeriesPoints:            120,
 	}))
 	t.Cleanup(func() {
 		srv.Close()

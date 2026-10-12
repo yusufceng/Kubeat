@@ -5,34 +5,53 @@ import {
   ApiError,
   type CheckResult,
   getMonitor,
+  getSeries,
+  getUptime,
   type Incident,
   listIncidents,
   listResults,
   type Monitor,
+  type Series,
+  type UptimeWindow,
 } from "@/lib/api";
 import { config } from "@/lib/config";
 import { dateTime, duration, uptime } from "@/lib/format";
 import { LiveRefresh } from "@/app/ui/live-refresh";
 import { BackendError } from "@/app/ui/backend-error";
 import { IncidentTable } from "@/app/ui/incident-table";
+import { LatencyChart } from "@/app/ui/latency-chart";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
 import { EditMonitorForm, MonitorActions } from "@/app/ui/monitor-settings";
 import { displayState, HistoryStrip, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 
-async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
+async function MonitorDetail({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const id = Number((await params).id);
   if (!Number.isInteger(id) || id <= 0) notFound();
+
+  // Only the offered ranges are accepted; anything else falls back to the default.
+  const requested = Number((await searchParams).range);
+  const range = config.chartRanges.includes(requested) ? requested : config.chartRanges[0];
 
   let monitor: Monitor;
   let results: CheckResult[];
   let incidents: Incident[];
+  let windows: UptimeWindow[];
+  let series: Series;
   try {
-    [monitor, results, incidents] = await Promise.all([
+    [monitor, results, incidents, windows, series] = await Promise.all([
       getMonitor(id),
       listResults(id, config.resultsLimit),
       listIncidents(config.incidentsLimit, id),
+      getUptime(id, config.uptimeWindows),
+      getSeries(id, range),
     ]);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
@@ -59,15 +78,12 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
         <MonitorActions monitor={monitor} />
       </header>
 
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Field label="Durum">
           <StatusBadge state={displayState(monitor)} />
         </Field>
-        <Field label={`Uptime (${duration(monitor.window_seconds)})`}>
-          {uptime(monitor.uptime_percent)}
-        </Field>
-        <Field label="Ort. yanıt">
-          {monitor.checks > 0 ? `${monitor.avg_latency_ms} ms` : "–"}
+        <Field label="Son yanıt süresi">
+          {monitor.last_result?.up ? `${monitor.last_result.latency_ms} ms` : "–"}
         </Field>
         <Field label="Kontrol aralığı">
           {duration(monitor.interval_seconds)} · zaman aşımı {duration(monitor.timeout_seconds)}
@@ -101,6 +117,54 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
           <span className="font-mono">{monitor.last_result.error}</span>
         </p>
       )}
+
+      <section aria-label="Uptime">
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {windows.map((w) => (
+            <div
+              key={w.window_seconds}
+              className="rounded-lg border border-black/10 p-4 dark:border-white/15"
+            >
+              <dt className="text-xs text-zinc-500">Uptime · son {duration(w.window_seconds)}</dt>
+              <dd className="mt-1 text-2xl font-semibold">{uptime(w.uptime_percent)}</dd>
+              <dd className="mt-0.5 text-xs text-zinc-500">
+                {w.checks === 0
+                  ? "Bu dönemde kontrol yok"
+                  : `${w.checks.toLocaleString("tr-TR")} kontrol, ${(w.checks - w.up_checks).toLocaleString("tr-TR")} başarısız`}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">Yanıt süresi (ms)</h2>
+          <nav aria-label="Grafik aralığı" className="flex gap-1 text-sm">
+            {config.chartRanges
+              .toSorted((a, b) => a - b)
+              .map((r) => (
+                <Link
+                  key={r}
+                  href={`/monitors/${monitor.id}?range=${r}`}
+                  scroll={false}
+                  aria-current={r === range ? "true" : undefined}
+                  className={`rounded-md px-3 py-1 ${
+                    r === range
+                      ? "bg-black/5 font-medium dark:bg-white/10"
+                      : "text-zinc-500 hover:text-inherit"
+                  }`}
+                >
+                  {duration(r)}
+                </Link>
+              ))}
+          </nav>
+        </div>
+        <LatencyChart series={series} />
+        <p className="mt-3 text-xs text-zinc-500">
+          Her nokta {duration(series.bucket_seconds)} içindeki başarılı kontrollerin ortalamasıdır.
+        </p>
+      </section>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold">Son {config.historyLimit} kontrol</h2>
@@ -171,7 +235,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export default function Page({ params }: PageProps<"/monitors/[id]">) {
+export default function Page({ params, searchParams }: PageProps<"/monitors/[id]">) {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-10">
       <Link href="/" className="text-sm text-zinc-500 hover:underline">
@@ -179,7 +243,7 @@ export default function Page({ params }: PageProps<"/monitors/[id]">) {
       </Link>
       <LiveRefresh />
       <Suspense fallback={<p className="text-sm text-zinc-500">Yükleniyor…</p>}>
-        <MonitorDetail params={params} />
+        <MonitorDetail params={params} searchParams={searchParams} />
       </Suspense>
     </main>
   );

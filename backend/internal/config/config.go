@@ -24,6 +24,9 @@ type Config struct {
 	ResultFlushInterval time.Duration // UPTIME_RESULT_FLUSH_INTERVAL
 	Retention           time.Duration // UPTIME_RETENTION
 	RetentionInterval   time.Duration // UPTIME_RETENTION_INTERVAL
+	RollupInterval      time.Duration // UPTIME_ROLLUP_INTERVAL
+	RollupRetention     time.Duration // UPTIME_ROLLUP_RETENTION
+	SeriesPoints        int           // UPTIME_SERIES_POINTS
 
 	HTTPInsecureSkipVerify bool // UPTIME_HTTP_INSECURE_SKIP_VERIFY
 
@@ -70,6 +73,8 @@ func Load() (Config, error) {
 		{&cfg.ResultFlushInterval, "UPTIME_RESULT_FLUSH_INTERVAL", time.Second},
 		{&cfg.Retention, "UPTIME_RETENTION", 7 * 24 * time.Hour},
 		{&cfg.RetentionInterval, "UPTIME_RETENTION_INTERVAL", time.Hour},
+		{&cfg.RollupInterval, "UPTIME_ROLLUP_INTERVAL", time.Minute},
+		{&cfg.RollupRetention, "UPTIME_ROLLUP_RETENTION", 365 * 24 * time.Hour},
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
 		{&cfg.NotifyRetryDelay, "UPTIME_NOTIFY_RETRY_DELAY", 5 * time.Second},
@@ -92,6 +97,7 @@ func Load() (Config, error) {
 		{&cfg.Workers, "UPTIME_WORKERS", 20},
 		{&cfg.ResultBatchSize, "UPTIME_RESULT_BATCH_SIZE", 100},
 		{&cfg.MaxResults, "UPTIME_MAX_RESULTS", 1000},
+		{&cfg.SeriesPoints, "UPTIME_SERIES_POINTS", 120},
 		{&cfg.DefaultFailureThreshold, "UPTIME_DEFAULT_FAILURE_THRESHOLD", 3},
 		{&cfg.RecoveryThreshold, "UPTIME_RECOVERY_THRESHOLD", 1},
 		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 100},

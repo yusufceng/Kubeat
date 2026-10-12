@@ -6,7 +6,7 @@ FRONTEND_PORT ?= 3000
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.2.0
+VERSION ?= 0.3.0
 CHART := deploy/helm/kubeat
 
 .PHONY: dev backend frontend test lint build images minikube-deploy minikube-open minikube-demo

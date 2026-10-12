@@ -28,6 +28,7 @@ type Store interface {
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (store.MonitorStatus, error)
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]store.CheckResult, error)
+	Series(ctx context.Context, monitorID int64, source store.SeriesSource, from, to time.Time, bucket time.Duration) ([]store.SeriesPoint, error)
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]store.Incident, error)
 	CreateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
 	GetChannel(ctx context.Context, id int64) (store.Channel, error)
@@ -56,6 +57,12 @@ type Options struct {
 	StatsWindow time.Duration
 	// MaxResults caps how many check results or incidents one request may return.
 	MaxResults int
+	// RawRetention is how far back individual results exist; beyond it only
+	// hourly summaries do, for up to HistoryRetention.
+	RawRetention     time.Duration
+	HistoryRetention time.Duration
+	// SeriesPoints is the number of buckets a series aims for.
+	SeriesPoints int
 	// DefaultFailureThreshold applies to monitors created without one.
 	DefaultFailureThreshold int
 	Notifier                Notifier
@@ -70,7 +77,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 2
+const Revision = 3
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -95,6 +102,8 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/monitors/{id}", h.updateMonitor)
 	mux.HandleFunc("DELETE /api/v1/monitors/{id}", h.deleteMonitor)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/results", h.listResults)
+	mux.HandleFunc("GET /api/v1/monitors/{id}/series", h.monitorSeries)
+	mux.HandleFunc("GET /api/v1/monitors/{id}/uptime", h.monitorUptime)
 	mux.HandleFunc("GET /api/v1/discovery", h.discoveryStatus)
 	mux.HandleFunc("GET /api/v1/discovery/namespaces", h.discoveryNamespaces)
 	mux.HandleFunc("GET /api/v1/discovery/candidates", h.discoveryCandidates)

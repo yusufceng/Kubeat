@@ -80,6 +80,32 @@ type Channel struct {
 	CreatedAt time.Time
 }
 
+// RollupBucket is the size of a stored summary bucket.
+const RollupBucket = time.Hour
+
+// SeriesPoint summarizes the checks of one monitor in one time bucket.
+type SeriesPoint struct {
+	Start    time.Time
+	Checks   int
+	UpChecks int
+	// AvgLatency and MaxLatency cover successful checks only; both are zero
+	// when UpChecks is zero.
+	AvgLatency time.Duration
+	MaxLatency time.Duration
+}
+
+// SeriesSource selects which table a series is read from.
+type SeriesSource int
+
+const (
+	// SeriesRaw reads individual check results; any bucket size works but
+	// only the raw retention period is available.
+	SeriesRaw SeriesSource = iota
+	// SeriesRollup reads hourly summaries; the bucket must be a multiple of
+	// RollupBucket.
+	SeriesRollup
+)
+
 // MonitorStatus is a monitor together with its latest result and its
 // statistics over a time window.
 type MonitorStatus struct {
@@ -116,6 +142,16 @@ type Store interface {
 	// DeleteCheckResultsBefore removes results older than cutoff and reports
 	// how many rows were deleted.
 	DeleteCheckResultsBefore(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// RollupCheckResults (re)computes the hourly summaries of every monitor
+	// for the hours in [from, to). from must be on an hour boundary, and the
+	// raw results of those hours must still be complete.
+	RollupCheckResults(ctx context.Context, from, to time.Time) error
+	// DeleteRollupsBefore removes summaries of hours before cutoff.
+	DeleteRollupsBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	// Series returns one point per non-empty bucket in [from, to), oldest
+	// first. Buckets are aligned to multiples of bucket since the Unix epoch.
+	Series(ctx context.Context, monitorID int64, source SeriesSource, from, to time.Time, bucket time.Duration) ([]SeriesPoint, error)
 
 	// OpenIncident records a new open incident. It returns ErrConflict when
 	// the monitor already has one.
