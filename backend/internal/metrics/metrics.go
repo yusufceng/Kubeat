@@ -53,7 +53,7 @@ func New(version string) *Metrics {
 		}),
 		dispatchSkipped: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "kubeat_scheduler_dispatch_skipped_total",
-			Help: "Times a due monitor had to wait a tick because every worker was busy. A steady increase means UPTIME_WORKERS is too low.",
+			Help: "Times a due monitor was left for the next tick because the workers stayed busy for a whole tick. A steady increase means UPTIME_WORKERS is too low.",
 		}),
 		lastTick: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "kubeat_scheduler_last_tick_timestamp_seconds",

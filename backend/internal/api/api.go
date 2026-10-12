@@ -29,6 +29,7 @@ type Store interface {
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (store.MonitorStatus, error)
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]store.CheckResult, error)
+	RecentCheckResults(ctx context.Context, monitorIDs []int64, limit int) (map[int64][]store.CheckResult, error)
 	Series(ctx context.Context, monitorID int64, source store.SeriesSource, from, to time.Time, bucket time.Duration) ([]store.SeriesPoint, error)
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]store.Incident, error)
 	CreateMaintenance(ctx context.Context, m store.Maintenance) (store.Maintenance, error)
@@ -94,7 +95,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 8
+const Revision = 9
 
 // Health is the response body of the health endpoint.
 type Health struct {

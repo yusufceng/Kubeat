@@ -266,6 +266,11 @@ func TestMonitorStatuses(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
+	// Statistics are read from the hourly summaries.
+	if err := s.RollupCheckResults(ctx, base.Add(-time.Hour), base.Add(time.Hour)); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+
 	statuses, err := s.ListMonitorStatuses(ctx, base)
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -278,8 +283,9 @@ func TestMonitorStatuses(t *testing.T) {
 	if !reflect.DeepEqual(got.Monitor, api) {
 		t.Errorf("monitor = %+v, want %+v", got.Monitor, api)
 	}
-	if got.Checks != 4 || got.UpChecks != 3 || got.AvgLatency != 250*time.Millisecond {
-		t.Errorf("Checks=%d UpChecks=%d AvgLatency=%s, want 4, 3, 250ms", got.Checks, got.UpChecks, got.AvgLatency)
+	// The average covers the three successful checks only: 100, 200, 300 ms.
+	if got.Checks != 4 || got.UpChecks != 3 || got.AvgLatency != 200*time.Millisecond {
+		t.Errorf("Checks=%d UpChecks=%d AvgLatency=%s, want 4, 3, 200ms", got.Checks, got.UpChecks, got.AvgLatency)
 	}
 	wantLast := CheckResult{MonitorID: api.ID, CheckedAt: base.Add(3 * time.Minute), Up: false,
 		Latency: 400 * time.Millisecond, StatusCode: 503, Error: "unexpected status 503"}
@@ -300,6 +306,21 @@ func TestMonitorStatuses(t *testing.T) {
 	}
 	if _, err := s.GetMonitorStatus(ctx, 999, base); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown id: err = %v, want ErrNotFound", err)
+	}
+
+	// The window starts on the hour: a cutoff inside the hour still counts
+	// the whole hour, never part of it.
+	if mid, _ := s.GetMonitorStatus(ctx, api.ID, base.Add(30*time.Minute)); mid.Checks != 4 {
+		t.Errorf("cutoff inside the hour: Checks = %d, want the hour's 4", mid.Checks)
+	}
+	// Results newer than the last summary run do not count yet, but are
+	// already the monitor's latest result.
+	newest := CheckResult{MonitorID: api.ID, CheckedAt: base.Add(5 * time.Minute), Up: true, Latency: time.Second}
+	if err := s.InsertCheckResults(ctx, []CheckResult{newest}); err != nil {
+		t.Fatal(err)
+	}
+	if stale, _ := s.GetMonitorStatus(ctx, api.ID, base); stale.Checks != 4 || !stale.Last.CheckedAt.Equal(newest.CheckedAt) {
+		t.Errorf("before the next summary run: Checks=%d Last=%s; want 4 and the new result as latest", stale.Checks, stale.Last.CheckedAt)
 	}
 
 	// With the window after the last result the latest result is still shown.
@@ -452,5 +473,48 @@ func TestHTTPOptions(t *testing.T) {
 	bad.HTTP.Method = "DELETE"
 	if _, err := s.CreateMonitor(ctx, bad); err == nil {
 		t.Error("method DELETE was accepted")
+	}
+}
+
+func TestRecentCheckResults(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	a, _ := s.CreateMonitor(ctx, newMonitor("a"))
+	b, _ := s.CreateMonitor(ctx, newMonitor("b"))
+	idle, _ := s.CreateMonitor(ctx, newMonitor("idle"))
+	base := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+
+	var batch []CheckResult
+	for i := 0; i < 5; i++ {
+		batch = append(batch,
+			CheckResult{MonitorID: a.ID, CheckedAt: base.Add(time.Duration(i) * time.Minute), Up: true, Latency: time.Duration(i) * time.Millisecond},
+			CheckResult{MonitorID: b.ID, CheckedAt: base.Add(time.Duration(i) * time.Minute), Up: false, Error: "x"})
+	}
+	if err := s.InsertCheckResults(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.RecentCheckResults(ctx, []int64{a.ID, idle.ID, 999}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || len(got[a.ID]) != 3 || len(got[idle.ID]) != 0 || len(got[999]) != 0 {
+		t.Fatalf("results per monitor = %d/%d/%d, want 3/0/0", len(got[a.ID]), len(got[idle.ID]), len(got[999]))
+	}
+	if _, asked := got[b.ID]; asked {
+		t.Error("results returned for a monitor that was not asked for")
+	}
+	// Newest first, and the same rows ListCheckResults gives.
+	single, _ := s.ListCheckResults(ctx, a.ID, 3)
+	for i := range single {
+		if got[a.ID][i] != single[i] {
+			t.Errorf("result %d = %+v, want %+v", i, got[a.ID][i], single[i])
+		}
+	}
+	if !got[a.ID][0].CheckedAt.Equal(base.Add(4 * time.Minute)) {
+		t.Errorf("first result is at %s, want the newest", got[a.ID][0].CheckedAt)
+	}
+	if empty, err := s.RecentCheckResults(ctx, nil, 3); err != nil || len(empty) != 0 {
+		t.Errorf("no monitors: %v, %v", empty, err)
 	}
 }

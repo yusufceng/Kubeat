@@ -1,183 +1,183 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { type CheckResult, listMonitors, listResults, type Monitor } from "@/lib/api";
+import { listMonitors, type Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
-import { duration, uptime } from "@/lib/format";
+import { compareNamespaces, MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
 import { AddMonitorForm } from "@/app/ui/add-monitor-form";
-import { LiveRefresh } from "@/app/ui/live-refresh";
 import { BackendError } from "@/app/ui/backend-error";
-import { HistoryStrip } from "@/app/ui/history-strip";
-import { LiveDuration } from "@/app/ui/live-duration";
-import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
-import { type DisplayState, displayState, StatusBadge } from "@/app/ui/status";
-import { TimeAgo } from "@/app/ui/time-ago";
+import { LiveRefresh } from "@/app/ui/live-refresh";
+import {
+  countStates,
+  GroupSummary,
+  isProblem,
+  MonitorTable,
+  StateStats,
+} from "@/app/ui/monitor-table";
 
-async function Monitors() {
-  let monitors: Monitor[];
-  let histories: CheckResult[][];
-  try {
-    monitors = await listMonitors();
-    histories = await Promise.all(monitors.map((m) => listResults(m.id, config.historyLimit)));
-  } catch (err) {
-    return <BackendError what="Monitor durumları" err={err} />;
-  }
+function byNamespace(monitors: Monitor[]): [string, Monitor[]][] {
+  const groups = new Map<string, Monitor[]>();
+  for (const m of monitors) groups.set(m.namespace, [...(groups.get(m.namespace) ?? []), m]);
+  return [...groups.entries()].sort(([a], [b]) => compareNamespaces(a, b));
+}
 
-  if (monitors.length === 0) {
-    return (
-      <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/20">
-        Henüz monitor yok. <Link href="/discovery" className="underline">Keşif</Link> ile
-        cluster&apos;daki servisleri bulun ya da aşağıdaki formdan elle ekleyin.
-      </p>
-    );
-  }
-
-  const states = monitors.map(displayState);
-  const count = (...wanted: DisplayState[]) => states.filter((s) => wanted.includes(s)).length;
-  const window = duration(monitors[0].window_seconds);
-
-  // Namespaces alphabetically, monitors entered by hand last.
-  const groups = new Map<string, number[]>();
-  monitors.forEach((m, i) => groups.set(m.namespace, [...(groups.get(m.namespace) ?? []), i]));
-  const namespaces = [...groups.keys()].sort((a, b) =>
-    a === "" ? 1 : b === "" ? -1 : a.localeCompare(b),
+function NamespaceTitle({ namespace }: { namespace: string }) {
+  return (
+    <Link href={namespaceHref(namespace)} className="hover:underline">
+      {namespace ? (
+        <>
+          <span className="font-normal text-zinc-500">namespace</span> {namespace}
+        </>
+      ) : (
+        MANUAL_LABEL
+      )}
+    </Link>
   );
+}
 
+/** Every monitor, grouped by namespace. For a number of monitors that fits a page. */
+function EveryMonitor({ monitors }: { monitors: Monitor[] }) {
+  return byNamespace(monitors).map(([namespace, group]) => (
+    <section key={namespace} aria-label={namespace || MANUAL_LABEL}>
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-semibold">
+          <NamespaceTitle namespace={namespace} />
+        </h2>
+        <GroupSummary counts={countStates(group)} />
+      </div>
+      <MonitorTable monitors={group} />
+    </section>
+  ));
+}
+
+/**
+ * What needs attention, then one line per namespace. For more monitors than
+ * anyone would read through; each namespace has its own page.
+ */
+function Overview({
+  all,
+  problems,
+  problemCount,
+}: {
+  all: Monitor[];
+  /** The listed problem monitors, with their history. */
+  problems: Monitor[];
+  problemCount: number;
+}) {
   return (
     <>
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Çalışıyor" value={count("up")} className="text-emerald-600 dark:text-emerald-400" />
-        <Stat
-          label="Erişilemiyor"
-          value={count("down", "recovering")}
-          className="text-red-600 dark:text-red-400"
-        />
-        <Stat
-          label="Doğrulanıyor"
-          value={count("verifying")}
-          className="text-amber-600 dark:text-amber-400"
-        />
-        <Stat
-          label="Bekleniyor / durduruldu"
-          value={count("pending", "paused")}
-          className="text-zinc-500"
-        />
-      </dl>
-
-      {namespaces.map((ns) => {
-        const rows = groups.get(ns)!;
-        const up = rows.filter((i) => states[i] === "up").length;
-        const down = rows.filter((i) => states[i] === "down" || states[i] === "recovering").length;
-        const paused = rows.filter((i) => states[i] === "paused").length;
-        return (
-          <section key={ns} aria-label={ns || "Elle eklenenler"}>
-            <div className="mb-2 flex items-baseline justify-between gap-3">
-              <h2 className="text-sm font-semibold">
-                {ns ? (
-                  <>
-                    <span className="font-normal text-zinc-500">namespace</span> {ns}
-                  </>
-                ) : (
-                  "Elle eklenenler"
-                )}
-              </h2>
-              <p className="text-xs text-zinc-500">
-                {up}/{rows.length - paused} çalışıyor
-                {paused > 0 && ` · ${paused} durduruldu`}
-                {down > 0 && (
-                  <span className="font-medium text-red-600 dark:text-red-400">
-                    {" "}
-                    · {down} erişilemiyor
-                  </span>
-                )}
+      <section aria-label="Sorunlu monitor'lar">
+        <h2 className="mb-2 text-sm font-semibold">
+          Sorunlu monitor&apos;lar{problemCount > 0 && ` (${problemCount})`}
+        </h2>
+        {problemCount === 0 ? (
+          <p className="rounded-lg border border-emerald-600/30 bg-emerald-600/5 p-4 text-sm text-emerald-800 dark:text-emerald-300">
+            Şu anda başarısız olan monitor yok.
+          </p>
+        ) : (
+          <>
+            <MonitorTable monitors={problems} showNamespace />
+            {problemCount > problems.length && (
+              <p className="mt-2 text-xs text-zinc-500">
+                İlk {problems.length} tanesi gösteriliyor; {problemCount - problems.length} sorunlu
+                monitor daha var. Tamamı için namespace sayfalarına bakın.
               </p>
-            </div>
-            <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
-              <table className="w-full table-fixed text-left text-sm">
-                <colgroup>
-                  <col />
-                  <col className="w-36" />
-                  <col className="w-80" />
-                  <col className="w-28" />
-                  <col className="w-24" />
-                  <col className="w-28" />
-                </colgroup>
-                <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Monitor</th>
-                    <th className="px-4 py-3 font-medium">Durum</th>
-                    <th className="px-4 py-3 font-medium">Son kontroller</th>
-                    <th className="px-4 py-3 text-right font-medium">Uptime ({window})</th>
-                    <th className="px-4 py-3 text-right font-medium">Ort. yanıt</th>
-                    <th className="px-4 py-3 text-right font-medium">Son kontrol</th>
+            )}
+          </>
+        )}
+      </section>
+
+      <section aria-label="Namespace'ler">
+        <h2 className="mb-2 text-sm font-semibold">Namespace&apos;ler</h2>
+        <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
+              <tr>
+                <th className="px-4 py-2 font-medium">Namespace</th>
+                <th className="px-4 py-2 text-right font-medium">Monitor</th>
+                <th className="px-4 py-2 text-right font-medium">Çalışıyor</th>
+                <th className="px-4 py-2 text-right font-medium">Erişilemiyor</th>
+                <th className="px-4 py-2 text-right font-medium">Doğrulanıyor</th>
+                <th className="px-4 py-2 text-right font-medium">Bekleniyor / durduruldu</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/5 tabular-nums dark:divide-white/10">
+              {byNamespace(all).map(([namespace, group]) => {
+                const counts = countStates(group);
+                return (
+                  <tr key={namespace}>
+                    <td className="px-4 py-2 font-medium">
+                      <NamespaceTitle namespace={namespace} />
+                    </td>
+                    <td className="px-4 py-2 text-right">{counts.total}</td>
+                    <td className="px-4 py-2 text-right">{counts.up}</td>
+                    <td
+                      className={`px-4 py-2 text-right ${
+                        counts.down > 0 ? "font-semibold text-red-600 dark:text-red-400" : ""
+                      }`}
+                    >
+                      {counts.down}
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right ${
+                        counts.verifying > 0 ? "text-amber-700 dark:text-amber-400" : ""
+                      }`}
+                    >
+                      {counts.verifying}
+                    </td>
+                    <td className="px-4 py-2 text-right text-zinc-500">{counts.idle}</td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-black/5 dark:divide-white/10">
-                  {rows.map((i) => {
-                    const m = monitors[i];
-                    const label = monitorLabel(m);
-                    return (
-                      <tr key={m.id}>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            {label.kind && <KindChip kind={label.kind} />}
-                            <Link
-                              href={`/monitors/${m.id}`}
-                              className="truncate font-medium hover:underline"
-                            >
-                              {label.name}
-                            </Link>
-                          </div>
-                          <div className="truncate text-xs text-zinc-500" title={m.target}>
-                            {m.target}
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <StatusBadge state={states[i]} />
-                          {m.open_incident && (
-                            <div className="mt-0.5 text-xs text-zinc-500">
-                              <LiveDuration since={m.open_incident.started_at} />
-                            </div>
-                          )}
-                          {m.maintenance_until && (
-                            <div className="mt-0.5 text-xs text-zinc-500">Bakımda, alarm yok</div>
-                          )}
-                          {m.cert_warning && (
-                            <div className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
-                              Sertifika süresi doluyor
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <HistoryStrip results={histories[i]} slots={config.historyLimit} />
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {uptime(m.uptime_percent)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {m.checks > 0 ? `${m.avg_latency_ms} ms` : "–"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right text-zinc-500">
-                          {m.last_result ? <TimeAgo iso={m.last_result.checked_at} /> : "–"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        );
-      })}
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>
   );
 }
 
-function Stat({ label, value, className }: { label: string; value: number; className: string }) {
+async function Monitors() {
+  let all: Monitor[];
+  // The monitors drawn with a history strip: everything, or just the problems.
+  let detailed: Monitor[];
+  let problemCount = 0;
+  let flat = true;
+  try {
+    all = await listMonitors();
+    flat = all.length <= config.dashboardFlatLimit;
+    if (flat) {
+      detailed = all.length > 0 ? await listMonitors({ history: config.historyLimit }) : [];
+    } else {
+      const problems = all.filter(isProblem);
+      problemCount = problems.length;
+      const ids = problems.slice(0, config.problemLimit).map((m) => m.id);
+      detailed = ids.length > 0 ? await listMonitors({ ids, history: config.historyLimit }) : [];
+    }
+  } catch (err) {
+    return <BackendError what="Monitor durumları" err={err} />;
+  }
+
+  if (all.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/20">
+        Henüz monitor yok.{" "}
+        <Link href="/discovery" className="underline">
+          Keşif
+        </Link>{" "}
+        ile cluster&apos;daki servisleri bulun ya da aşağıdaki formdan elle ekleyin.
+      </p>
+    );
+  }
+
   return (
-    <div className="rounded-lg border border-black/10 p-4 dark:border-white/15">
-      <dt className="text-xs text-zinc-500">{label}</dt>
-      <dd className={`mt-1 text-3xl font-semibold tabular-nums ${className}`}>{value}</dd>
-    </div>
+    <>
+      <StateStats counts={countStates(all)} />
+      {flat ? (
+        <EveryMonitor monitors={detailed} />
+      ) : (
+        <Overview all={all} problems={detailed} problemCount={problemCount} />
+      )}
+    </>
   );
 }
 

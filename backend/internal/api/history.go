@@ -10,8 +10,13 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
-// maxUptimeWindows bounds how many windows one uptime request may ask for.
-const maxUptimeWindows = 10
+const (
+	// maxUptimeWindows bounds how many windows one uptime request may ask for.
+	maxUptimeWindows = 10
+	// exactUptimeLimit is the window length from which uptime is computed
+	// from hourly summaries instead of individual results.
+	exactUptimeLimit = 24 * time.Hour
+)
 
 // bucketSizes are the bucket lengths a series may use, so that bucket edges
 // fall on round times.
@@ -142,8 +147,8 @@ type uptimeWindow struct {
 }
 
 // monitorUptime returns the uptime over each of ?windows=24h,168h,...
-// Windows longer than the raw retention are computed from hourly summaries,
-// so their start is rounded down to the hour.
+// Windows of a day or more are computed from hourly summaries, so their
+// start is rounded down to the hour.
 func (h *handler) monitorUptime(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
@@ -171,8 +176,12 @@ func (h *handler) monitorUptime(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	resp := make([]uptimeWindow, 0, len(windows))
 	for _, window := range windows {
+		// Short windows are counted exactly from raw results. From a day up
+		// the hourly summaries are used: a week of raw results is tens of
+		// thousands of rows per monitor, and an hour more or less at the
+		// start of such a window does not change the percentage.
 		source, from := store.SeriesRaw, now.Add(-window)
-		if window > h.opts.RawRetention {
+		if window >= exactUptimeLimit || window > h.opts.RawRetention {
 			source, from = store.SeriesRollup, from.Truncate(store.RollupBucket)
 		}
 		points, err := h.opts.Store.Series(r.Context(), id, source, from, now, store.RollupBucket)

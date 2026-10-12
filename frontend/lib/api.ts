@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 8;
+export const REQUIRED_API_REVISION = 9;
 
 export type Health = {
   status: string;
@@ -25,6 +25,16 @@ export type CheckResult = {
 };
 
 export type MonitorType = "http" | "tcp";
+
+/** One past check in the compact form the monitor list uses. */
+export type HistoryPoint = {
+  /** When it ran, Unix milliseconds. */
+  t: number;
+  up: boolean;
+  /** How long it took, milliseconds. */
+  ms: number;
+  error?: string;
+};
 
 /** Shown in place of a stored header value; sent back, it keeps that value. */
 export const MASKED_VALUE = "********";
@@ -89,6 +99,8 @@ export type Monitor = {
   cert_warning: boolean;
   /** Set while a maintenance window covers the monitor. */
   maintenance_until: string | null;
+  /** Recent checks, newest first; empty unless the list was asked for them. */
+  history: HistoryPoint[];
   window_seconds: number;
   checks: number;
   uptime_percent: number | null;
@@ -143,11 +155,26 @@ function withDefaults(m: Monitor): Monitor {
     open_incident: m.open_incident ?? null,
     cert_warning: m.cert_warning ?? false,
     maintenance_until: m.maintenance_until ?? null,
+    history: m.history ?? [],
   };
 }
 
-export const listMonitors = async () =>
-  (await request<Monitor[]>("/monitors")).map(withDefaults);
+export type MonitorFilter = {
+  /** Only this namespace; "" selects monitors without one. */
+  namespace?: string;
+  ids?: number[];
+  /** Include this many recent checks per monitor. */
+  history?: number;
+};
+
+export const listMonitors = async (filter: MonitorFilter = {}) => {
+  const params = new URLSearchParams();
+  if (filter.namespace !== undefined) params.set("namespace", filter.namespace);
+  if (filter.ids) params.set("ids", filter.ids.join(","));
+  if (filter.history) params.set("history", String(filter.history));
+  const query = params.size > 0 ? `?${params}` : "";
+  return (await request<Monitor[]>(`/monitors${query}`)).map(withDefaults);
+};
 
 export const getMonitor = async (id: number) =>
   withDefaults(await request<Monitor>(`/monitors/${id}`));

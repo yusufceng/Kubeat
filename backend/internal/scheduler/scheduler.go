@@ -31,8 +31,10 @@ type Options struct {
 	// Tick is how often the scheduler looks for due monitors and picks up
 	// added, changed or deleted ones.
 	Tick time.Duration
-	// MaxJitter bounds the random delay before a monitor's first check, so
-	// monitors loaded together do not all fire in the same instant.
+	// MaxJitter bounds the random delay before the first check of a monitor
+	// added while the scheduler is running, so that it is checked soon.
+	// Monitors already there at start are instead spread over their whole
+	// interval, which keeps hundreds of them from firing together forever.
 	MaxJitter time.Duration
 	// Workers is the maximum number of checks running at once.
 	Workers int
@@ -116,8 +118,8 @@ func (s *Scheduler) dispatch(ctx context.Context, jobs chan<- store.Monitor) {
 	ticker := time.NewTicker(s.opts.Tick)
 	defer ticker.Stop()
 
-	for {
-		s.tick(ctx, time.Now(), schedules, jobs)
+	for first := true; ; first = false {
+		s.tick(ctx, time.Now(), first, schedules, jobs)
 		select {
 		case <-ctx.Done():
 			return
@@ -126,7 +128,9 @@ func (s *Scheduler) dispatch(ctx context.Context, jobs chan<- store.Monitor) {
 	}
 }
 
-func (s *Scheduler) tick(ctx context.Context, now time.Time, schedules map[int64]*schedule, jobs chan<- store.Monitor) {
+// tick queues the monitors that are due. startup is true for the first tick,
+// when every monitor is new to the scheduler.
+func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, schedules map[int64]*schedule, jobs chan<- store.Monitor) {
 	monitors, err := s.store.ListMonitors(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -145,7 +149,11 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, schedules map[int64
 
 		sc, ok := schedules[m.ID]
 		if !ok {
-			sc = &schedule{next: now.Add(jitter(min(s.opts.MaxJitter, m.Interval)))}
+			spread := m.Interval
+			if !startup {
+				spread = min(s.opts.MaxJitter, m.Interval)
+			}
+			sc = &schedule{next: now.Add(jitter(spread))}
 			schedules[m.ID] = sc
 		}
 		sc.interval = m.Interval
@@ -161,6 +169,12 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, schedules map[int64
 		return schedules[due[i].ID].next.Before(schedules[due[j].ID].next)
 	})
 
+	// Hand the due monitors to the workers, waiting for a free one for as
+	// long as this tick lasts. Giving up the moment the queue is full would
+	// cap throughput at one queue-full per tick however fast the checks are.
+	deadline := time.NewTimer(s.opts.Tick)
+	defer deadline.Stop()
+
 dispatch:
 	for i, m := range due {
 		sc := schedules[m.ID]
@@ -172,11 +186,15 @@ dispatch:
 				// Fell behind (slow check or full queue): do not try to catch up.
 				sc.next = now.Add(sc.interval)
 			}
-		default:
-			// All workers are busy; the rest stay due and are retried next tick.
+		case <-deadline.C:
+			// The workers were busy for the whole tick; the rest stay due
+			// and go first on the next one.
 			s.setInFlight(m.ID, false)
 			s.opts.Metrics.DispatchSkipped(len(due) - i)
 			break dispatch
+		case <-ctx.Done():
+			s.setInFlight(m.ID, false)
+			return
 		}
 	}
 

@@ -73,7 +73,7 @@ eklenmelidir.
 | --- | --- | --- |
 | `GET` | `/api/v1/health` | Backend sağlık durumu |
 | `GET` | `/metrics` | Prometheus metrikleri |
-| `GET` | `/api/v1/monitors?window=24h` | Monitor'lar; son durum ve uptime ile |
+| `GET` | `/api/v1/monitors?window=24h` | Monitor'lar; son durum ve uptime ile. İsteğe bağlı: `namespace=x`, `ids=1,2`, `history=40` (her monitor'un son kontrolleri) |
 | `POST` | `/api/v1/monitors` | Monitor ekler |
 | `GET` | `/api/v1/monitors/{id}?window=24h` | Tek monitor |
 | `PATCH` | `/api/v1/monitors/{id}` | Monitor'u düzenler; `{"enabled": false}` ile durdurur |
@@ -129,6 +129,10 @@ saklanır. Ayrıca her monitor için saatlik özet tutulur (kontrol sayısı,
 başarılı sayısı, başarılı kontrollerin yanıt süresi) ve bu özetler
 `UPTIME_ROLLUP_RETENTION` (varsayılan 1 yıl) boyunca kalır. Kısa aralıklar
 ham sonuçlardan, ham verinin ötesine geçen aralıklar özetlerden hesaplanır.
+
+Monitor listesindeki uptime ve ortalama yanıt süresi de saatlik özetlerden
+okunur: en fazla `UPTIME_ROLLUP_INTERVAL` kadar geriden gelir ve pencere saat
+başına yuvarlanır. Ölçüm ayrıntıları: [docs/yuk-testi.md](docs/yuk-testi.md).
 
 Yanıt süresi yalnızca başarılı kontrollerden hesaplanır; başarısız bir
 kontrolün süresi çoğunlukla zaman aşımıdır ve yanıt süresi hakkında bir şey
@@ -300,7 +304,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_READ_HEADER_TIMEOUT` | `5s` | HTTP istek başlığı okuma süresi |
 | `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi için süre |
 | `UPTIME_SCHEDULER_TICK` | `1s` | Zamanı gelen monitor'ların ve monitor değişikliklerinin kontrol sıklığı |
-| `UPTIME_MAX_JITTER` | `5s` | İlk kontrolden önceki rastgele gecikmenin üst sınırı |
+| `UPTIME_MAX_JITTER` | `5s` | Çalışırken eklenen bir monitor'un ilk kontrolünden önceki rastgele gecikmenin üst sınırı. Açılışta var olan monitor'lar kendi aralıklarına yayılır |
 | `UPTIME_WORKERS` | `20` | Aynı anda çalışabilecek kontrol sayısı |
 | `UPTIME_RESULT_BATCH_SIZE` | `100` | Tek seferde yazılan en fazla sonuç sayısı |
 | `UPTIME_RESULT_FLUSH_INTERVAL` | `1s` | Dolmamış batch'in yazılma aralığı |
@@ -348,6 +352,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `BACKEND_TOKEN` | – | Backend'e gönderilen anahtar; `UPTIME_API_TOKEN` ile aynı olmalı |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
+| `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar ana sayfa tüm monitor'ları listeler; üzerinde sorunluları ve namespace özetini gösterir |
+| `PROBLEM_LIMIT` | `50` | Ana sayfada listelenen sorunlu monitor sayısı |
 | `HISTORY_LIMIT` | `40` | Geçmiş şeridinde gösterilen kontrol sayısı |
 | `RESULTS_LIMIT` | `30` | Monitor sayfasında listelenen kontrol sayısı |
 | `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |

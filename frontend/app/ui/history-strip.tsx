@@ -1,10 +1,10 @@
 "use client";
 
-import type { CheckResult } from "@/lib/api";
+import type { HistoryPoint } from "@/lib/api";
 import { useMounted } from "@/lib/use-mounted";
 
 /** One bar per check, oldest on the left; empty slots pad the left side. */
-export function HistoryStrip({ results, slots }: { results: CheckResult[]; slots: number }) {
+export function HistoryStrip({ results, slots }: { results: HistoryPoint[]; slots: number }) {
   // Hover titles carry the time in the viewer's zone, which only the browser
   // knows; until mounted they show the outcome alone.
   const mounted = useMounted();
@@ -23,9 +23,9 @@ export function HistoryStrip({ results, slots }: { results: CheckResult[]; slots
       ))}
       {shown.map((r) => (
         <span
-          key={r.checked_at}
-          title={`${mounted ? `${new Date(r.checked_at).toLocaleTimeString("tr-TR")} · ` : ""}${
-            r.up ? `${r.latency_ms} ms` : (r.error ?? "başarısız")
+          key={r.t}
+          title={`${mounted ? `${new Date(r.t).toLocaleTimeString("tr-TR")} · ` : ""}${
+            r.up ? `${r.ms} ms` : (r.error ?? "başarısız")
           }`}
           className={`w-1.5 rounded-sm ${r.up ? "bg-emerald-500" : "bg-red-500"}`}
         />

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -417,4 +418,89 @@ func TestSchedulerRecordsMetrics(t *testing.T) {
 	if got["kubeat_scheduler_last_tick_timestamp_seconds"] == 0 {
 		t.Error("last tick timestamp was never set")
 	}
+}
+
+// throughputChecker counts checks and takes a fixed time for each.
+type throughputChecker struct {
+	took  time.Duration
+	count atomic.Int64
+}
+
+func (c *throughputChecker) Check(ctx context.Context, m store.Monitor) store.CheckResult {
+	select {
+	case <-time.After(c.took):
+	case <-ctx.Done():
+	}
+	c.count.Add(1)
+	return store.CheckResult{MonitorID: m.ID, Up: true}
+}
+
+// With fast checks, how many run per tick must not be limited to the size
+// of the worker pool.
+func TestThroughputIsNotCappedByQueueSizePerTick(t *testing.T) {
+	st := &fakeStore{}
+	var ms []store.Monitor
+	for id := int64(1); id <= 200; id++ {
+		ms = append(ms, monitor(id, 50*time.Millisecond))
+	}
+	st.setMonitors(ms...)
+	checker := &throughputChecker{took: time.Millisecond}
+	opts := testOptions()
+	opts.Tick = 50 * time.Millisecond
+	opts.Workers = 4
+	opts.BatchSize = 1000
+	stop := start(st, checker, opts)
+
+	// 200 monitors due every 50 ms tick, 4 workers at 1 ms per check: one
+	// tick has room for all 200. Handing out only a queue-full (4) per tick
+	// would manage 80 checks per second.
+	time.Sleep(time.Second)
+	stop()
+
+	if got := checker.count.Load(); got < 1500 {
+		t.Errorf("%d checks in one second, want well over 1500 (a queue-full per tick would give about 80)", got)
+	}
+}
+
+func TestStartupSpreadsMonitorsOverTheirInterval(t *testing.T) {
+	st := &fakeStore{}
+	var ms []store.Monitor
+	for id := int64(1); id <= 100; id++ {
+		ms = append(ms, monitor(id, time.Second))
+	}
+	st.setMonitors(ms...)
+	checker := &throughputChecker{}
+	opts := testOptions()
+	opts.Tick = 10 * time.Millisecond
+	opts.MaxJitter = time.Millisecond // would bunch everything at the start
+	opts.Workers = 50
+	stop := start(st, checker, opts)
+
+	// A quarter of the interval in: about a quarter of the monitors have had
+	// their first check, not all of them.
+	time.Sleep(250 * time.Millisecond)
+	early := checker.count.Load()
+	time.Sleep(900 * time.Millisecond)
+	stop()
+
+	if early < 5 || early > 60 {
+		t.Errorf("%d of 100 monitors checked in the first quarter of their interval, want roughly 25", early)
+	}
+	if total := checker.count.Load(); total < 100 {
+		t.Errorf("only %d checks after more than a full interval, want every monitor checked", total)
+	}
+}
+
+func TestMonitorAddedLaterIsCheckedWithinMaxJitter(t *testing.T) {
+	st := &fakeStore{}
+	checker := &throughputChecker{}
+	opts := testOptions()
+	opts.MaxJitter = 20 * time.Millisecond
+	stop := start(st, checker, opts)
+	defer stop()
+
+	time.Sleep(20 * time.Millisecond) // past the startup tick
+	st.setMonitors(monitor(1, time.Hour))
+	// Not spread over its hour-long interval: checked almost at once.
+	waitFor(t, "the first check of the added monitor", func() bool { return checker.count.Load() >= 1 })
 }

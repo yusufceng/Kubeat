@@ -55,6 +55,19 @@ type monitorResponse struct {
 	Checks        int      `json:"checks"`
 	UptimePercent *float64 `json:"uptime_percent"`
 	AvgLatencyMS  int64    `json:"avg_latency_ms"`
+
+	// History holds the most recent checks, newest first; only present when
+	// the request asked for it with ?history=N.
+	History []historyPoint `json:"history,omitempty"`
+}
+
+// historyPoint is one past check in the compact form used when many
+// monitors are listed with their history.
+type historyPoint struct {
+	T     int64  `json:"t"` // when it ran, Unix milliseconds
+	Up    bool   `json:"up"`
+	MS    int64  `json:"ms"` // how long it took
+	Error string `json:"error,omitempty"`
 }
 
 type resultResponse struct {
@@ -160,20 +173,76 @@ func pathID(r *http.Request) (int64, bool) {
 	return id, err == nil && id > 0
 }
 
+// maxListIDs bounds the ?ids= filter of the monitor list.
+const maxListIDs = 500
+
+// listMonitors returns the monitors with their status. Optional filters:
+// ?namespace=x (empty for monitors without one) and ?ids=1,2,3. With
+// ?history=N each monitor carries its N most recent checks, so a page that
+// draws history for many monitors needs one request, not one per monitor.
 func (h *handler) listMonitors(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
 	window, err := h.window(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	history := 0
+	if v := query.Get("history"); v != "" {
+		if history, err = strconv.Atoi(v); err != nil || history < 1 {
+			writeError(w, http.StatusBadRequest, "history must be a positive integer")
+			return
+		}
+		history = min(history, h.opts.MaxResults)
+	}
+	var ids map[int64]bool
+	if v := query.Get("ids"); v != "" {
+		parts := strings.Split(v, ",")
+		if len(parts) > maxListIDs {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("ids: at most %d", maxListIDs))
+			return
+		}
+		ids = make(map[int64]bool, len(parts))
+		for _, part := range parts {
+			id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+			if err != nil || id < 1 {
+				writeError(w, http.StatusBadRequest, "ids must be a comma-separated list of monitor ids")
+				return
+			}
+			ids[id] = true
+		}
+	}
+	namespace, byNamespace := query.Get("namespace"), query.Has("namespace")
+
 	statuses, err := h.opts.Store.ListMonitorStatuses(r.Context(), time.Now().Add(-window))
 	if err != nil {
 		h.internalError(w, r, err)
 		return
 	}
 	resp := make([]monitorResponse, 0, len(statuses))
+	selected := make([]int64, 0, len(statuses))
 	for _, st := range statuses {
+		if (byNamespace && st.Namespace != namespace) || (ids != nil && !ids[st.ID]) {
+			continue
+		}
 		resp = append(resp, toMonitorResponse(st, window))
+		selected = append(selected, st.ID)
+	}
+
+	if history > 0 {
+		recent, err := h.opts.Store.RecentCheckResults(r.Context(), selected, history)
+		if err != nil {
+			h.internalError(w, r, err)
+			return
+		}
+		for i := range resp {
+			results := recent[resp[i].ID]
+			resp[i].History = make([]historyPoint, len(results))
+			for j, res := range results {
+				resp[i].History[j] = historyPoint{T: res.CheckedAt.UnixMilli(), Up: res.Up, MS: res.Latency.Milliseconds(), Error: res.Error}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

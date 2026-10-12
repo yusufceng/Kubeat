@@ -184,7 +184,8 @@ type MonitorStatus struct {
 	MaintenanceUntil time.Time
 	Checks           int // results in the window
 	UpChecks         int // of which successful
-	AvgLatency       time.Duration
+	// AvgLatency is the average over successful checks; zero if none.
+	AvgLatency time.Duration
 }
 
 // Store persists monitors and their check results.
@@ -194,7 +195,10 @@ type Store interface {
 	GetMonitor(ctx context.Context, id int64) (Monitor, error)
 	ListMonitors(ctx context.Context) ([]Monitor, error)
 	// ListMonitorStatuses returns every monitor with its latest result and
-	// statistics computed over results at or after since.
+	// statistics over the window that starts at since. The statistics are
+	// read from the hourly summaries, which keeps this fast however many
+	// results there are: the window starts on the hour at or before since,
+	// and the newest results count once the summaries are next refreshed.
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]MonitorStatus, error)
 	// GetMonitorStatus is ListMonitorStatuses for a single monitor.
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (MonitorStatus, error)
@@ -209,6 +213,9 @@ type Store interface {
 	InsertCheckResults(ctx context.Context, results []CheckResult) error
 	// ListCheckResults returns up to limit results of a monitor, newest first.
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]CheckResult, error)
+	// RecentCheckResults returns up to limit results, newest first, for each
+	// of the given monitors, keyed by monitor ID.
+	RecentCheckResults(ctx context.Context, monitorIDs []int64, limit int) (map[int64][]CheckResult, error)
 	// DeleteCheckResultsBefore removes results older than cutoff and reports
 	// how many rows were deleted.
 	DeleteCheckResultsBefore(ctx context.Context, cutoff time.Time) (int64, error)

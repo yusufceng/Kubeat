@@ -120,13 +120,20 @@ func TestMonitorLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert results: %v", err)
 	}
+	// Statistics come from the hourly summaries, which the server refreshes
+	// in the background; here the test does it.
+	if err := db.RollupCheckResults(context.Background(), now.Add(-72*time.Hour).Truncate(time.Hour), now.Add(time.Second)); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
 
 	var got monitorResponse
 	if code := do(t, "GET", base+"/1", "", &got); code != http.StatusOK {
 		t.Fatalf("get status = %d, want 200", code)
 	}
-	if got.Status != statusDown || got.Checks != 4 || got.AvgLatencyMS != 200 || got.WindowSeconds != 86400 {
-		t.Errorf("status=%s checks=%d avg=%d window=%d, want down, 4, 200, 86400", got.Status, got.Checks, got.AvgLatencyMS, got.WindowSeconds)
+	// The average is over the three successful checks; the failed one's 500 ms
+	// is not a response time.
+	if got.Status != statusDown || got.Checks != 4 || got.AvgLatencyMS != 100 || got.WindowSeconds != 86400 {
+		t.Errorf("status=%s checks=%d avg=%d window=%d, want down, 4, 100, 86400", got.Status, got.Checks, got.AvgLatencyMS, got.WindowSeconds)
 	}
 	if got.UptimePercent == nil || *got.UptimePercent != 75 {
 		t.Errorf("uptime_percent = %v, want 75", got.UptimePercent)
@@ -465,5 +472,85 @@ func TestAPIToken(t *testing.T) {
 	}
 	if code := request("POST", "/api/v1/monitors", "Bearer s3cret-token"); code != http.StatusCreated {
 		t.Errorf("POST with the token: status = %d, want 201", code)
+	}
+}
+
+func TestMonitorListFiltersAndHistory(t *testing.T) {
+	srv, db := newTestAPI(t)
+	ctx := context.Background()
+	base := srv.URL + "/api/v1/monitors"
+
+	create := func(name, namespace string) store.Monitor {
+		m, err := db.CreateMonitor(ctx, store.Monitor{Name: name, Namespace: namespace, Source: "service/" + name, Type: store.MonitorTCP,
+			Target: "x:1", Interval: 30 * time.Second, Timeout: 5 * time.Second, FailureThreshold: 3, Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	shopA, shopB, billing := create("a", "shop"), create("b", "shop"), create("c", "billing")
+	do(t, "POST", base, validMonitor, nil) // a monitor without a namespace, id 4
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	var batch []store.CheckResult
+	for i := 0; i < 5; i++ {
+		batch = append(batch, store.CheckResult{MonitorID: shopA.ID, CheckedAt: now.Add(-time.Duration(i) * time.Minute), Up: i != 0,
+			Latency: time.Duration(10*(i+1)) * time.Millisecond, Error: map[bool]string{true: "refused"}[i == 0]})
+	}
+	if err := db.InsertCheckResults(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+
+	names := func(list []monitorResponse) string {
+		var out []string
+		for _, m := range list {
+			out = append(out, m.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	var list []monitorResponse
+	for query, want := range map[string]string{
+		"":                      "a,b,c,api",
+		"?namespace=shop":       "a,b",
+		"?namespace=":           "api", // present but empty: monitors without a namespace
+		"?namespace=nope":       "",
+		"?ids=1,3":              "a,c",
+		"?ids=2&namespace=shop": "b",
+		"?ids=3&namespace=shop": "",
+	} {
+		list = nil
+		if code := do(t, "GET", base+query, "", &list); code != http.StatusOK || names(list) != want {
+			t.Errorf("GET %q: status=%d names=%q, want %q", query, code, names(list), want)
+		}
+		for _, m := range list {
+			if m.History != nil {
+				t.Errorf("GET %q: history present without being asked for", query)
+			}
+		}
+	}
+
+	// History: newest first, capped at MaxResults (3 in the test API), in the
+	// compact form.
+	list = nil
+	do(t, "GET", base+"?namespace=shop&history=50", "", &list)
+	a, b := list[0], list[1]
+	if len(a.History) != 3 || a.History[0].T != now.UnixMilli() || a.History[0].Up || a.History[0].Error != "refused" || a.History[0].MS != 10 {
+		t.Errorf("history of a = %+v", a.History)
+	}
+	if !a.History[1].Up || a.History[1].Error != "" || a.History[1].MS != 20 {
+		t.Errorf("second point of a = %+v", a.History[1])
+	}
+	// A monitor without results simply has no history field.
+	if len(b.History) != 0 {
+		t.Errorf("history of a monitor without results = %v", b.History)
+	}
+	_ = shopB
+	_ = billing
+
+	many := strings.TrimSuffix(strings.Repeat("1,", maxListIDs+1), ",")
+	for _, bad := range []string{"?history=0", "?history=x", "?ids=a", "?ids=0", "?ids=1,,2", "?ids=" + many} {
+		if code := do(t, "GET", base+bad, "", nil); code != http.StatusBadRequest {
+			t.Errorf("GET %.30q: status = %d, want 400", bad, code)
+		}
 	}
 }

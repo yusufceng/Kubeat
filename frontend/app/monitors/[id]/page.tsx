@@ -237,7 +237,15 @@ async function MonitorDetail({
 
       <section>
         <h2 className="mb-2 text-sm font-semibold">Son {config.historyLimit} kontrol</h2>
-        <HistoryStrip results={results} slots={config.historyLimit} />
+        <HistoryStrip
+          results={results.map((r) => ({
+            t: new Date(r.checked_at).getTime(),
+            up: r.up,
+            ms: r.latency_ms,
+            error: r.error ?? undefined,
+          }))}
+          slots={config.historyLimit}
+        />
       </section>
 
       <details className="rounded-lg border border-black/10 dark:border-white/15">

@@ -32,6 +32,13 @@ export const config = {
   refreshIntervalMs: positiveInt(process.env.REFRESH_INTERVAL_MS, 5000),
   /** Number of recent checks drawn in a history strip. */
   historyLimit: positiveInt(process.env.HISTORY_LIMIT, 40),
+  /**
+   * Up to this many monitors the home page lists every one of them; above
+   * it, it shows the problems and a summary per namespace instead.
+   */
+  dashboardFlatLimit: positiveInt(process.env.DASHBOARD_FLAT_LIMIT, 50),
+  /** Number of problem monitors listed on the home page. */
+  problemLimit: positiveInt(process.env.PROBLEM_LIMIT, 50),
   /** Number of recent checks listed on a monitor's page. */
   resultsLimit: positiveInt(process.env.RESULTS_LIMIT, 30),
   /** Periods for which a monitor's uptime is shown, in seconds. */

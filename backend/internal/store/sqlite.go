@@ -272,12 +272,15 @@ const maintenanceCovers = `(w.monitor_id = m.id OR (w.monitor_id IS NULL AND (w.
 
 // statusQuery joins each monitor with its newest result (found through the
 // (monitor_id, checked_at) index) and with its aggregates since a cutoff.
+// The aggregates come from the hourly summaries: computing them from raw
+// results means reading every result in the window on every request, which
+// took seconds at a few hundred monitors.
 const statusQuery = `
 SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.timeout_seconds, m.failure_threshold, m.enabled, m.created_at,
        m.namespace, m.source,
        m.http_method, m.http_expected_status, m.http_keyword, m.http_headers, m.tls_skip_verify,
        r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.cert_expires_at,
-       COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.avg_latency_ms, 0),
+       COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.up_latency_sum_ms, 0),
        i.id, i.started_at, i.cause, c.id IS NOT NULL,
        (SELECT MAX(w.ends_at) FROM maintenance_windows w
         WHERE w.starts_at <= ?3 AND w.ends_at > ?3 AND ` + maintenanceCovers + `)
@@ -289,9 +292,9 @@ LEFT JOIN check_results r ON r.id = (
     WHERE monitor_id = m.id
     ORDER BY checked_at DESC, id DESC LIMIT 1)
 LEFT JOIN (
-    SELECT monitor_id, COUNT(*) AS checks, SUM(up) AS up_checks, AVG(latency_ms) AS avg_latency_ms
-    FROM check_results
-    WHERE checked_at >= ?1
+    SELECT monitor_id, SUM(checks) AS checks, SUM(up_checks) AS up_checks, SUM(up_latency_sum_ms) AS up_latency_sum_ms
+    FROM check_rollups
+    WHERE bucket_start >= ?1
     GROUP BY monitor_id) a ON a.monitor_id = m.id
 WHERE ?2 = 0 OR m.id = ?2
 ORDER BY m.id`
@@ -317,7 +320,7 @@ func (s *SQLite) GetMonitorStatus(ctx context.Context, id int64, since time.Time
 
 // queryStatuses runs statusQuery for one monitor, or for all when id is 0.
 func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) ([]MonitorStatus, error) {
-	rows, err := s.read.QueryContext(ctx, statusQuery, since.UnixMilli(), id, time.Now().UnixMilli())
+	rows, err := s.read.QueryContext(ctx, statusQuery, since.Truncate(RollupBucket).UnixMilli(), id, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +335,7 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			up                           sql.NullBool
 			statusCode                   sql.NullInt64
 			errText                      sql.NullString
-			avgLatencyMS                 float64
+			upLatencySumMS               int64
 			incidentID, incidentStart    sql.NullInt64
 			incidentCause                sql.NullString
 			headers                      string
@@ -343,7 +346,7 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			&st.Namespace, &st.Source,
 			&st.HTTP.Method, &st.HTTP.ExpectedStatus, &st.HTTP.Keyword, &headers, &st.HTTP.SkipTLSVerify,
 			&checkedAt, &up, &latencyMS, &statusCode, &errText, &certExpires,
-			&st.Checks, &st.UpChecks, &avgLatencyMS,
+			&st.Checks, &st.UpChecks, &upLatencySumMS,
 			&incidentID, &incidentStart, &incidentCause, &st.CertWarning, &maintenanceUntil)
 		if err != nil {
 			return nil, err
@@ -354,7 +357,9 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 		if st.HTTP.Headers, err = decodeHeaders(headers); err != nil {
 			return nil, fmt.Errorf("monitor %d: %w", st.ID, err)
 		}
-		st.AvgLatency = time.Duration(avgLatencyMS * float64(time.Millisecond))
+		if st.UpChecks > 0 {
+			st.AvgLatency = time.Duration(float64(upLatencySumMS) / float64(st.UpChecks) * float64(time.Millisecond))
+		}
 		st.MaintenanceUntil = unixMilliOrZero(maintenanceUntil)
 		if checkedAt.Valid {
 			st.Last = &CheckResult{
@@ -475,14 +480,53 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 	return nil
 }
 
-func (s *SQLite) ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]CheckResult, error) {
-	rows, err := s.read.QueryContext(ctx,
-		`SELECT monitor_id, checked_at, up, latency_ms, status_code, error, cert_expires_at
+const recentResultsQuery = `SELECT monitor_id, checked_at, up, latency_ms, status_code, error, cert_expires_at
 		 FROM check_results WHERE monitor_id = ?
-		 ORDER BY checked_at DESC, id DESC LIMIT ?`, monitorID, limit)
+		 ORDER BY checked_at DESC, id DESC LIMIT ?`
+
+func (s *SQLite) ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]CheckResult, error) {
+	rows, err := s.read.QueryContext(ctx, recentResultsQuery, monitorID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list check results: %w", err)
 	}
+	return scanCheckResults(rows)
+}
+
+// RecentCheckResults runs one indexed lookup per monitor on a single
+// connection and prepared statement, which is far cheaper than a request
+// per monitor.
+func (s *SQLite) RecentCheckResults(ctx context.Context, monitorIDs []int64, limit int) (map[int64][]CheckResult, error) {
+	out := make(map[int64][]CheckResult, len(monitorIDs))
+	if len(monitorIDs) == 0 {
+		return out, nil
+	}
+	conn, err := s.read.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("recent check results: %w", err)
+	}
+	defer conn.Close()
+	stmt, err := conn.PrepareContext(ctx, recentResultsQuery)
+	if err != nil {
+		return nil, fmt.Errorf("recent check results: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, id := range monitorIDs {
+		rows, err := stmt.QueryContext(ctx, id, limit)
+		if err != nil {
+			return nil, fmt.Errorf("recent check results: %w", err)
+		}
+		results, err := scanCheckResults(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[id] = results
+	}
+	return out, nil
+}
+
+// scanCheckResults reads and closes rows.
+func scanCheckResults(rows *sql.Rows) ([]CheckResult, error) {
 	defer rows.Close()
 
 	var results []CheckResult

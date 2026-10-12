@@ -14,6 +14,8 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 6 | Agent ve çoklu cluster: her cluster'da hafif agent, merkeze push | Ertelendi: şimdilik tek cluster yeterli (2026-10-12) |
 | 7 | Üretime hazırlık: API koruması, kimlik doğrulama, yedekleme, yük testi | Sürüyor |
 
+Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
+
 ## Gerçek OpenShift'te doğrulanması gerekenler
 
 Geliştirme minikube'da yapıldı. Aşağıdakiler yalnızca birim testleriyle ya
