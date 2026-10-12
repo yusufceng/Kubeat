@@ -36,6 +36,8 @@ export const config = {
   backendTimeoutMs: positiveInt(process.env.BACKEND_TIMEOUT_MS, 3000),
   /** How often open pages reload their data. */
   refreshIntervalMs: positiveInt(process.env.REFRESH_INTERVAL_MS, 5000),
+  /** How often an open status page reloads; visitors are many, so slower. */
+  statusPageRefreshMs: positiveInt(process.env.STATUS_PAGE_REFRESH_MS, 30000),
   /** Number of recent checks drawn in a monitor's heartbeat bar. */
   historyLimit: positiveInt(process.env.HISTORY_LIMIT, 60),
   /** Number of recent checks drawn next to each monitor in the list. */

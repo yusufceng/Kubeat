@@ -9,9 +9,11 @@ import {
   createChannel,
   createMaintenance,
   createMonitor,
+  createStatusPage,
   deleteChannel,
   deleteMaintenance,
   deleteMonitor,
+  deleteStatusPage,
   type DnsOptions,
   type HttpOptions,
   importCandidates,
@@ -19,9 +21,11 @@ import {
   type MonitorChanges,
   type MonitorType,
   type NewMonitor,
+  type StatusPageSettings,
   testChannel,
   updateChannel,
   updateMonitor,
+  updateStatusPage,
 } from "@/lib/api";
 
 /** Parses "Name: value" lines; returns a message for a line it cannot read. */
@@ -186,6 +190,44 @@ export async function setChannelEnabledAction(formData: FormData): Promise<void>
 export async function deleteChannelAction(formData: FormData): Promise<void> {
   try {
     await deleteChannel(Number(formData.get("id")));
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 404)) throw err;
+  }
+  refresh();
+}
+
+/**
+ * Creates a status page, or with an id saves changes to one. Returns what
+ * was wrong, or nothing when it was saved.
+ */
+export async function saveStatusPageAction(formData: FormData): Promise<{ error: string } | undefined> {
+  const text = (name: string) => String(formData.get(name) ?? "").trim();
+  const id = Number(formData.get("id") ?? 0);
+  const settings: StatusPageSettings = {
+    slug: text("slug"),
+    title: text("title"),
+    description: text("description"),
+    announcement: text("announcement"),
+    published: formData.get("published") === "on",
+    // The checked monitors, in the order the form lists them.
+    monitors: formData.getAll("monitor").map((value) => ({
+      monitor_id: Number(value),
+      display_name: text(`name_${value}`),
+    })),
+  };
+  try {
+    if (id) await updateStatusPage(id, settings);
+    else await createStatusPage(settings);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) return { error: "Bu adres başka bir durum sayfasında kullanılıyor." };
+    return { error: describe(err) };
+  }
+  refresh();
+}
+
+export async function deleteStatusPageAction(formData: FormData): Promise<void> {
+  try {
+    await deleteStatusPage(Number(formData.get("id")));
   } catch (err) {
     if (!(err instanceof ApiError && err.status === 404)) throw err;
   }

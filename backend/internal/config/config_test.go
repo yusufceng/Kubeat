@@ -42,6 +42,9 @@ func TestLoadDefaults(t *testing.T) {
 		StatsWindow:      24 * time.Hour,
 		MaxResults:       1000,
 
+		StatusPageDays:           90,
+		StatusPageIncidentWindow: 14 * 24 * time.Hour,
+
 		DefaultFailureThreshold: 3,
 		RecoveryThreshold:       1,
 		CertWarning:             14 * 24 * time.Hour,

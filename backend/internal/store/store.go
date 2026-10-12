@@ -303,6 +303,31 @@ type Maintenance struct {
 	CreatedAt   time.Time
 }
 
+// StatusPage is a public view of some monitors: what a visitor without an
+// account may see.
+type StatusPage struct {
+	ID int64
+	// Slug is the last part of the page's address.
+	Slug        string
+	Title       string
+	Description string
+	// Announcement is a notice shown at the top of the page; empty for none.
+	Announcement string
+	// Published says whether the page is served.
+	Published bool
+	// Monitors are shown in this order.
+	Monitors  []StatusPageMonitor
+	CreatedAt time.Time
+}
+
+// StatusPageMonitor is one monitor on a status page.
+type StatusPageMonitor struct {
+	MonitorID int64
+	// DisplayName is shown instead of the monitor's own name, which is
+	// often an internal one; empty shows the monitor's name.
+	DisplayName string
+}
+
 // MonitorStatus is a monitor together with its latest result and its
 // statistics over a time window.
 type MonitorStatus struct {
@@ -396,6 +421,23 @@ type Store interface {
 	UpdateChannel(ctx context.Context, c Channel) (Channel, error)
 	ListChannels(ctx context.Context) ([]Channel, error)
 	DeleteChannel(ctx context.Context, id int64) error
+
+	// CreateStatusPage returns ErrConflict when the slug is taken.
+	CreateStatusPage(ctx context.Context, p StatusPage) (StatusPage, error)
+	GetStatusPage(ctx context.Context, id int64) (StatusPage, error)
+	GetStatusPageBySlug(ctx context.Context, slug string) (StatusPage, error)
+	// ListStatusPages returns every page, by title.
+	ListStatusPages(ctx context.Context) ([]StatusPage, error)
+	// UpdateStatusPage changes everything about the page with p.ID,
+	// including which monitors it shows.
+	UpdateStatusPage(ctx context.Context, p StatusPage) (StatusPage, error)
+	DeleteStatusPage(ctx context.Context, id int64) error
+	// StatusPageDailyUptime summarizes the checks of the page's monitors per
+	// UTC day in [from, to), keyed by monitor; days without checks are left
+	// out. Only Start, Checks and UpChecks of the points are set.
+	StatusPageDailyUptime(ctx context.Context, pageID int64, from, to time.Time) (map[int64][]SeriesPoint, error)
+	// MonitorIsPublic reports whether a published status page shows the monitor.
+	MonitorIsPublic(ctx context.Context, monitorID int64) (bool, error)
 
 	Close() error
 }

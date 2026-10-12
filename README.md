@@ -79,6 +79,9 @@ arayüz açıktır ve üst çubukta "Giriş koruması kapalı" uyarısı görün
   `LOGIN_LOCKOUT_MINUTES` (15) dakika herkes için kapanır. Sayaç arayüz
   sürecinin belleğindedir; süreç yeniden başlayınca sıfırlanır.
 - Kişi bazında hesap ve yetki yoktur: parolayı bilen herkes yöneticidir.
+- Oturum istemeyen üç adres vardır ve üçü de kendi sınırını taşır: yayındaki
+  durum sayfaları (`/status/...`), o sayfalardaki monitor'ların rozetleri
+  (`/api/badge/...`) ve push raporları (`/api/push/<token>`).
 
 Helm chart parolayı ilk kurulumda rastgele üretir. Okumak için:
 
@@ -105,6 +108,35 @@ bakış ya da açılan monitor.
 - **Yeni monitor / düzenle**: tipe göre değişen tek form.
 - **Tema**: sağ üstteki düğme sistem, açık ve koyu arasında geçer; seçim
   tarayıcıda saklanır.
+
+## Durum sayfaları
+
+Bir durum sayfası, seçilen monitor'ların durumunu **giriş gerektirmeyen** bir
+adreste yayınlar: `/status/<adres>`. Ekip dışındakiler, müşteriler ya da
+duvardaki bir ekran içindir. **Durum sayfaları** menüsünden oluşturulur.
+
+- Sayfa bir başlık, açıklama, isteğe bağlı bir **duyuru** ve seçilen
+  monitor'lardan oluşur. Her monitor'a sayfada görünecek ayrı bir ad
+  verilebilir; verilmezse keşfedilen monitor'larda nesnenin adı (`web:80`),
+  diğerlerinde monitor'un adı görünür.
+- Her monitor için durum, son `UPTIME_STATUS_PAGE_DAYS` günün gün gün uptime
+  çubuğu ve toplam uptime gösterilir; altında son kesintiler listelenir.
+- Sayfa yalnızca adı, durumu, uptime'ı ve kesintilerin zamanını gösterir.
+  Adresler, hata mesajları ve sayfada olmayan monitor'lar dışarı verilmez.
+- Tek bir başarısız kontrol sayfada "kesinti" görünmez; kesinti, alarm eşiği
+  aşılıp olay açıldığında görünür.
+- "Yayında" işareti kaldırılan sayfa açılmaz (404).
+
+**Rozetler.** Yayındaki bir sayfada gösterilen her monitor'un iki rozeti
+vardır; README ya da wiki sayfasına konabilir:
+
+```
+![durum](https://<kubeat-adresi>/api/badge/<monitor-id>/status)
+![uptime](https://<kubeat-adresi>/api/badge/<monitor-id>/uptime)
+```
+
+`?label=metin` ile soldaki yazı değiştirilebilir. Hiçbir yayındaki sayfada
+olmayan monitor'un rozeti yoktur (404).
 
 ## API
 
@@ -139,6 +171,12 @@ eklenmelidir.
 | `PATCH` | `/api/v1/channels/{id}` | Kanalı düzenler; `{"enabled": false}` ile durdurur |
 | `DELETE` | `/api/v1/channels/{id}` | Kanalı siler |
 | `POST` | `/api/v1/channels/{id}/test` | Kanala test bildirimi gönderir |
+| `GET` | `/api/v1/status-pages` | Durum sayfaları |
+| `POST` | `/api/v1/status-pages` | Sayfa ekler: `slug`, `title`, `description`, `announcement`, `published`, `monitors: [{monitor_id, display_name}]` |
+| `PATCH` | `/api/v1/status-pages/{id}` | Sayfayı düzenler; verilmeyen alanlar değişmez |
+| `DELETE` | `/api/v1/status-pages/{id}` | Sayfayı siler; monitor'lar kalır |
+| `GET` | `/api/v1/status-pages/by-slug/{slug}/view` | Yayındaki sayfanın herkese açık içeriği |
+| `GET` | `/api/v1/badges/{id}/{status\|uptime}` | Yayındaki bir sayfada olan monitor'un SVG rozeti |
 
 ```
 curl -X POST localhost:8090/api/v1/monitors -d '{
@@ -527,6 +565,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |
+| `UPTIME_STATUS_PAGE_DAYS` | `90` | Durum sayfasında gösterilen gün sayısı |
+| `UPTIME_STATUS_PAGE_INCIDENT_WINDOW` | `336h` | Durum sayfasında listelenen çözülmüş kesintilerin ne kadar geriye gittiği |
 | `UPTIME_DEFAULT_FAILURE_THRESHOLD` | `3` | Monitor'da belirtilmezse, olay açmak için gereken art arda başarısız kontrol sayısı |
 | `UPTIME_RECOVERY_THRESHOLD` | `1` | Olayı kapatmak için gereken art arda başarılı kontrol sayısı |
 | `UPTIME_CERT_WARNING` | `336h` | Sertifika bitişine bu kadar kala uyarı olayı açılır |
@@ -571,6 +611,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `LOGIN_LOCKOUT_MINUTES` | `15` | Kilidin süresi |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
+| `STATUS_PAGE_REFRESH_MS` | `30000` | Açık bir durum sayfasının yenilenme aralığı (ms) |
 | `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar monitor listesinde tüm namespace'ler açık gelir; üzerinde yalnızca sorunlu olanlar açılır |
 | `LIST_BEATS` | `14` | Monitor listesinde her satırda gösterilen son kontrol sayısı |
 | `HISTORY_LIMIT` | `60` | Monitor sayfasındaki kalp atışı çubuğunda gösterilen kontrol sayısı |

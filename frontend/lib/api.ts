@@ -7,7 +7,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 11;
+export const REQUIRED_API_REVISION = 12;
 
 export type Health = {
   status: string;
@@ -459,3 +459,72 @@ export type Workload = {
 };
 
 export const getWorkload = (id: number) => request<Workload>(`/monitors/${id}/workload`);
+
+export type StatusPageMonitor = {
+  monitor_id: number;
+  /** Shown instead of the monitor's own name; empty for that. */
+  display_name: string;
+};
+
+export type StatusPage = {
+  id: number;
+  /** The last part of the page's address, /status/{slug}. */
+  slug: string;
+  title: string;
+  description: string;
+  /** A notice at the top of the page; empty for none. */
+  announcement: string;
+  /** An unpublished page is not served. */
+  published: boolean;
+  /** In the order the page shows them. */
+  monitors: StatusPageMonitor[];
+  created_at: string;
+};
+
+export type StatusPageSettings = Omit<StatusPage, "id" | "created_at">;
+
+export const listStatusPages = () => request<StatusPage[]>("/status-pages");
+
+export const createStatusPage = (page: StatusPageSettings) =>
+  request<StatusPage>("/status-pages", { method: "POST", body: JSON.stringify(page) });
+
+export const updateStatusPage = (id: number, changes: Partial<StatusPageSettings>) =>
+  request<StatusPage>(`/status-pages/${id}`, { method: "PATCH", body: JSON.stringify(changes) });
+
+export const deleteStatusPage = (id: number) =>
+  request<void>(`/status-pages/${id}`, { method: "DELETE" });
+
+/** What a status page tells the public about a monitor. */
+export type PublicState = "up" | "down" | "maintenance" | "pending" | "paused";
+
+export type StatusPageView = {
+  slug: string;
+  title: string;
+  description: string;
+  announcement: string;
+  /** The page as a whole. */
+  state: "up" | "degraded" | "down" | "maintenance";
+  /** How many days each history covers, ending today (UTC). */
+  days: number;
+  /** The start of the first of those days. */
+  from: string;
+  monitors: {
+    id: number;
+    name: string;
+    state: PublicState;
+    uptime_percent: number | null;
+    /** One entry per day, oldest first; null for a day without checks. */
+    history: (number | null)[];
+  }[];
+  /** Outages, newest first. */
+  incidents: { monitor_name: string; started_at: string; resolved_at: string | null }[];
+};
+
+/**
+ * What a published status page shows. It is read without a session: the
+ * page is public, and the backend puts nothing internal in it.
+ */
+export const getStatusPageView = (slug: string) =>
+  request<StatusPageView>(`/status-pages/by-slug/${encodeURIComponent(slug)}/view`, undefined, {
+    open: true,
+  });

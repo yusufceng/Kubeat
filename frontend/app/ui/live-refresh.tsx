@@ -8,15 +8,16 @@ import { AutoRefresh } from "@/app/ui/auto-refresh";
  * from the running server's environment instead of being frozen into the
  * prerendered shell at build time.
  */
-export function LiveRefresh() {
+export function LiveRefresh({ every = "page" }: { every?: "page" | "statusPage" }) {
   return (
     <Suspense>
-      <RequestTimeRefresh />
+      <RequestTimeRefresh every={every} />
     </Suspense>
   );
 }
 
-async function RequestTimeRefresh() {
+async function RequestTimeRefresh({ every }: { every: "page" | "statusPage" }) {
   await connection();
-  return <AutoRefresh intervalMs={config.refreshIntervalMs} />;
+  const intervalMs = every === "statusPage" ? config.statusPageRefreshMs : config.refreshIntervalMs;
+  return <AutoRefresh intervalMs={intervalMs} />;
 }

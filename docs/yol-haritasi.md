@@ -16,7 +16,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 8 | Kontrol motorları: HTTP genişletmeleri, TLS'li TCP, ping, DNS, push, gRPC, WebSocket; tekrar aralığı, ters mod, kopyalama | Tamamlandı |
 | 9 | Çalışma alanı arayüzü: kenar çubuğunda aranabilir monitor listesi, genel bakış, zengin monitor sayfası, tüm tipler için ekleme/düzenleme formu, tema | Tamamlandı |
 | 10 | Etiketler, gruplar ve toplu işlemler | Sırada |
-| 11 | Durum sayfaları ve rozetler | Planlandı |
+| 11 | Durum sayfaları ve rozetler | Tamamlandı |
 | 12 | Tekrarlayan bakım pencereleri | Planlandı |
 | 13 | Bildirim sağlayıcıları: Telegram, Discord, PagerDuty, Mattermost, Google Chat, ntfy, Gotify; kanal düzenleme ve namespace'e göre yönlendirme | Tamamlandı |
 | 14 | Veritabanı ve kuyruk kontrolleri (PostgreSQL, MySQL, Redis, MongoDB, Kafka, RabbitMQ); Kubernetes workload tipi | Planlandı |
@@ -42,7 +42,7 @@ karşılamak. Kuma'nın kaynağı (3.0 beta, 2026-10) incelenerek çıkarıldı.
 | Monitor sayfası: kalp atışı çubuğu, yanıt süresi grafiği, 24 sa / 30 gün / 1 yıl uptime, sertifika bilgisi, olay tablosu | Var |
 | Açık, koyu ve sistem teması | Var |
 | Gruplar ve etiketler | Namespace gruplaması var; serbest grup ve etiket 10. adımda |
-| Durum sayfaları (herkese açık, olay duyurusu, RSS), rozetler | 11. adım |
+| Durum sayfaları (herkese açık, olay duyurusu, RSS), rozetler | Var: sayfa, duyuru, günlük uptime geçmişi, son kesintiler, durum ve uptime rozetleri. RSS, özel CSS ve özel alan adı yok |
 | Bakım: tek seferlik, tekrarlayan, cron | Tek seferlik var; kalanı 12. adımda |
 | 110 bildirim sağlayıcısı | 11 tanesi var: Slack, Teams, Telegram, Discord, Mattermost, Google Chat, PagerDuty, ntfy, Gotify, e-posta, webhook. Opsgenie eklenmedi: Atlassian ürünü sonlandırıyor |
 | Monitor başına bildirim seçimi | Kanal başına namespace kapsamı var; tek tek monitor seçimi etiketlerle (10. adım) |

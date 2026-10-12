@@ -13,6 +13,9 @@ export function proxy(request: NextRequest) {
   // Reports of push monitors come from jobs, which have no session; the
   // token in their path is checked by the backend.
   if (pathname.startsWith("/api/push/")) return NextResponse.next();
+  // Status pages and their badges are public by design; the backend serves
+  // only what was published.
+  if (pathname.startsWith("/status/") || pathname.startsWith("/api/badge/")) return NextResponse.next();
 
   const signedIn = validSession(request.cookies.get(SESSION_COOKIE)?.value);
 

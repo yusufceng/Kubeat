@@ -37,6 +37,9 @@ type Config struct {
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
 	MaxResults       int           // UPTIME_MAX_RESULTS
 
+	StatusPageDays           int           // UPTIME_STATUS_PAGE_DAYS
+	StatusPageIncidentWindow time.Duration // UPTIME_STATUS_PAGE_INCIDENT_WINDOW
+
 	DefaultFailureThreshold int           // UPTIME_DEFAULT_FAILURE_THRESHOLD
 	RecoveryThreshold       int           // UPTIME_RECOVERY_THRESHOLD
 	CertWarning             time.Duration // UPTIME_CERT_WARNING
@@ -139,6 +142,7 @@ func Load() (Config, error) {
 		{&cfg.RollupRetention, "UPTIME_ROLLUP_RETENTION", 365 * 24 * time.Hour},
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
+		{&cfg.StatusPageIncidentWindow, "UPTIME_STATUS_PAGE_INCIDENT_WINDOW", 14 * 24 * time.Hour},
 		{&cfg.CertWarning, "UPTIME_CERT_WARNING", 14 * 24 * time.Hour},
 		{&cfg.NotifyRetryDelay, "UPTIME_NOTIFY_RETRY_DELAY", 5 * time.Second},
 		{&cfg.NotifyTimeout, "UPTIME_NOTIFY_TIMEOUT", 5 * time.Second},
@@ -166,6 +170,7 @@ func Load() (Config, error) {
 		{&cfg.Workers, "UPTIME_WORKERS", 20},
 		{&cfg.ResultBatchSize, "UPTIME_RESULT_BATCH_SIZE", 100},
 		{&cfg.MaxResults, "UPTIME_MAX_RESULTS", 1000},
+		{&cfg.StatusPageDays, "UPTIME_STATUS_PAGE_DAYS", 90},
 		{&cfg.SeriesPoints, "UPTIME_SERIES_POINTS", 120},
 		{&cfg.KeywordBodyLimit, "UPTIME_KEYWORD_BODY_LIMIT_BYTES", 1 << 20},
 		{&cfg.DefaultFailureThreshold, "UPTIME_DEFAULT_FAILURE_THRESHOLD", 3},

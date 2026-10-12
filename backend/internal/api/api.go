@@ -43,6 +43,14 @@ type Store interface {
 	UpdateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
 	ListChannels(ctx context.Context) ([]store.Channel, error)
 	DeleteChannel(ctx context.Context, id int64) error
+	CreateStatusPage(ctx context.Context, p store.StatusPage) (store.StatusPage, error)
+	GetStatusPage(ctx context.Context, id int64) (store.StatusPage, error)
+	GetStatusPageBySlug(ctx context.Context, slug string) (store.StatusPage, error)
+	ListStatusPages(ctx context.Context) ([]store.StatusPage, error)
+	UpdateStatusPage(ctx context.Context, p store.StatusPage) (store.StatusPage, error)
+	DeleteStatusPage(ctx context.Context, id int64) error
+	StatusPageDailyUptime(ctx context.Context, pageID int64, from, to time.Time) (map[int64][]store.SeriesPoint, error)
+	MonitorIsPublic(ctx context.Context, monitorID int64) (bool, error)
 }
 
 // Discovery lists what could be monitored in the cluster.
@@ -72,6 +80,10 @@ type Options struct {
 	HistoryRetention time.Duration
 	// SeriesPoints is the number of buckets a series aims for.
 	SeriesPoints int
+	// StatusPageDays is how many days of history a status page shows, and
+	// StatusPageIncidentWindow how far back it lists resolved outages.
+	StatusPageDays           int
+	StatusPageIncidentWindow time.Duration
 	// DefaultFailureThreshold applies to monitors created without one.
 	DefaultFailureThreshold int
 	Notifier                Notifier
@@ -99,7 +111,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 11
+const Revision = 12
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -144,6 +156,13 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/channels/{id}", h.updateChannel)
 	mux.HandleFunc("DELETE /api/v1/channels/{id}", h.deleteChannel)
 	mux.HandleFunc("POST /api/v1/channels/{id}/test", h.testChannel)
+	mux.HandleFunc("GET /api/v1/status-pages", h.listStatusPages)
+	mux.HandleFunc("POST /api/v1/status-pages", h.createStatusPage)
+	mux.HandleFunc("GET /api/v1/status-pages/{id}", h.getStatusPage)
+	mux.HandleFunc("PATCH /api/v1/status-pages/{id}", h.updateStatusPage)
+	mux.HandleFunc("DELETE /api/v1/status-pages/{id}", h.deleteStatusPage)
+	mux.HandleFunc("GET /api/v1/status-pages/by-slug/{slug}/view", h.viewStatusPage)
+	mux.HandleFunc("GET /api/v1/badges/{id}/{kind}", h.badge)
 	// Whatever the source has at hand reports: curl, wget, an HTTP client.
 	mux.HandleFunc("GET "+pushPath+"{token}", h.push)
 	mux.HandleFunc("POST "+pushPath+"{token}", h.push)

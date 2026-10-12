@@ -36,6 +36,9 @@ func newTestAPI(t *testing.T) (*httptest.Server, *store.SQLite) {
 		Notifier:         notifier,
 		Logger:           logger,
 
+		StatusPageDays:           3,
+		StatusPageIncidentWindow: 48 * time.Hour,
+
 		DefaultFailureThreshold: 3,
 		RawRetention:            48 * time.Hour,
 		HistoryRetention:        365 * 24 * time.Hour,
