@@ -17,9 +17,9 @@ func (s *SQLite) CreateMaintenance(ctx context.Context, m Maintenance) (Maintena
 		monitorID = sql.NullInt64{Int64: m.MonitorID, Valid: true}
 	}
 	res, err := s.write.ExecContext(ctx,
-		`INSERT INTO maintenance_windows (name, starts_at, ends_at, namespace, monitor_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		m.Name, m.StartsAt.UnixMilli(), m.EndsAt.UnixMilli(), m.Namespace, monitorID, m.CreatedAt.UnixMilli())
+		`INSERT INTO maintenance_windows (name, starts_at, ends_at, repeat, timezone, namespace, monitor_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.Name, m.StartsAt.UnixMilli(), m.EndsAt.UnixMilli(), m.Repeat, m.Timezone, m.Namespace, monitorID, m.CreatedAt.UnixMilli())
 	if err != nil {
 		return Maintenance{}, fmt.Errorf("create maintenance: %w", err)
 	}
@@ -29,16 +29,12 @@ func (s *SQLite) CreateMaintenance(ctx context.Context, m Maintenance) (Maintena
 	return m, nil
 }
 
-func (s *SQLite) ListMaintenance(ctx context.Context, limit int) ([]Maintenance, error) {
-	rows, err := s.read.QueryContext(ctx,
-		`SELECT w.id, w.name, w.starts_at, w.ends_at, w.namespace, w.monitor_id, m.name, w.created_at
-		 FROM maintenance_windows w LEFT JOIN monitors m ON m.id = w.monitor_id
-		 ORDER BY w.starts_at DESC, w.id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list maintenance: %w", err)
-	}
-	defer rows.Close()
+const maintenanceQuery = `SELECT w.id, w.name, w.starts_at, w.ends_at, w.repeat, w.timezone, w.namespace, w.monitor_id, m.name, w.created_at
+		 FROM maintenance_windows w LEFT JOIN monitors m ON m.id = w.monitor_id `
 
+// scanMaintenance reads and closes rows of maintenanceQuery.
+func scanMaintenance(rows *sql.Rows) ([]Maintenance, error) {
+	defer rows.Close()
 	var windows []Maintenance
 	for rows.Next() {
 		var (
@@ -47,8 +43,8 @@ func (s *SQLite) ListMaintenance(ctx context.Context, limit int) ([]Maintenance,
 			monitorID                   sql.NullInt64
 			monitorName                 sql.NullString
 		)
-		if err := rows.Scan(&m.ID, &m.Name, &startsAt, &endsAt, &m.Namespace, &monitorID, &monitorName, &createdAt); err != nil {
-			return nil, fmt.Errorf("list maintenance: %w", err)
+		if err := rows.Scan(&m.ID, &m.Name, &startsAt, &endsAt, &m.Repeat, &m.Timezone, &m.Namespace, &monitorID, &monitorName, &createdAt); err != nil {
+			return nil, err
 		}
 		m.StartsAt = time.UnixMilli(startsAt).UTC()
 		m.EndsAt = time.UnixMilli(endsAt).UTC()
@@ -57,10 +53,46 @@ func (s *SQLite) ListMaintenance(ctx context.Context, limit int) ([]Maintenance,
 		m.MonitorName = monitorName.String
 		windows = append(windows, m)
 	}
-	if err := rows.Err(); err != nil {
+	return windows, rows.Err()
+}
+
+func (s *SQLite) ListMaintenance(ctx context.Context, limit int) ([]Maintenance, error) {
+	rows, err := s.read.QueryContext(ctx,
+		maintenanceQuery+`ORDER BY w.repeat != '' DESC, w.starts_at DESC, w.id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list maintenance: %w", err)
+	}
+	windows, err := scanMaintenance(rows)
+	if err != nil {
 		return nil, fmt.Errorf("list maintenance: %w", err)
 	}
 	return windows, nil
+}
+
+// activeMaintenance returns the windows that cover at, each with the end
+// of the occurrence that does. When a repeating window is due is worked
+// out here, not in SQL: it depends on the calendar of a time zone.
+func (s *SQLite) activeMaintenance(ctx context.Context, at time.Time) ([]Maintenance, []time.Time, error) {
+	rows, err := s.read.QueryContext(ctx,
+		maintenanceQuery+`WHERE w.repeat != '' OR (w.starts_at <= ?1 AND w.ends_at > ?1)`, at.UnixMilli())
+	if err != nil {
+		return nil, nil, err
+	}
+	candidates, err := scanMaintenance(rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	var (
+		active []Maintenance
+		until  []time.Time
+	)
+	for _, w := range candidates {
+		if end, ok := w.ActiveUntil(at); ok {
+			active = append(active, w)
+			until = append(until, end)
+		}
+	}
+	return active, until, nil
 }
 
 func (s *SQLite) DeleteMaintenance(ctx context.Context, id int64) error {
@@ -79,15 +111,14 @@ func (s *SQLite) DeleteMaintenance(ctx context.Context, id int64) error {
 }
 
 func (s *SQLite) InMaintenance(ctx context.Context, m Monitor, at time.Time) (bool, error) {
-	var covered bool
-	err := s.read.QueryRowContext(ctx,
-		`SELECT EXISTS (
-		     SELECT 1 FROM maintenance_windows w
-		     WHERE w.starts_at <= ?1 AND w.ends_at > ?1
-		       AND (w.monitor_id = ?2 OR (w.monitor_id IS NULL AND (w.namespace = '' OR w.namespace = ?3))))`,
-		at.UnixMilli(), m.ID, m.Namespace).Scan(&covered)
+	active, _, err := s.activeMaintenance(ctx, at)
 	if err != nil {
 		return false, fmt.Errorf("in maintenance: %w", err)
 	}
-	return covered, nil
+	for _, w := range active {
+		if w.Covers(m) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

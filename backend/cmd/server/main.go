@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	// Time zones for repeating maintenance windows, for images without them.
+	_ "time/tzdata"
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/api"

@@ -407,12 +407,18 @@ export const getUptime = (id: number, windowsSeconds: number[]) =>
     `/monitors/${id}/uptime?windows=${windowsSeconds.map((s) => `${s}s`).join(",")}`,
   );
 
+export type MaintenanceRepeat = "" | "daily" | "weekly" | "monthly";
+
 export type Maintenance = {
   id: number;
   name: string;
+  /** For a window that repeats: the occurrence going on now, or else the next one. */
   starts_at: string;
   ends_at: string;
   state: "active" | "upcoming" | "past";
+  repeat: MaintenanceRepeat;
+  /** The zone in which a repeating window keeps its time of day. */
+  timezone: string;
   /** Scope: one monitor, one namespace, or (both empty) every monitor. */
   namespace: string;
   monitor_id: number | null;
@@ -426,6 +432,9 @@ export type NewMaintenance = {
   duration_seconds: number;
   namespace?: string;
   monitor_id?: number;
+  repeat?: MaintenanceRepeat;
+  /** An IANA name; only with repeat. */
+  timezone?: string;
 };
 
 export const listMaintenance = (limit: number) =>

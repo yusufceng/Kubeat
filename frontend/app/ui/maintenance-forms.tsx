@@ -7,6 +7,7 @@ import {
   type MaintenanceFormState,
 } from "@/app/actions";
 import { duration } from "@/lib/format";
+import { useMounted } from "@/lib/use-mounted";
 
 const inputClass = "field";
 const buttonClass = "btn";
@@ -27,9 +28,13 @@ export function MaintenanceForm({
   // The picker gives a wall-clock time in the viewer's zone; the server gets
   // the instant it denotes.
   const [startsAt, setStartsAt] = useState("");
+  // The zone is the browser's; the server cannot know it.
+  const mounted = useMounted();
+  const timezone = mounted ? Intl.DateTimeFormat().resolvedOptions().timeZone : "";
 
   return (
     <form action={action} className="grid gap-4 sm:grid-cols-6">
+      <input type="hidden" name="timezone" value={timezone} />
       <input
         type="hidden"
         name="starts_at"
@@ -70,7 +75,19 @@ export function MaintenanceForm({
           ))}
         </select>
       </label>
-      <div className="flex items-end gap-3 sm:col-span-4">
+      <label className="sm:col-span-2">
+        <span className="mb-1 block text-xs font-medium text-muted">Tekrar</span>
+        <select name="repeat" defaultValue="" className={inputClass}>
+          <option value="">Tek seferlik</option>
+          <option value="daily">Her gün aynı saatte</option>
+          <option value="weekly">Her hafta aynı gün ve saatte</option>
+          <option value="monthly">Her ay aynı gün ve saatte</option>
+        </select>
+        <span className="mt-1 block text-xs text-muted">
+          Tekrarlayan pencere saatini {timezone || "tarayıcınızın"} saat diliminde korur.
+        </span>
+      </label>
+      <div className="flex items-end gap-3 sm:col-span-2">
         <button
           type="submit"
           disabled={pending}
@@ -88,10 +105,18 @@ export function MaintenanceForm({
   );
 }
 
-/** Ends an active window, or removes an upcoming or past one. */
-export function DeleteMaintenanceButton({ id, label }: { id: number; label: string }) {
+/**
+ * Ends an active window, or removes an upcoming or past one. confirm, when
+ * given, is asked first: deleting a repeating window ends all of it.
+ */
+export function DeleteMaintenanceButton({ id, label, confirm: question }: { id: number; label: string; confirm?: string }) {
   return (
-    <form action={deleteMaintenanceAction}>
+    <form
+      action={deleteMaintenanceAction}
+      onSubmit={(e) => {
+        if (question && !confirm(question)) e.preventDefault();
+      }}
+    >
       <input type="hidden" name="id" value={id} />
       <button type="submit" className={buttonClass}>
         {label}

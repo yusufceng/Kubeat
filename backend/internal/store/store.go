@@ -294,10 +294,16 @@ const (
 // Maintenance is a period during which no incident is opened for the
 // monitors it covers: one monitor, one namespace, or all of them.
 type Maintenance struct {
-	ID       int64
-	Name     string
+	ID   int64
+	Name string
+	// StartsAt and EndsAt bound the window or, for one that repeats, its
+	// first occurrence.
 	StartsAt time.Time
 	EndsAt   time.Time
+	// Repeat says whether and how often the window comes back, at the same
+	// time of day in Timezone (an IANA name; empty means UTC).
+	Repeat   Repeat
+	Timezone string
 	// Namespace limits the window to one namespace and MonitorID to one
 	// monitor; at most one of them is set, and neither means everything.
 	Namespace string
@@ -412,7 +418,8 @@ type Store interface {
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]Incident, error)
 
 	CreateMaintenance(ctx context.Context, m Maintenance) (Maintenance, error)
-	// ListMaintenance returns up to limit windows, latest start first.
+	// ListMaintenance returns up to limit windows: the repeating ones, then
+	// the others, latest start first.
 	ListMaintenance(ctx context.Context, limit int) ([]Maintenance, error)
 	DeleteMaintenance(ctx context.Context, id int64) error
 	// InMaintenance reports whether a window covers the monitor at the

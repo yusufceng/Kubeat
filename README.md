@@ -167,7 +167,7 @@ eklenmelidir.
 | `POST` | `/api/v1/discovery/import` | Seçilen hedefleri monitor'a çevirir |
 | `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye |
 | `GET` | `/api/v1/maintenance` | Bakım pencereleri, en son başlayan önce |
-| `POST` | `/api/v1/maintenance` | Pencere ekler: `name`, `duration_seconds` ya da `ends_at`, isteğe bağlı `starts_at`, `namespace` ya da `monitor_id` |
+| `POST` | `/api/v1/maintenance` | Pencere ekler: `name`, `duration_seconds` ya da `ends_at`, isteğe bağlı `starts_at`, `namespace` ya da `monitor_id`, `repeat` ve `timezone` |
 | `DELETE` | `/api/v1/maintenance/{id}` | Pencereyi siler; süren pencereyi bitirir |
 | `GET` | `/api/v1/channels` | Bildirim kanalları (URL'ler maskelenir) |
 | `POST` | `/api/v1/channels` | Kanal ekler: `{"name", "type", "target", "secret", "namespaces"}` |
@@ -490,8 +490,21 @@ erişilemiyorsa olay o zaman açılır.
 
 Kapsam tek bir monitor, bir namespace ya da tüm monitor'lar olabilir. Monitor
 sayfasındaki "Alarmı sustur" düğmesi, o monitor için şimdi başlayan bir
-pencere oluşturur. Pencereler tek seferliktir; tekrarlayan pencere yoktur.
-Bakım sırasındaki başarısız kontroller uptime yüzdesine dahildir.
+pencere oluşturur. Bakım sırasındaki başarısız kontroller uptime yüzdesine
+dahildir.
+
+**Tekrarlayan pencereler.** Bir pencere her gün, her hafta (aynı gün) ya da
+her ay (ayın aynı günü) tekrarlanabilir: `repeat` alanı `daily`, `weekly` ya
+da `monthly`. Verilen başlangıç ve süre ilk tekrarı tanımlar; sonrakiler
+`timezone` saat diliminde aynı saatte başlar, yani yaz/kış saati değişse de
+02:00'deki pencere 02:00'de kalır. Arayüz saat dilimini tarayıcıdan alır.
+
+- Pencere, iki tekrar arasındaki süreden kısa olmalıdır (günlük için 24
+  saatten, haftalık için 7 günden, aylık için 28 günden).
+- Aylık bir pencere, o günü olmayan aylarda atlanır (31'i olan pencere
+  kasımda çalışmaz); başka bir güne kaydırılmaz.
+- Listede tekrarlayan bir pencerenin başlangıcı ve bitişi, o an süren ya da
+  sıradaki tekrarı gösterir. Silmek serinin tümünü kaldırır.
 
 ### Bildirim kanalları
 

@@ -90,3 +90,61 @@ func TestMaintenanceAPI(t *testing.T) {
 		t.Errorf("maintenance_until after every covering window ended = %v", m.MaintenanceUntil)
 	}
 }
+
+func TestRecurringMaintenanceAPI(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/api/v1/maintenance"
+	now := time.Now().UTC()
+	stamp := func(t time.Time) string { return t.Format(time.RFC3339) }
+
+	// Began ten days ago and runs for an hour every day, starting ten
+	// minutes ago on the clock: its current occurrence is the one reported.
+	var active maintenanceResponse
+	first := now.Add(-10*24*time.Hour - 10*time.Minute)
+	body := `{"name":"gece yedeği","starts_at":"` + stamp(first) + `","duration_seconds":3600,"repeat":"daily","timezone":"Europe/Istanbul"}`
+	if code := do(t, "POST", base, body, &active); code != http.StatusCreated {
+		t.Fatalf("create: status = %d", code)
+	}
+	if active.State != maintenanceActive || active.Repeat != "daily" || active.Timezone != "Europe/Istanbul" ||
+		active.StartsAt.Sub(now.Add(-10*time.Minute)).Abs() > 2*time.Second || active.EndsAt.Sub(active.StartsAt) != time.Hour {
+		t.Errorf("active = %+v", active)
+	}
+
+	// One that is not on now reports its next occurrence, and is never "past".
+	var upcoming maintenanceResponse
+	first = now.Add(-21*24*time.Hour + 3*time.Hour)
+	body = `{"name":"haftalık","starts_at":"` + stamp(first) + `","duration_seconds":1800,"repeat":"weekly"}`
+	if code := do(t, "POST", base, body, &upcoming); code != http.StatusCreated {
+		t.Fatalf("create weekly: status = %d", code)
+	}
+	if upcoming.State != maintenanceUpcoming || upcoming.Timezone != "UTC" || upcoming.StartsAt.Sub(now.Add(3*time.Hour)).Abs() > 2*time.Second {
+		t.Errorf("upcoming = %+v, want its next start in three hours", upcoming)
+	}
+
+	// The monitor list knows about the active one.
+	var m monitorResponse
+	do(t, "POST", srv.URL+"/api/v1/monitors", validMonitor, nil)
+	do(t, "GET", srv.URL+"/api/v1/monitors/1", "", &m)
+	if m.MaintenanceUntil == nil || m.MaintenanceUntil.Sub(now.Add(50*time.Minute)).Abs() > 2*time.Second {
+		t.Errorf("maintenance_until = %v, want in about 50 minutes", m.MaintenanceUntil)
+	}
+
+	start := stamp(now.Add(time.Hour))
+	for name, body := range map[string]string{
+		"unknown repeat":           `{"name":"x","duration_seconds":60,"repeat":"hourly"}`,
+		"unknown zone":             `{"name":"x","duration_seconds":60,"repeat":"daily","timezone":"Mars/Olympus"}`,
+		"the server's own zone":    `{"name":"x","duration_seconds":60,"repeat":"daily","timezone":"Local"}`,
+		"zone without a repeat":    `{"name":"x","duration_seconds":60,"timezone":"Europe/Istanbul"}`,
+		"daily as long as a day":   `{"name":"x","starts_at":"` + start + `","duration_seconds":86400,"repeat":"daily"}`,
+		"weekly as long as a week": `{"name":"x","starts_at":"` + start + `","duration_seconds":604800,"repeat":"weekly"}`,
+	} {
+		if code := do(t, "POST", base, body, nil); code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, code)
+		}
+	}
+	// A window that happens once must still lie ahead; a repeating one may have begun long ago.
+	past := `{"name":"x","starts_at":"` + stamp(now.Add(-48*time.Hour)) + `","duration_seconds":60}`
+	if code := do(t, "POST", base, past, nil); code != http.StatusBadRequest {
+		t.Errorf("a one-off window in the past: status = %d, want 400", code)
+	}
+}

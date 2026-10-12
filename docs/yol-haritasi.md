@@ -17,7 +17,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 9 | Çalışma alanı arayüzü: kenar çubuğunda aranabilir monitor listesi, genel bakış, zengin monitor sayfası, tüm tipler için ekleme/düzenleme formu, tema | Tamamlandı |
 | 10 | Etiketler, gruplar ve toplu işlemler | Tamamlandı |
 | 11 | Durum sayfaları ve rozetler | Tamamlandı |
-| 12 | Tekrarlayan bakım pencereleri | Planlandı |
+| 12 | Tekrarlayan bakım pencereleri | Tamamlandı |
 | 13 | Bildirim sağlayıcıları: Telegram, Discord, PagerDuty, Mattermost, Google Chat, ntfy, Gotify; kanal düzenleme ve namespace'e göre yönlendirme | Tamamlandı |
 | 14 | Veritabanı ve kuyruk kontrolleri (PostgreSQL, MySQL, Redis, MongoDB, Kafka, RabbitMQ); Kubernetes workload tipi | Planlandı |
 | 15 | Ayarlar ekranı, kişisel hesaplar ve roller, API anahtarları | Planlandı |
@@ -43,7 +43,7 @@ karşılamak. Kuma'nın kaynağı (3.0 beta, 2026-10) incelenerek çıkarıldı.
 | Açık, koyu ve sistem teması | Var |
 | Gruplar ve etiketler | Var: namespace ya da serbest grup, renkli etiketler. Etiketlerin değeri ve iç içe gruplar yok |
 | Durum sayfaları (herkese açık, olay duyurusu, RSS), rozetler | Var: sayfa, duyuru, günlük uptime geçmişi, son kesintiler, durum ve uptime rozetleri. RSS, özel CSS ve özel alan adı yok |
-| Bakım: tek seferlik, tekrarlayan, cron | Tek seferlik var; kalanı 12. adımda |
+| Bakım: tek seferlik, tekrarlayan, cron | Tek seferlik ve günlük/haftalık/aylık tekrar var, saat dilimiyle. Cron ifadesi ve haftanın birden çok günü yok (her gün için ayrı pencere açılır) |
 | 110 bildirim sağlayıcısı | 11 tanesi var: Slack, Teams, Telegram, Discord, Mattermost, Google Chat, PagerDuty, ntfy, Gotify, e-posta, webhook. Opsgenie eklenmedi: Atlassian ürünü sonlandırıyor |
 | Monitor başına bildirim seçimi | Kanal başına namespace ya da grup kapsamı var; tek tek monitor seçimi yok |
 | Kullanıcı, 2FA, API anahtarları, ayarlar ekranı | Tek yönetici parolası var; kalanı 15. adımda |
@@ -72,8 +72,7 @@ da şablon render edilerek doğrulandı:
   okunur kullanıcı gibi) ve kimin neyi değiştirdiğinin kaydı yoktur.
 - İstek header'ları ve webhook adresleri veritabanında şifresiz durur.
 - Keşif tek seferliktir; sonradan eklenen servisler kendiliğinden izlenmez.
-- Bakım pencereleri tek seferliktir ve bakım sırasındaki başarısız
-  kontroller uptime'a dahildir.
+- Bakım sırasındaki başarısız kontroller uptime'a dahildir.
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.

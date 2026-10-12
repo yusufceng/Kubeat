@@ -13,8 +13,15 @@ import { monitorLabel } from "@/app/ui/monitor-name";
 
 const stateLabels: Record<Maintenance["state"], { label: string; className: string }> = {
   active: { label: "Sürüyor", className: "font-medium text-up" },
-  upcoming: { label: "Planlandı", className: "" },
+  upcoming: { label: "Planlandı", className: "" }, // for a repeating window: its next occurrence
   past: { label: "Bitti", className: "text-muted" },
+};
+
+const repeatLabels: Record<Maintenance["repeat"], string> = {
+  "": "–",
+  daily: "Her gün",
+  weekly: "Her hafta",
+  monthly: "Her ay",
 };
 
 function Scope({ window }: { window: Maintenance }) {
@@ -70,6 +77,7 @@ async function MaintenanceList() {
               <tr>
                 <th className="px-4 py-2 font-medium">Açıklama</th>
                 <th className="px-4 py-2 font-medium">Kapsam</th>
+                <th className="px-4 py-2 font-medium">Tekrar</th>
                 <th className="px-4 py-2 font-medium">Başlangıç</th>
                 <th className="px-4 py-2 font-medium">Bitiş</th>
                 <th className="px-4 py-2 font-medium">Durum</th>
@@ -83,6 +91,9 @@ async function MaintenanceList() {
                   <td className="px-4 py-2">
                     <Scope window={w} />
                   </td>
+                  <td className="whitespace-nowrap px-4 py-2" title={w.repeat ? `Saat dilimi: ${w.timezone}` : undefined}>
+                    {repeatLabels[w.repeat] ?? w.repeat}
+                  </td>
                   <td className="whitespace-nowrap px-4 py-2 tabular-nums">
                     <LocalTime iso={w.starts_at} seconds={false} />
                   </td>
@@ -94,10 +105,15 @@ async function MaintenanceList() {
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex justify-end">
-                      <DeleteMaintenanceButton
-                        id={w.id}
-                        label={w.state === "active" ? "Şimdi bitir" : "Sil"}
-                      />
+                      {w.repeat ? (
+                        <DeleteMaintenanceButton
+                          id={w.id}
+                          label="Seriyi sil"
+                          confirm={`"${w.name}" tekrarlayan bakımı tümüyle silinsin mi? Sonraki tekrarlar da kalkar.`}
+                        />
+                      ) : (
+                        <DeleteMaintenanceButton id={w.id} label={w.state === "active" ? "Şimdi bitir" : "Sil"} />
+                      )}
                     </div>
                   </td>
                 </tr>

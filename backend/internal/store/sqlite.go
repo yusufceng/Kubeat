@@ -490,10 +490,6 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
 }
 
-// maintenanceCovers is the condition under which maintenance window w covers
-// monitor m.
-const maintenanceCovers = `(w.monitor_id = m.id OR (w.monitor_id IS NULL AND (w.namespace = '' OR w.namespace = m.namespace)))`
-
 // statusQuery joins each monitor with its newest result (found through the
 // (monitor_id, checked_at) index) and with its aggregates since a cutoff.
 // The aggregates come from the hourly summaries: computing them from raw
@@ -503,9 +499,7 @@ var statusQuery = `
 SELECT ` + monitorColumnsOf("m") + `,
        r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.detail, r.cert_expires_at,
        COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.up_latency_sum_ms, 0),
-       i.id, i.started_at, i.cause, c.id IS NOT NULL,
-       (SELECT MAX(w.ends_at) FROM maintenance_windows w
-        WHERE w.starts_at <= ?3 AND w.ends_at > ?3 AND ` + maintenanceCovers + `)
+       i.id, i.started_at, i.cause, c.id IS NOT NULL
 FROM monitors m
 LEFT JOIN incidents i ON i.monitor_id = m.id AND i.kind = 'down' AND i.resolved_at IS NULL
 LEFT JOIN incidents c ON c.monitor_id = m.id AND c.kind = 'cert' AND c.resolved_at IS NULL
@@ -542,7 +536,11 @@ func (s *SQLite) GetMonitorStatus(ctx context.Context, id int64, since time.Time
 
 // queryStatuses runs statusQuery for one monitor, or for all when id is 0.
 func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) ([]MonitorStatus, error) {
-	rows, err := s.read.QueryContext(ctx, statusQuery, since.Truncate(RollupBucket).UnixMilli(), id, time.Now().UnixMilli())
+	windows, until, err := s.activeMaintenance(ctx, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.read.QueryContext(ctx, statusQuery, since.Truncate(RollupBucket).UnixMilli(), id)
 	if err != nil {
 		return nil, err
 	}
@@ -561,12 +559,11 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			incidentID, incidentStart sql.NullInt64
 			incidentCause             sql.NullString
 			certExpires               sql.NullInt64
-			maintenanceUntil          sql.NullInt64
 		)
 		err := rows.Scan(append(row.dest(),
 			&checkedAt, &up, &latencyMS, &statusCode, &errText, &detail, &certExpires,
 			&st.Checks, &st.UpChecks, &upLatencySumMS,
-			&incidentID, &incidentStart, &incidentCause, &st.CertWarning, &maintenanceUntil)...)
+			&incidentID, &incidentStart, &incidentCause, &st.CertWarning)...)
 		if err != nil {
 			return nil, err
 		}
@@ -576,7 +573,12 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 		if st.UpChecks > 0 {
 			st.AvgLatency = time.Duration(float64(upLatencySumMS) / float64(st.UpChecks) * float64(time.Millisecond))
 		}
-		st.MaintenanceUntil = unixMilliOrZero(maintenanceUntil)
+		// Of the windows that cover the monitor, the one that ends last.
+		for i, w := range windows {
+			if w.Covers(st.Monitor) && until[i].After(st.MaintenanceUntil) {
+				st.MaintenanceUntil = until[i]
+			}
+		}
 		if checkedAt.Valid {
 			st.Last = &CheckResult{
 				MonitorID:  st.ID,

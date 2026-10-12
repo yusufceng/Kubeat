@@ -17,6 +17,7 @@ import {
   type DnsOptions,
   type HttpOptions,
   importCandidates,
+  type MaintenanceRepeat,
   type Monitor,
   type MonitorChanges,
   type MonitorType,
@@ -282,11 +283,15 @@ export async function createMaintenanceAction(
   // Scope is "all", "ns:<namespace>" or "mon:<monitor id>".
   const scope = String(formData.get("scope") ?? "all");
   const startsAt = String(formData.get("starts_at") ?? "");
+  const repeat = String(formData.get("repeat") ?? "") as MaintenanceRepeat;
+  const timezone = String(formData.get("timezone") ?? "");
   try {
     await createMaintenance({
       name: String(formData.get("name") ?? ""),
       duration_seconds: Number(formData.get("duration_seconds")),
       ...(startsAt && { starts_at: startsAt }),
+      // A repeating window keeps its time of day in the viewer's zone.
+      ...(repeat && { repeat, ...(timezone && { timezone }) }),
       ...(scope.startsWith("ns:") && { namespace: scope.slice(3) }),
       ...(scope.startsWith("mon:") && { monitor_id: Number(scope.slice(4)) }),
     });

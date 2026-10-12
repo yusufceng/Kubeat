@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -18,11 +17,17 @@ const (
 )
 
 type maintenanceResponse struct {
-	ID       int64     `json:"id"`
-	Name     string    `json:"name"`
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	// StartsAt and EndsAt bound the window. For one that repeats they are
+	// the occurrence going on now or, when none is, the next one.
 	StartsAt time.Time `json:"starts_at"`
 	EndsAt   time.Time `json:"ends_at"`
 	State    string    `json:"state"`
+	// Repeat is "", "daily", "weekly" or "monthly"; Timezone is the zone in
+	// which a repeating window keeps its time of day.
+	Repeat   string `json:"repeat"`
+	Timezone string `json:"timezone"`
 	// Scope: one monitor, one namespace, or (both empty) every monitor.
 	Namespace   string `json:"namespace"`
 	MonitorID   *int64 `json:"monitor_id"`
@@ -31,14 +36,18 @@ type maintenanceResponse struct {
 
 func toMaintenanceResponse(m store.Maintenance, now time.Time) maintenanceResponse {
 	resp := maintenanceResponse{
-		ID: m.ID, Name: m.Name, StartsAt: m.StartsAt, EndsAt: m.EndsAt,
+		ID: m.ID, Name: m.Name, StartsAt: m.StartsAt, EndsAt: m.EndsAt, Repeat: string(m.Repeat), Timezone: m.Timezone,
 		State: maintenanceActive, Namespace: m.Namespace, MonitorName: m.MonitorName,
 	}
+	start, end, more := m.Occurrence(now)
 	switch {
-	case now.Before(m.StartsAt):
-		resp.State = maintenanceUpcoming
-	case !now.Before(m.EndsAt):
+	case !more:
 		resp.State = maintenancePast
+	case now.Before(start):
+		resp.State = maintenanceUpcoming
+		resp.StartsAt, resp.EndsAt = start, end
+	default:
+		resp.StartsAt, resp.EndsAt = start, end
 	}
 	if m.MonitorID != 0 {
 		resp.MonitorID = &m.MonitorID
@@ -75,14 +84,15 @@ type createMaintenanceRequest struct {
 	// At most one of Namespace and MonitorID; neither means every monitor.
 	Namespace string `json:"namespace"`
 	MonitorID int64  `json:"monitor_id"`
+	// Repeat makes the window come back: "daily", "weekly" or "monthly",
+	// at the same time of day in Timezone (an IANA name, UTC if empty).
+	Repeat   string `json:"repeat"`
+	Timezone string `json:"timezone"`
 }
 
 func (h *handler) createMaintenance(w http.ResponseWriter, r *http.Request) {
 	var req createMaintenanceRequest
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
@@ -92,6 +102,27 @@ func (h *handler) createMaintenance(w http.ResponseWriter, r *http.Request) {
 		StartsAt:  now,
 		Namespace: strings.TrimSpace(req.Namespace),
 		MonitorID: req.MonitorID,
+		Repeat:    store.Repeat(req.Repeat),
+	}
+	switch m.Repeat {
+	case store.RepeatNone:
+		if req.Timezone != "" {
+			writeError(w, http.StatusBadRequest, "timezone applies only to a window that repeats")
+			return
+		}
+	case store.RepeatDaily, store.RepeatWeekly, store.RepeatMonthly:
+		m.Timezone = strings.TrimSpace(req.Timezone)
+		if m.Timezone == "" {
+			m.Timezone = "UTC"
+		}
+		// "Local" would be the server's zone, which no user means.
+		if _, err := time.LoadLocation(m.Timezone); err != nil || m.Timezone == "Local" {
+			writeError(w, http.StatusBadRequest, "timezone must be an IANA name such as Europe/Istanbul")
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "repeat must be daily, weekly, monthly or empty")
+		return
 	}
 	if req.StartsAt != nil {
 		m.StartsAt = *req.StartsAt
@@ -122,8 +153,12 @@ func (h *handler) createMaintenance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "the window must end after it starts")
 		return
 	}
-	if !m.EndsAt.After(now) {
+	if m.Repeat == store.RepeatNone && !m.EndsAt.After(now) {
 		writeError(w, http.StatusBadRequest, "the window is already over")
+		return
+	}
+	if period := m.Repeat.Period(); period > 0 && m.EndsAt.Sub(m.StartsAt) >= period {
+		writeError(w, http.StatusBadRequest, "a repeating window must be shorter than the time between two occurrences")
 		return
 	}
 	if m.MonitorID != 0 {
