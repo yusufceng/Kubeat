@@ -56,13 +56,15 @@ spec:
           ports:
             - name: http
               containerPort: 3000
+          # The sign-in page needs no session and no backend, so it answers
+          # whenever the server itself is healthy.
           readinessProbe:
             httpGet:
-              path: /
+              path: /login
               port: http
           livenessProbe:
             httpGet:
-              path: /
+              path: /login
               port: http
             initialDelaySeconds: 10
           resources:
