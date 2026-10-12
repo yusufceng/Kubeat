@@ -4,17 +4,20 @@ FRONTEND_PORT ?= 3000
 # Lokal geliştirmede backend ile frontend arasındaki ortak anahtar. Gerçek
 # kurulumda chart rastgele bir anahtar üretir.
 API_TOKEN ?= local-dev-token
+# Lokal geliştirmede arayüzün yönetici parolası. Boş bırakılırsa giriş
+# istenmez. Gerçek kurulumda chart rastgele bir parola üretir.
+ADMIN_PASSWORD ?= admin
 
 # Cluster hedefleri her zaman bu bağlamı kullanır; kubectl'in o anki bağlamını
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.10.0
+VERSION ?= 0.11.0
 CHART := deploy/helm/kubeat
 # Ek helm ayarları, örn. HELM_ARGS="--set prometheus.url=http://..."
 HELM_ARGS ?=
 
-.PHONY: dev backend frontend test lint build images minikube-deploy minikube-open minikube-demo
+.PHONY: dev backend frontend test lint build images minikube-deploy minikube-open minikube-demo minikube-password
 
 # Backend ve frontend'i birlikte çalıştırır; Ctrl-C ikisini de durdurur.
 dev:
@@ -24,7 +27,7 @@ backend:
 	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) UPTIME_API_TOKEN=$(API_TOKEN) go run ./cmd/server
 
 frontend:
-	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) BACKEND_TOKEN=$(API_TOKEN) npm run dev -- -p $(FRONTEND_PORT)
+	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) BACKEND_TOKEN=$(API_TOKEN) ADMIN_PASSWORD=$(ADMIN_PASSWORD) npm run dev -- -p $(FRONTEND_PORT)
 
 test:
 	cd backend && go test ./...
@@ -58,3 +61,7 @@ minikube-open:
 # bir Prometheus (monitoring-demo) kurar.
 minikube-demo:
 	kubectl --context $(KUBE_CONTEXT) apply -f deploy/demo/shop.yaml -f deploy/demo/prometheus.yaml
+
+# Minikube kurulumunun yönetici parolasını yazdırır.
+minikube-password:
+	@kubectl --context $(KUBE_CONTEXT) -n $(NAMESPACE) get secret kubeat-admin -o jsonpath='{.data.password}' | base64 -d; echo

@@ -1,0 +1,18 @@
+Kubeat is installed.
+
+Administrator password:
+{{- if .Values.auth.existingSecret }}
+  taken from the Secret "{{ .Values.auth.existingSecret }}" (key "password").
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-admin -o jsonpath='{.data.password}' | base64 -d; echo
+{{- end }}
+
+Open the UI:
+{{- if .Values.route.enabled }}
+  through the Route "{{ .Release.Name }}".
+{{- else if .Values.ingress.enabled }}
+  http://{{ .Values.ingress.host }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-frontend 3000:3000
+  then http://localhost:3000
+{{- end }}

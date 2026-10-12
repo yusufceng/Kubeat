@@ -1,3 +1,6 @@
+import "server-only";
+
+import { requireSession } from "@/lib/auth";
 import { config } from "@/lib/config";
 
 /**
@@ -35,9 +38,6 @@ export type HistoryPoint = {
   ms: number;
   error?: string;
 };
-
-/** Shown in place of a stored header value; sent back, it keeps that value. */
-export const MASKED_VALUE = "********";
 
 export type HttpOptions = {
   method: "GET" | "HEAD";
@@ -122,7 +122,13 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  /** Skip the session check; only for what is public anyway. */
+  { open = false }: { open?: boolean } = {},
+): Promise<T> {
+  if (!open) await requireSession();
   const res = await fetch(`${config.backendUrl}/api/v1${path}`, {
     ...init,
     headers: {
@@ -138,7 +144,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.status === 204 ? (undefined as T) : res.json();
 }
 
-export const getHealth = () => request<Health>("/health");
+// Also shown on the sign-in page, and the backend serves it to anyone.
+export const getHealth = () => request<Health>("/health", undefined, { open: true });
 
 /**
  * Fills in fields an older backend does not send yet, so that a version

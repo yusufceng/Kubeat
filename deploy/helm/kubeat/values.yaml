@@ -34,6 +34,14 @@ frontend:
     limits:
       memory: 512Mi
 
+# Sign-in to the UI with a single administrator password. By default the
+# chart generates the password once and keeps it; the install notes say how
+# to read it.
+auth:
+  # Name of an existing Secret with the keys "password" and "session-secret".
+  existingSecret: ""
+  sessionTtlHours: 12
+
 # Periodic copies of the database on a volume of their own. A copy on the
 # database's own volume would be lost together with it.
 backup:

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { BackendWarning } from "@/app/ui/backend-warning";
 import { Nav } from "@/app/ui/nav";
+import { SessionControls } from "@/app/ui/session-controls";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Nav />
+        <Nav>
+          <SessionControls />
+        </Nav>
         <BackendWarning />
         {children}
       </body>

@@ -12,7 +12,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 4 | Aracın kendi sağlığı: `/metrics`, heartbeat | Tamamlandı |
 | 5 | Cluster metrikleri: monitor'un arkasındaki pod'lar, Prometheus/Thanos'tan CPU ve bellek | Tamamlandı |
 | 6 | Agent ve çoklu cluster: her cluster'da hafif agent, merkeze push | Ertelendi: şimdilik tek cluster yeterli (2026-10-12) |
-| 7 | Üretime hazırlık: API koruması, yük testi, yedekleme, kullanıcı girişi | API koruması, yük testi ve yedekleme tamamlandı; kullanıcı girişi bekliyor |
+| 7 | Üretime hazırlık: API koruması, yük testi, yedekleme, yönetici parolasıyla giriş | Tamamlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
@@ -31,8 +31,8 @@ da şablon render edilerek doğrulandı:
 
 - Backend tek replica çalışır; güncelleme sırasında birkaç saniye kontrol
   yapılmaz.
-- Backend API'si ortak bir anahtarla korunur, ama arayüzde kullanıcı girişi
-  yoktur: arayüze erişen herkes her şeyi değiştirebilir.
+- Giriş tek bir yönetici parolasıyladır: kişi bazında hesap, rol (salt
+  okunur kullanıcı gibi) ve kimin neyi değiştirdiğinin kaydı yoktur.
 - İstek header'ları ve webhook adresleri veritabanında şifresiz durur.
 - Keşif tek seferliktir; sonradan eklenen servisler kendiliğinden izlenmez.
 - Bakım pencereleri tek seferliktir ve bakım sırasındaki başarısız

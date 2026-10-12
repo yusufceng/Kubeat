@@ -1,4 +1,5 @@
 // Server-side settings of the frontend, read from the environment.
+import "server-only";
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const n = Number(value);

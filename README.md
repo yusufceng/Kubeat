@@ -31,6 +31,7 @@ Chart [deploy/helm/kubeat](deploy/helm/kubeat) altındadır. Minikube için:
 minikube start --keep-context   # kubectl'in mevcut bağlamını değiştirmez
 make minikube-deploy            # imajları derler, yükler, chart'ı kurar
 make minikube-open              # arayüz -> http://localhost:3000
+make minikube-password          # giriş parolasını yazdırır
 make minikube-demo              # keşfi denemek için örnek namespace
 ```
 
@@ -60,9 +61,30 @@ güncellemelerde korur. Ek olarak `networkPolicy.enabled=true`, backend'e
 yalnızca arayüz pod'larının bağlanmasına izin verir (NetworkPolicy uygulayan
 bir ağ eklentisi gerekir).
 
-Bu, cluster içindeki başka pod'ların API'yi kullanmasını engeller. Arayüzün
-kendisinde henüz kullanıcı girişi yoktur: arayüze erişebilen herkes her şeyi
-değiştirebilir.
+### Giriş
+
+Arayüz tek bir yönetici parolasıyla korunur. `ADMIN_PASSWORD` ayarlıysa
+oturumu olmayan her istek giriş sayfasına yönlendirilir; ayarlı değilse
+arayüz açıktır ve üst çubukta "Giriş koruması kapalı" uyarısı görünür.
+
+- Oturum, yalnızca bitiş zamanını taşıyan imzalı bir çerezdir (HttpOnly,
+  SameSite=Lax, HTTPS üzerinden gelindiyse Secure). `SESSION_TTL_HOURS`
+  (varsayılan 12) sonra biter.
+- Çerezi imzalayan anahtar `SESSION_SECRET`'tır; verilmezse paroladan
+  türetilir, yani parola değişince tüm oturumlar kapanır.
+- Art arda `LOGIN_MAX_FAILURES` (10) hatalı denemeden sonra giriş
+  `LOGIN_LOCKOUT_MINUTES` (15) dakika herkes için kapanır. Sayaç arayüz
+  sürecinin belleğindedir; süreç yeniden başlayınca sıfırlanır.
+- Kişi bazında hesap ve yetki yoktur: parolayı bilen herkes yöneticidir.
+
+Helm chart parolayı ilk kurulumda rastgele üretir. Okumak için:
+
+```
+kubectl -n kubeat get secret kubeat-admin -o jsonpath='{.data.password}' | base64 -d
+```
+
+Lokal geliştirmede `make dev` parolayı `admin` yapar
+(`make dev ADMIN_PASSWORD=...` ile değişir).
 
 ## API
 
@@ -381,6 +403,11 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SMTP_PASSWORD` | – | SMTP parolası |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TOKEN` | – | Backend'e gönderilen anahtar; `UPTIME_API_TOKEN` ile aynı olmalı |
+| `ADMIN_PASSWORD` | – | Arayüzün yönetici parolası; boşsa giriş istenmez |
+| `SESSION_SECRET` | – | Oturum çerezini imzalayan anahtar; boşsa paroladan türetilir |
+| `SESSION_TTL_HOURS` | `12` | Oturum süresi |
+| `LOGIN_MAX_FAILURES` | `10` | Girişi kilitleyen hatalı deneme sayısı |
+| `LOGIN_LOCKOUT_MINUTES` | `15` | Kilidin süresi |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar ana sayfa tüm monitor'ları listeler; üzerinde sorunluları ve namespace özetini gösterir |

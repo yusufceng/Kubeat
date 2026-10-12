@@ -7,7 +7,8 @@ import {
   setMonitorEnabledAction,
   updateMonitorAction,
 } from "@/app/actions";
-import { MASKED_VALUE, type Monitor } from "@/lib/api";
+import type { Monitor } from "@/lib/api";
+import { MASKED_VALUE } from "@/lib/constants";
 
 const inputClass =
   "w-full rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-white/20";
