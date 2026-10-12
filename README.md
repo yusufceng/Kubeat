@@ -3,7 +3,7 @@
 OCP/Kubernetes ortamlarındaki servisler için uptime monitoring aracı.
 Go + Next.js + SQLite.
 
-Proje planı: [docs/proje-plani.md](docs/proje-plani.md)
+Proje planı: [docs/proje-plani.md](docs/proje-plani.md) · Yol haritası ve bilinen sınırlar: [docs/yol-haritasi.md](docs/yol-haritasi.md)
 
 ## Yapı
 
