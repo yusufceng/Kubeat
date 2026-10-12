@@ -184,6 +184,7 @@ func main() {
 			MinCheckInterval: cfg.MinCheckInterval,
 			StatsWindow:      cfg.StatsWindow,
 			MaxResults:       cfg.MaxResults,
+			Token:            cfg.APIToken,
 			Notifier:         alerts,
 			Metrics:          meter.Handler(),
 			EmailEnabled:     senders.EmailEnabled(),
@@ -213,6 +214,9 @@ func main() {
 		}
 	}()
 
+	if cfg.APIToken == "" {
+		logger.Warn("the API is not protected: UPTIME_API_TOKEN is not set, so anything that can reach this address can change monitors and channels")
+	}
 	logger.Info("server listening", "addr", cfg.Addr, "version", version, "db", cfg.DBPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server failed", "error", err)

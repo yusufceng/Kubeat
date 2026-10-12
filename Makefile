@@ -1,12 +1,15 @@
 # Lokal geliştirme portları. Backend'in kendi varsayılanı :8080'dir.
 BACKEND_PORT ?= 8090
 FRONTEND_PORT ?= 3000
+# Lokal geliştirmede backend ile frontend arasındaki ortak anahtar. Gerçek
+# kurulumda chart rastgele bir anahtar üretir.
+API_TOKEN ?= local-dev-token
 
 # Cluster hedefleri her zaman bu bağlamı kullanır; kubectl'in o anki bağlamını
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.7.1
+VERSION ?= 0.8.0
 CHART := deploy/helm/kubeat
 # Ek helm ayarları, örn. HELM_ARGS="--set prometheus.url=http://..."
 HELM_ARGS ?=
@@ -18,10 +21,10 @@ dev:
 	@trap 'kill 0' INT TERM EXIT; $(MAKE) backend & $(MAKE) frontend & wait
 
 backend:
-	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) go run ./cmd/server
+	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) UPTIME_API_TOKEN=$(API_TOKEN) go run ./cmd/server
 
 frontend:
-	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) npm run dev -- -p $(FRONTEND_PORT)
+	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) BACKEND_TOKEN=$(API_TOKEN) npm run dev -- -p $(FRONTEND_PORT)
 
 test:
 	cd backend && go test ./...

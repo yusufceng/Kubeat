@@ -1,0 +1,21 @@
+{{- /*
+The shared secret between the frontend and the backend API. Generated once
+and kept across upgrades; set apiToken.existingSecret to manage it yourself.
+*/ -}}
+{{- if not .Values.apiToken.existingSecret }}
+{{- $name := printf "%s-api-token" .Release.Name }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kubeat.labels" . | nindent 4 }}
+type: Opaque
+data:
+  {{- if and $existing $existing.data (index $existing.data "token") }}
+  token: {{ index $existing.data "token" }}
+  {{- else }}
+  token: {{ randAlphaNum 48 | b64enc }}
+  {{- end }}
+{{- end }}

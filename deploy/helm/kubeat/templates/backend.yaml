@@ -55,6 +55,11 @@ spec:
               value: ":8080"
             - name: UPTIME_DB_PATH
               value: /data/uptime.db
+            - name: UPTIME_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubeat.apiTokenSecret" . }}
+                  key: token
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
             {{- with .Values.prometheus }}

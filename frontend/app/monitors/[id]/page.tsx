@@ -59,7 +59,7 @@ async function MonitorDetail({
     ]);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
-    return <BackendError what="Monitor durumu" />;
+    return <BackendError what="Monitor durumu" err={err} />;
   }
 
   const label = monitorLabel(monitor);

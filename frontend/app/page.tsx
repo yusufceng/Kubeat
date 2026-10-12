@@ -18,8 +18,8 @@ async function Monitors() {
   try {
     monitors = await listMonitors();
     histories = await Promise.all(monitors.map((m) => listResults(m.id, config.historyLimit)));
-  } catch {
-    return <BackendError what="Monitor durumları" />;
+  } catch (err) {
+    return <BackendError what="Monitor durumları" err={err} />;
   }
 
   if (monitors.length === 0) {

@@ -46,7 +46,28 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 - Ayarlar `backend.env` ve `frontend.env` altında ortam değişkeni olarak
   verilir; bkz. [values.yaml](deploy/helm/kubeat/values.yaml).
 
+## Güvenlik
+
+Backend API'si, `UPTIME_API_TOKEN` ayarlandığında yalnızca bu anahtarı
+`Authorization: Bearer ...` başlığıyla gönderen isteklere yanıt verir.
+Arayüz aynı anahtarı `BACKEND_TOKEN` ile gönderir. Sağlık kontrolü
+(`/api/v1/health`) ve `/metrics` anahtarsız okunabilir; ikisi de bir şey
+değiştirmez. Anahtar ayarlanmazsa API açıktır ve backend bunu açılışta
+uyarı olarak loglar.
+
+Helm chart anahtarı ilk kurulumda rastgele üretir, bir Secret'ta saklar ve
+güncellemelerde korur. Ek olarak `networkPolicy.enabled=true`, backend'e
+yalnızca arayüz pod'larının bağlanmasına izin verir (NetworkPolicy uygulayan
+bir ağ eklentisi gerekir).
+
+Bu, cluster içindeki başka pod'ların API'yi kullanmasını engeller. Arayüzün
+kendisinde henüz kullanıcı girişi yoktur: arayüze erişebilen herkes her şeyi
+değiştirebilir.
+
 ## API
+
+`UPTIME_API_TOKEN` ayarlıysa örneklere `-H "Authorization: Bearer $TOKEN"`
+eklenmelidir.
 
 | Metot | Yol | Açıklama |
 | --- | --- | --- |
@@ -274,6 +295,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | --- | --- | --- |
 | `UPTIME_ADDR` | `:8080` | Backend'in dinlediği adres |
 | `UPTIME_DB_PATH` | `uptime.db` | SQLite dosyasının yolu |
+| `UPTIME_API_TOKEN` | – | API isteklerinde zorunlu tutulan anahtar; boşsa API açıktır |
 | `UPTIME_DB_BUSY_TIMEOUT` | `5s` | Kilitli veritabanı için bekleme süresi |
 | `UPTIME_READ_HEADER_TIMEOUT` | `5s` | HTTP istek başlığı okuma süresi |
 | `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi için süre |
@@ -323,6 +345,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SMTP_USERNAME` | – | SMTP kullanıcı adı; boşsa kimlik doğrulama yapılmaz |
 | `UPTIME_SMTP_PASSWORD` | – | SMTP parolası |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
+| `BACKEND_TOKEN` | – | Backend'e gönderilen anahtar; `UPTIME_API_TOKEN` ile aynı olmalı |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `HISTORY_LIMIT` | `40` | Geçmiş şeridinde gösterilen kontrol sayısı |

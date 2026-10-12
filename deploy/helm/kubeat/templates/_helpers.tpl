@@ -19,3 +19,8 @@ capabilities:
 seccompProfile:
   type: RuntimeDefault
 {{- end }}
+
+{{/* The Secret holding the API token, and the env entry that reads it. */}}
+{{- define "kubeat.apiTokenSecret" -}}
+{{ .Values.apiToken.existingSecret | default (printf "%s-api-token" .Release.Name) }}
+{{- end }}

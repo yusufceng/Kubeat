@@ -235,6 +235,7 @@ function describe(err: unknown): string {
     if (err.status === 409) return "Bu isim zaten kullanılıyor.";
     if (err.status === 400) return `Geçersiz değer: ${err.message}`;
     if (err.status === 502) return `Cluster'a erişilemedi: ${err.message}`;
+    if (err.status === 401) return "Backend API anahtarını kabul etmedi (BACKEND_TOKEN).";
   }
   return "Backend'e ulaşılamadı. Biraz sonra tekrar deneyin.";
 }

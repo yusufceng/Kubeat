@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -69,6 +70,9 @@ type Options struct {
 	// DefaultFailureThreshold applies to monitors created without one.
 	DefaultFailureThreshold int
 	Notifier                Notifier
+	// Token, if set, must be presented as a bearer token on every API
+	// request except the health check. Empty leaves the API open.
+	Token string
 	// Metrics, if set, is served at /metrics.
 	Metrics http.Handler
 	// EmailEnabled says whether an SMTP server is configured; e-mail
@@ -133,7 +137,27 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("POST /api/v1/channels", h.createChannel)
 	mux.HandleFunc("DELETE /api/v1/channels/{id}", h.deleteChannel)
 	mux.HandleFunc("POST /api/v1/channels/{id}/test", h.testChannel)
-	return mux
+	return requireToken(opts.Token, mux)
+}
+
+// requireToken guards the API with a shared secret. The health check stays
+// open for the kubelet's probes and /metrics for the cluster's Prometheus;
+// neither changes anything.
+func requireToken(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		open := r.URL.Path == "/api/v1/health" || r.URL.Path == "/metrics"
+		got := []byte(r.Header.Get("Authorization"))
+		if !open && subtle.ConstantTimeCompare(got, want) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="kubeat"`)
+			writeError(w, http.StatusUnauthorized, "a valid API token is required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *handler) health(w http.ResponseWriter, _ *http.Request) {

@@ -32,6 +32,11 @@ spec:
           env:
             - name: BACKEND_URL
               value: "http://{{ .Release.Name }}-backend:8080"
+            - name: BACKEND_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubeat.apiTokenSecret" . }}
+                  key: token
             {{- range $name, $value := .Values.frontend.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}

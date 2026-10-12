@@ -34,6 +34,23 @@ frontend:
     limits:
       memory: 512Mi
 
+# The backend API only answers requests carrying a shared secret, which the
+# frontend sends. By default the chart generates it once and keeps it.
+apiToken:
+  # Name of an existing Secret with the key "token", to manage it yourself.
+  existingSecret: ""
+
+# Restricts who can connect to the backend at the network level, in addition
+# to the token. Needs a network plugin that enforces NetworkPolicy.
+networkPolicy:
+  enabled: false
+  # Extra sources allowed to reach the backend, e.g. the namespace of the
+  # Prometheus that scrapes /metrics. A list of NetworkPolicy "from" entries.
+  backendIngressFrom: []
+    # - namespaceSelector:
+    #     matchLabels:
+    #       kubernetes.io/metadata.name: openshift-user-workload-monitoring
+
 # Where pod CPU and memory usage is read from: any Prometheus-compatible
 # API. Leave the URL empty to show pods without resource usage.
 prometheus:

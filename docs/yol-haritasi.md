@@ -11,8 +11,8 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 3 | Alarm olgunluğu: Slack/Teams/e-posta, bakım pencereleri, susturma, hatırlatma | Tamamlandı |
 | 4 | Aracın kendi sağlığı: `/metrics`, heartbeat | Tamamlandı |
 | 5 | Cluster metrikleri: monitor'un arkasındaki pod'lar, Prometheus/Thanos'tan CPU ve bellek | Tamamlandı |
-| 6 | Agent ve çoklu cluster: her cluster'da hafif agent, merkeze push | Sırada |
-| 7 | Üretime hazırlık: kimlik doğrulama (OIDC/LDAP), yedekleme, yük testi | Bekliyor |
+| 6 | Agent ve çoklu cluster: her cluster'da hafif agent, merkeze push | Ertelendi: şimdilik tek cluster yeterli (2026-10-12) |
+| 7 | Üretime hazırlık: API koruması, kimlik doğrulama, yedekleme, yük testi | Sürüyor |
 
 ## Gerçek OpenShift'te doğrulanması gerekenler
 
@@ -29,7 +29,8 @@ da şablon render edilerek doğrulandı:
 
 - Backend tek replica çalışır; güncelleme sırasında birkaç saniye kontrol
   yapılmaz.
-- Kimlik doğrulama yoktur: arayüze erişen herkes her şeyi değiştirebilir.
+- Backend API'si ortak bir anahtarla korunur, ama arayüzde kullanıcı girişi
+  yoktur: arayüze erişen herkes her şeyi değiştirebilir.
 - İstek header'ları ve webhook adresleri veritabanında şifresiz durur.
 - Keşif tek seferliktir; sonradan eklenen servisler kendiliğinden izlenmez.
 - Bakım pencereleri tek seferliktir ve bakım sırasındaki başarısız

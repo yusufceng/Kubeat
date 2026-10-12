@@ -25,6 +25,8 @@ function durationList(value: string | undefined, fallback: string): number[] {
 
 export const config = {
   backendUrl: process.env.BACKEND_URL ?? "http://localhost:8080",
+  /** Shared secret sent to the backend; must match its UPTIME_API_TOKEN. */
+  backendToken: process.env.BACKEND_TOKEN ?? "",
   backendTimeoutMs: positiveInt(process.env.BACKEND_TIMEOUT_MS, 3000),
   /** How often open pages reload their data. */
   refreshIntervalMs: positiveInt(process.env.REFRESH_INTERVAL_MS, 5000),

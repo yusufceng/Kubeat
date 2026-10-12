@@ -395,3 +395,75 @@ func TestHTTPOptionsAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIToken(t *testing.T) {
+	db, err := store.OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "test.db"), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("kubeat_build_info 1\n")) })
+	srv := httptest.NewServer(NewHandler(Options{
+		Store: db, Token: "s3cret-token", Metrics: metrics, MaxResults: 100, StatsWindow: time.Hour,
+		MinCheckInterval: 5 * time.Second, DefaultFailureThreshold: 3,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}))
+	t.Cleanup(func() {
+		srv.Close()
+		db.Close()
+	})
+
+	request := func(method, path, auth string) int {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(validMonitor))
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Probes and scrapes need no token.
+	for _, path := range []string{"/api/v1/health", "/metrics"} {
+		if code := request("GET", path, ""); code != http.StatusOK {
+			t.Errorf("GET %s without a token: status = %d, want 200", path, code)
+		}
+	}
+	// Everything else does, reads and writes alike.
+	for _, target := range []string{"GET /api/v1/monitors", "POST /api/v1/monitors", "GET /api/v1/channels", "DELETE /api/v1/monitors/1", "GET /api/v1/discovery", "GET /api/v1/nope"} {
+		method, path, _ := strings.Cut(target, " ")
+		for name, auth := range map[string]string{
+			"no header":    "",
+			"wrong token":  "Bearer wrong",
+			"prefix":       "Bearer s3cret",
+			"longer":       "Bearer s3cret-token-and-more",
+			"wrong scheme": "Basic s3cret-token",
+			"token alone":  "s3cret-token",
+		} {
+			if code := request(method, path, auth); code != http.StatusUnauthorized {
+				t.Errorf("%s with %s: status = %d, want 401", target, name, code)
+			}
+		}
+	}
+	var list []monitorResponse
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/monitors", nil)
+	req.Header.Set("Authorization", "Bearer s3cret-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("with the token: status = %d, want 200", resp.StatusCode)
+	}
+	// None of the rejected POSTs created anything.
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil || len(list) != 0 {
+		t.Errorf("monitors after rejected requests = %v, %v", list, err)
+	}
+	if code := request("POST", "/api/v1/monitors", "Bearer s3cret-token"); code != http.StatusCreated {
+		t.Errorf("POST with the token: status = %d, want 201", code)
+	}
+}

@@ -8,8 +8,8 @@ async function Channels() {
   let channels: Channel[];
   try {
     channels = await listChannels();
-  } catch {
-    return <BackendError what="Bildirim kanalları" />;
+  } catch (err) {
+    return <BackendError what="Bildirim kanalları" err={err} />;
   }
 
   if (channels.length === 0) {

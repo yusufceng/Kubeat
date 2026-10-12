@@ -43,8 +43,8 @@ async function MaintenanceList() {
       listMaintenance(config.maintenanceLimit),
       listMonitors(),
     ]);
-  } catch {
-    return <BackendError what="Bakım pencereleri" />;
+  } catch (err) {
+    return <BackendError what="Bakım pencereleri" err={err} />;
   }
 
   const namespaces = [...new Set(monitors.map((m) => m.namespace).filter(Boolean))].sort();

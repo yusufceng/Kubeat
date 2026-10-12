@@ -9,8 +9,8 @@ async function Incidents() {
   let incidents: Incident[];
   try {
     incidents = await listIncidents(config.incidentsLimit);
-  } catch {
-    return <BackendError what="Olaylar" />;
+  } catch (err) {
+    return <BackendError what="Olaylar" err={err} />;
   }
 
   if (incidents.length === 0) {
