@@ -125,7 +125,7 @@ func (s *SQLite) Close() error {
 	return errors.Join(s.read.Close(), s.write.Close())
 }
 
-const monitorColumns = "id, name, type, target, interval_seconds, timeout_seconds, enabled, created_at"
+const monitorColumns = "id, name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at"
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -137,7 +137,7 @@ func scanMonitor(row rowScanner) (Monitor, error) {
 		interval, timeout int64
 		createdAt         int64
 	)
-	err := row.Scan(&m.ID, &m.Name, &m.Type, &m.Target, &interval, &timeout, &m.Enabled, &createdAt)
+	err := row.Scan(&m.ID, &m.Name, &m.Type, &m.Target, &interval, &timeout, &m.FailureThreshold, &m.Enabled, &createdAt)
 	if err != nil {
 		return Monitor{}, err
 	}
@@ -150,9 +150,9 @@ func scanMonitor(row rowScanner) (Monitor, error) {
 func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 	m.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
 	res, err := s.write.ExecContext(ctx,
-		`INSERT INTO monitors (name, type, target, interval_seconds, timeout_seconds, enabled, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		m.Name, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.Enabled, m.CreatedAt.UnixMilli())
+		`INSERT INTO monitors (name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.Name, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.FailureThreshold, m.Enabled, m.CreatedAt.UnixMilli())
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}
@@ -207,10 +207,12 @@ func isUniqueViolation(err error) bool {
 // statusQuery joins each monitor with its newest result (found through the
 // (monitor_id, checked_at) index) and with its aggregates since a cutoff.
 const statusQuery = `
-SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.timeout_seconds, m.enabled, m.created_at,
+SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.timeout_seconds, m.failure_threshold, m.enabled, m.created_at,
        r.checked_at, r.up, r.latency_ms, r.status_code, r.error,
-       COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.avg_latency_ms, 0)
+       COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.avg_latency_ms, 0),
+       i.id, i.started_at, i.cause
 FROM monitors m
+LEFT JOIN incidents i ON i.monitor_id = m.id AND i.resolved_at IS NULL
 LEFT JOIN check_results r ON r.id = (
     SELECT id FROM check_results
     WHERE monitor_id = m.id
@@ -260,10 +262,13 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			statusCode                   sql.NullInt64
 			errText                      sql.NullString
 			avgLatencyMS                 float64
+			incidentID, incidentStart    sql.NullInt64
+			incidentCause                sql.NullString
 		)
-		err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Target, &interval, &timeout, &st.Enabled, &createdAt,
+		err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Target, &interval, &timeout, &st.FailureThreshold, &st.Enabled, &createdAt,
 			&checkedAt, &up, &latencyMS, &statusCode, &errText,
-			&st.Checks, &st.UpChecks, &avgLatencyMS)
+			&st.Checks, &st.UpChecks, &avgLatencyMS,
+			&incidentID, &incidentStart, &incidentCause)
 		if err != nil {
 			return nil, err
 		}
@@ -279,6 +284,15 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 				Latency:    time.Duration(latencyMS.Int64) * time.Millisecond,
 				StatusCode: int(statusCode.Int64),
 				Error:      errText.String,
+			}
+		}
+		if incidentID.Valid {
+			st.Incident = &Incident{
+				ID:          incidentID.Int64,
+				MonitorID:   st.ID,
+				MonitorName: st.Name,
+				StartedAt:   time.UnixMilli(incidentStart.Int64).UTC(),
+				Cause:       incidentCause.String,
 			}
 		}
 		statuses = append(statuses, st)

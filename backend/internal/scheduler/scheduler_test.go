@@ -321,3 +321,34 @@ func TestRetentionRunsImmediatelyAndRepeats(t *testing.T) {
 		t.Errorf("cutoff = %v, want about %v", p.cutoffs[0], want)
 	}
 }
+
+func TestOnResultsSeesOnlyStoredResults(t *testing.T) {
+	st := &fakeStore{rejectID: 2}
+	st.setMonitors(monitor(1, 5*time.Millisecond), monitor(2, 5*time.Millisecond))
+
+	var mu sync.Mutex
+	seen := map[int64]int{}
+	opts := testOptions()
+	opts.OnResults = func(_ context.Context, results []store.CheckResult) {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, r := range results {
+			seen[r.MonitorID]++
+		}
+	}
+	stop := start(st, &fakeChecker{}, opts)
+
+	waitFor(t, "callbacks for the stored monitor", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return seen[1] >= 5
+	})
+	stop()
+
+	if seen[2] != 0 {
+		t.Errorf("callback saw %d results that were never stored", seen[2])
+	}
+	if seen[1] != st.countFor(1) {
+		t.Errorf("callback saw %d results, store has %d", seen[1], st.countFor(1))
+	}
+}

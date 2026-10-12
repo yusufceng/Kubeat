@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -21,6 +22,16 @@ type Store interface {
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (store.MonitorStatus, error)
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]store.CheckResult, error)
+	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]store.Incident, error)
+	CreateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
+	GetChannel(ctx context.Context, id int64) (store.Channel, error)
+	ListChannels(ctx context.Context) ([]store.Channel, error)
+	DeleteChannel(ctx context.Context, id int64) error
+}
+
+// Notifier sends a single notification to a channel, without retries.
+type Notifier interface {
+	SendOnce(ctx context.Context, ch store.Channel, n alert.Notification) error
 }
 
 // Options configures the API handler.
@@ -31,9 +42,12 @@ type Options struct {
 	MinCheckInterval time.Duration
 	// StatsWindow is the default period over which uptime is computed.
 	StatsWindow time.Duration
-	// MaxResults caps how many check results one request may return.
+	// MaxResults caps how many check results or incidents one request may return.
 	MaxResults int
-	Logger     *slog.Logger
+	// DefaultFailureThreshold applies to monitors created without one.
+	DefaultFailureThreshold int
+	Notifier                Notifier
+	Logger                  *slog.Logger
 }
 
 // Health is the response body of the health endpoint.
@@ -57,6 +71,11 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/monitors/{id}", h.getMonitor)
 	mux.HandleFunc("DELETE /api/v1/monitors/{id}", h.deleteMonitor)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/results", h.listResults)
+	mux.HandleFunc("GET /api/v1/incidents", h.listIncidents)
+	mux.HandleFunc("GET /api/v1/channels", h.listChannels)
+	mux.HandleFunc("POST /api/v1/channels", h.createChannel)
+	mux.HandleFunc("DELETE /api/v1/channels/{id}", h.deleteChannel)
+	mux.HandleFunc("POST /api/v1/channels/{id}/test", h.testChannel)
 	return mux
 }
 

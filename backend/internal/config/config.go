@@ -30,6 +30,13 @@ type Config struct {
 	MinCheckInterval time.Duration // UPTIME_MIN_CHECK_INTERVAL
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
 	MaxResults       int           // UPTIME_MAX_RESULTS
+
+	DefaultFailureThreshold int           // UPTIME_DEFAULT_FAILURE_THRESHOLD
+	RecoveryThreshold       int           // UPTIME_RECOVERY_THRESHOLD
+	NotifyQueueSize         int           // UPTIME_NOTIFY_QUEUE_SIZE
+	NotifyAttempts          int           // UPTIME_NOTIFY_ATTEMPTS
+	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
+	NotifyTimeout           time.Duration // UPTIME_NOTIFY_TIMEOUT
 }
 
 // Load reads the configuration from the environment, falling back to
@@ -55,6 +62,8 @@ func Load() (Config, error) {
 		{&cfg.RetentionInterval, "UPTIME_RETENTION_INTERVAL", time.Hour},
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
+		{&cfg.NotifyRetryDelay, "UPTIME_NOTIFY_RETRY_DELAY", 5 * time.Second},
+		{&cfg.NotifyTimeout, "UPTIME_NOTIFY_TIMEOUT", 5 * time.Second},
 	}
 	for _, d := range durations {
 		v, err := envDuration(d.key, d.def)
@@ -64,16 +73,28 @@ func Load() (Config, error) {
 		*d.dst = v
 	}
 
+	ints := []struct {
+		dst *int
+		key string
+		def int
+	}{
+		{&cfg.Workers, "UPTIME_WORKERS", 20},
+		{&cfg.ResultBatchSize, "UPTIME_RESULT_BATCH_SIZE", 100},
+		{&cfg.MaxResults, "UPTIME_MAX_RESULTS", 1000},
+		{&cfg.DefaultFailureThreshold, "UPTIME_DEFAULT_FAILURE_THRESHOLD", 3},
+		{&cfg.RecoveryThreshold, "UPTIME_RECOVERY_THRESHOLD", 1},
+		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 100},
+		{&cfg.NotifyAttempts, "UPTIME_NOTIFY_ATTEMPTS", 3},
+	}
+	for _, i := range ints {
+		v, err := envPositiveInt(i.key, i.def)
+		if err != nil {
+			return Config{}, err
+		}
+		*i.dst = v
+	}
+
 	var err error
-	if cfg.Workers, err = envPositiveInt("UPTIME_WORKERS", 20); err != nil {
-		return Config{}, err
-	}
-	if cfg.ResultBatchSize, err = envPositiveInt("UPTIME_RESULT_BATCH_SIZE", 100); err != nil {
-		return Config{}, err
-	}
-	if cfg.MaxResults, err = envPositiveInt("UPTIME_MAX_RESULTS", 1000); err != nil {
-		return Config{}, err
-	}
 	if cfg.MinCheckInterval < time.Second {
 		// Intervals are stored in whole seconds.
 		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL: must be at least 1s, got %s", cfg.MinCheckInterval)

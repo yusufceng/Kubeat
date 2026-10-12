@@ -33,6 +33,11 @@ make test
 | `GET` | `/api/v1/monitors/{id}?window=24h` | Tek monitor |
 | `DELETE` | `/api/v1/monitors/{id}` | Monitor'u ve sonuçlarını siler |
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
+| `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye |
+| `GET` | `/api/v1/channels` | Bildirim kanalları (URL'ler maskelenir) |
+| `POST` | `/api/v1/channels` | Webhook kanalı ekler |
+| `DELETE` | `/api/v1/channels/{id}` | Kanalı siler |
+| `POST` | `/api/v1/channels/{id}/test` | Kanala test bildirimi gönderir |
 
 ```
 curl -X POST localhost:8090/api/v1/monitors -d '{
@@ -43,6 +48,27 @@ curl -X POST localhost:8090/api/v1/monitors -d '{
 
 `type` değeri `http` (2xx/3xx yanıt başarılı sayılır) ya da `tcp`
 (`host:port` bağlantısı kurulabiliyorsa başarılı) olabilir.
+
+## Alarm
+
+Bir monitor art arda `failure_threshold` kez başarısız olursa olay açılır;
+art arda `UPTIME_RECOVERY_THRESHOLD` kez başarılı olunca kapanır. Her iki
+durumda etkin tüm kanallara bir bildirim gider; olay açıkken tekrar bildirim
+gönderilmez.
+
+Webhook kanalına şu gövdeyle `POST` yapılır. `text` alanı insan tarafından
+okunabilir özettir.
+
+```json
+{
+  "event": "down",
+  "text": "🔴 odeme-api erişilemiyor (https://...). Art arda 3 kontrol başarısız. Son hata: ...",
+  "monitor": { "id": 1, "name": "odeme-api", "type": "http", "target": "https://..." },
+  "incident": { "id": 7, "started_at": "...", "resolved_at": null, "cause": "..." }
+}
+```
+
+`event` değeri `down`, `up` ya da `test` olur.
 
 ## Yapılandırma
 
@@ -67,6 +93,12 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |
+| `UPTIME_DEFAULT_FAILURE_THRESHOLD` | `3` | Monitor'da belirtilmezse, olay açmak için gereken art arda başarısız kontrol sayısı |
+| `UPTIME_RECOVERY_THRESHOLD` | `1` | Olayı kapatmak için gereken art arda başarılı kontrol sayısı |
+| `UPTIME_NOTIFY_ATTEMPTS` | `3` | Kanal başına bildirim deneme sayısı |
+| `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
+| `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |
+| `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Gönderilmeyi bekleyebilecek en fazla bildirim sayısı |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |

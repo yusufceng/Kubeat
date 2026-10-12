@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/api"
 	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
@@ -43,21 +44,42 @@ func main() {
 	// Background work stops on the same signal as the HTTP server and is
 	// waited for before the database is closed.
 	var background sync.WaitGroup
+	userAgent := "kubeat/" + version
+
+	alerts := alert.New(db, &alert.WebhookSender{Client: &http.Client{}, UserAgent: userAgent}, alert.Options{
+		RecoveryThreshold: cfg.RecoveryThreshold,
+		QueueSize:         cfg.NotifyQueueSize,
+		Attempts:          cfg.NotifyAttempts,
+		RetryDelay:        cfg.NotifyRetryDelay,
+		SendTimeout:       cfg.NotifyTimeout,
+		Logger:            logger,
+	})
+	// Notifications raised by the scheduler's final flush must still go out,
+	// so delivery stops only after the scheduler has.
+	alertCtx, stopAlerts := context.WithCancel(context.Background())
+	defer stopAlerts()
+
 	sched := scheduler.New(db, checker.New(checker.Options{
 		InsecureSkipVerify: cfg.HTTPInsecureSkipVerify,
-		UserAgent:          "kubeat/" + version,
+		UserAgent:          userAgent,
 	}), scheduler.Options{
 		Tick:          cfg.SchedulerTick,
 		MaxJitter:     cfg.MaxJitter,
 		Workers:       cfg.Workers,
 		BatchSize:     cfg.ResultBatchSize,
 		FlushInterval: cfg.ResultFlushInterval,
+		OnResults:     alerts.Evaluate,
 		Logger:        logger,
 	})
-	background.Add(2)
+	background.Add(3)
 	go func() {
 		defer background.Done()
 		sched.Run(ctx)
+		stopAlerts()
+	}()
+	go func() {
+		defer background.Done()
+		alerts.Run(alertCtx)
 	}()
 	go func() {
 		defer background.Done()
@@ -72,7 +94,10 @@ func main() {
 			MinCheckInterval: cfg.MinCheckInterval,
 			StatsWindow:      cfg.StatsWindow,
 			MaxResults:       cfg.MaxResults,
+			Notifier:         alerts,
 			Logger:           logger,
+
+			DefaultFailureThreshold: cfg.DefaultFailureThreshold,
 		}),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 	}

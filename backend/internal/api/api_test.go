@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -22,13 +23,20 @@ func newTestAPI(t *testing.T) (*httptest.Server, *store.SQLite) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	notifier := alert.New(db, &alert.WebhookSender{Client: http.DefaultClient}, alert.Options{
+		Attempts: 1, SendTimeout: 2 * time.Second, Logger: logger,
+	})
 	srv := httptest.NewServer(NewHandler(Options{
 		Version:          "test",
 		Store:            db,
 		MinCheckInterval: 5 * time.Second,
 		StatsWindow:      24 * time.Hour,
 		MaxResults:       3,
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier:         notifier,
+		Logger:           logger,
+
+		DefaultFailureThreshold: 3,
 	}))
 	t.Cleanup(func() {
 		srv.Close()

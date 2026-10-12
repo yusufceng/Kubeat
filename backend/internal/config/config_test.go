@@ -36,6 +36,13 @@ func TestLoadDefaults(t *testing.T) {
 		MinCheckInterval: 5 * time.Second,
 		StatsWindow:      24 * time.Hour,
 		MaxResults:       1000,
+
+		DefaultFailureThreshold: 3,
+		RecoveryThreshold:       1,
+		NotifyQueueSize:         100,
+		NotifyAttempts:          3,
+		NotifyRetryDelay:        5 * time.Second,
+		NotifyTimeout:           5 * time.Second,
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)

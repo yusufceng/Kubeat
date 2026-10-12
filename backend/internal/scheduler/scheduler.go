@@ -38,7 +38,10 @@ type Options struct {
 	// when it is full or when the interval elapses, whichever comes first.
 	BatchSize     int
 	FlushInterval time.Duration
-	Logger        *slog.Logger
+	// OnResults, if set, is called with each group of results after they
+	// have been stored. Calls are sequential.
+	OnResults func(ctx context.Context, results []store.CheckResult)
+	Logger    *slog.Logger
 }
 
 // Scheduler runs checks for all enabled monitors.
@@ -238,18 +241,23 @@ func (s *Scheduler) write(ctx context.Context, results <-chan store.CheckResult)
 }
 
 func (s *Scheduler) flush(ctx context.Context, batch []store.CheckResult) {
-	err := s.store.InsertCheckResults(ctx, batch)
-	if err == nil {
-		return
-	}
-	// One bad row (for example a monitor deleted while its check was running)
-	// fails the whole transaction; retry row by row so the rest is kept.
-	lost := 0
-	for _, r := range batch {
-		if err := s.store.InsertCheckResults(ctx, []store.CheckResult{r}); err != nil {
-			lost++
-			s.opts.Logger.Warn("check result dropped", "monitor_id", r.MonitorID, "error", err)
+	stored := batch
+	if err := s.store.InsertCheckResults(ctx, batch); err != nil {
+		// One bad row (for example a monitor deleted while its check was
+		// running) fails the whole transaction; retry row by row so the rest
+		// is kept.
+		stored = make([]store.CheckResult, 0, len(batch))
+		for _, r := range batch {
+			if err := s.store.InsertCheckResults(ctx, []store.CheckResult{r}); err != nil {
+				s.opts.Logger.Warn("check result dropped", "monitor_id", r.MonitorID, "error", err)
+				continue
+			}
+			stored = append(stored, r)
 		}
+		s.opts.Logger.Warn("batch insert failed, retried row by row",
+			"error", err, "rows", len(batch), "dropped", len(batch)-len(stored))
 	}
-	s.opts.Logger.Warn("batch insert failed, retried row by row", "error", err, "rows", len(batch), "dropped", lost)
+	if s.opts.OnResults != nil && len(stored) > 0 {
+		s.opts.OnResults(ctx, stored)
+	}
 }

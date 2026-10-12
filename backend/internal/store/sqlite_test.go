@@ -27,6 +27,8 @@ func newMonitor(name string) Monitor {
 		Interval: 30 * time.Second,
 		Timeout:  5 * time.Second,
 		Enabled:  true,
+
+		FailureThreshold: 3,
 	}
 }
 

@@ -22,17 +22,20 @@ const (
 )
 
 type monitorResponse struct {
-	ID              int64     `json:"id"`
-	Name            string    `json:"name"`
-	Type            string    `json:"type"`
-	Target          string    `json:"target"`
-	IntervalSeconds int       `json:"interval_seconds"`
-	TimeoutSeconds  int       `json:"timeout_seconds"`
-	Enabled         bool      `json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID               int64     `json:"id"`
+	Name             string    `json:"name"`
+	Type             string    `json:"type"`
+	Target           string    `json:"target"`
+	IntervalSeconds  int       `json:"interval_seconds"`
+	TimeoutSeconds   int       `json:"timeout_seconds"`
+	FailureThreshold int       `json:"failure_threshold"`
+	Enabled          bool      `json:"enabled"`
+	CreatedAt        time.Time `json:"created_at"`
 
 	Status string          `json:"status"`
 	Last   *resultResponse `json:"last_result"`
+	// OpenIncident is set while the monitor is in an alerting state.
+	OpenIncident *incidentResponse `json:"open_incident"`
 
 	// Statistics over the last WindowSeconds. UptimePercent is null when no
 	// check ran in the window.
@@ -75,6 +78,12 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		WindowSeconds:   int(window / time.Second),
 		Checks:          st.Checks,
 		AvgLatencyMS:    st.AvgLatency.Milliseconds(),
+
+		FailureThreshold: st.FailureThreshold,
+	}
+	if st.Incident != nil {
+		incident := toIncidentResponse(*st.Incident)
+		resp.OpenIncident = &incident
 	}
 	if st.Last != nil {
 		last := toResultResponse(*st.Last)
@@ -102,6 +111,19 @@ func (h *handler) window(r *http.Request) (time.Duration, error) {
 		return 0, fmt.Errorf("window must be a positive duration such as 1h or 24h")
 	}
 	return d, nil
+}
+
+// limit reads the optional ?limit=, capped at and defaulting to MaxResults.
+func (h *handler) limit(r *http.Request) (int, error) {
+	v := r.URL.Query().Get("limit")
+	if v == "" {
+		return h.opts.MaxResults, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 0, errors.New("limit must be a positive integer")
+	}
+	return min(n, h.opts.MaxResults), nil
 }
 
 func pathID(r *http.Request) (int64, bool) {
@@ -156,10 +178,18 @@ type createMonitorRequest struct {
 	Target          string `json:"target"`
 	IntervalSeconds int    `json:"interval_seconds"`
 	TimeoutSeconds  int    `json:"timeout_seconds"`
+	// FailureThreshold is optional; 0 means the server default.
+	FailureThreshold int `json:"failure_threshold"`
 }
 
 // validate normalizes the request and reports the first problem found.
-func (req *createMonitorRequest) validate(minInterval time.Duration) error {
+func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThreshold int) error {
+	if req.FailureThreshold == 0 {
+		req.FailureThreshold = defaultThreshold
+	}
+	if req.FailureThreshold < 1 {
+		return errors.New("failure_threshold must be at least 1")
+	}
 	req.Name = strings.TrimSpace(req.Name)
 	req.Target = strings.TrimSpace(req.Target)
 
@@ -203,7 +233,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if err := req.validate(h.opts.MinCheckInterval); err != nil {
+	if err := req.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -215,6 +245,8 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		Interval: time.Duration(req.IntervalSeconds) * time.Second,
 		Timeout:  time.Duration(req.TimeoutSeconds) * time.Second,
 		Enabled:  true,
+
+		FailureThreshold: req.FailureThreshold,
 	})
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "a monitor with this name already exists")
@@ -251,14 +283,10 @@ func (h *handler) listResults(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
-	limit := h.opts.MaxResults
-	if v := r.URL.Query().Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
-			return
-		}
-		limit = min(n, h.opts.MaxResults)
+	limit, err := h.limit(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// Distinguish "no results yet" from "no such monitor".
