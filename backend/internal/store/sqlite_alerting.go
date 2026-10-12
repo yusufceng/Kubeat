@@ -100,14 +100,14 @@ func (s *SQLite) ListIncidents(ctx context.Context, monitorID int64, limit int) 
 	return incidents, nil
 }
 
-const channelColumns = "id, name, type, url, enabled, created_at"
+const channelColumns = "id, name, type, target, enabled, created_at"
 
 func scanChannel(row rowScanner) (Channel, error) {
 	var (
 		c         Channel
 		createdAt int64
 	)
-	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.URL, &c.Enabled, &createdAt); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Enabled, &createdAt); err != nil {
 		return Channel{}, err
 	}
 	c.CreatedAt = time.UnixMilli(createdAt).UTC()
@@ -117,8 +117,8 @@ func scanChannel(row rowScanner) (Channel, error) {
 func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) {
 	c.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
 	res, err := s.write.ExecContext(ctx,
-		"INSERT INTO notification_channels (name, type, url, enabled, created_at) VALUES (?, ?, ?, ?, ?)",
-		c.Name, c.Type, c.URL, c.Enabled, c.CreatedAt.UnixMilli())
+		"INSERT INTO notification_channels (name, type, target, enabled, created_at) VALUES (?, ?, ?, ?, ?)",
+		c.Name, c.Type, c.Target, c.Enabled, c.CreatedAt.UnixMilli())
 	if isUniqueViolation(err) {
 		return Channel{}, ErrConflict
 	}

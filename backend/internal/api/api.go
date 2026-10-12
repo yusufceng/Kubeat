@@ -66,6 +66,9 @@ type Options struct {
 	// DefaultFailureThreshold applies to monitors created without one.
 	DefaultFailureThreshold int
 	Notifier                Notifier
+	// EmailEnabled says whether an SMTP server is configured; e-mail
+	// channels cannot be created without one.
+	EmailEnabled bool
 	// Discovery is nil when no cluster is available; DiscoveryStatus then
 	// says why. Otherwise DiscoveryStatus describes the connection.
 	Discovery       Discovery
@@ -77,7 +80,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 5
+const Revision = 6
 
 // Health is the response body of the health endpoint.
 type Health struct {

@@ -43,6 +43,15 @@ type Config struct {
 	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
 	NotifyTimeout           time.Duration // UPTIME_NOTIFY_TIMEOUT
 
+	// SMTP settings for e-mail channels; e-mail is off unless both the host
+	// and the sender address are set.
+	SMTPHost     string // UPTIME_SMTP_HOST
+	SMTPPort     int    // UPTIME_SMTP_PORT
+	SMTPUsername string // UPTIME_SMTP_USERNAME
+	SMTPPassword string // UPTIME_SMTP_PASSWORD
+	SMTPFrom     string // UPTIME_SMTP_FROM
+	SMTPSecurity string // UPTIME_SMTP_SECURITY: starttls, tls or none
+
 	// Discovery connects with the pod's service account when running in a
 	// cluster. Outside one, it needs both a kubeconfig and a context.
 	DiscoveryEnabled bool          // UPTIME_DISCOVERY_ENABLED
@@ -57,6 +66,12 @@ func Load() (Config, error) {
 	cfg := Config{
 		Addr:   envString("UPTIME_ADDR", ":8080"),
 		DBPath: envString("UPTIME_DB_PATH", "uptime.db"),
+
+		SMTPHost:     envString("UPTIME_SMTP_HOST", ""),
+		SMTPUsername: envString("UPTIME_SMTP_USERNAME", ""),
+		SMTPPassword: envString("UPTIME_SMTP_PASSWORD", ""),
+		SMTPFrom:     envString("UPTIME_SMTP_FROM", ""),
+		SMTPSecurity: envString("UPTIME_SMTP_SECURITY", "starttls"),
 
 		Kubeconfig:  envString("UPTIME_KUBECONFIG", ""),
 		KubeContext: envString("UPTIME_KUBE_CONTEXT", ""),
@@ -106,6 +121,7 @@ func Load() (Config, error) {
 		{&cfg.RecoveryThreshold, "UPTIME_RECOVERY_THRESHOLD", 1},
 		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 100},
 		{&cfg.NotifyAttempts, "UPTIME_NOTIFY_ATTEMPTS", 3},
+		{&cfg.SMTPPort, "UPTIME_SMTP_PORT", 587},
 	}
 	for _, i := range ints {
 		v, err := envPositiveInt(i.key, i.def)
@@ -116,6 +132,11 @@ func Load() (Config, error) {
 	}
 
 	var err error
+	switch cfg.SMTPSecurity {
+	case "starttls", "tls", "none":
+	default:
+		return Config{}, fmt.Errorf("UPTIME_SMTP_SECURITY: must be starttls, tls or none, got %q", cfg.SMTPSecurity)
+	}
 	if cfg.MinCheckInterval < time.Second {
 		// Intervals are stored in whole seconds.
 		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL: must be at least 1s, got %s", cfg.MinCheckInterval)

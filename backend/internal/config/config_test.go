@@ -50,6 +50,9 @@ func TestLoadDefaults(t *testing.T) {
 		NotifyRetryDelay:        5 * time.Second,
 		NotifyTimeout:           5 * time.Second,
 
+		SMTPPort:     587,
+		SMTPSecurity: "starttls",
+
 		DiscoveryEnabled: true,
 		KubeTimeout:      10 * time.Second,
 	}
@@ -117,5 +120,12 @@ func TestLoadRejectsSubSecondMinInterval(t *testing.T) {
 	t.Setenv("UPTIME_MIN_CHECK_INTERVAL", "500ms")
 	if _, err := Load(); err == nil {
 		t.Error("UPTIME_MIN_CHECK_INTERVAL=500ms was accepted")
+	}
+}
+
+func TestLoadRejectsUnknownSMTPSecurity(t *testing.T) {
+	t.Setenv("UPTIME_SMTP_SECURITY", "ssl")
+	if _, err := Load(); err == nil {
+		t.Error("UPTIME_SMTP_SECURITY=ssl was accepted")
 	}
 }

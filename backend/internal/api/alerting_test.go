@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -106,14 +109,14 @@ func TestChannelsEndpoint(t *testing.T) {
 	}
 
 	var created channelResponse
-	body := `{"name":" ops ","type":"webhook","url":"` + secretURL + `"}`
+	body := `{"name":" ops ","type":"webhook","target":"` + secretURL + `"}`
 	if code := do(t, "POST", base, body, &created); code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", code)
 	}
-	if created.Name != "ops" || !created.Enabled || strings.Contains(created.URL, "SECRET") || !strings.HasSuffix(created.URL, "/…") {
+	if created.Name != "ops" || !created.Enabled || strings.Contains(created.Target, "SECRET") || !strings.HasSuffix(created.Target, "/…") {
 		t.Errorf("created = %+v (URL must be masked)", created)
 	}
-	if do(t, "GET", base, "", &list); len(list) != 1 || strings.Contains(list[0].URL, "SECRET") {
+	if do(t, "GET", base, "", &list); len(list) != 1 || strings.Contains(list[0].Target, "SECRET") {
 		t.Errorf("list leaks the webhook URL: %+v", list)
 	}
 
@@ -121,10 +124,13 @@ func TestChannelsEndpoint(t *testing.T) {
 		t.Errorf("duplicate name: status = %d, want 409", code)
 	}
 	for name, bad := range map[string]string{
-		"empty name":  `{"name":"","type":"webhook","url":"https://x"}`,
-		"wrong type":  `{"name":"a","type":"email","url":"https://x"}`,
-		"not a URL":   `{"name":"a","type":"webhook","url":"hooks.example.com"}`,
-		"unknown key": `{"name":"a","type":"webhook","url":"https://x","extra":1}`,
+		"empty name":      `{"name":"","type":"webhook","target":"https://x"}`,
+		"wrong type":      `{"name":"a","type":"pagerduty","target":"https://x"}`,
+		"not a URL":       `{"name":"a","type":"webhook","target":"hooks.example.com"}`,
+		"slack not a URL": `{"name":"a","type":"slack","target":"#ops"}`,
+		"unknown key":     `{"name":"a","type":"webhook","target":"https://x","extra":1}`,
+		// The test API has no SMTP server configured.
+		"email without smtp": `{"name":"a","type":"email","target":"ops@example.com"}`,
 	} {
 		if code := do(t, "POST", base, bad, nil); code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", name, code)
@@ -160,5 +166,48 @@ func TestChannelsEndpoint(t *testing.T) {
 	}
 	if code := do(t, "DELETE", base+"/1", "", nil); code != http.StatusNotFound {
 		t.Errorf("second delete status = %d, want 404", code)
+	}
+}
+
+func TestChannelTypes(t *testing.T) {
+	db, err := store.OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "test.db"), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(NewHandler(Options{
+		Store: db, EmailEnabled: true, MaxResults: 100,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}))
+	t.Cleanup(func() {
+		srv.Close()
+		db.Close()
+	})
+	base := srv.URL + "/api/v1/channels"
+
+	var c channelResponse
+	for _, typ := range []string{"slack", "teams"} {
+		body := `{"name":"` + typ + `","type":"` + typ + `","target":"https://hooks.example.com/services/SECRET"}`
+		if code := do(t, "POST", base, body, &c); code != http.StatusCreated || c.Type != typ || strings.Contains(c.Target, "SECRET") {
+			t.Errorf("%s channel: status=%d %+v", typ, code, c)
+		}
+	}
+
+	// Addresses are normalized and, unlike URLs, shown as they are.
+	body := `{"name":"mail","type":"email","target":" Ops <ops@example.com> ,oncall@example.com "}`
+	if code := do(t, "POST", base, body, &c); code != http.StatusCreated || c.Target != "ops@example.com, oncall@example.com" {
+		t.Errorf("email channel: status=%d target=%q", code, c.Target)
+	}
+
+	many := strings.Repeat("a@example.com,", maxRecipients+1)
+	for name, target := range map[string]string{"invalid address": "ops@", "empty": " ", "too many": many} {
+		body := `{"name":"x","type":"email","target":"` + target + `"}`
+		if code := do(t, "POST", base, body, nil); code != http.StatusBadRequest {
+			t.Errorf("email with %s: status = %d, want 400", name, code)
+		}
+	}
+
+	var list []channelResponse
+	if do(t, "GET", base, "", &list); len(list) != 3 {
+		t.Errorf("channels = %+v", list)
 	}
 }

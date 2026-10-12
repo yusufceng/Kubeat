@@ -47,7 +47,15 @@ func main() {
 	var background sync.WaitGroup
 	userAgent := "kubeat/" + version
 
-	alerts := alert.New(db, &alert.WebhookSender{Client: &http.Client{}, UserAgent: userAgent}, alert.Options{
+	senders := alert.NewRouter(&http.Client{}, userAgent, alert.SMTPConfig{
+		Host:     cfg.SMTPHost,
+		Port:     cfg.SMTPPort,
+		Username: cfg.SMTPUsername,
+		Password: cfg.SMTPPassword,
+		From:     cfg.SMTPFrom,
+		Security: cfg.SMTPSecurity,
+	})
+	alerts := alert.New(db, senders, alert.Options{
 		RecoveryThreshold: cfg.RecoveryThreshold,
 		CertWarning:       cfg.CertWarning,
 		QueueSize:         cfg.NotifyQueueSize,
@@ -120,6 +128,7 @@ func main() {
 			StatsWindow:      cfg.StatsWindow,
 			MaxResults:       cfg.MaxResults,
 			Notifier:         alerts,
+			EmailEnabled:     senders.EmailEnabled(),
 			Discovery:        discovery,
 			DiscoveryStatus:  discoveryStatus,
 			Logger:           logger,

@@ -108,14 +108,20 @@ func (i Incident) Open() bool { return i.ResolvedAt.IsZero() }
 // ChannelType is the kind of destination a notification channel sends to.
 type ChannelType string
 
-const ChannelWebhook ChannelType = "webhook"
+const (
+	ChannelWebhook ChannelType = "webhook" // JSON POST to any URL
+	ChannelSlack   ChannelType = "slack"   // Slack incoming webhook
+	ChannelTeams   ChannelType = "teams"   // Microsoft Teams workflow webhook
+	ChannelEmail   ChannelType = "email"   // e-mail through the configured SMTP server
+)
 
 // Channel is a destination for incident notifications.
 type Channel struct {
-	ID        int64
-	Name      string
-	Type      ChannelType
-	URL       string
+	ID   int64
+	Name string
+	Type ChannelType
+	// Target is a URL, or for e-mail a comma-separated list of addresses.
+	Target    string
 	Enabled   bool
 	CreatedAt time.Time
 }

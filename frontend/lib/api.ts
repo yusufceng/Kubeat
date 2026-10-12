@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 5;
+export const REQUIRED_API_REVISION = 6;
 
 export type Health = {
   status: string;
@@ -52,12 +52,14 @@ export type Incident = {
   cause: string;
 };
 
+export type ChannelType = "webhook" | "slack" | "teams" | "email";
+
 export type Channel = {
   id: number;
   name: string;
-  type: "webhook";
-  /** masked by the backend */
-  url: string;
+  type: ChannelType;
+  /** A URL, masked by the backend, or for e-mail the list of addresses. */
+  target: string;
   enabled: boolean;
   created_at: string;
 };
@@ -167,11 +169,8 @@ export const listIncidents = (limit: number, monitorId?: number) =>
 
 export const listChannels = () => request<Channel[]>("/channels");
 
-export const createChannel = (channel: { name: string; url: string }) =>
-  request<Channel>("/channels", {
-    method: "POST",
-    body: JSON.stringify({ ...channel, type: "webhook" }),
-  });
+export const createChannel = (channel: { name: string; type: ChannelType; target: string }) =>
+  request<Channel>("/channels", { method: "POST", body: JSON.stringify(channel) });
 
 export const deleteChannel = (id: number) =>
   request<void>(`/channels/${id}`, { method: "DELETE" });

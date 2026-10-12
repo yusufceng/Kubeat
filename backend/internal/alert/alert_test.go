@@ -72,7 +72,7 @@ func newFixture(t *testing.T, failureThreshold, recoveryThreshold int) *fixture 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.CreateChannel(ctx, store.Channel{Name: "ops", Type: store.ChannelWebhook, URL: "http://unused", Enabled: true}); err != nil {
+	if _, err := db.CreateChannel(ctx, store.Channel{Name: "ops", Type: store.ChannelWebhook, Target: "http://unused", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -234,10 +234,10 @@ func TestStateSurvivesRestart(t *testing.T) {
 func TestDeliveryRetriesAndSkipsDisabledChannels(t *testing.T) {
 	f := newFixture(t, 1, 1)
 	ctx := context.Background()
-	if _, err := f.db.CreateChannel(ctx, store.Channel{Name: "off", Type: store.ChannelWebhook, URL: "http://unused", Enabled: false}); err != nil {
+	if _, err := f.db.CreateChannel(ctx, store.Channel{Name: "off", Type: store.ChannelWebhook, Target: "http://unused", Enabled: false}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.db.CreateChannel(ctx, store.Channel{Name: "second", Type: store.ChannelWebhook, URL: "http://unused", Enabled: true}); err != nil {
+	if _, err := f.db.CreateChannel(ctx, store.Channel{Name: "second", Type: store.ChannelWebhook, Target: "http://unused", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -339,7 +339,7 @@ func TestWebhookSender(t *testing.T) {
 	defer srv.Close()
 
 	sender := &WebhookSender{Client: srv.Client(), UserAgent: "kubeat/test"}
-	ch := store.Channel{Name: "ops", Type: store.ChannelWebhook, URL: srv.URL}
+	ch := store.Channel{Name: "ops", Type: store.ChannelWebhook, Target: srv.URL}
 	started := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
 	m := store.Monitor{ID: 7, Name: "api", Type: store.MonitorHTTP, Target: "https://example.com", FailureThreshold: 3}
 	ctx := context.Background()
@@ -389,7 +389,7 @@ func TestWebhookSender(t *testing.T) {
 	if err := sender.Send(ctx, ch, down); err == nil {
 		t.Error("a 500 answer was treated as delivered")
 	}
-	if err := sender.Send(ctx, store.Channel{URL: "http://127.0.0.1:1"}, down); err == nil {
+	if err := sender.Send(ctx, store.Channel{Target: "http://127.0.0.1:1"}, down); err == nil {
 		t.Error("an unreachable webhook was treated as delivered")
 	}
 }

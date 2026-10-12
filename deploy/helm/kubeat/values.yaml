@@ -34,6 +34,19 @@ frontend:
     limits:
       memory: 512Mi
 
+# SMTP server for e-mail notification channels. E-mail is off while host or
+# from is empty.
+smtp:
+  host: ""
+  port: 587
+  from: ""             # e.g. "Kubeat <kubeat@example.com>"
+  security: starttls   # starttls, tls or none
+  username: ""
+  # The password is read from an existing Secret, never from values.
+  passwordSecret:
+    name: ""
+    key: password
+
 # Lets the backend list namespaces, services, pods, ingresses and routes
 # (read-only, cluster-wide) so monitors can be created from what is running.
 discovery:

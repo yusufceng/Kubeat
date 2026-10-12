@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -57,13 +58,17 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// maxRecipients bounds the addresses of one e-mail channel.
+const maxRecipients = 20
+
 type channelResponse struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Type string `json:"type"`
-	// URL is masked: a webhook URL is a credential, and anyone who can read
-	// it can post to the channel.
-	URL       string    `json:"url"`
+	// Target is the channel's URL or, for e-mail, its addresses. URLs are
+	// masked: a webhook URL is a credential, and anyone who can read it can
+	// post to the channel.
+	Target    string    `json:"target"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -78,7 +83,11 @@ func maskURL(raw string) string {
 }
 
 func toChannelResponse(c store.Channel) channelResponse {
-	return channelResponse{ID: c.ID, Name: c.Name, Type: string(c.Type), URL: maskURL(c.URL), Enabled: c.Enabled, CreatedAt: c.CreatedAt}
+	target := c.Target
+	if c.Type != store.ChannelEmail {
+		target = maskURL(target)
+	}
+	return channelResponse{ID: c.ID, Name: c.Name, Type: string(c.Type), Target: target, Enabled: c.Enabled, CreatedAt: c.CreatedAt}
 }
 
 func (h *handler) listChannels(w http.ResponseWriter, r *http.Request) {
@@ -95,9 +104,36 @@ func (h *handler) listChannels(w http.ResponseWriter, r *http.Request) {
 }
 
 type createChannelRequest struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	URL  string `json:"url"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Target string `json:"target"`
+}
+
+// channelTarget validates a channel's target for its type and returns the
+// form to store.
+func (h *handler) channelTarget(typ store.ChannelType, target string) (string, error) {
+	switch typ {
+	case store.ChannelWebhook, store.ChannelSlack, store.ChannelTeams:
+		u, err := url.Parse(target)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return "", errors.New("target must be an http:// or https:// URL")
+		}
+		return target, nil
+	case store.ChannelEmail:
+		if !h.opts.EmailEnabled {
+			return "", errors.New("e-mail channels need an SMTP server; set UPTIME_SMTP_HOST and UPTIME_SMTP_FROM")
+		}
+		recipients, err := alert.ParseRecipients(target)
+		if err != nil {
+			return "", fmt.Errorf("target: %w", err)
+		}
+		if len(recipients) > maxRecipients {
+			return "", fmt.Errorf("target: at most %d addresses", maxRecipients)
+		}
+		return strings.Join(recipients, ", "), nil
+	default:
+		return "", errors.New("type must be webhook, slack, teams or email")
+	}
 }
 
 func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
@@ -109,23 +145,18 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	req.URL = strings.TrimSpace(req.URL)
-
-	switch u, err := url.Parse(req.URL); {
-	case req.Name == "":
+	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
-	case store.ChannelType(req.Type) != store.ChannelWebhook:
-		writeError(w, http.StatusBadRequest, "type must be webhook")
-		return
-	case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "":
-		writeError(w, http.StatusBadRequest, "url must be an http:// or https:// URL")
+	}
+	typ := store.ChannelType(req.Type)
+	target, err := h.channelTarget(typ, strings.TrimSpace(req.Target))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	c, err := h.opts.Store.CreateChannel(r.Context(), store.Channel{
-		Name: req.Name, Type: store.ChannelWebhook, URL: req.URL, Enabled: true,
-	})
+	c, err := h.opts.Store.CreateChannel(r.Context(), store.Channel{Name: req.Name, Type: typ, Target: target, Enabled: true})
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "a channel with this name already exists")
 		return
@@ -181,7 +212,7 @@ func (h *handler) testChannel(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.opts.Notifier.SendOnce(r.Context(), ch, alert.Notification{Event: alert.EventTest}); err != nil {
 		h.opts.Logger.Warn("channel test failed", "channel", ch.Name, "error", err)
-		writeJSON(w, http.StatusOK, testChannelResponse{Error: redactURL(err.Error(), ch.URL)})
+		writeJSON(w, http.StatusOK, testChannelResponse{Error: redactURL(err.Error(), ch.Target)})
 		return
 	}
 	writeJSON(w, http.StatusOK, testChannelResponse{Delivered: true})
@@ -189,5 +220,8 @@ func (h *handler) testChannel(w http.ResponseWriter, r *http.Request) {
 
 // redactURL removes the webhook URL that net/http embeds in its errors.
 func redactURL(msg, rawURL string) string {
+	if !strings.Contains(rawURL, "://") {
+		return msg // an e-mail channel: nothing secret in the target
+	}
 	return strings.ReplaceAll(msg, rawURL, maskURL(rawURL))
 }

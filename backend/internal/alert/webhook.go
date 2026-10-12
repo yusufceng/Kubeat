@@ -89,20 +89,25 @@ func Text(n Notification) string {
 
 // Send posts n to the channel's URL; any non-2xx answer is an error.
 func (s *WebhookSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
-	payload, err := json.Marshal(newWebhookBody(n))
+	return postJSON(ctx, s.Client, s.UserAgent, ch.Target, newWebhookBody(n))
+}
+
+// postJSON posts body as JSON; any non-2xx answer is an error.
+func postJSON(ctx context.Context, client *http.Client, userAgent, url string, body any) error {
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ch.URL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if s.UserAgent != "" {
-		req.Header.Set("User-Agent", s.UserAgent)
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
 	}
 
-	resp, err := s.Client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

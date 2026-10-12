@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import {
   type ChannelFormState,
   type ChannelTestState,
@@ -8,18 +8,38 @@ import {
   deleteChannelAction,
   testChannelAction,
 } from "@/app/actions";
+import type { ChannelType } from "@/lib/api";
+import { channelTypes } from "@/lib/channel-types";
 
 const inputClass =
   "w-full rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-white/20";
 
 const initialState: ChannelFormState = { error: null, values: null };
 
+
 export function AddChannelForm() {
   const [state, action, pending] = useActionState(createChannelAction, initialState);
+  const [type, setType] = useState<ChannelType>((state.values?.type as ChannelType) ?? "slack");
+  const spec = channelTypes[type];
 
   return (
     <form action={action} className="grid gap-4 sm:grid-cols-6">
-      <label className="sm:col-span-2">
+      <label className="sm:col-span-1">
+        <span className="mb-1 block text-xs font-medium text-zinc-500">Tür</span>
+        <select
+          name="type"
+          value={type}
+          onChange={(e) => setType(e.target.value as ChannelType)}
+          className={inputClass}
+        >
+          {(Object.keys(channelTypes) as ChannelType[]).map((t) => (
+            <option key={t} value={t}>
+              {channelTypes[t].label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="sm:col-span-1">
         <span className="mb-1 block text-xs font-medium text-zinc-500">İsim</span>
         <input
           name="name"
@@ -30,13 +50,16 @@ export function AddChannelForm() {
         />
       </label>
       <label className="sm:col-span-3">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">Webhook URL</span>
+        <span className="mb-1 block text-xs font-medium text-zinc-500">{spec.targetLabel}</span>
         <input
-          name="url"
-          type="url"
+          // Remounted per type so a URL typed for one type is not validated
+          // as an address list for another.
+          key={type}
+          name="target"
+          type={spec.inputType}
           required
-          defaultValue={state.values?.url ?? ""}
-          placeholder="https://hooks.ornek.com/..."
+          defaultValue={state.values?.type === type ? state.values.target : ""}
+          placeholder={spec.placeholder}
           className={inputClass}
         />
       </label>

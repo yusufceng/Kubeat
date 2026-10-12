@@ -57,6 +57,29 @@ spec:
               value: /data/uptime.db
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
+            {{- with .Values.smtp }}
+            {{- if and .host .from }}
+            - name: UPTIME_SMTP_HOST
+              value: {{ .host | quote }}
+            - name: UPTIME_SMTP_PORT
+              value: {{ .port | quote }}
+            - name: UPTIME_SMTP_FROM
+              value: {{ .from | quote }}
+            - name: UPTIME_SMTP_SECURITY
+              value: {{ .security | quote }}
+            {{- with .username }}
+            - name: UPTIME_SMTP_USERNAME
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .passwordSecret.name }}
+            - name: UPTIME_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .passwordSecret.name }}
+                  key: {{ .passwordSecret.key }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- range $name, $value := .Values.backend.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}

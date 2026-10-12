@@ -96,15 +96,25 @@ func TestChannels(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 
-	created, err := s.CreateChannel(ctx, Channel{Name: "ops", Type: ChannelWebhook, URL: "https://hooks.example.com/abc", Enabled: true})
+	created, err := s.CreateChannel(ctx, Channel{Name: "ops", Type: ChannelWebhook, Target: "https://hooks.example.com/abc", Enabled: true})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := s.CreateChannel(ctx, Channel{Name: "ops", Type: ChannelWebhook, URL: "https://x", Enabled: true}); !errors.Is(err, ErrConflict) {
+	if _, err := s.CreateChannel(ctx, Channel{Name: "ops", Type: ChannelWebhook, Target: "https://x", Enabled: true}); !errors.Is(err, ErrConflict) {
 		t.Errorf("duplicate name: err = %v, want ErrConflict", err)
 	}
-	if _, err := s.CreateChannel(ctx, Channel{Name: "mail", Type: "email", URL: "a@b.c"}); err == nil {
+	if _, err := s.CreateChannel(ctx, Channel{Name: "pager", Type: "pagerduty", Target: "x"}); err == nil {
 		t.Error("unknown channel type was accepted")
+	}
+	for _, typ := range []ChannelType{ChannelSlack, ChannelTeams, ChannelEmail} {
+		c, err := s.CreateChannel(ctx, Channel{Name: string(typ), Type: typ, Target: "t", Enabled: true})
+		if err != nil {
+			t.Errorf("%s channel: %v", typ, err)
+			continue
+		}
+		if err := s.DeleteChannel(ctx, c.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	got, err := s.GetChannel(ctx, created.ID)
@@ -226,5 +236,50 @@ func TestCertificateIncidentsAndExpiry(t *testing.T) {
 	}
 	if all, _ := s.ListIncidents(ctx, 0, 10); len(all) != 2 {
 		t.Errorf("incidents = %+v", all)
+	}
+}
+
+// Channels created before other channel types existed keep their URL.
+func TestChannelsSurviveTheTypeMigration(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "old.db")
+
+	old, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, _ := migrationFiles.ReadDir("migrations")
+	for _, entry := range names[:6] { // everything before 0007
+		body, err := migrationFiles.ReadFile("migrations/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := old.Exec(string(body)); err != nil {
+			t.Fatalf("%s: %v", entry.Name(), err)
+		}
+	}
+	for _, stmt := range []string{
+		"PRAGMA user_version = 6",
+		"INSERT INTO notification_channels (id, name, type, url, enabled, created_at) VALUES (7, 'ops', 'webhook', 'https://hooks.example.com/abc', 0, 1000)",
+	} {
+		if _, err := old.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old.Close()
+
+	s, err := OpenSQLite(ctx, path, 5*time.Second)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer s.Close()
+
+	got, err := s.GetChannel(ctx, 7)
+	want := Channel{ID: 7, Name: "ops", Type: ChannelWebhook, Target: "https://hooks.example.com/abc", Enabled: false, CreatedAt: time.UnixMilli(1000).UTC()}
+	if err != nil || got != want {
+		t.Errorf("channel after upgrade = %+v, %v; want %+v", got, err, want)
+	}
+	if _, err := s.CreateChannel(ctx, Channel{Name: "mail", Type: ChannelEmail, Target: "a@example.com", Enabled: true}); err != nil {
+		t.Errorf("new channel type after upgrade: %v", err)
 	}
 }

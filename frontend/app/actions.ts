@@ -4,6 +4,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   ApiError,
+  type ChannelType,
   createChannel,
   createMonitor,
   deleteChannel,
@@ -123,7 +124,7 @@ export async function deleteMonitorAction(formData: FormData): Promise<void> {
 
 export type ChannelFormState = {
   error: string | null;
-  values: { name: string; url: string } | null;
+  values: { name: string; type: string; target: string } | null;
 };
 
 export async function createChannelAction(
@@ -132,10 +133,11 @@ export async function createChannelAction(
 ): Promise<ChannelFormState> {
   const values = {
     name: String(formData.get("name") ?? ""),
-    url: String(formData.get("url") ?? ""),
+    type: String(formData.get("type") ?? ""),
+    target: String(formData.get("target") ?? ""),
   };
   try {
-    await createChannel(values);
+    await createChannel({ ...values, type: values.type as ChannelType });
   } catch (err) {
     return { error: describe(err), values };
   }

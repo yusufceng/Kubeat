@@ -65,7 +65,7 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 | `POST` | `/api/v1/discovery/import` | Seçilen hedefleri monitor'a çevirir |
 | `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye |
 | `GET` | `/api/v1/channels` | Bildirim kanalları (URL'ler maskelenir) |
-| `POST` | `/api/v1/channels` | Webhook kanalı ekler |
+| `POST` | `/api/v1/channels` | Kanal ekler: `{"name", "type", "target"}` |
 | `DELETE` | `/api/v1/channels/{id}` | Kanalı siler |
 | `POST` | `/api/v1/channels/{id}/test` | Kanala test bildirimi gönderir |
 
@@ -144,7 +144,22 @@ HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
 açılır ve bildirim gider; sertifika yenilenince olay kapanır. Bu olay
 kesintilerden bağımsızdır: hedef çalışırken de açık olabilir.
 
-Webhook kanalına şu gövdeyle `POST` yapılır. `text` alanı insan tarafından
+### Bildirim kanalları
+
+| Tür | Hedef | Gönderilen |
+| --- | --- | --- |
+| `slack` | Slack incoming webhook URL'i | `{"text": "..."}` |
+| `teams` | Teams workflow webhook URL'i | Adaptive Card içeren mesaj |
+| `email` | Virgülle ayrılmış adresler | Düz metin e-posta |
+| `webhook` | Herhangi bir URL | Aşağıdaki JSON gövdesi |
+
+E-posta için bir SMTP sunucusu tanımlanmalıdır (`UPTIME_SMTP_*`); tanımlı
+değilse e-posta kanalı eklenemez. Varsayılan bağlantı güvenliği `starttls`
+olup sunucu STARTTLS sunmuyorsa gönderim reddedilir, şifresiz gönderilmez.
+
+Webhook URL'leri API yanıtlarında maskelenir.
+
+Genel webhook kanalına şu gövdeyle `POST` yapılır. `text` alanı insan tarafından
 okunabilir özettir.
 
 ```json
@@ -197,6 +212,12 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_KUBECONFIG` | – | Cluster dışında çalışırken kullanılacak kubeconfig dosyası |
 | `UPTIME_KUBE_CONTEXT` | – | Kubeconfig içindeki bağlam; kubeconfig verildiyse zorunlu |
 | `UPTIME_KUBE_TIMEOUT` | `10s` | Cluster API istekleri için zaman aşımı |
+| `UPTIME_SMTP_HOST` | – | E-posta kanalları için SMTP sunucusu |
+| `UPTIME_SMTP_PORT` | `587` | SMTP portu |
+| `UPTIME_SMTP_FROM` | – | Gönderen adresi, örn. `Kubeat <kubeat@ornek.com>` |
+| `UPTIME_SMTP_SECURITY` | `starttls` | `starttls`, `tls` ya da `none` |
+| `UPTIME_SMTP_USERNAME` | – | SMTP kullanıcı adı; boşsa kimlik doğrulama yapılmaz |
+| `UPTIME_SMTP_PASSWORD` | – | SMTP parolası |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
