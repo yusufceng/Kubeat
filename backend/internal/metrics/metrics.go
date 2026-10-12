@@ -32,6 +32,8 @@ type Metrics struct {
 	notificationsDrop prometheus.Counter
 	heartbeats        *prometheus.CounterVec
 	lastHeartbeat     prometheus.Gauge
+	backups           *prometheus.CounterVec
+	lastBackup        prometheus.Gauge
 }
 
 // New returns Metrics with the Go runtime and process collectors registered.
@@ -85,6 +87,15 @@ func New(version string) *Metrics {
 		}),
 	}
 
+	m.backups = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kubeat_backups_total",
+		Help: "Database backups attempted, by outcome.",
+	}, []string{"result"})
+	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "kubeat_backup_last_success_timestamp_seconds",
+		Help: "When a database backup last succeeded; 0 if none has since the process started.",
+	})
+
 	build := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "kubeat_build_info",
 		Help:        "Always 1; the version is in the label.",
@@ -100,6 +111,7 @@ func New(version string) *Metrics {
 		m.resultsWritten, m.resultsDropped,
 		m.notifications, m.notificationsDrop,
 		m.heartbeats, m.lastHeartbeat,
+		m.backups, m.lastBackup,
 	)
 	return m
 }
@@ -210,6 +222,17 @@ func (m *Metrics) Heartbeat(result string, at time.Time) {
 	m.heartbeats.WithLabelValues(result).Inc()
 	if result == HeartbeatSent {
 		m.lastHeartbeat.Set(float64(at.UnixMilli()) / 1000)
+	}
+}
+
+// Backup records one backup attempt.
+func (m *Metrics) Backup(ok bool, at time.Time) {
+	if m == nil {
+		return
+	}
+	m.backups.WithLabelValues(resultLabel(ok, "ok", "failed")).Inc()
+	if ok {
+		m.lastBackup.Set(float64(at.UnixMilli()) / 1000)
 	}
 }
 

@@ -181,11 +181,7 @@ dispatch:
 		s.setInFlight(m.ID, true)
 		select {
 		case jobs <- m:
-			sc.next = sc.next.Add(sc.interval)
-			if sc.next.Before(now) {
-				// Fell behind (slow check or full queue): do not try to catch up.
-				sc.next = now.Add(sc.interval)
-			}
+			sc.next = nextAfter(sc.next, sc.interval, now)
 		case <-deadline.C:
 			// The workers were busy for the whole tick; the rest stay due
 			// and go first on the next one.
@@ -206,6 +202,21 @@ dispatch:
 
 	s.lastTick.Store(now.UnixNano())
 	s.opts.Metrics.SchedulerTick(now)
+}
+
+// nextAfter returns the first time after now that is a whole number of
+// intervals past due. A monitor that fell behind (a slow check, a busy
+// pool, a stalled database) skips the runs it missed instead of catching
+// up, and keeps its place in the cycle: resetting to "now plus interval"
+// would put every monitor that fell behind together on the same instant
+// from then on.
+func nextAfter(due time.Time, interval time.Duration, now time.Time) time.Time {
+	next := due.Add(interval)
+	if !next.After(now) {
+		missed := now.Sub(next)/interval + 1
+		next = next.Add(missed * interval)
+	}
+	return next
 }
 
 func jitter(max time.Duration) time.Duration {

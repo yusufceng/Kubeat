@@ -57,6 +57,11 @@ type Config struct {
 	PrometheusCPUQuery           string        // UPTIME_PROMETHEUS_CPU_QUERY
 	PrometheusMemoryQuery        string        // UPTIME_PROMETHEUS_MEMORY_QUERY
 
+	// Periodic copies of the database; off while the directory is empty.
+	BackupDir      string        // UPTIME_BACKUP_DIR
+	BackupInterval time.Duration // UPTIME_BACKUP_INTERVAL
+	BackupKeep     int           // UPTIME_BACKUP_KEEP
+
 	// Heartbeats go to an external dead man's switch; off while the URL is
 	// empty. MetricsTimeout bounds the database read done for a scrape.
 	HeartbeatURL      string        // UPTIME_HEARTBEAT_URL
@@ -91,6 +96,7 @@ func Load() (Config, error) {
 		APIToken: envString("UPTIME_API_TOKEN", ""),
 
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
+		BackupDir:    envString("UPTIME_BACKUP_DIR", ""),
 
 		PrometheusURL:         envString("UPTIME_PROMETHEUS_URL", ""),
 		PrometheusTokenFile:   envString("UPTIME_PROMETHEUS_TOKEN_FILE", ""),
@@ -132,6 +138,7 @@ func Load() (Config, error) {
 		{&cfg.HeartbeatInterval, "UPTIME_HEARTBEAT_INTERVAL", time.Minute},
 		{&cfg.HeartbeatTimeout, "UPTIME_HEARTBEAT_TIMEOUT", 10 * time.Second},
 		{&cfg.MetricsTimeout, "UPTIME_METRICS_TIMEOUT", 5 * time.Second},
+		{&cfg.BackupInterval, "UPTIME_BACKUP_INTERVAL", 24 * time.Hour},
 		{&cfg.PrometheusTimeout, "UPTIME_PROMETHEUS_TIMEOUT", 10 * time.Second},
 		{&cfg.PrometheusRateWindow, "UPTIME_PROMETHEUS_RATE_WINDOW", 5 * time.Minute},
 	}
@@ -158,6 +165,7 @@ func Load() (Config, error) {
 		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 100},
 		{&cfg.NotifyAttempts, "UPTIME_NOTIFY_ATTEMPTS", 3},
 		{&cfg.SMTPPort, "UPTIME_SMTP_PORT", 587},
+		{&cfg.BackupKeep, "UPTIME_BACKUP_KEEP", 7},
 	}
 	for _, i := range ints {
 		v, err := envPositiveInt(i.key, i.def)

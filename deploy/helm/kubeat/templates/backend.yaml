@@ -12,6 +12,23 @@ spec:
   resources:
     requests:
       storage: {{ .Values.backend.persistence.size }}
+{{- if and .Values.backup.enabled (not .Values.backup.persistence.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-backup
+  labels:
+    {{- include "kubeat.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.backup.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.persistence.size }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -62,6 +79,14 @@ spec:
                   key: token
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
+            {{- if .Values.backup.enabled }}
+            - name: UPTIME_BACKUP_DIR
+              value: /backup
+            - name: UPTIME_BACKUP_INTERVAL
+              value: {{ .Values.backup.interval | quote }}
+            - name: UPTIME_BACKUP_KEEP
+              value: {{ .Values.backup.keep | quote }}
+            {{- end }}
             {{- with .Values.prometheus }}
             {{- if .url }}
             - name: UPTIME_PROMETHEUS_URL
@@ -135,10 +160,19 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if .Values.backup.enabled }}
+            - name: backup
+              mountPath: /backup
+            {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-data
+        {{- if .Values.backup.enabled }}
+        - name: backup
+          persistentVolumeClaim:
+            claimName: {{ .Values.backup.persistence.existingClaim | default (printf "%s-backup" .Release.Name) }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

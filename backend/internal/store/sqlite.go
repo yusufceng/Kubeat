@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	"modernc.org/sqlite"
@@ -27,6 +28,9 @@ var migrationFiles embed.FS
 type SQLite struct {
 	write *sql.DB
 	read  *sql.DB
+	// path and busyTimeout are kept to open extra connections for backups.
+	path        string
+	busyTimeout time.Duration
 }
 
 var _ Store = (*SQLite)(nil)
@@ -51,7 +55,56 @@ func OpenSQLite(ctx context.Context, path string, busyTimeout time.Duration) (*S
 		write.Close()
 		return nil, err
 	}
-	return &SQLite{write: write, read: read}, nil
+	return &SQLite{write: write, read: read, path: path, busyTimeout: busyTimeout}, nil
+}
+
+// Backup writes a consistent, compacted copy of the database to dest, which
+// must not exist. It runs while the database is in use: the copy reflects
+// the moment it started, and writers are not held up.
+func (s *SQLite) Backup(ctx context.Context, dest string) error {
+	// A connection of its own, so the single write connection stays free for
+	// check results while a large database is being copied.
+	db, err := openPool(s.path, s.busyTimeout, true)
+	if err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	// VACUUM INTO takes no bound parameters; the path is quoted as a literal.
+	quoted := "'" + strings.ReplaceAll(dest, "'", "''") + "'"
+	if _, err := db.ExecContext(ctx, "VACUUM INTO "+quoted); err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
+	return nil
+}
+
+// SchemaVersion returns the number of migrations applied to the database
+// file at path, without modifying it.
+func SchemaVersion(ctx context.Context, path string) (int, error) {
+	q := url.Values{}
+	q.Set("mode", "ro")
+	db, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Opaque: url.PathEscape(path), RawQuery: q.Encode()}).String())
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	var version int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return 0, err
+	}
+	// Reading the schema fails on a file that is not a usable database.
+	var tables int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
+// CurrentSchemaVersion is the schema version this binary creates.
+func CurrentSchemaVersion() int {
+	names, _ := fs.Glob(migrationFiles, "migrations/*.sql")
+	return len(names)
 }
 
 func openPool(path string, busyTimeout time.Duration, writer bool) (*sql.DB, error) {
@@ -554,14 +607,29 @@ func scanCheckResults(rows *sql.Rows) ([]CheckResult, error) {
 	return results, nil
 }
 
+// deleteChunk is how many results one retention statement removes. After
+// downtime there can be millions to delete; in one statement that would
+// hold the write connection, and with it the storing of new results, for
+// the whole time.
+const deleteChunk = 20000
+
 func (s *SQLite) DeleteCheckResultsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := s.write.ExecContext(ctx, "DELETE FROM check_results WHERE checked_at < ?", cutoff.UnixMilli())
-	if err != nil {
-		return 0, fmt.Errorf("delete check results: %w", err)
+	var total int64
+	for {
+		res, err := s.write.ExecContext(ctx,
+			`DELETE FROM check_results WHERE id IN (
+			     SELECT id FROM check_results WHERE checked_at < ? LIMIT ?)`,
+			cutoff.UnixMilli(), deleteChunk)
+		if err != nil {
+			return total, fmt.Errorf("delete check results: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("delete check results: %w", err)
+		}
+		total += n
+		if n < deleteChunk {
+			return total, nil
+		}
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("delete check results: %w", err)
-	}
-	return n, nil
 }

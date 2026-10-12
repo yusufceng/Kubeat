@@ -53,6 +53,9 @@ func TestLoadDefaults(t *testing.T) {
 		PrometheusTimeout:    10 * time.Second,
 		PrometheusRateWindow: 5 * time.Minute,
 
+		BackupInterval: 24 * time.Hour,
+		BackupKeep:     7,
+
 		HeartbeatInterval: time.Minute,
 		HeartbeatTimeout:  10 * time.Second,
 		MetricsTimeout:    5 * time.Second,

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -516,5 +517,87 @@ func TestRecentCheckResults(t *testing.T) {
 	}
 	if empty, err := s.RecentCheckResults(ctx, nil, 3); err != nil || len(empty) != 0 {
 		t.Errorf("no monitors: %v, %v", empty, err)
+	}
+}
+
+func TestBackup(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	m, _ := s.CreateMonitor(ctx, newMonitor("api"))
+	base := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	if err := s.InsertCheckResults(ctx, []CheckResult{{MonitorID: m.ID, CheckedAt: base, Up: true, Latency: time.Millisecond}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A destination with characters that need quoting in SQL.
+	dest := filepath.Join(t.TempDir(), "it's a backup.db")
+	if err := s.Backup(ctx, dest); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+
+	// Changes after the backup are not in it.
+	if _, err := s.CreateMonitor(ctx, newMonitor("later")); err != nil {
+		t.Fatal(err)
+	}
+
+	if v, err := SchemaVersion(ctx, dest); err != nil || v != CurrentSchemaVersion() {
+		t.Errorf("SchemaVersion of the backup = %d, %v; want %d", v, err, CurrentSchemaVersion())
+	}
+	restored, err := OpenSQLite(ctx, dest, 5*time.Second)
+	if err != nil {
+		t.Fatalf("open the backup: %v", err)
+	}
+	defer restored.Close()
+	monitors, _ := restored.ListMonitors(ctx)
+	if len(monitors) != 1 || monitors[0].Name != "api" {
+		t.Errorf("monitors in the backup = %+v, want only api", monitors)
+	}
+	if results, _ := restored.ListCheckResults(ctx, m.ID, 10); len(results) != 1 || !results[0].CheckedAt.Equal(base) {
+		t.Errorf("results in the backup = %+v", results)
+	}
+
+	// An existing file is never overwritten.
+	if err := s.Backup(ctx, dest); err == nil {
+		t.Error("backup overwrote an existing file")
+	}
+	if _, err := SchemaVersion(ctx, filepath.Join(t.TempDir(), "missing.db")); err == nil {
+		t.Error("SchemaVersion of a missing file succeeded")
+	}
+	junk := filepath.Join(t.TempDir(), "junk.db")
+	os.WriteFile(junk, []byte("this is not a database, just some text that is long enough"), 0o600)
+	if _, err := SchemaVersion(ctx, junk); err == nil {
+		t.Error("SchemaVersion of a non-database file succeeded")
+	}
+}
+
+func TestRetentionDeletesInChunks(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	m, _ := s.CreateMonitor(ctx, newMonitor("api"))
+	base := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+
+	// More than two chunks of old results, plus a few to keep.
+	const old = 2*deleteChunk + 123
+	batch := make([]CheckResult, 0, old+3)
+	for i := 0; i < old; i++ {
+		batch = append(batch, CheckResult{MonitorID: m.ID, CheckedAt: base.Add(-time.Duration(i+1) * time.Second), Up: true})
+	}
+	for i := 0; i < 3; i++ {
+		batch = append(batch, CheckResult{MonitorID: m.ID, CheckedAt: base.Add(time.Duration(i) * time.Second), Up: true})
+	}
+	if err := s.InsertCheckResults(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.DeleteCheckResultsBefore(ctx, base)
+	if err != nil || n != old {
+		t.Fatalf("deleted %d, %v; want %d", n, err, old)
+	}
+	left, _ := s.ListCheckResults(ctx, m.ID, 100)
+	if len(left) != 3 || left[2].CheckedAt.Before(base) {
+		t.Errorf("%d results left, want the 3 at or after the cutoff", len(left))
+	}
+	if n, _ := s.DeleteCheckResultsBefore(ctx, base); n != 0 {
+		t.Errorf("second run deleted %d", n)
 	}
 }

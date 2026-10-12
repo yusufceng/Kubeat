@@ -49,6 +49,20 @@ kabaca `worker sayısı / ortalama kontrol süresi` kontrol/sn.
    ana sayfa sorunlu monitor'ları ve namespace özetini gösteriyor, her
    namespace'in kendi sayfası var.
 
+4. **Açılıştan sonraki 16 saniye hiç sonuç yazılmıyordu.** Saatlik
+   özetlerin ilk hesaplaması tek bir ifadeyle 10 milyon satırı okuyor ve
+   veritabanının tek yazma bağlantısını tutuyordu; kontroller de bu sırada
+   bekliyordu. Hesaplama artık saat saat yapılıyor, retention silmesi de
+   20.000 satırlık parçalarla; arada sonuçlar yazılabiliyor. Bekleyen
+   monitor'lar aynı ana yığılmasın diye geciken bir monitor döngüdeki
+   yerini koruyor.
+
+## Yedekleme
+
+600 MB'lık veritabanının kopyası kontroller sürerken 8-10 saniyede alındı
+(580 MB). Bu sırada sonuç yazımı kesilmedi. Kopyadan başlatılan sunucu 500
+monitor'u ve 10 milyon sonucu sorunsuz okudu.
+
 ## Ölçülmeyenler
 
 - Uzun süreli çalışma (günler): veritabanı büyümesi, retention'ın

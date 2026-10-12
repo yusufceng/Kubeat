@@ -504,3 +504,34 @@ func TestMonitorAddedLaterIsCheckedWithinMaxJitter(t *testing.T) {
 	// Not spread over its hour-long interval: checked almost at once.
 	waitFor(t, "the first check of the added monitor", func() bool { return checker.count.Load() >= 1 })
 }
+
+func TestNextAfterKeepsThePhase(t *testing.T) {
+	base := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	interval := 30 * time.Second
+	tests := []struct {
+		name     string
+		due, now time.Time
+		want     time.Time
+	}{
+		{"on time", base, base, base.Add(30 * time.Second)},
+		{"dispatched a little late", base, base.Add(2 * time.Second), base.Add(30 * time.Second)},
+		{"exactly one interval late", base, base.Add(30 * time.Second), base.Add(60 * time.Second)},
+		{"far behind", base, base.Add(95 * time.Second), base.Add(120 * time.Second)},
+	}
+	for _, tt := range tests {
+		got := nextAfter(tt.due, interval, tt.now)
+		if !got.Equal(tt.want) {
+			t.Errorf("%s: next = %s, want %s", tt.name, got.Sub(base), tt.want.Sub(base))
+		}
+		if !got.After(tt.now) {
+			t.Errorf("%s: next %s is not after now", tt.name, got.Sub(base))
+		}
+	}
+
+	// Two monitors due 10 s apart that both fall behind stay 10 s apart.
+	now := base.Add(5 * time.Minute)
+	a, b := nextAfter(base, interval, now), nextAfter(base.Add(10*time.Second), interval, now)
+	if gap := b.Sub(a); gap != 10*time.Second && gap != -20*time.Second {
+		t.Errorf("monitors that fell behind together are %s apart, want their original 10s offset", gap)
+	}
+}

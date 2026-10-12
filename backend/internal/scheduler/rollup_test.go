@@ -72,9 +72,9 @@ func TestRunRollupsBackfillsThenRefreshesRecentHours(t *testing.T) {
 			Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		})
 	}()
-	waitFor(t, "periodic rollups", func() bool {
-		ranges, _ := st.snapshot()
-		return len(ranges) >= 3
+	waitFor(t, "the backfill and two periodic rollups", func() bool {
+		_, pruned := st.snapshot()
+		return len(pruned) >= 2 // pruning follows each periodic run
 	})
 	cancel()
 	<-done
@@ -88,12 +88,34 @@ func TestRunRollupsBackfillsThenRefreshesRecentHours(t *testing.T) {
 			t.Errorf("range %d is empty: %v", i, r)
 		}
 	}
-	// The first run reaches back over the whole raw retention.
+
+	// The backfill covers the whole raw retention in steps of one hour, so
+	// that no single statement holds the write connection for long.
 	if age := started.Sub(ranges[0][0]); age < 46*time.Hour || age > 48*time.Hour {
 		t.Errorf("backfill starts %s ago, want just under 48h", age)
 	}
+	steps := 0
+	for i, r := range ranges {
+		if r[1].Sub(r[0]) > store.RollupBucket {
+			break // the periodic runs span two hours
+		}
+		if i > 0 && !r[0].Equal(ranges[i-1][1]) {
+			t.Fatalf("backfill step %d starts at %s, want where the previous ended (%s)", i, r[0], ranges[i-1][1])
+		}
+		steps++
+	}
+	if steps < 47 || steps > 49 {
+		t.Errorf("backfill took %d steps, want one per hour of the 48h retention", steps)
+	}
+	if last := ranges[steps-1][1]; started.Sub(last) > time.Minute || last.Sub(started) > time.Minute {
+		t.Errorf("backfill ends at %s, want now (%s)", last, started)
+	}
+
 	// Later runs only redo the previous and the current hour.
-	if age := started.Sub(ranges[1][0]); age < time.Hour-time.Second || age > 2*time.Hour {
+	if len(ranges) <= steps {
+		t.Fatalf("no periodic run after the backfill: %d ranges, %d backfill steps", len(ranges), steps)
+	}
+	if age := started.Sub(ranges[steps][0]); age < time.Hour-time.Second || age > 2*time.Hour {
 		t.Errorf("periodic run starts %s ago, want between 1h and 2h", age)
 	}
 	if len(pruned) == 0 {

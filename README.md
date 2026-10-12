@@ -205,6 +205,34 @@ verir. Heartbeat yalnızca scheduler son aralıkta çalıştıysa gönderilir; s
 ayakta ama kontrol yapmıyorsa da istekler kesilir. Bu servisin izlenen
 cluster'ın dışında olması gerekir, yoksa ikisi birlikte düşer.
 
+## Yedekleme ve geri yükleme
+
+`UPTIME_BACKUP_DIR` ayarlanırsa backend veritabanının tutarlı bir kopyasını
+`UPTIME_BACKUP_INTERVAL` (varsayılan 24 saat) aralıkla o dizine yazar ve en
+yeni `UPTIME_BACKUP_KEEP` (varsayılan 7) kopyayı tutar. Kopya araç çalışırken
+alınır; kontroller ve sonuçların yazılması bu sırada sürer. Her kopya
+açılıp şema sürümü doğrulandıktan sonra saklanır. Dosyalar
+`kubeat-20261012T030000Z.db` biçiminde adlandırılır.
+
+Yeniden başlatma ek kopya üretmez: yeni kopya, en son kopyanın üzerinden
+aralık kadar zaman geçince alınır.
+
+Yedek dizini veritabanından **ayrı bir volume** olmalıdır; aynı volume'daki
+kopya veritabanıyla birlikte kaybolur. Chart'ta `backup.enabled=true` bunun
+için ayrı bir PVC oluşturur. Bu yine aynı cluster'dadır: cluster'ın
+tamamını kaybetmeye karşı kopyaların dışarıya da taşınması gerekir.
+
+Geri yükleme:
+
+1. Backend'i durdurun (`kubectl scale deploy/kubeat-backend --replicas=0`).
+2. Seçtiğiniz kopyayı veritabanı dosyasının yerine kopyalayın ve yanındaki
+   `-wal` ile `-shm` dosyalarını silin.
+3. Backend'i başlatın. Kopyadan sonraki kontrol sonuçları ve değişiklikler
+   kaybolur.
+
+`kubeat_backup_last_success_timestamp_seconds` metriği son başarılı kopyanın
+zamanını verir; ilerlemiyorsa yedekleme çalışmıyordur.
+
 ## Keşif
 
 Backend cluster içinde çalışırken pod'un servis hesabıyla cluster'a bağlanır
@@ -338,6 +366,9 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_PROMETHEUS_RATE_WINDOW` | `5m` | CPU kullanımının ortalamasının alındığı süre |
 | `UPTIME_PROMETHEUS_CPU_QUERY` | – | Varsayılan CPU sorgusunun yerine kullanılır |
 | `UPTIME_PROMETHEUS_MEMORY_QUERY` | – | Varsayılan bellek sorgusunun yerine kullanılır |
+| `UPTIME_BACKUP_DIR` | – | Veritabanı kopyalarının yazılacağı dizin; boşsa yedekleme kapalıdır |
+| `UPTIME_BACKUP_INTERVAL` | `24h` | Kopyalar arasındaki süre |
+| `UPTIME_BACKUP_KEEP` | `7` | Saklanan kopya sayısı |
 | `UPTIME_HEARTBEAT_URL` | – | Dead man's switch adresi; boşsa heartbeat gönderilmez |
 | `UPTIME_HEARTBEAT_INTERVAL` | `1m` | Heartbeat aralığı; `UPTIME_SCHEDULER_TICK`'in en az iki katı |
 | `UPTIME_HEARTBEAT_TIMEOUT` | `10s` | Heartbeat isteğinin zaman aşımı |

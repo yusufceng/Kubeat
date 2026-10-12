@@ -15,6 +15,7 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/api"
+	"github.com/yusufceng/Kubeat/backend/internal/backup"
 	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
 	"github.com/yusufceng/Kubeat/backend/internal/heartbeat"
@@ -93,6 +94,29 @@ func main() {
 		Metrics:       meter,
 		Logger:        logger,
 	})
+	if cfg.BackupDir != "" {
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			backup.Run(ctx, db, backup.Options{
+				Dir:      cfg.BackupDir,
+				Interval: cfg.BackupInterval,
+				Keep:     cfg.BackupKeep,
+				// A backup is only kept if it opens as a database of the
+				// version this binary writes.
+				Verify: func(ctx context.Context, path string) error {
+					v, err := store.SchemaVersion(ctx, path)
+					if err == nil && v != store.CurrentSchemaVersion() {
+						err = fmt.Errorf("schema version %d, want %d", v, store.CurrentSchemaVersion())
+					}
+					return err
+				},
+				Metrics: meter,
+				Logger:  logger,
+			})
+		}()
+		logger.Info("backups enabled", "dir", cfg.BackupDir, "interval", cfg.BackupInterval.String(), "keep", cfg.BackupKeep)
+	}
 	if cfg.HeartbeatURL != "" {
 		background.Add(1)
 		go func() {

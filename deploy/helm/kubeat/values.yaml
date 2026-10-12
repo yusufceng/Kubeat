@@ -34,6 +34,17 @@ frontend:
     limits:
       memory: 512Mi
 
+# Periodic copies of the database on a volume of their own. A copy on the
+# database's own volume would be lost together with it.
+backup:
+  enabled: false
+  interval: 24h
+  keep: 7
+  persistence:
+    size: 5Gi
+    storageClass: ""     # empty uses the cluster default
+    existingClaim: ""    # use this PVC instead of creating one
+
 # The backend API only answers requests carrying a shared secret, which the
 # frontend sends. By default the chart generates it once and keeps it.
 apiToken:

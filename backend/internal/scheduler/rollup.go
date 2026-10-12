@@ -30,8 +30,14 @@ type RollupOptions struct {
 // At start it summarizes every hour whose raw results are still complete,
 // which also fills in whatever was missed while the process was down.
 func RunRollups(ctx context.Context, st Rollups, opts RollupOptions) {
+	// The backfill goes one hour at a time. Done in a single statement it
+	// holds the database's only write connection for as long as it takes to
+	// read every result there is, and check results cannot be stored
+	// meanwhile; in steps, they get their turn between two hours.
 	now := time.Now().UTC()
-	rollup(ctx, st, oldestCompleteHour(now, opts.RawRetention), now, opts.Logger)
+	for from := oldestCompleteHour(now, opts.RawRetention); from.Before(now) && ctx.Err() == nil; from = from.Add(store.RollupBucket) {
+		rollup(ctx, st, from, minTime(from.Add(store.RollupBucket), now), opts.Logger)
+	}
 
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
@@ -57,6 +63,13 @@ func RunRollups(ctx context.Context, st Rollups, opts RollupOptions) {
 			opts.Logger.Info("old rollups deleted", "rows", n)
 		}
 	}
+}
+
+func minTime(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
 }
 
 // oldestCompleteHour is the first hour boundary at or after now-retention:
