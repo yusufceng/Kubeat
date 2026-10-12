@@ -7,7 +7,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 12;
+export const REQUIRED_API_REVISION = 13;
 
 export type Health = {
   status: string;
@@ -164,8 +164,10 @@ export type Monitor = CheckOptions & {
   type: MonitorType;
   /** Empty for push monitors. */
   target: string;
-  /** Empty for monitors entered by hand. */
+  /** The namespace of a discovered monitor, or the group of one entered by hand; empty for none. */
   namespace: string;
+  /** Free-form labels, sorted. */
+  tags: string[];
   /** The discovered object, e.g. "service/api:80"; empty for manual monitors. */
   source: string;
   interval_seconds: number;
@@ -206,6 +208,9 @@ export type MonitorSettings = {
   timeout_seconds: number;
   failure_threshold: number;
   description?: string;
+  /** The group of a monitor entered by hand; a discovered one keeps its namespace. */
+  namespace?: string;
+  tags?: string[];
   retry_interval_seconds?: number;
   inverted?: boolean;
   http?: Partial<HttpOptions>;
@@ -262,6 +267,7 @@ function withDefaults(m: Monitor): Monitor {
     ...m,
     namespace: m.namespace ?? "",
     source: m.source ?? "",
+    tags: m.tags ?? [],
     failure_threshold: m.failure_threshold ?? 0,
     description: m.description ?? "",
     retry_interval_seconds: m.retry_interval_seconds ?? 0,

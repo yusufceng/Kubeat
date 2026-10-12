@@ -292,3 +292,71 @@ func newRecorder() *recorder { return &recorder{header: http.Header{}, status: h
 func (r *recorder) Header() http.Header         { return r.header }
 func (r *recorder) Write(b []byte) (int, error) { return len(b), nil }
 func (r *recorder) WriteHeader(status int)      { r.status = status }
+
+func TestTagsAndGroupsAPI(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	ctx := context.Background()
+
+	var m monitorResponse
+	body := monitorJSON("pay", "tcp", "pay:443", `"namespace":" Ödeme sistemleri ","tags":[" prod ","team-pay","prod"]`)
+	if code := do(t, "POST", base, body, &m); code != http.StatusCreated {
+		t.Fatalf("create: status = %d", code)
+	}
+	if m.Namespace != "Ödeme sistemleri" || strings.Join(m.Tags, ",") != "prod,team-pay" {
+		t.Errorf("created = namespace %q, tags %v", m.Namespace, m.Tags)
+	}
+	// A monitor without tags answers with an empty list, not null.
+	var plain monitorResponse
+	do(t, "POST", base, monitorJSON("plain", "tcp", "x:1", ""), &plain)
+	if plain.Tags == nil || len(plain.Tags) != 0 || plain.Namespace != "" {
+		t.Errorf("plain = namespace %q, tags %#v", plain.Namespace, plain.Tags)
+	}
+
+	// An update that names neither leaves both; one that does replaces them.
+	var updated monitorResponse
+	do(t, "PATCH", base+"/1", `{"interval_seconds":120}`, &updated)
+	if updated.Namespace != "Ödeme sistemleri" || len(updated.Tags) != 2 {
+		t.Errorf("after an unrelated update = namespace %q, tags %v", updated.Namespace, updated.Tags)
+	}
+	do(t, "PATCH", base+"/1", `{"namespace":"","tags":["staging"]}`, &updated)
+	if updated.Namespace != "" || strings.Join(updated.Tags, ",") != "staging" {
+		t.Errorf("after moving out of the group = namespace %q, tags %v", updated.Namespace, updated.Tags)
+	}
+
+	// A discovered monitor keeps its namespace but can be tagged.
+	discovered, err := db.CreateMonitor(ctx, store.Monitor{Name: "shop/service/web:80", Namespace: "shop", Source: "service/web:80",
+		Type: store.MonitorTCP, Target: "web.shop.svc:80", Interval: time.Minute, Timeout: time.Second, FailureThreshold: 1, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := base + "/" + itoa(discovered.ID)
+	if code := do(t, "PATCH", url, `{"namespace":"elsewhere"}`, nil); code != http.StatusBadRequest {
+		t.Errorf("moving a discovered monitor: status = %d, want 400", code)
+	}
+	if code := do(t, "PATCH", url, `{"namespace":"shop","tags":["critical"]}`, &updated); code != http.StatusOK ||
+		updated.Namespace != "shop" || strings.Join(updated.Tags, ",") != "critical" {
+		t.Errorf("tagging a discovered monitor: status = %d, monitor = %+v", code, updated)
+	}
+
+	invalid := map[string]string{
+		"group with a slash":  `"namespace":"a/b"`,
+		"reserved group":      `"namespace":"_"`,
+		"long group":          `"namespace":"` + strings.Repeat("a", 64) + `"`,
+		"tag with a comma":    `"tags":["a,b"]`,
+		"empty tag":           `"tags":[" "]`,
+		"long tag":            `"tags":["` + strings.Repeat("a", 31) + `"]`,
+		"too many tags":       `"tags":["1","2","3","4","5","6","7","8","9","10","11"]`,
+		"tag with a new line": `"tags":["a\nb"]`,
+	}
+	for name, extra := range invalid {
+		if code := do(t, "POST", base, monitorJSON("x", "tcp", "x:1", extra), nil); code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, code)
+		}
+	}
+	// A group may have the length of a namespace name in characters, not bytes.
+	long := strings.Repeat("ş", 63)
+	if code := do(t, "POST", base, monitorJSON("uzun", "tcp", "x:1", `"namespace":"`+long+`"`), nil); code != http.StatusCreated {
+		t.Errorf("a 63-character group with non-ASCII letters: status = %d", code)
+	}
+}

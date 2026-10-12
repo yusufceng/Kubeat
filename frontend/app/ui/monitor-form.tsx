@@ -75,7 +75,16 @@ function Check({ name, label, hint, defaultChecked }: { name: string; label: str
  * The form of a monitor: every setting of every type. With a monitor it
  * edits that one; without, it creates one of the type chosen at the top.
  */
-export function MonitorForm({ monitor, defaults }: { monitor?: Monitor; defaults: MonitorDefaults }) {
+export function MonitorForm({
+  monitor,
+  defaults,
+  groups,
+}: {
+  monitor?: Monitor;
+  defaults: MonitorDefaults;
+  /** The groups that exist, offered as suggestions. */
+  groups: string[];
+}) {
   const [type, setType] = useState<MonitorType>(monitor?.type ?? "http");
   const [auth, setAuth] = useState(monitor?.http?.auth ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +162,30 @@ export function MonitorForm({ monitor, defaults }: { monitor?: Monitor; defaults
             placeholder="Neyi izliyor, kime ait?"
             className="field"
           />
+        </Field>
+        {discovered ? (
+          <Field label="Namespace" span={3} hint="Keşfedilen monitor nesnesinin namespace'inde kalır.">
+            <input defaultValue={monitor?.namespace} disabled className="field" />
+          </Field>
+        ) : (
+          <Field label="Grup (isteğe bağlı)" span={3} hint="Listede bu ad altında toplanır; bildirim kanalları gruba göre sınırlanabilir.">
+            <input
+              name="group"
+              list="monitor-groups"
+              defaultValue={monitor?.namespace}
+              maxLength={63}
+              placeholder="Ödeme sistemleri"
+              className="field"
+            />
+            <datalist id="monitor-groups">
+              {groups.map((g) => (
+                <option key={g} value={g} />
+              ))}
+            </datalist>
+          </Field>
+        )}
+        <Field label="Etiketler (isteğe bağlı)" span={3} hint="Virgülle ayırın. Listede etikete göre süzebilirsiniz.">
+          <input name="tags" defaultValue={monitor?.tags.join(", ")} placeholder="prod, kritik" className="field" />
         </Field>
       </Section>
 

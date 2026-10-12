@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { type BulkAction, bulkMonitorsAction } from "@/app/actions";
 import type { MonitorType } from "@/lib/api";
 import { monitorTypeOrder, typeLabel } from "@/lib/monitor-types";
 import { compareNamespaces, MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
@@ -65,8 +66,49 @@ export function MonitorList({
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [typeFilter, setTypeFilter] = useState<MonitorType | "">("");
+  const [tagFilter, setTagFilter] = useState("");
   // Only what the viewer toggled; everything else follows the default.
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  // In selecting mode a row is ticked instead of opened.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [working, startBulk] = useTransition();
+
+  // A monitor that was deleted elsewhere is no longer there to act on.
+  const chosen = useMemo(() => items.filter((i) => selected.has(i.id)).map((i) => i.id), [items, selected]);
+
+  function toggle(ids: number[], on: boolean) {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function stopSelecting() {
+    setSelecting(false);
+    setSelected(new Set());
+    setBulkError(null);
+  }
+
+  function bulk(action: BulkAction) {
+    if (
+      action === "delete" &&
+      !confirm(`${chosen.length} monitor ve tüm kontrol geçmişleri silinsin mi? Bu geri alınamaz.`)
+    ) {
+      return;
+    }
+    setBulkError(null);
+    startBulk(async () => {
+      const { failed } = await bulkMonitorsAction(chosen, action);
+      if (failed > 0) setBulkError(`${failed} monitor değiştirilemedi.`);
+      else stopSelecting();
+    });
+  }
 
   const counts = useMemo(
     () => ({
@@ -81,16 +123,20 @@ export function MonitorList({
     () => monitorTypeOrder.filter((t) => items.some((i) => i.type === t)),
     [items],
   );
+  const tagsInUse = useMemo(() => [...new Set(items.flatMap((i) => i.tags))].sort(), [items]);
+  // A tag that no monitor has any more cannot be filtered on.
+  const tag = tagsInUse.includes(tagFilter) ? tagFilter : "";
 
   const needle = query.trim().toLocaleLowerCase("tr");
-  const filtering = needle !== "" || stateFilter !== "all" || typeFilter !== "";
+  const filtering = needle !== "" || stateFilter !== "all" || typeFilter !== "" || tag !== "";
   const groups = useMemo(() => {
     const shown = items.filter(
       (i) =>
         matchesState(i, stateFilter) &&
         (typeFilter === "" || i.type === typeFilter) &&
+        (tag === "" || i.tags.includes(tag)) &&
         (needle === "" ||
-          `${i.name} ${i.target} ${i.namespace}`.toLocaleLowerCase("tr").includes(needle)),
+          `${i.name} ${i.target} ${i.namespace} ${i.tags.join(" ")}`.toLocaleLowerCase("tr").includes(needle)),
     );
     const byNamespace = new Map<string, ListItem[]>();
     for (const item of shown) {
@@ -99,7 +145,7 @@ export function MonitorList({
     return [...byNamespace.entries()]
       .sort(([a], [b]) => compareNamespaces(a, b))
       .map(([namespace, group]) => ({ namespace, items: group.sort(byUrgency) }));
-  }, [items, needle, stateFilter, typeFilter]);
+  }, [items, needle, stateFilter, typeFilter, tag]);
 
   const filters: { key: StateFilter; label: string }[] = [
     { key: "all", label: "Tümü" },
@@ -121,7 +167,7 @@ export function MonitorList({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ad, adres ya da namespace ara"
+            placeholder="Ad, adres, grup ya da etiket ara"
             className="field pl-9"
           />
         </label>
@@ -143,12 +189,14 @@ export function MonitorList({
               {f.label} <span className="tabular-nums opacity-70">{counts[f.key]}</span>
             </button>
           ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
           {typesInUse.length > 1 && (
             <select
               aria-label="Tipe göre süz"
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as MonitorType | "")}
-              className="ml-auto rounded-full border-0 bg-sunken px-2 py-1 text-xs text-muted outline-none"
+              className="rounded-full border-0 bg-sunken px-2 py-1 text-xs text-muted outline-none"
             >
               <option value="">Tüm tipler</option>
               {typesInUse.map((t) => (
@@ -158,7 +206,62 @@ export function MonitorList({
               ))}
             </select>
           )}
+          {tagsInUse.length > 0 && (
+            <select
+              aria-label="Etikete göre süz"
+              value={tag}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="max-w-[9rem] rounded-full border-0 bg-sunken px-2 py-1 text-xs text-muted outline-none"
+            >
+              <option value="">Tüm etiketler</option>
+              {tagsInUse.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          )}
+          {items.length > 0 && (
+            <button
+              type="button"
+              onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
+              aria-pressed={selecting}
+              className={`ml-auto rounded-full px-2.5 py-1 text-xs font-medium ${
+                selecting ? "bg-ink text-bg" : "bg-sunken text-muted hover:text-ink"
+              }`}
+            >
+              {selecting ? "Seçimi bırak" : "Seç"}
+            </button>
+          )}
         </div>
+        {selecting && (
+          <div className="flex flex-col gap-2 rounded-lg bg-sunken p-2.5" role="group" aria-label="Toplu işlem">
+            <p className="text-xs text-muted">
+              {chosen.length === 0 ? "İşlem yapılacak monitor'ları işaretleyin." : `${chosen.length} monitor seçildi.`}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" className="btn px-2.5 py-1 text-xs" disabled={chosen.length === 0 || working} onClick={() => bulk("pause")}>
+                Durdur
+              </button>
+              <button type="button" className="btn px-2.5 py-1 text-xs" disabled={chosen.length === 0 || working} onClick={() => bulk("resume")}>
+                Devam ettir
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger px-2.5 py-1 text-xs"
+                disabled={chosen.length === 0 || working}
+                onClick={() => bulk("delete")}
+              >
+                Sil
+              </button>
+            </div>
+            {bulkError && (
+              <p role="alert" className="text-xs text-down">
+                {bulkError}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -195,6 +298,15 @@ export function MonitorList({
                   />
                   <span className="truncate">{namespace || MANUAL_LABEL}</span>
                 </button>
+                {selecting && (
+                  <input
+                    type="checkbox"
+                    aria-label={`${namespace || MANUAL_LABEL} grubunun tümünü seç`}
+                    checked={group.every((i) => selected.has(i.id))}
+                    onChange={(e) => toggle(group.map((i) => i.id), e.target.checked)}
+                    className="h-3.5 w-3.5 accent-(--accent)"
+                  />
+                )}
                 {problems > 0 && (
                   <span className="rounded-full bg-down/12 px-1.5 py-0.5 font-semibold tabular-nums text-down">
                     {problems}
@@ -211,7 +323,14 @@ export function MonitorList({
               {open && (
                 <ul>
                   {group.map((item) => (
-                    <Row key={item.id} item={item} beats={beats} active={item.id === activeId} />
+                    <Row
+                      key={item.id}
+                      item={item}
+                      beats={beats}
+                      active={item.id === activeId}
+                      picked={selecting ? selected.has(item.id) : null}
+                      onPick={(on) => toggle([item.id], on)}
+                    />
                   ))}
                 </ul>
               )}
@@ -223,31 +342,66 @@ export function MonitorList({
   );
 }
 
-function Row({ item, beats, active }: { item: ListItem; beats: number; active: boolean }) {
+function Row({
+  item,
+  beats,
+  active,
+  picked,
+  onPick,
+}: {
+  item: ListItem;
+  beats: number;
+  active: boolean;
+  /** Whether the row is ticked; null when rows are not being selected. */
+  picked: boolean | null;
+  onPick: (on: boolean) => void;
+}) {
   const style = stateStyles[item.state];
+  const content = (
+    <>
+      <span
+        title={style.label}
+        className={`w-14 shrink-0 rounded-full py-0.5 text-center text-xs font-semibold tabular-nums ${style.soft}`}
+      >
+        {pillText(item)}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{item.name}</span>
+        <span className="block truncate text-xs text-muted">
+          {item.kind ?? typeLabel(item.type)}
+          {item.tags.length > 0 && ` · ${item.tags.join(", ")}`}
+          {item.target && ` · ${item.target}`}
+        </span>
+      </span>
+      <Beats beats={item.beats} slots={beats} />
+    </>
+  );
+  const frame = "flex items-center gap-2.5 rounded-lg px-2 py-2";
+
+  if (picked !== null) {
+    return (
+      <li>
+        <label className={`${frame} cursor-pointer ${picked ? "bg-accent/10" : "hover:bg-sunken/60"}`}>
+          <input
+            type="checkbox"
+            checked={picked}
+            onChange={(e) => onPick(e.target.checked)}
+            aria-label={`${item.name} monitor'unu seç`}
+            className="h-4 w-4 shrink-0 accent-(--accent)"
+          />
+          {content}
+        </label>
+      </li>
+    );
+  }
   return (
     <li>
       <Link
         href={`/monitors/${item.id}`}
         aria-current={active ? "page" : undefined}
-        className={`flex items-center gap-2.5 rounded-lg px-2 py-2 ${
-          active ? "bg-sunken" : "hover:bg-sunken/60"
-        }`}
+        className={`${frame} ${active ? "bg-sunken" : "hover:bg-sunken/60"}`}
       >
-        <span
-          title={style.label}
-          className={`w-14 shrink-0 rounded-full py-0.5 text-center text-xs font-semibold tabular-nums ${style.soft}`}
-        >
-          {pillText(item)}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{item.name}</span>
-          <span className="block truncate text-xs text-muted">
-            {item.kind ?? typeLabel(item.type)}
-            {item.target && ` · ${item.target}`}
-          </span>
-        </span>
-        <Beats beats={item.beats} slots={beats} />
+        {content}
       </Link>
     </li>
   );

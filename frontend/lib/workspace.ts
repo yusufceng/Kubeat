@@ -27,6 +27,7 @@ export type ListItem = {
   kind: string | null;
   type: Monitor["type"];
   namespace: string;
+  tags: string[];
   target: string;
   state: DisplayState;
   uptime: number | null;
@@ -42,6 +43,7 @@ export function toListItem(m: Monitor): ListItem {
     kind: label.kind,
     type: m.type,
     namespace: m.namespace,
+    tags: m.tags,
     target: m.target,
     state: displayState(m),
     uptime: m.uptime_percent,
@@ -66,4 +68,9 @@ export function countStates(monitors: Pick<Monitor, "status" | "open_incident" |
 /** A monitor whose latest check failed or that has an open outage. */
 export function isProblem(state: DisplayState): boolean {
   return state === "down" || state === "recovering" || state === "verifying";
+}
+
+/** The groups monitors entered by hand are in, for the form to suggest. */
+export function manualGroups(monitors: Monitor[]): string[] {
+  return [...new Set(monitors.filter((m) => m.source === "" && m.namespace !== "").map((m) => m.namespace))].sort();
 }

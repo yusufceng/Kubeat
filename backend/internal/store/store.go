@@ -51,10 +51,14 @@ type Monitor struct {
 	// RetryInterval is how soon a failed check is repeated while fewer than
 	// FailureThreshold checks have failed in a row; zero means Interval.
 	RetryInterval time.Duration
-	// Namespace groups the monitor; Source identifies the cluster object it
-	// was discovered from. Both are empty for monitors entered by hand.
+	// Namespace groups the monitor: the namespace of the cluster object it
+	// was discovered from or, for a monitor entered by hand, a group name of
+	// the user's choosing (empty for none). Source identifies that cluster
+	// object; it is empty for monitors entered by hand.
 	Namespace string
 	Source    string
+	// Tags are free-form labels, sorted and without duplicates.
+	Tags []string
 	// FailureThreshold is how many consecutive failed checks open an incident.
 	FailureThreshold int
 	// Inverted turns the outcome around: the monitor is up while its target
@@ -359,8 +363,9 @@ type Store interface {
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]MonitorStatus, error)
 	// GetMonitorStatus is ListMonitorStatuses for a single monitor.
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (MonitorStatus, error)
-	// UpdateMonitor changes the monitor with m.ID. Its type, namespace,
-	// source, push token and creation time never change.
+	// UpdateMonitor changes the monitor with m.ID. Its type, source, push
+	// token and creation time never change, nor does the namespace of a
+	// discovered monitor.
 	UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error)
 	// DeleteMonitor removes the monitor and all of its check results.
 	DeleteMonitor(ctx context.Context, id int64) error

@@ -63,8 +63,14 @@ export async function saveMonitorAction(formData: FormData): Promise<{ error: st
     retry_interval_seconds: push ? 0 : number("retry_interval_seconds"),
     inverted: !push && checked("inverted"),
   };
-  // Discovered monitors are named after their source and have no name field.
+  // Discovered monitors are named after their source and stay in its
+  // namespace; their form has neither field.
   if (formData.get("name") !== null) settings.name = text("name");
+  if (formData.get("group") !== null) settings.namespace = text("group");
+  settings.tags = text("tags")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
 
   switch (type) {
     case "http": {
@@ -142,6 +148,24 @@ export async function cloneMonitorAction(id: number, name: string): Promise<{ er
   }
   refresh();
   redirect(`/monitors/${copy.id}/edit`);
+}
+
+export type BulkAction = "pause" | "resume" | "delete";
+
+/**
+ * Pauses, resumes or deletes several monitors. Returns how many of them it
+ * could not change; the others are done.
+ */
+export async function bulkMonitorsAction(ids: number[], action: BulkAction): Promise<{ failed: number }> {
+  const results = await Promise.allSettled(
+    ids.map((id) => (action === "delete" ? deleteMonitor(id) : updateMonitor(id, { enabled: action === "resume" }))),
+  );
+  refresh();
+  // A monitor that is already gone is what a delete asked for.
+  const failed = results.filter(
+    (r) => r.status === "rejected" && !(action === "delete" && r.reason instanceof ApiError && r.reason.status === 404),
+  );
+  return { failed: failed.length };
 }
 
 export async function setMonitorEnabledAction(formData: FormData): Promise<void> {

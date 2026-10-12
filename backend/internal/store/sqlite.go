@@ -226,7 +226,7 @@ func (s *SQLite) Close() error {
 // monitorFields are the columns of a monitor, in the order monitorRow reads them.
 var monitorFields = []string{
 	"id", "name", "description", "type", "target", "interval_seconds", "timeout_seconds", "retry_interval_seconds",
-	"failure_threshold", "inverted", "enabled", "push_token", "created_at", "namespace", "source", "settings",
+	"failure_threshold", "inverted", "enabled", "push_token", "created_at", "namespace", "source", "tags", "settings",
 }
 
 var monitorColumns = strings.Join(monitorFields, ", ")
@@ -244,14 +244,14 @@ type rowScanner interface {
 type monitorRow struct {
 	m                                   Monitor
 	interval, timeout, retry, createdAt int64
-	settings                            string
+	tags, settings                      string
 }
 
 // dest returns where the monitor columns are scanned to.
 func (r *monitorRow) dest() []any {
 	return []any{
 		&r.m.ID, &r.m.Name, &r.m.Description, &r.m.Type, &r.m.Target, &r.interval, &r.timeout, &r.retry,
-		&r.m.FailureThreshold, &r.m.Inverted, &r.m.Enabled, &r.m.PushToken, &r.createdAt, &r.m.Namespace, &r.m.Source, &r.settings,
+		&r.m.FailureThreshold, &r.m.Inverted, &r.m.Enabled, &r.m.PushToken, &r.createdAt, &r.m.Namespace, &r.m.Source, &r.tags, &r.settings,
 	}
 }
 
@@ -265,7 +265,26 @@ func (r *monitorRow) monitor() (Monitor, error) {
 	if err := decodeSettings(r.settings, &m); err != nil {
 		return Monitor{}, fmt.Errorf("monitor %d: %w", m.ID, err)
 	}
+	if err := json.Unmarshal([]byte(r.tags), &m.Tags); err != nil {
+		return Monitor{}, fmt.Errorf("monitor %d: decode tags: %w", m.ID, err)
+	}
+	if len(m.Tags) == 0 {
+		m.Tags = nil
+	}
 	return m, nil
+}
+
+// encodeTags stores tags as a JSON array, sorted and without duplicates; no
+// tags is "[]". It returns the tags in that stored order too.
+func encodeTags(tags []string) (string, []string, error) {
+	if len(tags) == 0 {
+		return "[]", nil, nil
+	}
+	sorted := slices.Clone(tags)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	b, err := json.Marshal(sorted)
+	return string(b), sorted, err
 }
 
 func scanMonitor(row rowScanner) (Monitor, error) {
@@ -355,14 +374,19 @@ func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 	if err != nil {
 		return Monitor{}, fmt.Errorf("create monitor: %w", err)
 	}
+	tags, sorted, err := encodeTags(m.Tags)
+	if err != nil {
+		return Monitor{}, fmt.Errorf("create monitor: %w", err)
+	}
+	m.Tags = sorted
 	m.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
 
 	res, err := s.write.ExecContext(ctx,
 		`INSERT INTO monitors (name, description, type, target, interval_seconds, timeout_seconds, retry_interval_seconds,
-		                       failure_threshold, inverted, enabled, push_token, created_at, namespace, source, settings)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                       failure_threshold, inverted, enabled, push_token, created_at, namespace, source, tags, settings)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.Name, m.Description, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), int64(m.RetryInterval/time.Second),
-		m.FailureThreshold, m.Inverted, m.Enabled, m.PushToken, m.CreatedAt.UnixMilli(), m.Namespace, m.Source, encoded)
+		m.FailureThreshold, m.Inverted, m.Enabled, m.PushToken, m.CreatedAt.UnixMilli(), m.Namespace, m.Source, tags, encoded)
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}
@@ -588,18 +612,26 @@ func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 		return Monitor{}, err
 	}
 	m.Type = current.Type
+	if current.Source != "" {
+		// A discovered monitor lives where its object does.
+		m.Namespace = current.Namespace
+	}
 	normalize(&m)
 	encoded, err := encodeSettings(m)
+	if err != nil {
+		return Monitor{}, fmt.Errorf("update monitor: %w", err)
+	}
+	tags, _, err := encodeTags(m.Tags)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("update monitor: %w", err)
 	}
 	res, err := s.write.ExecContext(ctx,
 		`UPDATE monitors
 		 SET name = ?, description = ?, target = ?, interval_seconds = ?, timeout_seconds = ?, retry_interval_seconds = ?,
-		     failure_threshold = ?, inverted = ?, enabled = ?, settings = ?
+		     failure_threshold = ?, inverted = ?, enabled = ?, namespace = ?, tags = ?, settings = ?
 		 WHERE id = ?`,
 		m.Name, m.Description, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), int64(m.RetryInterval/time.Second),
-		m.FailureThreshold, m.Inverted, m.Enabled, encoded, m.ID)
+		m.FailureThreshold, m.Inverted, m.Enabled, m.Namespace, tags, encoded, m.ID)
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}

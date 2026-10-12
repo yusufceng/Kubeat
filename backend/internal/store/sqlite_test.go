@@ -688,6 +688,39 @@ func TestUpgradeFromColumnOptions(t *testing.T) {
 	}
 }
 
+func TestTagsAndGroups(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	m := newMonitor("api")
+	m.Namespace, m.Tags = "Ödeme sistemleri", []string{"prod", "team-pay", "prod"}
+	created, err := s.CreateMonitor(ctx, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"prod", "team-pay"} // sorted, once each
+	if !reflect.DeepEqual(created.Tags, want) {
+		t.Errorf("created tags = %v, want %v", created.Tags, want)
+	}
+	got, _ := s.GetMonitor(ctx, created.ID)
+	if !reflect.DeepEqual(got.Tags, want) || got.Namespace != "Ödeme sistemleri" {
+		t.Errorf("stored = %+v", got)
+	}
+	if st, _ := s.GetMonitorStatus(ctx, created.ID, time.Now()); !reflect.DeepEqual(st.Tags, want) {
+		t.Errorf("status tags = %v", st.Tags)
+	}
+
+	// A monitor entered by hand can move to another group and lose its tags.
+	got.Namespace, got.Tags = "Altyapı", nil
+	updated, err := s.UpdateMonitor(ctx, got)
+	if err != nil || updated.Namespace != "Altyapı" || updated.Tags != nil {
+		t.Errorf("updated = %+v, %v", updated, err)
+	}
+	if plain, _ := s.CreateMonitor(ctx, newMonitor("plain")); plain.Tags != nil {
+		t.Errorf("a monitor without tags has %v", plain.Tags)
+	}
+}
+
 func TestRecentCheckResults(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)

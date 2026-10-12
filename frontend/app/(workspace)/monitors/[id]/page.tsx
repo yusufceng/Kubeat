@@ -30,6 +30,7 @@ import { MonitorActions } from "@/app/ui/monitor-settings";
 import { PodsPanel } from "@/app/ui/pods-panel";
 import { PushUrl } from "@/app/ui/push-url";
 import { displayState, StatusBadge, StatusPill } from "@/app/ui/status";
+import { Tag } from "@/app/ui/tag";
 import { TimeAgo } from "@/app/ui/time-ago";
 
 /** The settings of the check, as label and value pairs. */
@@ -163,6 +164,13 @@ async function MonitorDetail({
             <StatusPill state={state} />
           </div>
           {monitor.description && <p className="mt-1.5 text-sm text-muted">{monitor.description}</p>}
+          {monitor.tags.length > 0 && (
+            <p className="mt-2 flex flex-wrap gap-1.5">
+              {monitor.tags.map((tag) => (
+                <Tag key={tag} name={tag} />
+              ))}
+            </p>
+          )}
           {monitor.target && <p className="mt-1.5 break-all font-mono text-sm text-muted">{monitor.target}</p>}
         </div>
         <MonitorActions monitor={monitor} />

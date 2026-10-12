@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ApiError, getMonitor, type Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
+import { manualGroups, workspaceMonitors } from "@/lib/workspace";
 import { BackendError } from "@/app/ui/backend-error";
 import { MonitorForm } from "@/app/ui/monitor-form";
 import { monitorLabel } from "@/app/ui/monitor-name";
@@ -19,6 +20,7 @@ async function EditMonitor({ params }: { params: Promise<{ id: string }> }) {
     return <BackendError what="Monitor ayarları" err={err} />;
   }
   const name = monitorLabel(monitor).name;
+  const groups = await workspaceMonitors().then(manualGroups, () => []);
 
   return (
     <>
@@ -35,7 +37,7 @@ async function EditMonitor({ params }: { params: Promise<{ id: string }> }) {
         </p>
         <h1 className="text-2xl font-semibold tracking-tight">{name}</h1>
       </header>
-      <MonitorForm monitor={monitor} defaults={config.newMonitor} />
+      <MonitorForm monitor={monitor} defaults={config.newMonitor} groups={groups} />
     </>
   );
 }

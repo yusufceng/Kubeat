@@ -2,12 +2,15 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { config } from "@/lib/config";
+import { manualGroups, workspaceMonitors } from "@/lib/workspace";
 import { MonitorForm } from "@/app/ui/monitor-form";
 
 /** The form, with the defaults of the running server's environment. */
 async function NewMonitor() {
   await connection();
-  return <MonitorForm defaults={config.newMonitor} />;
+  // The form works without the suggestions, should the backend be away.
+  const groups = await workspaceMonitors().then(manualGroups, () => []);
+  return <MonitorForm defaults={config.newMonitor} groups={groups} />;
 }
 
 export default function Page() {

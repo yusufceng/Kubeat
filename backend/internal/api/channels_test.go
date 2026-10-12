@@ -73,7 +73,7 @@ func TestChannelProviders(t *testing.T) {
 		"ntfy without a topic":    `{"name":"x","type":"ntfy","target":"https://ntfy.sh/"}`,
 		"gotify without a token":  `{"name":"x","type":"gotify","target":"https://gotify.example.com"}`,
 		"secret with a space":     `{"name":"x","type":"gotify","target":"https://g","secret":"a b"}`,
-		"namespace name":          `{"name":"x","type":"discord","target":"https://x","namespaces":["Shop Team"]}`,
+		"namespace name":          `{"name":"x","type":"discord","target":"https://x","namespaces":["shop/team"]}`,
 		"empty namespace":         `{"name":"x","type":"discord","target":"https://x","namespaces":[""]}`,
 	}
 	for name, body := range invalid {
@@ -136,7 +136,7 @@ func TestUpdateChannel(t *testing.T) {
 		"name taken":     {tg.ID, `{"name":"hook-2"}`, http.StatusConflict},
 		"type change":    {tg.ID, `{"type":"slack"}`, http.StatusBadRequest},
 		"unknown":        {999, `{"enabled":true}`, http.StatusNotFound},
-		"bad namespaces": {tg.ID, `{"namespaces":["a b"]}`, http.StatusBadRequest},
+		"bad namespaces": {tg.ID, `{"namespaces":["a,b"]}`, http.StatusBadRequest},
 	} {
 		if code := patch(tc.id, tc.body, nil); code != tc.want {
 			t.Errorf("%s: status = %d, want %d", name, code, tc.want)

@@ -270,7 +270,7 @@ async function Overview() {
 
         <div className="flex flex-col gap-5 xl:col-span-2">
           <section aria-label="Gruplar" className="card overflow-hidden">
-            <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold">Namespace&apos;ler</h2>
+            <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold">Namespace&apos;ler ve gruplar</h2>
             <ul className="divide-y divide-line">
               {namespaces.map(([namespace, group]) => {
                 const c = countStates(group);

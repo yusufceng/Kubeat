@@ -212,8 +212,8 @@ func channelNamespaces(namespaces []string) ([]string, error) {
 	var out []string
 	for _, ns := range namespaces {
 		ns = strings.TrimSpace(ns)
-		if ns == "" || !validHost(ns) || strings.Contains(ns, ".") {
-			return nil, fmt.Errorf("namespaces: %q is not a namespace name", ns)
+		if !validGroup(ns) {
+			return nil, fmt.Errorf("namespaces: %q is not the name of a namespace or group", ns)
 		}
 		if !seen[ns] {
 			seen[ns] = true

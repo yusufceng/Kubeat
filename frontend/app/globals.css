@@ -21,6 +21,8 @@
   --warn: #c98206;
   --maint: #2f74d0;
   --idle: #a3acb6;
+  /* How light the text of a tag is; its hue comes from the tag's name. */
+  --tag-ink: 0.48;
 
   /* Used by the pages that predate the tokens above. */
   --background: var(--bg);
@@ -53,6 +55,7 @@
   --warn: #efb03a;
   --maint: #5b9bf0;
   --idle: #566070;
+  --tag-ink: 0.8;
 
   --viz-series: #4a94ec;
   --viz-grid: #232a33;

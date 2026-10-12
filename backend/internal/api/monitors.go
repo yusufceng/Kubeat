@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -32,11 +34,13 @@ type monitorResponse struct {
 	Type        string `json:"type"`
 	// Target is empty for push monitors.
 	Target string `json:"target"`
-	// Namespace and Source are empty for monitors entered by hand.
-	Namespace       string `json:"namespace"`
-	Source          string `json:"source"`
-	IntervalSeconds int    `json:"interval_seconds"`
-	TimeoutSeconds  int    `json:"timeout_seconds"`
+	// Namespace is the namespace of a discovered monitor or the group of
+	// one entered by hand; Source is empty for the latter.
+	Namespace       string   `json:"namespace"`
+	Source          string   `json:"source"`
+	Tags            []string `json:"tags"`
+	IntervalSeconds int      `json:"interval_seconds"`
+	TimeoutSeconds  int      `json:"timeout_seconds"`
 	// RetryIntervalSeconds is 0 when failed checks are not repeated early.
 	RetryIntervalSeconds int       `json:"retry_interval_seconds"`
 	FailureThreshold     int       `json:"failure_threshold"`
@@ -134,6 +138,10 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		CertWarning:          st.CertWarning,
 		Namespace:            st.Namespace,
 		Source:               st.Source,
+		Tags:                 st.Tags,
+	}
+	if resp.Tags == nil {
+		resp.Tags = []string{}
 	}
 	if !st.MaintenanceUntil.IsZero() {
 		resp.MaintenanceUntil = &st.MaintenanceUntil
@@ -301,11 +309,60 @@ type createMonitorRequest struct {
 	// FailureThreshold is optional; 0 means the server default.
 	FailureThreshold int  `json:"failure_threshold"`
 	Inverted         bool `json:"inverted"`
+	// Namespace is the group of a monitor entered by hand; optional.
+	Namespace string `json:"namespace"`
+	// Tags are free-form labels; optional.
+	Tags []string `json:"tags"`
 	// Options of the monitor's own type; optional.
 	checkOptions
 }
 
-const maxDescriptionLength = 500
+const (
+	maxDescriptionLength = 500
+	// maxGroupLength is the longest group name, the length of a namespace's.
+	maxGroupLength = 63
+	maxTags        = 10
+	maxTagLength   = 30
+	// reservedGroup stands for "no group" in the UI's addresses.
+	reservedGroup = "_"
+)
+
+// plainName reports whether s can name a group or a tag: at most max
+// characters, none of them a control character or one that separates names
+// in a list or a path.
+func plainName(s string, max int) bool {
+	if s == "" || utf8.RuneCountInString(s) > max {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || r == '/' || r == ',' {
+			return false
+		}
+	}
+	return true
+}
+
+// validGroup reports whether name can group monitors: a namespace's name,
+// or a name of the user's choosing.
+func validGroup(name string) bool {
+	return name != reservedGroup && plainName(name, maxGroupLength)
+}
+
+// cleanTags validates tags and returns them trimmed.
+func cleanTags(tags []string) ([]string, error) {
+	if len(tags) > maxTags {
+		return nil, fmt.Errorf("tags: at most %d", maxTags)
+	}
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if !plainName(tag, maxTagLength) {
+			return nil, fmt.Errorf("tags: %q is not a tag; use up to %d characters without commas or slashes", tag, maxTagLength)
+		}
+		out = append(out, tag)
+	}
+	return out, nil
+}
 
 // hostName matches a DNS name, with the underscores service records use.
 var hostName = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_.-]*[A-Za-z0-9_])?\.?$`)
@@ -377,6 +434,13 @@ func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThre
 	if len(req.Description) > maxDescriptionLength {
 		return fmt.Errorf("description must be at most %d bytes", maxDescriptionLength)
 	}
+	if req.Namespace = strings.TrimSpace(req.Namespace); req.Namespace != "" && !validGroup(req.Namespace) {
+		return fmt.Errorf("namespace must be a group name of at most %d characters, without commas or slashes", maxGroupLength)
+	}
+	var err error
+	if req.Tags, err = cleanTags(req.Tags); err != nil {
+		return err
+	}
 	if err := validateTarget(store.MonitorType(req.Type), req.Target); err != nil {
 		return err
 	}
@@ -414,6 +478,8 @@ func (req *createMonitorRequest) monitor(base store.Monitor) store.Monitor {
 	base.RetryInterval = time.Duration(req.RetryIntervalSeconds) * time.Second
 	base.FailureThreshold = req.FailureThreshold
 	base.Inverted = req.Inverted
+	base.Namespace = req.Namespace
+	base.Tags = req.Tags
 	return base
 }
 
@@ -519,6 +585,11 @@ type updateMonitorRequest struct {
 	FailureThreshold     *int    `json:"failure_threshold"`
 	Inverted             *bool   `json:"inverted"`
 	Enabled              *bool   `json:"enabled"`
+	// Namespace moves a monitor entered by hand to another group; a
+	// discovered monitor stays in the namespace of its object.
+	Namespace *string `json:"namespace"`
+	// Tags, when present, replace all tags.
+	Tags *[]string `json:"tags"`
 	// The options of the monitor's type, when present, replace all of them.
 	checkOptions
 }
@@ -556,6 +627,18 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		RetryIntervalSeconds: int(current.RetryInterval / time.Second),
 		FailureThreshold:     current.FailureThreshold,
 		Inverted:             current.Inverted,
+		Namespace:            current.Namespace,
+		Tags:                 current.Tags,
+	}
+	if req.Namespace != nil && strings.TrimSpace(*req.Namespace) != current.Namespace {
+		if current.Source != "" {
+			writeError(w, http.StatusBadRequest, "a discovered monitor stays in the namespace of its object")
+			return
+		}
+		merged.Namespace = *req.Namespace
+	}
+	if req.Tags != nil {
+		merged.Tags = *req.Tags
 	}
 	if req.Name != nil {
 		merged.Name = *req.Name

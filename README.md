@@ -97,9 +97,12 @@ Lokal geliştirmede `make dev` parolayı `admin` yapar
 Arayüz bir çalışma alanıdır: solda tüm monitor'ların listesi, sağda genel
 bakış ya da açılan monitor.
 
-- **Liste**: namespace'e göre gruplanır; ada, adrese ya da namespace'e göre
-  aranır; duruma (sorunlu, çalışıyor, pasif) ve tipe göre süzülür. Her satırda
-  durum, 24 saatlik uptime ve son kontroller görünür.
+- **Liste**: namespace'e ya da gruba göre toplanır; ada, adrese, gruba ya da
+  etikete göre aranır; duruma (sorunlu, çalışıyor, pasif), tipe ve etikete göre
+  süzülür. Her satırda durum, 24 saatlik uptime ve son kontroller görünür.
+- **Toplu işlem**: listedeki "Seç" ile birden çok monitor işaretlenip birlikte
+  durdurulur, devam ettirilir ya da silinir; grup başlığındaki kutu o gruptaki
+  görünenlerin hepsini seçer.
 - **Genel bakış**: durum sayıları, devam eden kesintiler, son olaylar,
   namespace bazında dağılım ve süresi en yakın sertifikalar.
 - **Monitor sayfası**: son kontrollerin çubuğu, yanıt süresi ve uptime
@@ -189,6 +192,12 @@ Her monitor'da ortak alanlar: `name`, `type`, `target`, `interval_seconds`,
 `timeout_seconds` ve isteğe bağlı olarak:
 
 - `description`: serbest açıklama.
+- `namespace`: elle eklenen bir monitor'un **grubu** (örneğin "Ödeme
+  sistemleri"). Listede bu ad altında toplanır ve bildirim kanalları gruba
+  göre sınırlanabilir. Keşfedilen monitor'larda bu alan nesnenin
+  namespace'idir ve değiştirilemez.
+- `tags`: serbest etiketler (`["prod", "kritik"]`), en çok 10 tane. Listede
+  etikete göre süzülür ve aranır; keşfedilen monitor'lara da verilebilir.
 - `failure_threshold`: art arda kaç başarısız kontrolün kesinti sayılacağı.
 - `retry_interval_seconds`: bir kontrol başarısız olduğunda, kesinti
   kesinleşene kadar sonraki kontrolün kaç saniye sonra yapılacağı. `0` ise
