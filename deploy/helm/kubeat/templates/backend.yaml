@@ -37,6 +37,7 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       serviceAccountName: {{ .Release.Name }}
+      automountServiceAccountToken: {{ .Values.discovery.enabled }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -54,6 +55,8 @@ spec:
               value: ":8080"
             - name: UPTIME_DB_PATH
               value: /data/uptime.db
+            - name: UPTIME_DISCOVERY_ENABLED
+              value: {{ .Values.discovery.enabled | quote }}
             {{- range $name, $value := .Values.backend.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}

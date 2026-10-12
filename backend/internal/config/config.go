@@ -37,6 +37,13 @@ type Config struct {
 	NotifyAttempts          int           // UPTIME_NOTIFY_ATTEMPTS
 	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
 	NotifyTimeout           time.Duration // UPTIME_NOTIFY_TIMEOUT
+
+	// Discovery connects with the pod's service account when running in a
+	// cluster. Outside one, it needs both a kubeconfig and a context.
+	DiscoveryEnabled bool          // UPTIME_DISCOVERY_ENABLED
+	Kubeconfig       string        // UPTIME_KUBECONFIG
+	KubeContext      string        // UPTIME_KUBE_CONTEXT
+	KubeTimeout      time.Duration // UPTIME_KUBE_TIMEOUT
 }
 
 // Load reads the configuration from the environment, falling back to
@@ -45,6 +52,9 @@ func Load() (Config, error) {
 	cfg := Config{
 		Addr:   envString("UPTIME_ADDR", ":8080"),
 		DBPath: envString("UPTIME_DB_PATH", "uptime.db"),
+
+		Kubeconfig:  envString("UPTIME_KUBECONFIG", ""),
+		KubeContext: envString("UPTIME_KUBE_CONTEXT", ""),
 	}
 
 	durations := []struct {
@@ -64,6 +74,7 @@ func Load() (Config, error) {
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
 		{&cfg.NotifyRetryDelay, "UPTIME_NOTIFY_RETRY_DELAY", 5 * time.Second},
 		{&cfg.NotifyTimeout, "UPTIME_NOTIFY_TIMEOUT", 5 * time.Second},
+		{&cfg.KubeTimeout, "UPTIME_KUBE_TIMEOUT", 10 * time.Second},
 	}
 	for _, d := range durations {
 		v, err := envDuration(d.key, d.def)
@@ -98,6 +109,9 @@ func Load() (Config, error) {
 	if cfg.MinCheckInterval < time.Second {
 		// Intervals are stored in whole seconds.
 		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL: must be at least 1s, got %s", cfg.MinCheckInterval)
+	}
+	if cfg.DiscoveryEnabled, err = envBool("UPTIME_DISCOVERY_ENABLED", true); err != nil {
+		return Config{}, err
 	}
 	if cfg.HTTPInsecureSkipVerify, err = envBool("UPTIME_HTTP_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err

@@ -8,6 +8,7 @@ import {
   createMonitor,
   deleteChannel,
   deleteMonitor,
+  importCandidates,
   type MonitorType,
   testChannel,
 } from "@/lib/api";
@@ -110,10 +111,37 @@ export async function testChannelAction(
   }
 }
 
+/** null before the first import; afterwards its outcome. */
+export type ImportState = { created: number; skipped: number; error: string | null } | null;
+
+export async function importCandidatesAction(
+  _prev: ImportState,
+  formData: FormData,
+): Promise<ImportState> {
+  const sources = formData.getAll("source").map(String);
+  if (sources.length === 0) {
+    return { created: 0, skipped: 0, error: "En az bir hedef seçin." };
+  }
+  try {
+    const result = await importCandidates({
+      namespace: String(formData.get("namespace") ?? ""),
+      sources,
+      interval_seconds: Number(formData.get("interval_seconds")),
+      timeout_seconds: Number(formData.get("timeout_seconds")),
+      failure_threshold: Number(formData.get("failure_threshold")),
+    });
+    refresh();
+    return { created: result.created.length, skipped: result.skipped.length, error: null };
+  } catch (err) {
+    return { created: 0, skipped: 0, error: describe(err) };
+  }
+}
+
 function describe(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 409) return "Bu isim zaten kullanılıyor.";
     if (err.status === 400) return `Geçersiz değer: ${err.message}`;
+    if (err.status === 502) return `Cluster'a erişilemedi: ${err.message}`;
   }
   return "Backend'e ulaşılamadı. Biraz sonra tekrar deneyin.";
 }

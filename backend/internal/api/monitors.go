@@ -22,10 +22,13 @@ const (
 )
 
 type monitorResponse struct {
-	ID               int64     `json:"id"`
-	Name             string    `json:"name"`
-	Type             string    `json:"type"`
-	Target           string    `json:"target"`
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Target string `json:"target"`
+	// Namespace and Source are empty for monitors entered by hand.
+	Namespace        string    `json:"namespace"`
+	Source           string    `json:"source"`
 	IntervalSeconds  int       `json:"interval_seconds"`
 	TimeoutSeconds   int       `json:"timeout_seconds"`
 	FailureThreshold int       `json:"failure_threshold"`
@@ -80,6 +83,8 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		AvgLatencyMS:    st.AvgLatency.Milliseconds(),
 
 		FailureThreshold: st.FailureThreshold,
+		Namespace:        st.Namespace,
+		Source:           st.Source,
 	}
 	if st.Incident != nil {
 		incident := toIncidentResponse(*st.Incident)

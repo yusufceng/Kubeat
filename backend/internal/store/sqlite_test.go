@@ -310,3 +310,41 @@ func TestMonitorStatuses(t *testing.T) {
 		t.Errorf("empty window: %+v", statuses[0])
 	}
 }
+
+func TestMonitorSource(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	discovered := newMonitor("shop/service/api:80")
+	discovered.Namespace, discovered.Source = "shop", "service/api:80"
+	created, err := s.CreateMonitor(ctx, discovered)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := s.GetMonitor(ctx, created.ID)
+	if err != nil || got.Namespace != "shop" || got.Source != "service/api:80" {
+		t.Errorf("GetMonitor = %+v, %v", got, err)
+	}
+	if st, _ := s.GetMonitorStatus(ctx, created.ID, time.Now()); st.Namespace != "shop" || st.Source != "service/api:80" {
+		t.Errorf("status = %+v", st.Monitor)
+	}
+
+	// The same object cannot be monitored twice, even under another name.
+	again := newMonitor("another-name")
+	again.Namespace, again.Source = "shop", "service/api:80"
+	if _, err := s.CreateMonitor(ctx, again); !errors.Is(err, ErrConflict) {
+		t.Errorf("same source twice: err = %v, want ErrConflict", err)
+	}
+	// The same source name in a different namespace is a different object.
+	other := newMonitor("billing/service/api:80")
+	other.Namespace, other.Source = "billing", "service/api:80"
+	if _, err := s.CreateMonitor(ctx, other); err != nil {
+		t.Errorf("same source in another namespace: %v", err)
+	}
+	// Hand-made monitors have no source and never collide on it.
+	for _, name := range []string{"manual-1", "manual-2"} {
+		if _, err := s.CreateMonitor(ctx, newMonitor(name)); err != nil {
+			t.Errorf("manual monitor %s: %v", name, err)
+		}
+	}
+}

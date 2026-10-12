@@ -15,6 +15,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/api"
 	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
+	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -86,6 +87,19 @@ func main() {
 		scheduler.RunRetention(ctx, db, cfg.Retention, cfg.RetentionInterval, logger)
 	}()
 
+	var discovery api.Discovery
+	discoveryStatus := "disabled by UPTIME_DISCOVERY_ENABLED"
+	if cfg.DiscoveryEnabled {
+		client, err := k8s.Connect(k8s.Options{Kubeconfig: cfg.Kubeconfig, Context: cfg.KubeContext, Timeout: cfg.KubeTimeout})
+		if err != nil {
+			discoveryStatus = err.Error()
+			logger.Info("cluster discovery unavailable", "reason", err.Error())
+		} else {
+			discovery, discoveryStatus = client, client.Mode
+			logger.Info("cluster discovery enabled", "mode", client.Mode)
+		}
+	}
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.NewHandler(api.Options{
@@ -95,6 +109,8 @@ func main() {
 			StatsWindow:      cfg.StatsWindow,
 			MaxResults:       cfg.MaxResults,
 			Notifier:         alerts,
+			Discovery:        discovery,
+			DiscoveryStatus:  discoveryStatus,
 			Logger:           logger,
 
 			DefaultFailureThreshold: cfg.DefaultFailureThreshold,

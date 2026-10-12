@@ -1,0 +1,116 @@
+# A small namespace to try discovery against:
+#   kubectl --context minikube apply -f deploy/demo/shop.yaml
+#
+#   web     healthy, HTTP readiness probe  -> HTTP check on the probe's path
+#   cache   healthy, no HTTP probe         -> TCP check
+#   broken  readiness probe never passes   -> HTTP check that fails
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: shop-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:stable-alpine
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /index.html, port: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: shop-demo
+spec:
+  selector: {app: web}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache
+  namespace: shop-demo
+spec:
+  selector:
+    matchLabels: {app: cache}
+  template:
+    metadata:
+      labels: {app: cache}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - {containerPort: 6379}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cache
+  namespace: shop-demo
+spec:
+  selector: {app: cache}
+  ports:
+    - {port: 6379}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken
+  namespace: shop-demo
+spec:
+  selector:
+    matchLabels: {app: broken}
+  template:
+    metadata:
+      labels: {app: broken}
+    spec:
+      containers:
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:stable-alpine
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}   # nginx answers 404
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broken
+  namespace: shop-demo
+spec:
+  selector: {app: broken}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  namespace: shop-demo
+spec:
+  rules:
+    - host: shop.demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port: {name: http}

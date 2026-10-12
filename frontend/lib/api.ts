@@ -43,6 +43,10 @@ export type Monitor = {
   name: string;
   type: MonitorType;
   target: string;
+  /** Empty for monitors entered by hand. */
+  namespace: string;
+  /** The discovered object, e.g. "service/api:80"; empty for manual monitors. */
+  source: string;
   interval_seconds: number;
   timeout_seconds: number;
   failure_threshold: number;
@@ -115,3 +119,38 @@ export const deleteChannel = (id: number) =>
 
 export const testChannel = (id: number) =>
   request<ChannelTest>(`/channels/${id}/test`, { method: "POST" });
+
+export type DiscoveryStatus = { enabled: boolean; detail: string };
+
+export type Candidate = {
+  kind: "service" | "ingress" | "route";
+  namespace: string;
+  name: string;
+  port: number;
+  source: string;
+  type: MonitorType;
+  target: string;
+  reason: "readiness-probe" | "liveness-probe" | "tcp-fallback" | "route-host" | "ingress-rule";
+  /** Set when the candidate is already monitored. */
+  monitor_id: number | null;
+};
+
+export type ImportResult = {
+  created: Monitor[];
+  skipped: { source: string; reason: string }[];
+};
+
+export const getDiscoveryStatus = () => request<DiscoveryStatus>("/discovery");
+
+export const listNamespaces = () => request<string[]>("/discovery/namespaces");
+
+export const listCandidates = (namespace: string) =>
+  request<Candidate[]>(`/discovery/candidates?namespace=${encodeURIComponent(namespace)}`);
+
+export const importCandidates = (body: {
+  namespace: string;
+  sources: string[];
+  interval_seconds: number;
+  timeout_seconds: number;
+  failure_threshold: number;
+}) => request<ImportResult>("/discovery/import", { method: "POST", body: JSON.stringify(body) });

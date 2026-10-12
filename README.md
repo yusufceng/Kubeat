@@ -31,6 +31,7 @@ Chart [deploy/helm/kubeat](deploy/helm/kubeat) altındadır. Minikube için:
 minikube start --keep-context   # kubectl'in mevcut bağlamını değiştirmez
 make minikube-deploy            # imajları derler, yükler, chart'ı kurar
 make minikube-open              # arayüz -> http://localhost:3000
+make minikube-demo              # keşfi denemek için örnek namespace
 ```
 
 Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izlenebilir,
@@ -55,6 +56,10 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 | `GET` | `/api/v1/monitors/{id}?window=24h` | Tek monitor |
 | `DELETE` | `/api/v1/monitors/{id}` | Monitor'u ve sonuçlarını siler |
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
+| `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
+| `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
+| `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
+| `POST` | `/api/v1/discovery/import` | Seçilen hedefleri monitor'a çevirir |
 | `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye |
 | `GET` | `/api/v1/channels` | Bildirim kanalları (URL'ler maskelenir) |
 | `POST` | `/api/v1/channels` | Webhook kanalı ekler |
@@ -70,6 +75,30 @@ curl -X POST localhost:8090/api/v1/monitors -d '{
 
 `type` değeri `http` (2xx/3xx yanıt başarılı sayılır) ya da `tcp`
 (`host:port` bağlantısı kurulabiliyorsa başarılı) olabilir.
+
+## Keşif
+
+Backend cluster içinde çalışırken pod'un servis hesabıyla cluster'a bağlanır
+ve arayüzdeki **Keşif** sayfasında seçilen namespace'teki izlenebilir
+hedefleri listeler. Seçilenler tek adımda monitor'a çevrilir ve ana sayfada
+namespace'e göre gruplanır. Erişim yalnızca okuma amaçlıdır.
+
+| Kaynak | Önerilen kontrol |
+| --- | --- |
+| Route (OpenShift) | Route adresine HTTP |
+| Ingress | Her host ve yol için HTTP |
+| Service, pod'unda HTTP probe var | Service üzerinden probe'un yoluna HTTP |
+| Service, HTTP probe yok | Porta TCP bağlantısı |
+
+Service için yol tahmin edilmez: uygulamanın kendi readiness (yoksa liveness)
+probe'u hangi adresin "sağlıklı" anlamına geldiğini zaten söyler; rastgele bir
+yol 404 dönüp yanlış alarm üretir.
+
+Denemek için `make minikube-demo` örnek bir `shop-demo` namespace'i kurar.
+
+Cluster dışında çalışırken keşif için hem `UPTIME_KUBECONFIG` hem
+`UPTIME_KUBE_CONTEXT` verilmelidir; kubeconfig'in o anki bağlamı bilerek
+kullanılmaz.
 
 ## Alarm
 
@@ -121,6 +150,10 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |
 | `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Gönderilmeyi bekleyebilecek en fazla bildirim sayısı |
+| `UPTIME_DISCOVERY_ENABLED` | `true` | Cluster keşfini açar |
+| `UPTIME_KUBECONFIG` | – | Cluster dışında çalışırken kullanılacak kubeconfig dosyası |
+| `UPTIME_KUBE_CONTEXT` | – | Kubeconfig içindeki bağlam; kubeconfig verildiyse zorunlu |
+| `UPTIME_KUBE_TIMEOUT` | `10s` | Cluster API istekleri için zaman aşımı |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |

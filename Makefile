@@ -6,10 +6,10 @@ FRONTEND_PORT ?= 3000
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.1.0
+VERSION ?= 0.2.0
 CHART := deploy/helm/kubeat
 
-.PHONY: dev backend frontend test lint build images minikube-deploy minikube-open
+.PHONY: dev backend frontend test lint build images minikube-deploy minikube-open minikube-demo
 
 # Backend ve frontend'i birlikte çalıştırır; Ctrl-C ikisini de durdurur.
 dev:
@@ -48,3 +48,7 @@ minikube-deploy: images
 # Arayüzü http://localhost:$(FRONTEND_PORT) adresine açar.
 minikube-open:
 	kubectl --context $(KUBE_CONTEXT) -n $(NAMESPACE) port-forward svc/kubeat-frontend $(FRONTEND_PORT):3000
+
+# Keşfi denemek için örnek bir namespace (shop-demo) kurar.
+minikube-demo:
+	kubectl --context $(KUBE_CONTEXT) apply -f deploy/demo/shop.yaml

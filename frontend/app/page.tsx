@@ -7,6 +7,7 @@ import { AddMonitorForm } from "@/app/ui/add-monitor-form";
 import { LiveRefresh } from "@/app/ui/live-refresh";
 import { BackendError } from "@/app/ui/backend-error";
 import { LiveDuration } from "@/app/ui/live-duration";
+import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
 import { type DisplayState, displayState, HistoryStrip, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 
@@ -23,7 +24,8 @@ async function Monitors() {
   if (monitors.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/20">
-        Henüz monitor yok. Aşağıdaki formdan ilkini ekleyin.
+        Henüz monitor yok. <Link href="/discovery" className="underline">Keşif</Link> ile
+        cluster&apos;daki servisleri bulun ya da aşağıdaki formdan elle ekleyin.
       </p>
     );
   }
@@ -31,6 +33,13 @@ async function Monitors() {
   const states = monitors.map(displayState);
   const count = (...wanted: DisplayState[]) => states.filter((s) => wanted.includes(s)).length;
   const window = duration(monitors[0].window_seconds);
+
+  // Namespaces alphabetically, monitors entered by hand last.
+  const groups = new Map<string, number[]>();
+  monitors.forEach((m, i) => groups.set(m.namespace, [...(groups.get(m.namespace) ?? []), i]));
+  const namespaces = [...groups.keys()].sort((a, b) =>
+    a === "" ? 1 : b === "" ? -1 : a.localeCompare(b),
+  );
 
   return (
     <>
@@ -49,52 +58,101 @@ async function Monitors() {
         <Stat label="Bekleniyor" value={count("pending")} className="text-zinc-500" />
       </dl>
 
-      <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
-            <tr>
-              <th className="px-4 py-3 font-medium">Monitor</th>
-              <th className="px-4 py-3 font-medium">Durum</th>
-              <th className="px-4 py-3 font-medium">Son kontroller</th>
-              <th className="px-4 py-3 text-right font-medium">Uptime ({window})</th>
-              <th className="px-4 py-3 text-right font-medium">Ort. yanıt</th>
-              <th className="px-4 py-3 text-right font-medium">Son kontrol</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-black/5 dark:divide-white/10">
-            {monitors.map((m, i) => (
-              <tr key={m.id}>
-                <td className="max-w-64 px-4 py-3">
-                  <Link href={`/monitors/${m.id}`} className="font-medium hover:underline">
-                    {m.name}
-                  </Link>
-                  <div className="truncate text-xs text-zinc-500" title={m.target}>
-                    {m.target}
-                  </div>
-                </td>
-                <td className="whitespace-nowrap px-4 py-3">
-                  <StatusBadge state={states[i]} />
-                  {m.open_incident && (
-                    <div className="mt-0.5 text-xs text-zinc-500">
-                      <LiveDuration since={m.open_incident.started_at} />
-                    </div>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <HistoryStrip results={histories[i]} slots={config.historyLimit} />
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums">{uptime(m.uptime_percent)}</td>
-                <td className="px-4 py-3 text-right tabular-nums">
-                  {m.checks > 0 ? `${m.avg_latency_ms} ms` : "–"}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 text-right text-zinc-500">
-                  {m.last_result ? <TimeAgo iso={m.last_result.checked_at} /> : "–"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {namespaces.map((ns) => {
+        const rows = groups.get(ns)!;
+        const up = rows.filter((i) => states[i] === "up").length;
+        const down = rows.filter((i) => states[i] === "down" || states[i] === "recovering").length;
+        return (
+          <section key={ns} aria-label={ns || "Elle eklenenler"}>
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <h2 className="text-sm font-semibold">
+                {ns ? (
+                  <>
+                    <span className="font-normal text-zinc-500">namespace</span> {ns}
+                  </>
+                ) : (
+                  "Elle eklenenler"
+                )}
+              </h2>
+              <p className="text-xs text-zinc-500">
+                {up}/{rows.length} çalışıyor
+                {down > 0 && (
+                  <span className="font-medium text-red-600 dark:text-red-400">
+                    {" "}
+                    · {down} erişilemiyor
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+              <table className="w-full table-fixed text-left text-sm">
+                <colgroup>
+                  <col />
+                  <col className="w-36" />
+                  <col className="w-80" />
+                  <col className="w-28" />
+                  <col className="w-24" />
+                  <col className="w-28" />
+                </colgroup>
+                <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Monitor</th>
+                    <th className="px-4 py-3 font-medium">Durum</th>
+                    <th className="px-4 py-3 font-medium">Son kontroller</th>
+                    <th className="px-4 py-3 text-right font-medium">Uptime ({window})</th>
+                    <th className="px-4 py-3 text-right font-medium">Ort. yanıt</th>
+                    <th className="px-4 py-3 text-right font-medium">Son kontrol</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/5 dark:divide-white/10">
+                  {rows.map((i) => {
+                    const m = monitors[i];
+                    const label = monitorLabel(m);
+                    return (
+                      <tr key={m.id}>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {label.kind && <KindChip kind={label.kind} />}
+                            <Link
+                              href={`/monitors/${m.id}`}
+                              className="truncate font-medium hover:underline"
+                            >
+                              {label.name}
+                            </Link>
+                          </div>
+                          <div className="truncate text-xs text-zinc-500" title={m.target}>
+                            {m.target}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <StatusBadge state={states[i]} />
+                          {m.open_incident && (
+                            <div className="mt-0.5 text-xs text-zinc-500">
+                              <LiveDuration since={m.open_incident.started_at} />
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <HistoryStrip results={histories[i]} slots={config.historyLimit} />
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {uptime(m.uptime_percent)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {m.checks > 0 ? `${m.avg_latency_ms} ms` : "–"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-zinc-500">
+                          {m.last_result ? <TimeAgo iso={m.last_result.checked_at} /> : "–"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        );
+      })}
     </>
   );
 }
@@ -117,7 +175,7 @@ export default function Home() {
         <Monitors />
       </Suspense>
       <section className="rounded-lg border border-black/10 p-5 dark:border-white/15">
-        <h2 className="mb-4 text-sm font-semibold">Yeni monitor</h2>
+        <h2 className="mb-4 text-sm font-semibold">Elle monitor ekle</h2>
         <AddMonitorForm />
       </section>
     </main>

@@ -34,6 +34,11 @@ frontend:
     limits:
       memory: 512Mi
 
+# Lets the backend list namespaces, services, pods, ingresses and routes
+# (read-only, cluster-wide) so monitors can be created from what is running.
+discovery:
+  enabled: true
+
 # Pod-level security context for both workloads. Leave empty on OpenShift,
 # which assigns the UID and fsGroup itself. On other clusters set fsGroup so
 # the backend can write to its volume, e.g. {fsGroup: 1001}.

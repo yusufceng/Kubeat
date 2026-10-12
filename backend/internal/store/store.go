@@ -32,6 +32,10 @@ type Monitor struct {
 	Target   string
 	Interval time.Duration
 	Timeout  time.Duration
+	// Namespace groups the monitor; Source identifies the cluster object it
+	// was discovered from. Both are empty for monitors entered by hand.
+	Namespace string
+	Source    string
 	// FailureThreshold is how many consecutive failed checks open an incident.
 	FailureThreshold int
 	Enabled          bool

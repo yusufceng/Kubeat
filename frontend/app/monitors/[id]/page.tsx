@@ -17,6 +17,7 @@ import { DeleteMonitorButton } from "@/app/ui/delete-monitor-button";
 import { BackendError } from "@/app/ui/backend-error";
 import { IncidentTable } from "@/app/ui/incident-table";
 import { LiveDuration } from "@/app/ui/live-duration";
+import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
 import { displayState, HistoryStrip, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 
@@ -38,11 +39,19 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
     return <BackendError what="Monitor durumu" />;
   }
 
+  const label = monitorLabel(monitor);
+
   return (
     <>
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">{monitor.name}</h1>
+          {monitor.namespace && (
+            <p className="mb-1 flex items-center gap-2 text-sm text-zinc-500">
+              namespace <span className="font-medium text-foreground">{monitor.namespace}</span>
+              {label.kind && <KindChip kind={label.kind} />}
+            </p>
+          )}
+          <h1 className="text-2xl font-semibold tracking-tight">{label.name}</h1>
           <p className="mt-1 break-all text-sm text-zinc-500">
             {monitor.type.toUpperCase()} · {monitor.target}
           </p>

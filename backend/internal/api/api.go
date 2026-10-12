@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
+	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -18,6 +19,7 @@ const maxBodyBytes = 1 << 20
 // Store is the part of the persistence layer the API needs.
 type Store interface {
 	CreateMonitor(ctx context.Context, m store.Monitor) (store.Monitor, error)
+	ListMonitors(ctx context.Context) ([]store.Monitor, error)
 	DeleteMonitor(ctx context.Context, id int64) error
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (store.MonitorStatus, error)
@@ -27,6 +29,12 @@ type Store interface {
 	GetChannel(ctx context.Context, id int64) (store.Channel, error)
 	ListChannels(ctx context.Context) ([]store.Channel, error)
 	DeleteChannel(ctx context.Context, id int64) error
+}
+
+// Discovery lists what could be monitored in the cluster.
+type Discovery interface {
+	Namespaces(ctx context.Context) ([]string, error)
+	Candidates(ctx context.Context, namespace string) ([]k8s.Candidate, error)
 }
 
 // Notifier sends a single notification to a channel, without retries.
@@ -47,7 +55,11 @@ type Options struct {
 	// DefaultFailureThreshold applies to monitors created without one.
 	DefaultFailureThreshold int
 	Notifier                Notifier
-	Logger                  *slog.Logger
+	// Discovery is nil when no cluster is available; DiscoveryStatus then
+	// says why. Otherwise DiscoveryStatus describes the connection.
+	Discovery       Discovery
+	DiscoveryStatus string
+	Logger          *slog.Logger
 }
 
 // Health is the response body of the health endpoint.
@@ -71,6 +83,10 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/monitors/{id}", h.getMonitor)
 	mux.HandleFunc("DELETE /api/v1/monitors/{id}", h.deleteMonitor)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/results", h.listResults)
+	mux.HandleFunc("GET /api/v1/discovery", h.discoveryStatus)
+	mux.HandleFunc("GET /api/v1/discovery/namespaces", h.discoveryNamespaces)
+	mux.HandleFunc("GET /api/v1/discovery/candidates", h.discoveryCandidates)
+	mux.HandleFunc("POST /api/v1/discovery/import", h.discoveryImport)
 	mux.HandleFunc("GET /api/v1/incidents", h.listIncidents)
 	mux.HandleFunc("GET /api/v1/channels", h.listChannels)
 	mux.HandleFunc("POST /api/v1/channels", h.createChannel)

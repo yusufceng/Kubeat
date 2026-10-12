@@ -43,6 +43,9 @@ func TestLoadDefaults(t *testing.T) {
 		NotifyAttempts:          3,
 		NotifyRetryDelay:        5 * time.Second,
 		NotifyTimeout:           5 * time.Second,
+
+		DiscoveryEnabled: true,
+		KubeTimeout:      10 * time.Second,
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)
