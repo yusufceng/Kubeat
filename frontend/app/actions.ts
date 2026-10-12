@@ -71,6 +71,7 @@ export async function saveMonitorAction(formData: FormData): Promise<{ error: st
     retry_interval_seconds: push ? 0 : number("retry_interval_seconds"),
     inverted: !push && checked("inverted"),
   };
+  if (formData.get("each_pod") !== null) settings.each_pod = checked("each_pod");
   // Discovered monitors are named after their source and stay in its
   // namespace; their form has neither field.
   if (formData.get("name") !== null) settings.name = text("name");

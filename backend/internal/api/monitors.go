@@ -46,11 +46,14 @@ type monitorResponse struct {
 	IntervalSeconds int      `json:"interval_seconds"`
 	TimeoutSeconds  int      `json:"timeout_seconds"`
 	// RetryIntervalSeconds is 0 when failed checks are not repeated early.
-	RetryIntervalSeconds int       `json:"retry_interval_seconds"`
-	FailureThreshold     int       `json:"failure_threshold"`
-	Inverted             bool      `json:"inverted"`
-	Enabled              bool      `json:"enabled"`
-	CreatedAt            time.Time `json:"created_at"`
+	RetryIntervalSeconds int  `json:"retry_interval_seconds"`
+	FailureThreshold     int  `json:"failure_threshold"`
+	Inverted             bool `json:"inverted"`
+	// EachPod: an HTTP or TCP monitor discovered from a service port checks
+	// every ready pod behind it rather than the service's address.
+	EachPod   bool      `json:"each_pod"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
 	// PushToken is the secret of a push monitor's report URL,
 	// /api/push/{token}; absent for other types.
 	PushToken string `json:"push_token,omitempty"`
@@ -128,6 +131,7 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		IntervalSeconds: int(st.Interval / time.Second),
 		TimeoutSeconds:  int(st.Timeout / time.Second),
 		Inverted:        st.Inverted,
+		EachPod:         st.EachPod,
 		Enabled:         st.Enabled,
 		CreatedAt:       st.CreatedAt,
 		PushToken:       st.PushToken,
@@ -315,6 +319,9 @@ type createMonitorRequest struct {
 	// FailureThreshold is optional; 0 means the server default.
 	FailureThreshold int  `json:"failure_threshold"`
 	Inverted         bool `json:"inverted"`
+	// EachPod is only valid on an HTTP or TCP monitor discovered from a
+	// service port; optional.
+	EachPod bool `json:"each_pod"`
 	// Namespace is the group of a monitor entered by hand; optional.
 	Namespace string `json:"namespace"`
 	// Tags are free-form labels; optional.
@@ -492,6 +499,7 @@ func (req *createMonitorRequest) monitor(base store.Monitor) store.Monitor {
 	base.RetryInterval = time.Duration(req.RetryIntervalSeconds) * time.Second
 	base.FailureThreshold = req.FailureThreshold
 	base.Inverted = req.Inverted
+	base.EachPod = req.EachPod
 	base.Namespace = req.Namespace
 	base.Tags = req.Tags
 	return base
@@ -551,6 +559,10 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
 	m.Enabled = true
 	if err := req.checkOptions.apply(&m); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateEachPod(m); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -615,6 +627,7 @@ type updateMonitorRequest struct {
 	RetryIntervalSeconds *int    `json:"retry_interval_seconds"`
 	FailureThreshold     *int    `json:"failure_threshold"`
 	Inverted             *bool   `json:"inverted"`
+	EachPod              *bool   `json:"each_pod"`
 	Enabled              *bool   `json:"enabled"`
 	// Namespace moves a monitor entered by hand to another group; a
 	// discovered monitor stays in the namespace of its object.
@@ -668,6 +681,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		RetryIntervalSeconds: int(current.RetryInterval / time.Second),
 		FailureThreshold:     current.FailureThreshold,
 		Inverted:             current.Inverted,
+		EachPod:              current.EachPod,
 		Namespace:            current.Namespace,
 		Tags:                 current.Tags,
 	}
@@ -706,6 +720,9 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	if req.Inverted != nil {
 		merged.Inverted = *req.Inverted
 	}
+	if req.EachPod != nil {
+		merged.EachPod = *req.EachPod
+	}
 	if req.FailureThreshold != nil {
 		if *req.FailureThreshold < 1 {
 			writeError(w, http.StatusBadRequest, "failure_threshold must be at least 1")
@@ -724,6 +741,10 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 
 	change := merged.monitor(current)
 	if err := req.checkOptions.apply(&change); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateEachPod(change); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -782,6 +803,20 @@ func (h *handler) closeIncident(r *http.Request, m store.Monitor) error {
 	return nil
 }
 
+// validateEachPod says whether the monitor may check its pods one by one.
+func validateEachPod(m store.Monitor) error {
+	if !m.EachPod {
+		return nil
+	}
+	if m.Type != store.MonitorHTTP && m.Type != store.MonitorTCP {
+		return errors.New("each_pod only applies to http and tcp monitors")
+	}
+	if !strings.HasPrefix(m.Source, "service/") {
+		return errors.New("each_pod only applies to a monitor discovered from a service port")
+	}
+	return nil
+}
+
 // managedError answers a change to what discovery owns on a managed monitor.
 const managedError = "this monitor follows the kubeat.io/* annotations of its cluster object; change those instead"
 
@@ -791,7 +826,8 @@ func changesManagedSettings(req updateMonitorRequest, current store.Monitor) boo
 	return (req.Target != nil && strings.TrimSpace(*req.Target) != current.Target) ||
 		(req.IntervalSeconds != nil && *req.IntervalSeconds != int(current.Interval/time.Second)) ||
 		(req.TimeoutSeconds != nil && *req.TimeoutSeconds != int(current.Timeout/time.Second)) ||
-		(req.FailureThreshold != nil && *req.FailureThreshold != current.FailureThreshold)
+		(req.FailureThreshold != nil && *req.FailureThreshold != current.FailureThreshold) ||
+		(req.EachPod != nil && *req.EachPod != current.EachPod)
 }
 
 func (h *handler) deleteMonitor(w http.ResponseWriter, r *http.Request) {

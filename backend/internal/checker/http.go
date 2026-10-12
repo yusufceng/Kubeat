@@ -24,6 +24,12 @@ var HTTPMethods = []string{
 // status and, for HTTPS, when the server's certificate expires; its error
 // is nil only if the response satisfies the monitor's expectations.
 func (c *Checker) checkHTTP(ctx context.Context, m store.Monitor) outcome {
+	return c.checkHTTPAt(ctx, m, "")
+}
+
+// checkHTTPAt sends the request to addr ("ip:port") instead of where the
+// URL leads, when addr is given; the request itself is unchanged.
+func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string) outcome {
 	o := m.HTTP
 	expected, err := ParseStatusSet(o.ExpectedStatus)
 	if err != nil {
@@ -62,6 +68,14 @@ func (c *Checker) checkHTTP(ctx context.Context, m store.Monitor) outcome {
 	transport := c.verifying
 	if o.SkipTLSVerify {
 		transport = c.insecure
+	}
+	if addr != "" {
+		// A transport of its own, so that the connection pool does not hand
+		// this pod's connection to a check of another.
+		t := transport.Clone()
+		t.DialContext = c.dialTo(addr)
+		defer t.CloseIdleConnections()
+		transport = t
 	}
 	client := &http.Client{
 		Transport: transport,

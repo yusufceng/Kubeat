@@ -211,6 +211,8 @@ export type Monitor = CheckOptions & {
   failure_threshold: number;
   /** Up while the target fails. */
   inverted: boolean;
+  /** Checks every ready pod behind the service port instead of the service's address. */
+  each_pod: boolean;
   enabled: boolean;
   created_at: string;
   /** The secret of a push monitor's report URL; absent for other types. */
@@ -247,6 +249,7 @@ export type MonitorSettings = {
   tags?: string[];
   retry_interval_seconds?: number;
   inverted?: boolean;
+  each_pod?: boolean;
   http?: Partial<HttpOptions>;
   tcp?: Partial<TcpOptions>;
   dns?: Partial<DnsOptions>;
@@ -316,6 +319,7 @@ function withDefaults(m: Monitor): Monitor {
     description: m.description ?? "",
     retry_interval_seconds: m.retry_interval_seconds ?? 0,
     inverted: m.inverted ?? false,
+    each_pod: m.each_pod ?? false,
     http: m.http ?? null,
     tcp: m.tcp ?? null,
     dns: m.dns ?? null,

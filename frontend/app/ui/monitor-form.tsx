@@ -59,10 +59,28 @@ function Field({
   );
 }
 
-function Check({ name, label, hint, defaultChecked }: { name: string; label: string; hint?: string; defaultChecked?: boolean }) {
+function Check({
+  name,
+  label,
+  hint,
+  defaultChecked,
+  disabled,
+}: {
+  name: string;
+  label: string;
+  hint?: string;
+  defaultChecked?: boolean;
+  disabled?: boolean;
+}) {
   return (
     <label className="flex items-start gap-2.5 text-sm sm:col-span-6">
-      <input type="checkbox" name={name} defaultChecked={defaultChecked} className="mt-0.5 h-4 w-4 accent-(--accent)" />
+      <input
+        type="checkbox"
+        name={name}
+        defaultChecked={defaultChecked}
+        disabled={disabled}
+        className="mt-0.5 h-4 w-4 accent-(--accent)"
+      />
       <span>
         {label}
         {hint && <span className="block text-xs text-muted">{hint}</span>}
@@ -96,6 +114,8 @@ export function MonitorForm({
   // made from an annotation also takes its target and timing from there.
   const discovered = (monitor?.source ?? "") !== "";
   const managed = monitor?.managed ?? false;
+  // Only a service port has pods to check one by one.
+  const fromService = (monitor?.source ?? "").startsWith("service/") && (type === "http" || type === "tcp");
 
   // Submitted by hand instead of through the form's action: React resets a
   // form after its action, which would throw away a rejected form's values.
@@ -524,6 +544,19 @@ export function MonitorForm({
 
       {type !== "push" && (
         <Section title="Gelişmiş">
+          {fromService && (
+            <Check
+              name="each_pod"
+              label="Her pod'u ayrı kontrol et"
+              hint={
+                managed
+                  ? "Nesnedeki kubeat.io/each-pod annotation'ından gelir."
+                  : "Service adresi yerine arkasındaki hazır pod'ların her birine aynı kontrol yapılır; biri cevap vermezse kesinti sayılır ve adı yazılır."
+              }
+              defaultChecked={monitor?.each_pod}
+              disabled={managed}
+            />
+          )}
           <Check
             name="inverted"
             label="Ters mod"

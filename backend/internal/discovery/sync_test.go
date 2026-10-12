@@ -195,6 +195,15 @@ func TestSyncHonoursPortAndPath(t *testing.T) {
 		t.Errorf("monitor = %+v", m)
 	}
 
+	// Each pod, asked for on the service.
+	cluster.candidates[0].Annotations = monitored(map[string]string{AnnotationPort: "web", AnnotationEachPod: "true"})
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if m := names(t, db)["shop/service/api:8080"]; !m.EachPod || m.Type != store.MonitorTCP {
+		t.Errorf("each pod = %+v", m)
+	}
+
 	// A probe-derived HTTPS check keeps its scheme and gets the path.
 	cluster.candidates[0].Type, cluster.candidates[0].Target = store.MonitorHTTP, "https://api.shop.svc:8080/livez"
 	cluster.candidates[0].Annotations = monitored(map[string]string{AnnotationPort: "8080", AnnotationPath: "/ready"})
@@ -215,6 +224,8 @@ func TestSyncReportsBadAnnotations(t *testing.T) {
 		serviceCandidate("rel", 80, "", monitored(map[string]string{AnnotationPath: "healthz"})),
 		{Kind: k8s.KindIngress, Namespace: "shop", Name: "web", Annotations: monitored(map[string]string{AnnotationPath: "/x"}),
 			Type: store.MonitorHTTP, Target: "https://shop.example.com/", Reason: k8s.ReasonIngressRule},
+		{Kind: k8s.KindDeployment, Namespace: "shop", Name: "api", Annotations: monitored(map[string]string{AnnotationEachPod: "true"}),
+			Type: store.MonitorWorkload, Target: k8s.WorkloadTarget("shop", k8s.KindDeployment, "api"), Reason: k8s.ReasonWorkload},
 		serviceCandidate("ok", 80, "", monitored(map[string]string{AnnotationMonitor: " True "})),
 	}}
 	s, db := newSyncer(t, cluster)
@@ -222,7 +233,7 @@ func TestSyncReportsBadAnnotations(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := s.Status()
-	if st.Created != 1 || len(st.Skipped) != 6 {
+	if st.Created != 1 || len(st.Skipped) != 7 {
 		t.Errorf("status = %+v", st)
 	}
 	if got := names(t, db); len(got) != 1 || got["shop/service/ok:80"].Name == "" {

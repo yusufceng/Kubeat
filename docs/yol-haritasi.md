@@ -26,6 +26,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 15 | Kişisel hesaplar, LDAP girişi, namespace bazlı roller, değişiklik kaydı | Tamamlandı |
 | 15b | Ayarlar ekranı, kişi başına API anahtarları | Planlandı |
 | 17 | Annotation ile sürekli keşif: `kubeat.io/monitor` taşıyan nesneler kendiliğinden izlenir | Tamamlandı |
+| 18 | Pod bazında kontrol: Service'in arkasındaki her hazır pod'a aynı kontrol (`each_pod`) | Tamamlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 

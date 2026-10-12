@@ -171,6 +171,11 @@ async function MonitorDetail({
             </Link>
             {label.kind && <KindChip kind={label.kind} />}
             <KindChip kind={typeLabel(monitor.type)} />
+            {monitor.each_pod && (
+              <span className="rounded bg-sunken px-1.5 py-0.5 text-xs" title="Her hazır pod ayrı kontrol edilir">
+                her pod
+              </span>
+            )}
             {monitor.managed && (
               <span
                 className="rounded bg-sunken px-1.5 py-0.5 text-xs"

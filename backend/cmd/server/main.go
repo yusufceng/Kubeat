@@ -121,6 +121,7 @@ func main() {
 		cluster    api.Discovery
 		workloads  api.Workloads
 		replicas   checker.Workloads
+		endpoints  checker.Endpoints
 		podMetrics api.PodMetrics
 		sync       api.Sync
 	)
@@ -132,6 +133,7 @@ func main() {
 			logger.Info("cluster discovery unavailable", "reason", err.Error())
 		} else {
 			cluster, workloads, replicas, discoveryStatus = client, client, client, client.Mode
+			endpoints = podEndpoints{client}
 			logger.Info("cluster discovery enabled", "mode", client.Mode)
 			if cfg.DiscoverySyncInterval > 0 {
 				syncer := discovery.New(discovery.Options{
@@ -156,6 +158,7 @@ func main() {
 		BodyLimit:          int64(cfg.KeywordBodyLimit),
 		Pushes:             db,
 		Workloads:          replicas,
+		Endpoints:          endpoints,
 	}), scheduler.Options{
 		Tick:          cfg.SchedulerTick,
 		MaxJitter:     cfg.MaxJitter,
@@ -403,6 +406,21 @@ func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, lo
 	}
 	logger.Warn("the admin password was reset from UPTIME_ADMIN_PASSWORD; unset UPTIME_ADMIN_PASSWORD_RESET again")
 	return nil
+}
+
+// podEndpoints hands the cluster's endpoints to the checker in its own terms.
+type podEndpoints struct{ client *k8s.Client }
+
+func (p podEndpoints) PodEndpoints(ctx context.Context, namespace, source string) ([]checker.Endpoint, error) {
+	found, err := p.client.PodEndpoints(ctx, namespace, source)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]checker.Endpoint, 0, len(found))
+	for _, e := range found {
+		out = append(out, checker.Endpoint{Pod: e.Pod, Address: e.Address})
+	}
+	return out, nil
 }
 
 // runSessionCleanup drops expired sessions and old audit entries, hourly.

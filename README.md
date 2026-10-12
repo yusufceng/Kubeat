@@ -568,6 +568,24 @@ Bu yüzden keşifle oluşturulmuş bir monitor'un sayfasında, o hedefin
 arkasındaki pod'lar da gösterilir: kaçı hazır, her birinin durumu
 (`CrashLoopBackOff` gibi), restart sayısı, yaşı ve node'u.
 
+### Her pod'u ayrı kontrol etmek
+
+Bir Service portundan keşfedilmiş `http` ya da `tcp` monitor'da
+`"each_pod": true` (formda "Her pod'u ayrı kontrol et", annotation ile
+`kubeat.io/each-pod: "true"`) seçilirse kontrol Service adresine değil,
+EndpointSlice'taki hazır pod'ların her birine aynı anda yapılır. İstek
+değişmez: aynı yol, aynı `Host` başlığı, aynı TLS sunucu adı; yalnızca
+bağlantı pod'un adresine kurulur. Pod'lardan biri bile başarısız olursa
+kontrol başarısız sayılır ve hata metninde hangi pod'ların neden düştüğü
+yazar (`1 of 3 pods failed: web-7d9f (unexpected status 503)`); hepsi
+geçerse ayrıntıda pod adları görünür. Gecikme en yavaş pod'unkidir.
+
+"Ready görünüyor ama cevap vermiyor" durumunu yalnızca bu yakalar: pod'un
+readiness probe'u geçerken gerçek iş yolu bozulmuş olabilir. Hazır olmayan
+pod'lar kontrole girmez; onlar `workload` monitor'unun işidir. Chart'ın
+ClusterRole'ü bunun için `discovery.k8s.io/endpointslices` listeleme izni
+içerir.
+
 Bu bilgi sayfa açıldığında cluster API'sinden canlı okunur; Kubeat bunu
 saklamaz ve bunun için alarm üretmez. Replika eksikliği ya da sürekli
 yeniden başlayan pod alarmları cluster'ın kendi izleme altyapısının işidir.

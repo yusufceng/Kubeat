@@ -34,6 +34,9 @@ const (
 	// AnnotationPath makes the check of a Service port an HTTP request to
 	// this path, whether or not a pod probe was found.
 	AnnotationPath = "kubeat.io/path"
+	// AnnotationEachPod, when "true" on a Service, checks every ready pod
+	// behind the port instead of the service's address.
+	AnnotationEachPod = "kubeat.io/each-pod"
 )
 
 // Actor is recorded in the audit log for the syncer's changes.
@@ -199,7 +202,7 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 			st.Updated++
 		case differs(current, want):
 			current.Target, current.Interval, current.Timeout, current.FailureThreshold = want.Target, want.Interval, want.Timeout, want.FailureThreshold
-			current.GRPC.Service = want.GRPC.Service
+			current.GRPC.Service, current.EachPod = want.GRPC.Service, want.EachPod
 			if _, err := s.opts.Store.UpdateMonitor(ctx, current); err != nil {
 				return fmt.Errorf("update monitor %d: %w", current.ID, err)
 			}
@@ -229,7 +232,8 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 // differs says whether the settings the syncer owns changed.
 func differs(current, want store.Monitor) bool {
 	return current.Target != want.Target || current.Interval != want.Interval || current.Timeout != want.Timeout ||
-		current.FailureThreshold != want.FailureThreshold || current.GRPC.Service != want.GRPC.Service
+		current.FailureThreshold != want.FailureThreshold || current.GRPC.Service != want.GRPC.Service ||
+		current.EachPod != want.EachPod
 }
 
 func (s *Syncer) create(ctx context.Context, want store.Monitor) error {
@@ -333,6 +337,12 @@ func (s *Syncer) monitorFor(c k8s.Candidate) (store.Monitor, error) {
 			return m, err
 		}
 		m.Type, m.Target, m.GRPC.Service = store.MonitorHTTP, target, ""
+	}
+	if v, ok := c.Annotations[AnnotationEachPod]; ok && strings.EqualFold(strings.TrimSpace(v), "true") {
+		if c.Kind != k8s.KindService || (m.Type != store.MonitorHTTP && m.Type != store.MonitorTCP) {
+			return m, fmt.Errorf("%s: only applies to a Service port checked over HTTP or TCP", AnnotationEachPod)
+		}
+		m.EachPod = true
 	}
 	return m, nil
 }

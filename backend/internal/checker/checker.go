@@ -35,6 +35,9 @@ type Options struct {
 	Pushes Pushes
 	// Workloads is required for workload monitors; nil without a cluster.
 	Workloads Workloads
+	// Endpoints is required for monitors that check each pod; nil without
+	// a cluster.
+	Endpoints Endpoints
 }
 
 // Checker runs the checks of every monitor type. It is safe for concurrent
@@ -86,28 +89,30 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	result := store.CheckResult{MonitorID: m.ID, CheckedAt: start.UTC().Truncate(time.Millisecond)}
 
 	var out outcome
-	switch m.Type {
-	case store.MonitorHTTP:
+	switch {
+	case eachPod(m):
+		out = c.checkEachPod(ctx, m)
+	case m.Type == store.MonitorHTTP:
 		out = c.checkHTTP(ctx, m)
-	case store.MonitorTCP:
+	case m.Type == store.MonitorTCP:
 		out = c.checkTCP(ctx, m)
-	case store.MonitorPing:
+	case m.Type == store.MonitorPing:
 		out = c.checkPing(ctx, m.Target)
-	case store.MonitorDNS:
+	case m.Type == store.MonitorDNS:
 		out = c.checkDNS(ctx, m)
-	case store.MonitorPush:
+	case m.Type == store.MonitorPush:
 		out = c.checkPush(ctx, m, start)
-	case store.MonitorGRPC:
+	case m.Type == store.MonitorGRPC:
 		out = c.checkGRPC(ctx, m)
-	case store.MonitorWebSocket:
+	case m.Type == store.MonitorWebSocket:
 		out = c.checkWebSocket(ctx, m)
-	case store.MonitorPostgres:
+	case m.Type == store.MonitorPostgres:
 		out = c.checkPostgres(ctx, m)
-	case store.MonitorMySQL:
+	case m.Type == store.MonitorMySQL:
 		out = c.checkMySQL(ctx, m)
-	case store.MonitorRedis:
+	case m.Type == store.MonitorRedis:
 		out = c.checkRedis(ctx, m)
-	case store.MonitorWorkload:
+	case m.Type == store.MonitorWorkload:
 		out = c.checkWorkload(ctx, m)
 	default:
 		out = failedf("unsupported monitor type %q", m.Type)
@@ -176,7 +181,12 @@ func leafExpiry(state *tls.ConnectionState) time.Time {
 }
 
 func (c *Checker) checkTCP(ctx context.Context, m store.Monitor) outcome {
-	conn, err := c.dialer.DialContext(ctx, "tcp", m.Target)
+	return c.checkTCPAt(ctx, m, m.Target)
+}
+
+// checkTCPAt connects to addr; the TLS server name stays the target's.
+func (c *Checker) checkTCPAt(ctx context.Context, m store.Monitor, addr string) outcome {
+	conn, err := c.dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return failed(err)
 	}

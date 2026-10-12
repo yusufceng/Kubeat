@@ -24,6 +24,9 @@ gider. Restart sayıları için alarm yok; panelde görünür. 2. madde hâlâ a
    entegrasyonu sırasında yalnızca okunup gösterilir.
 2. **Pod'ları tek tek yoklamak.** EndpointSlice'tan pod IP'leri alınıp her
    birine gerçek iş yolundan istek atılır. "Ready görünüyor ama cevap vermiyor"
-   durumunu yalnızca bu yakalar ve hazır araçlarda karşılığı yoktur. Cluster
-   içi agent ve monitor başına birden çok örnek (veri modeli değişikliği)
-   gerektirir. MVP dışı; agent işiyle birlikte değerlendirilecek.
+   durumunu yalnızca bu yakalar ve hazır araçlarda karşılığı yoktur.
+
+   Güncelleme (2026-10-12, en son): `each_pod` seçeneğiyle yapıldı; agent ve
+   monitor başına birden çok örnek gerekmedi, çünkü backend cluster içinde
+   çalışır ve pod'lara doğrudan erişir; sonuç tek kayıttır, düşen pod'lar
+   hata metninde adlarıyla yer alır. Pod başına ayrı geçmiş tutulmaz.

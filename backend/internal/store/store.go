@@ -78,7 +78,10 @@ type Monitor struct {
 	// Inverted turns the outcome around: the monitor is up while its target
 	// fails, for things that must not be reachable.
 	Inverted bool
-	Enabled  bool
+	// EachPod makes an HTTP or TCP monitor discovered from a service port
+	// check every ready pod behind it instead of the service's address.
+	EachPod bool
+	Enabled bool
 	// PushToken is the secret in the URL a push monitor's source reports to;
 	// empty for other types.
 	PushToken string
