@@ -308,7 +308,7 @@ func TestEmailSenderFailures(t *testing.T) {
 
 func TestRouterPicksSenderByType(t *testing.T) {
 	srv, bodies := capture(t)
-	router := NewRouter(srv.Client(), "kubeat/test", SMTPConfig{})
+	router := NewRouter(srv.Client(), "kubeat/test", SMTPConfig{}, Endpoints{})
 	ctx := context.Background()
 	n := sampleDown()
 

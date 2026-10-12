@@ -20,6 +20,7 @@ import {
   type MonitorType,
   type NewMonitor,
   testChannel,
+  updateChannel,
   updateMonitor,
 } from "@/lib/api";
 
@@ -155,27 +156,31 @@ export async function deleteMonitorAction(formData: FormData): Promise<void> {
   redirect("/");
 }
 
-export type ChannelFormState = {
-  error: string | null;
-  values: { name: string; type: string; target: string } | null;
-};
-
-export async function createChannelAction(
-  _prev: ChannelFormState,
-  formData: FormData,
-): Promise<ChannelFormState> {
-  const values = {
-    name: String(formData.get("name") ?? ""),
-    type: String(formData.get("type") ?? ""),
-    target: String(formData.get("target") ?? ""),
+/**
+ * Creates a channel, or with an id saves changes to one. Returns what was
+ * wrong, or nothing when it was saved.
+ */
+export async function saveChannelAction(formData: FormData): Promise<{ error: string } | undefined> {
+  const text = (name: string) => String(formData.get(name) ?? "").trim();
+  const id = Number(formData.get("id") ?? 0);
+  const settings = {
+    name: text("name"),
+    target: text("target"),
+    secret: text("secret"),
+    namespaces: formData.getAll("namespace").map(String),
   };
   try {
-    await createChannel({ ...values, type: values.type as ChannelType });
+    if (id) await updateChannel(id, settings);
+    else await createChannel({ ...settings, type: text("type") as ChannelType });
   } catch (err) {
-    return { error: describe(err), values };
+    return { error: describe(err) };
   }
   refresh();
-  return { error: null, values: null };
+}
+
+export async function setChannelEnabledAction(formData: FormData): Promise<void> {
+  await updateChannel(Number(formData.get("id")), { enabled: formData.get("enabled") === "true" });
+  refresh();
 }
 
 export async function deleteChannelAction(formData: FormData): Promise<void> {

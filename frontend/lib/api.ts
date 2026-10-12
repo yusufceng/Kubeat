@@ -7,7 +7,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 10;
+export const REQUIRED_API_REVISION = 11;
 
 export type Health = {
   status: string;
@@ -118,16 +118,41 @@ export type Incident = {
   cause: string;
 };
 
-export type ChannelType = "webhook" | "slack" | "teams" | "email";
+export type ChannelType =
+  | "webhook"
+  | "slack"
+  | "teams"
+  | "email"
+  | "discord"
+  | "mattermost"
+  | "googlechat"
+  | "telegram"
+  | "pagerduty"
+  | "ntfy"
+  | "gotify";
 
 export type Channel = {
   id: number;
   name: string;
   type: ChannelType;
-  /** A URL, masked by the backend, or for e-mail the list of addresses. */
+  /** Where it sends to; URLs come back masked. Empty for types without one. */
   target: string;
+  /** Whether a token or key is stored; its value never leaves the backend. */
+  has_secret: boolean;
+  /** The namespaces whose monitors it hears about; empty for all of them. */
+  namespaces: string[];
   enabled: boolean;
   created_at: string;
+};
+
+/** What a client sets on a channel. */
+export type ChannelSettings = {
+  name: string;
+  /** Sent back as it was shown, it keeps the stored target. */
+  target: string;
+  /** Sent as the mask, it keeps the stored secret. */
+  secret: string;
+  namespaces: string[];
 };
 
 export type ChannelTest = { delivered: boolean; error?: string };
@@ -296,8 +321,11 @@ export const listIncidents = (limit: number, monitorId?: number) =>
 
 export const listChannels = () => request<Channel[]>("/channels");
 
-export const createChannel = (channel: { name: string; type: ChannelType; target: string }) =>
+export const createChannel = (channel: ChannelSettings & { type: ChannelType }) =>
   request<Channel>("/channels", { method: "POST", body: JSON.stringify(channel) });
+
+export const updateChannel = (id: number, changes: Partial<ChannelSettings & { enabled: boolean }>) =>
+  request<Channel>(`/channels/${id}`, { method: "PATCH", body: JSON.stringify(changes) });
 
 export const deleteChannel = (id: number) =>
   request<void>(`/channels/${id}`, { method: "DELETE" });

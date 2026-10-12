@@ -1,0 +1,252 @@
+package alert
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/yusufceng/Kubeat/backend/internal/store"
+)
+
+// Endpoints are the addresses of the hosted services notifications go to.
+// They are settings so that a cluster without direct internet access can
+// point them at a proxy.
+type Endpoints struct {
+	// Telegram is the Bot API, without the "/bot<token>" part.
+	Telegram string
+	// PagerDuty is the Events API v2 "enqueue" address.
+	PagerDuty string
+}
+
+// accepted turns an answer outside 2xx into an error that names the
+// provider and carries what it said, which usually tells what is wrong.
+func accepted(provider string, status int, answer []byte) error {
+	if status >= 200 && status < 300 {
+		return nil
+	}
+	said := strings.TrimSpace(string(answer))
+	if said == "" {
+		return fmt.Errorf("%s answered %d", provider, status)
+	}
+	return fmt.Errorf("%s answered %d: %s", provider, status, truncate(said, 200))
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return strings.ToValidUTF8(s[:max], "") + "…"
+}
+
+// DiscordSender posts to a Discord webhook, which takes the message in
+// "content".
+type DiscordSender struct {
+	Client    *http.Client
+	UserAgent string
+}
+
+// discordLimit is the longest message Discord accepts.
+const discordLimit = 2000
+
+func (s *DiscordSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	status, answer, err := post(ctx, s.Client, s.UserAgent, ch.Target, nil,
+		map[string]string{"content": truncate(Text(n), discordLimit-1)})
+	if err != nil {
+		return err
+	}
+	return accepted("Discord", status, answer)
+}
+
+// TelegramSender sends a message as a bot. The channel's target is the chat
+// and its secret the bot's token.
+type TelegramSender struct {
+	Client    *http.Client
+	UserAgent string
+	BaseURL   string
+}
+
+func (s *TelegramSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	target := strings.TrimSuffix(s.BaseURL, "/") + "/bot" + ch.Secret + "/sendMessage"
+	status, answer, err := post(ctx, s.Client, s.UserAgent, target, nil, map[string]any{
+		"chat_id":                  ch.Target,
+		"text":                     Text(n),
+		"disable_web_page_preview": true,
+	})
+	if err != nil {
+		return err
+	}
+	// Telegram explains a refusal in "description".
+	var reply struct {
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(answer, &reply) == nil && reply.Description != "" {
+		answer = []byte(reply.Description)
+	}
+	return accepted("Telegram", status, answer)
+}
+
+// PagerDutySender raises and resolves alerts through the Events API v2. The
+// channel's secret is the integration's routing key. An incident here is
+// one alert there: the events about it share a deduplication key, so the
+// recovery closes what the outage opened.
+type PagerDutySender struct {
+	Client    *http.Client
+	UserAgent string
+	URL       string
+}
+
+type pagerDutyEvent struct {
+	RoutingKey  string            `json:"routing_key"`
+	EventAction string            `json:"event_action"`
+	DedupKey    string            `json:"dedup_key"`
+	Payload     *pagerDutyPayload `json:"payload,omitempty"`
+}
+
+type pagerDutyPayload struct {
+	Summary       string            `json:"summary"`
+	Source        string            `json:"source"`
+	Severity      string            `json:"severity"`
+	Component     string            `json:"component,omitempty"`
+	Group         string            `json:"group,omitempty"`
+	CustomDetails map[string]string `json:"custom_details,omitempty"`
+}
+
+// pagerDutySummaryLimit is the longest summary PagerDuty accepts.
+const pagerDutySummaryLimit = 1024
+
+func (s *PagerDutySender) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	event := pagerDutyEvent{
+		RoutingKey:  ch.Secret,
+		EventAction: "trigger",
+		DedupKey:    fmt.Sprintf("kubeat-incident-%d", n.Incident.ID),
+	}
+	switch n.Event {
+	case EventUp, EventCertRenewed:
+		event.EventAction = "resolve"
+	case EventTest:
+		// A test must not page anyone: it is raised as information and
+		// resolved by the second request below.
+		event.DedupKey = "kubeat-test"
+	}
+
+	if event.EventAction == "trigger" {
+		source := n.Monitor.Target
+		if source == "" {
+			source = "kubeat"
+		}
+		details := make(map[string]string)
+		for _, fact := range Facts(n) {
+			details[fact.Label] = fact.Value
+		}
+		event.Payload = &pagerDutyPayload{
+			Summary:       truncate(Text(n), pagerDutySummaryLimit-3),
+			Source:        source,
+			Severity:      pagerDutySeverity(n.Event),
+			Component:     n.Monitor.Name,
+			Group:         n.Monitor.Namespace,
+			CustomDetails: details,
+		}
+	}
+	if err := s.enqueue(ctx, event); err != nil {
+		return err
+	}
+	if n.Event == EventTest {
+		return s.enqueue(ctx, pagerDutyEvent{RoutingKey: ch.Secret, EventAction: "resolve", DedupKey: event.DedupKey})
+	}
+	return nil
+}
+
+func pagerDutySeverity(e Event) string {
+	switch e {
+	case EventCertExpiring:
+		return "warning"
+	case EventTest:
+		return "info"
+	default:
+		return "critical"
+	}
+}
+
+func (s *PagerDutySender) enqueue(ctx context.Context, event pagerDutyEvent) error {
+	status, answer, err := post(ctx, s.Client, s.UserAgent, s.URL, nil, event)
+	if err != nil {
+		return err
+	}
+	return accepted("PagerDuty", status, answer)
+}
+
+// NtfySender publishes to an ntfy topic. The channel's target is the
+// topic's address, such as https://ntfy.sh/alerts, and its secret an
+// optional access token.
+type NtfySender struct {
+	Client    *http.Client
+	UserAgent string
+}
+
+// SplitNtfyTopic splits a topic address into the server and the topic.
+func SplitNtfyTopic(target string) (server, topic string, err error) {
+	u, err := url.Parse(target)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", "", errors.New("must be an http:// or https:// URL")
+	}
+	path := strings.Trim(u.Path, "/")
+	cut := strings.LastIndex(path, "/")
+	topic = path[cut+1:]
+	if topic == "" {
+		return "", "", errors.New("must end with the topic, as in https://ntfy.sh/my-topic")
+	}
+	u.Path, u.RawQuery, u.Fragment = "/"+path[:cut+1], "", ""
+	return u.String(), topic, nil
+}
+
+func (s *NtfySender) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	server, topic, err := SplitNtfyTopic(ch.Target)
+	if err != nil {
+		return fmt.Errorf("topic address %w", err)
+	}
+	// Published as JSON to the server's root: a title with non-ASCII
+	// letters cannot travel in a header.
+	message := map[string]any{"topic": topic, "title": Subject(n), "message": Text(n), "priority": 3}
+	switch n.Event {
+	case EventDown, EventReminder:
+		message["priority"], message["tags"] = 5, []string{"rotating_light"}
+	case EventCertExpiring:
+		message["priority"], message["tags"] = 4, []string{"warning"}
+	case EventUp, EventCertRenewed:
+		message["tags"] = []string{"white_check_mark"}
+	}
+	var headers map[string]string
+	if ch.Secret != "" {
+		headers = map[string]string{"Authorization": "Bearer " + ch.Secret}
+	}
+	status, answer, err := post(ctx, s.Client, s.UserAgent, server, headers, message)
+	if err != nil {
+		return err
+	}
+	return accepted("ntfy", status, answer)
+}
+
+// GotifySender creates a message on a Gotify server. The channel's target
+// is the server's address and its secret an application token.
+type GotifySender struct {
+	Client    *http.Client
+	UserAgent string
+}
+
+func (s *GotifySender) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	priority := 5
+	if n.Event == EventDown || n.Event == EventReminder {
+		priority = 8
+	}
+	status, answer, err := post(ctx, s.Client, s.UserAgent, strings.TrimSuffix(ch.Target, "/")+"/message",
+		map[string]string{"X-Gotify-Key": ch.Secret},
+		map[string]any{"title": Subject(n), "message": Text(n), "priority": priority})
+	if err != nil {
+		return err
+	}
+	return accepted("Gotify", status, answer)
+}

@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -217,21 +218,47 @@ func (i Incident) Open() bool { return i.ResolvedAt.IsZero() }
 type ChannelType string
 
 const (
-	ChannelWebhook ChannelType = "webhook" // JSON POST to any URL
-	ChannelSlack   ChannelType = "slack"   // Slack incoming webhook
-	ChannelTeams   ChannelType = "teams"   // Microsoft Teams workflow webhook
-	ChannelEmail   ChannelType = "email"   // e-mail through the configured SMTP server
+	ChannelWebhook    ChannelType = "webhook"    // JSON POST to any URL
+	ChannelSlack      ChannelType = "slack"      // Slack incoming webhook
+	ChannelTeams      ChannelType = "teams"      // Microsoft Teams workflow webhook
+	ChannelEmail      ChannelType = "email"      // e-mail through the configured SMTP server
+	ChannelDiscord    ChannelType = "discord"    // Discord webhook
+	ChannelMattermost ChannelType = "mattermost" // Mattermost incoming webhook
+	ChannelGoogleChat ChannelType = "googlechat" // Google Chat space webhook
+	ChannelTelegram   ChannelType = "telegram"   // Telegram bot
+	ChannelPagerDuty  ChannelType = "pagerduty"  // PagerDuty Events API v2
+	ChannelNtfy       ChannelType = "ntfy"       // an ntfy topic
+	ChannelGotify     ChannelType = "gotify"     // a Gotify server
 )
+
+// ChannelTypes lists every type.
+var ChannelTypes = []ChannelType{
+	ChannelWebhook, ChannelSlack, ChannelTeams, ChannelEmail, ChannelDiscord, ChannelMattermost,
+	ChannelGoogleChat, ChannelTelegram, ChannelPagerDuty, ChannelNtfy, ChannelGotify,
+}
 
 // Channel is a destination for incident notifications.
 type Channel struct {
 	ID   int64
 	Name string
 	Type ChannelType
-	// Target is a URL, or for e-mail a comma-separated list of addresses.
-	Target    string
-	Enabled   bool
-	CreatedAt time.Time
+	// Target is where the channel sends to: a URL, for e-mail a
+	// comma-separated list of addresses, for Telegram a chat. PagerDuty has
+	// none.
+	Target string
+	// Secret is the credential of providers that have one beside the
+	// target: a bot token, a routing key, an access token.
+	Secret string
+	// Namespaces limits the channel to the monitors of these namespaces;
+	// empty means every monitor.
+	Namespaces []string
+	Enabled    bool
+	CreatedAt  time.Time
+}
+
+// Covers reports whether notifications about the monitor go to the channel.
+func (c Channel) Covers(m Monitor) bool {
+	return len(c.Namespaces) == 0 || slices.Contains(c.Namespaces, m.Namespace)
 }
 
 // RollupBucket is the size of a stored summary bucket.
@@ -364,6 +391,9 @@ type Store interface {
 
 	CreateChannel(ctx context.Context, c Channel) (Channel, error)
 	GetChannel(ctx context.Context, id int64) (Channel, error)
+	// UpdateChannel changes everything about the channel with c.ID except
+	// its type and creation time.
+	UpdateChannel(ctx context.Context, c Channel) (Channel, error)
 	ListChannels(ctx context.Context) ([]Channel, error)
 	DeleteChannel(ctx context.Context, id int64) error
 

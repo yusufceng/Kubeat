@@ -135,7 +135,8 @@ eklenmelidir.
 | `POST` | `/api/v1/maintenance` | Pencere ekler: `name`, `duration_seconds` ya da `ends_at`, isteğe bağlı `starts_at`, `namespace` ya da `monitor_id` |
 | `DELETE` | `/api/v1/maintenance/{id}` | Pencereyi siler; süren pencereyi bitirir |
 | `GET` | `/api/v1/channels` | Bildirim kanalları (URL'ler maskelenir) |
-| `POST` | `/api/v1/channels` | Kanal ekler: `{"name", "type", "target"}` |
+| `POST` | `/api/v1/channels` | Kanal ekler: `{"name", "type", "target", "secret", "namespaces"}` |
+| `PATCH` | `/api/v1/channels/{id}` | Kanalı düzenler; `{"enabled": false}` ile durdurur |
 | `DELETE` | `/api/v1/channels/{id}` | Kanalı siler |
 | `POST` | `/api/v1/channels/{id}/test` | Kanala test bildirimi gönderir |
 
@@ -447,18 +448,41 @@ Bakım sırasındaki başarısız kontroller uptime yüzdesine dahildir.
 
 ### Bildirim kanalları
 
-| Tür | Hedef | Gönderilen |
-| --- | --- | --- |
-| `slack` | Slack incoming webhook URL'i | `{"text": "..."}` |
-| `teams` | Teams workflow webhook URL'i | Adaptive Card içeren mesaj |
-| `email` | Virgülle ayrılmış adresler | Düz metin e-posta |
-| `webhook` | Herhangi bir URL | Aşağıdaki JSON gövdesi |
+| Tür | `target` | `secret` | Gönderilen |
+| --- | --- | --- | --- |
+| `slack` | Incoming webhook URL'i | – | `{"text": "..."}` |
+| `mattermost` | Incoming webhook URL'i | – | `{"text": "..."}` |
+| `googlechat` | Alan webhook URL'i | – | `{"text": "..."}` |
+| `teams` | Workflow webhook URL'i | – | Adaptive Card içeren mesaj |
+| `discord` | Webhook URL'i | – | `{"content": "..."}` |
+| `telegram` | Sohbet kimliği (`-100...` ya da `@kanal`) | Bot token | Bot üzerinden mesaj |
+| `pagerduty` | – | Events API v2 integration key | Kesintide alarm açar, düzelince aynı alarmı kapatır |
+| `ntfy` | Konu adresi (`https://ntfy.sh/konu`) | Erişim token'ı (isteğe bağlı) | Başlık, öncelik ve etiketle mesaj |
+| `gotify` | Sunucu adresi | Uygulama token'ı | Başlık ve öncelikle mesaj |
+| `email` | Virgülle ayrılmış adresler | – | Düz metin e-posta |
+| `webhook` | Herhangi bir URL | – | Aşağıdaki JSON gövdesi |
+
+Her kanal durdurulabilir, düzenlenebilir ve test edilebilir (`PATCH
+/api/v1/channels/{id}`, `POST .../test`). Başarısız bir test, sağlayıcının
+verdiği yanıtı gösterir.
+
+**Kapsam.** `namespaces` verilen bir kanal yalnızca o namespace'lerdeki
+monitor'ların bildirimlerini alır; boşsa hepsini alır. Böylece her ekibe kendi
+namespace'inin alarmları gider, ortak bir kanal da her şeyi görür.
+
+**Gizli değerler.** URL'ler API yanıtlarında maskelenir (`https://host/…`),
+`secret` ise hiç dönmez; yalnızca `has_secret` bilgisi verilir. Güncellemede
+maskelenmiş adres ya da `********` gönderilirse kayıtlı değer korunur. Hata
+mesajları adresi ve token'ı içermez.
 
 E-posta için bir SMTP sunucusu tanımlanmalıdır (`UPTIME_SMTP_*`); tanımlı
 değilse e-posta kanalı eklenemez. Varsayılan bağlantı güvenliği `starttls`
 olup sunucu STARTTLS sunmuyorsa gönderim reddedilir, şifresiz gönderilmez.
 
-Webhook URL'leri API yanıtlarında maskelenir.
+Telegram ve PagerDuty internetteki servislerdir. Cluster'dan doğrudan çıkış
+yoksa backend'e `HTTPS_PROXY` verilebilir ya da adresler
+`UPTIME_TELEGRAM_API_URL` ve `UPTIME_PAGERDUTY_EVENTS_URL` ile kendi
+vekilinize yönlendirilebilir.
 
 Genel webhook kanalına şu gövdeyle `POST` yapılır. `text` alanı insan tarafından
 okunabilir özettir.
@@ -536,6 +560,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SMTP_SECURITY` | `starttls` | `starttls`, `tls` ya da `none` |
 | `UPTIME_SMTP_USERNAME` | – | SMTP kullanıcı adı; boşsa kimlik doğrulama yapılmaz |
 | `UPTIME_SMTP_PASSWORD` | – | SMTP parolası |
+| `UPTIME_TELEGRAM_API_URL` | `https://api.telegram.org` | Telegram Bot API adresi |
+| `UPTIME_PAGERDUTY_EVENTS_URL` | `https://events.pagerduty.com/v2/enqueue` | PagerDuty Events API v2 adresi |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TOKEN` | – | Backend'e gönderilen anahtar; `UPTIME_API_TOKEN` ile aynı olmalı |
 | `ADMIN_PASSWORD` | – | Arayüzün yönetici parolası; boşsa giriş istenmez |

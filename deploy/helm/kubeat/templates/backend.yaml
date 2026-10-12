@@ -105,6 +105,14 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- with .Values.notifications.telegramApiUrl }}
+            - name: UPTIME_TELEGRAM_API_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.notifications.pagerDutyEventsUrl }}
+            - name: UPTIME_PAGERDUTY_EVENTS_URL
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.heartbeat }}
             {{- if .urlSecret.name }}
             - name: UPTIME_HEARTBEAT_URL

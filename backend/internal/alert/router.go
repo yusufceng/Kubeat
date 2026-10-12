@@ -16,15 +16,24 @@ type Router struct {
 }
 
 // NewRouter returns a Router for every channel type.
-func NewRouter(client *http.Client, userAgent string, smtp SMTPConfig) *Router {
+func NewRouter(client *http.Client, userAgent string, smtp SMTPConfig, endpoints Endpoints) *Router {
 	email := &EmailSender{SMTP: smtp}
+	// Mattermost and Google Chat read a message from "text", like Slack.
+	text := &SlackSender{Client: client, UserAgent: userAgent}
 	return &Router{
 		email: email,
 		senders: map[store.ChannelType]Sender{
-			store.ChannelWebhook: &WebhookSender{Client: client, UserAgent: userAgent},
-			store.ChannelSlack:   &SlackSender{Client: client, UserAgent: userAgent},
-			store.ChannelTeams:   &TeamsSender{Client: client, UserAgent: userAgent},
-			store.ChannelEmail:   email,
+			store.ChannelWebhook:    &WebhookSender{Client: client, UserAgent: userAgent},
+			store.ChannelSlack:      text,
+			store.ChannelMattermost: text,
+			store.ChannelGoogleChat: text,
+			store.ChannelTeams:      &TeamsSender{Client: client, UserAgent: userAgent},
+			store.ChannelEmail:      email,
+			store.ChannelDiscord:    &DiscordSender{Client: client, UserAgent: userAgent},
+			store.ChannelTelegram:   &TelegramSender{Client: client, UserAgent: userAgent, BaseURL: endpoints.Telegram},
+			store.ChannelPagerDuty:  &PagerDutySender{Client: client, UserAgent: userAgent, URL: endpoints.PagerDuty},
+			store.ChannelNtfy:       &NtfySender{Client: client, UserAgent: userAgent},
+			store.ChannelGotify:     &GotifySender{Client: client, UserAgent: userAgent},
 		},
 	}
 }

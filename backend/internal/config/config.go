@@ -78,6 +78,11 @@ type Config struct {
 	SMTPFrom     string // UPTIME_SMTP_FROM
 	SMTPSecurity string // UPTIME_SMTP_SECURITY: starttls, tls or none
 
+	// The hosted services notifications go to; change them to send through
+	// a proxy of your own.
+	TelegramAPIURL     string // UPTIME_TELEGRAM_API_URL
+	PagerDutyEventsURL string // UPTIME_PAGERDUTY_EVENTS_URL
+
 	// Discovery connects with the pod's service account when running in a
 	// cluster. Outside one, it needs both a kubeconfig and a context.
 	DiscoveryEnabled bool          // UPTIME_DISCOVERY_ENABLED
@@ -109,6 +114,9 @@ func Load() (Config, error) {
 		SMTPPassword: envString("UPTIME_SMTP_PASSWORD", ""),
 		SMTPFrom:     envString("UPTIME_SMTP_FROM", ""),
 		SMTPSecurity: envString("UPTIME_SMTP_SECURITY", "starttls"),
+
+		TelegramAPIURL:     envString("UPTIME_TELEGRAM_API_URL", "https://api.telegram.org"),
+		PagerDutyEventsURL: envString("UPTIME_PAGERDUTY_EVENTS_URL", "https://events.pagerduty.com/v2/enqueue"),
 
 		Kubeconfig:  envString("UPTIME_KUBECONFIG", ""),
 		KubeContext: envString("UPTIME_KUBE_CONTEXT", ""),

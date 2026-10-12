@@ -24,7 +24,7 @@ func newTestAPI(t *testing.T) (*httptest.Server, *store.SQLite) {
 		t.Fatalf("open store: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	notifier := alert.New(db, alert.NewRouter(http.DefaultClient, "kubeat/test", alert.SMTPConfig{}), alert.Options{
+	notifier := alert.New(db, alert.NewRouter(http.DefaultClient, "kubeat/test", alert.SMTPConfig{}, alert.Endpoints{}), alert.Options{
 		Attempts: 1, SendTimeout: 2 * time.Second, Logger: logger,
 	})
 	srv := httptest.NewServer(NewHandler(Options{

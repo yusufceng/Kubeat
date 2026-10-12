@@ -63,6 +63,9 @@ func TestLoadDefaults(t *testing.T) {
 		SMTPPort:     587,
 		SMTPSecurity: "starttls",
 
+		TelegramAPIURL:     "https://api.telegram.org",
+		PagerDutyEventsURL: "https://events.pagerduty.com/v2/enqueue",
+
 		DiscoveryEnabled: true,
 		KubeTimeout:      10 * time.Second,
 	}

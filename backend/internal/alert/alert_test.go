@@ -661,3 +661,38 @@ func TestNoRemindersByDefaultOrInMaintenance(t *testing.T) {
 		t.Errorf("reminders sent during maintenance: %v", events)
 	}
 }
+
+// A channel limited to some namespaces hears only about their monitors.
+func TestDeliveryFollowsTheChannelScope(t *testing.T) {
+	f := newFixture(t, 1, 1) // its monitor has no namespace; "ops" has no scope
+	ctx := context.Background()
+	for _, ch := range []store.Channel{
+		{Name: "shop-team", Namespaces: []string{"shop"}},
+		{Name: "billing-team", Namespaces: []string{"billing", "payments"}},
+	} {
+		ch.Type, ch.Target, ch.Enabled = store.ChannelWebhook, "http://unused", true
+		if _, err := f.db.CreateChannel(ctx, ch); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deliver := func(namespace string) string {
+		f.sender.mu.Lock()
+		f.sender.channels = nil
+		f.sender.mu.Unlock()
+		f.engine.deliver(ctx, Notification{Event: EventDown, Monitor: store.Monitor{Name: "m", Namespace: namespace}})
+		f.sender.mu.Lock()
+		defer f.sender.mu.Unlock()
+		return strings.Join(f.sender.channels, ",")
+	}
+	for namespace, want := range map[string]string{
+		"":         "ops",
+		"shop":     "ops,shop-team",
+		"payments": "ops,billing-team",
+		"other":    "ops",
+	} {
+		if got := deliver(namespace); got != want {
+			t.Errorf("namespace %q: delivered to %q, want %q", namespace, got, want)
+		}
+	}
+}

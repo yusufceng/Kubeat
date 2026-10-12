@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -122,25 +124,51 @@ func (s *SQLite) ListIncidents(ctx context.Context, monitorID int64, limit int) 
 	return incidents, nil
 }
 
-const channelColumns = "id, name, type, target, enabled, created_at"
+const channelColumns = "id, name, type, target, secret, namespaces, enabled, created_at"
 
 func scanChannel(row rowScanner) (Channel, error) {
 	var (
-		c         Channel
-		createdAt int64
+		c          Channel
+		namespaces string
+		createdAt  int64
 	)
-	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Enabled, &createdAt); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Secret, &namespaces, &c.Enabled, &createdAt); err != nil {
 		return Channel{}, err
+	}
+	if err := json.Unmarshal([]byte(namespaces), &c.Namespaces); err != nil {
+		return Channel{}, fmt.Errorf("channel %d: decode namespaces: %w", c.ID, err)
+	}
+	if len(c.Namespaces) == 0 {
+		c.Namespaces = nil
 	}
 	c.CreatedAt = time.UnixMilli(createdAt).UTC()
 	return c, nil
 }
 
+// encodeNamespaces stores a channel's scope as a JSON array; no scope is "[]".
+func encodeNamespaces(namespaces []string) (string, error) {
+	if len(namespaces) == 0 {
+		return "[]", nil
+	}
+	b, err := json.Marshal(namespaces)
+	return string(b), err
+}
+
 func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) {
+	if !slices.Contains(ChannelTypes, c.Type) {
+		return Channel{}, fmt.Errorf("create channel: unknown type %q", c.Type)
+	}
+	namespaces, err := encodeNamespaces(c.Namespaces)
+	if err != nil {
+		return Channel{}, fmt.Errorf("create channel: %w", err)
+	}
+	if len(c.Namespaces) == 0 {
+		c.Namespaces = nil
+	}
 	c.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
 	res, err := s.write.ExecContext(ctx,
-		"INSERT INTO notification_channels (name, type, target, enabled, created_at) VALUES (?, ?, ?, ?, ?)",
-		c.Name, c.Type, c.Target, c.Enabled, c.CreatedAt.UnixMilli())
+		"INSERT INTO notification_channels (name, type, target, secret, namespaces, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		c.Name, c.Type, c.Target, c.Secret, namespaces, c.Enabled, c.CreatedAt.UnixMilli())
 	if isUniqueViolation(err) {
 		return Channel{}, ErrConflict
 	}
@@ -151,6 +179,36 @@ func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) 
 		return Channel{}, fmt.Errorf("create channel: %w", err)
 	}
 	return c, nil
+}
+
+func (s *SQLite) UpdateChannel(ctx context.Context, c Channel) (Channel, error) {
+	namespaces, err := encodeNamespaces(c.Namespaces)
+	if err != nil {
+		return Channel{}, fmt.Errorf("update channel: %w", err)
+	}
+	res, err := s.write.ExecContext(ctx,
+		"UPDATE notification_channels SET name = ?, target = ?, secret = ?, namespaces = ?, enabled = ? WHERE id = ?",
+		c.Name, c.Target, c.Secret, namespaces, c.Enabled, c.ID)
+	if isUniqueViolation(err) {
+		return Channel{}, ErrConflict
+	}
+	if err != nil {
+		return Channel{}, fmt.Errorf("update channel: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return Channel{}, fmt.Errorf("update channel: %w", err)
+	}
+	if n == 0 {
+		return Channel{}, ErrNotFound
+	}
+	// Read back through the writer so the answer reflects this update.
+	updated, err := scanChannel(s.write.QueryRowContext(ctx,
+		"SELECT "+channelColumns+" FROM notification_channels WHERE id = ?", c.ID))
+	if err != nil {
+		return Channel{}, fmt.Errorf("update channel: %w", err)
+	}
+	return updated, nil
 }
 
 func (s *SQLite) GetChannel(ctx context.Context, id int64) (Channel, error) {

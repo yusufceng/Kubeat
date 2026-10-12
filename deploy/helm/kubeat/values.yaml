@@ -103,6 +103,12 @@ heartbeat:
     name: ""
     key: url
 
+# Where Telegram and PagerDuty notifications are sent. Leave empty for the
+# services' own addresses; set them to go through a proxy of your own.
+notifications:
+  telegramApiUrl: ""
+  pagerDutyEventsUrl: ""
+
 # SMTP server for e-mail notification channels. E-mail is off while host or
 # from is empty.
 smtp:

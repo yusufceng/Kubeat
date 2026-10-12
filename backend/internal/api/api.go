@@ -40,6 +40,7 @@ type Store interface {
 	DeleteMaintenance(ctx context.Context, id int64) error
 	CreateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
 	GetChannel(ctx context.Context, id int64) (store.Channel, error)
+	UpdateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
 	ListChannels(ctx context.Context) ([]store.Channel, error)
 	DeleteChannel(ctx context.Context, id int64) error
 }
@@ -98,7 +99,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 10
+const Revision = 11
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -140,6 +141,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("DELETE /api/v1/maintenance/{id}", h.deleteMaintenance)
 	mux.HandleFunc("GET /api/v1/channels", h.listChannels)
 	mux.HandleFunc("POST /api/v1/channels", h.createChannel)
+	mux.HandleFunc("PATCH /api/v1/channels/{id}", h.updateChannel)
 	mux.HandleFunc("DELETE /api/v1/channels/{id}", h.deleteChannel)
 	mux.HandleFunc("POST /api/v1/channels/{id}/test", h.testChannel)
 	// Whatever the source has at hand reports: curl, wget, an HTTP client.

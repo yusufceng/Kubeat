@@ -323,7 +323,7 @@ func (e *Engine) deliver(ctx context.Context, n Notification) {
 		return
 	}
 	for _, ch := range channels {
-		if !ch.Enabled {
+		if !ch.Enabled || !ch.Covers(n.Monitor) {
 			continue
 		}
 		err := e.sendWithRetry(ctx, ch, n)

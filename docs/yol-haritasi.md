@@ -18,7 +18,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 10 | Etiketler, gruplar ve toplu işlemler | Sırada |
 | 11 | Durum sayfaları ve rozetler | Planlandı |
 | 12 | Tekrarlayan bakım pencereleri | Planlandı |
-| 13 | Bildirim sağlayıcıları: Telegram, Discord, PagerDuty, Opsgenie, Mattermost, Google Chat, ntfy | Planlandı |
+| 13 | Bildirim sağlayıcıları: Telegram, Discord, PagerDuty, Mattermost, Google Chat, ntfy, Gotify; kanal düzenleme ve namespace'e göre yönlendirme | Tamamlandı |
 | 14 | Veritabanı ve kuyruk kontrolleri (PostgreSQL, MySQL, Redis, MongoDB, Kafka, RabbitMQ); Kubernetes workload tipi | Planlandı |
 | 15 | Ayarlar ekranı, kişisel hesaplar ve roller, API anahtarları | Planlandı |
 
@@ -44,7 +44,8 @@ karşılamak. Kuma'nın kaynağı (3.0 beta, 2026-10) incelenerek çıkarıldı.
 | Gruplar ve etiketler | Namespace gruplaması var; serbest grup ve etiket 10. adımda |
 | Durum sayfaları (herkese açık, olay duyurusu, RSS), rozetler | 11. adım |
 | Bakım: tek seferlik, tekrarlayan, cron | Tek seferlik var; kalanı 12. adımda |
-| 110 bildirim sağlayıcısı | Webhook, Slack, Teams, e-posta var; yaygın olanlar 13. adımda |
+| 110 bildirim sağlayıcısı | 11 tanesi var: Slack, Teams, Telegram, Discord, Mattermost, Google Chat, PagerDuty, ntfy, Gotify, e-posta, webhook. Opsgenie eklenmedi: Atlassian ürünü sonlandırıyor |
+| Monitor başına bildirim seçimi | Kanal başına namespace kapsamı var; tek tek monitor seçimi etiketlerle (10. adım) |
 | Kullanıcı, 2FA, API anahtarları, ayarlar ekranı | Tek yönetici parolası var; kalanı 15. adımda |
 | Proxy, uzak tarayıcı, Cloudflare tüneli | Kapsam dışı |
 
@@ -73,6 +74,9 @@ da şablon render edilerek doğrulandı:
 - Keşif tek seferliktir; sonradan eklenen servisler kendiliğinden izlenmez.
 - Bakım pencereleri tek seferliktir ve bakım sırasındaki başarısız
   kontroller uptime'a dahildir.
-- Slack ve Teams gönderimi gerçek servislere karşı denenmedi.
+- Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
+  yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
+  yazıldı.
+- Kanalların token'ları da veritabanında şifresiz durur.
 - Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır. Minikube'da
   kısıtlı güvenlik bağlamındaki pod'dan çalıştı; OpenShift'te denenmedi.

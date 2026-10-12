@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
@@ -106,28 +108,50 @@ func (s *WebhookSender) Send(ctx context.Context, ch store.Channel, n Notificati
 
 // postJSON posts body as JSON; any non-2xx answer is an error.
 func postJSON(ctx context.Context, client *http.Client, userAgent, url string, body any) error {
-	payload, err := json.Marshal(body)
+	status, _, err := post(ctx, client, userAgent, url, nil, body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if status < 200 || status >= 300 {
+		return fmt.Errorf("webhook answered %d", status)
+	}
+	return nil
+}
+
+// answerLimit bounds how much of a provider's answer is read: enough for
+// the message of an error.
+const answerLimit = 2 << 10
+
+// post sends body as JSON with the given extra headers and returns the
+// status of the answer and the beginning of its body. Its errors never
+// carry the URL, which for most providers is or contains a credential.
+func post(ctx context.Context, client *http.Client, userAgent, target string, headers map[string]string, body any) (int, []byte, error) {
+	payload, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return 0, nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
+	if err != nil {
+		return 0, nil, errors.New("the address is not a valid URL")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if userAgent != "" {
 		req.Header.Set("User-Agent", userAgent)
 	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err // the cause without the URL around it
+		}
+		return 0, nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	answer, _ := io.ReadAll(io.LimitReader(resp.Body, answerLimit))
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook answered %d", resp.StatusCode)
-	}
-	return nil
+	return resp.StatusCode, answer, nil
 }

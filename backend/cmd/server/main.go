@@ -63,7 +63,7 @@ func main() {
 		Password: cfg.SMTPPassword,
 		From:     cfg.SMTPFrom,
 		Security: cfg.SMTPSecurity,
-	})
+	}, alert.Endpoints{Telegram: cfg.TelegramAPIURL, PagerDuty: cfg.PagerDutyEventsURL})
 	alerts := alert.New(db, senders, alert.Options{
 		RecoveryThreshold: cfg.RecoveryThreshold,
 		CertWarning:       cfg.CertWarning,

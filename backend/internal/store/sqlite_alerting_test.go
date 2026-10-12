@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -103,10 +104,10 @@ func TestChannels(t *testing.T) {
 	if _, err := s.CreateChannel(ctx, Channel{Name: "ops", Type: ChannelWebhook, Target: "https://x", Enabled: true}); !errors.Is(err, ErrConflict) {
 		t.Errorf("duplicate name: err = %v, want ErrConflict", err)
 	}
-	if _, err := s.CreateChannel(ctx, Channel{Name: "pager", Type: "pagerduty", Target: "x"}); err == nil {
+	if _, err := s.CreateChannel(ctx, Channel{Name: "pager", Type: "carrier-pigeon", Target: "x"}); err == nil {
 		t.Error("unknown channel type was accepted")
 	}
-	for _, typ := range []ChannelType{ChannelSlack, ChannelTeams, ChannelEmail} {
+	for _, typ := range ChannelTypes[1:] {
 		c, err := s.CreateChannel(ctx, Channel{Name: string(typ), Type: typ, Target: "t", Enabled: true})
 		if err != nil {
 			t.Errorf("%s channel: %v", typ, err)
@@ -118,11 +119,11 @@ func TestChannels(t *testing.T) {
 	}
 
 	got, err := s.GetChannel(ctx, created.ID)
-	if err != nil || got != created {
+	if err != nil || !reflect.DeepEqual(got, created) {
 		t.Errorf("get = %+v, %v; want %+v", got, err, created)
 	}
 	list, err := s.ListChannels(ctx)
-	if err != nil || len(list) != 1 || list[0] != created {
+	if err != nil || len(list) != 1 || !reflect.DeepEqual(list[0], created) {
 		t.Errorf("list = %+v, %v", list, err)
 	}
 
@@ -134,6 +135,54 @@ func TestChannels(t *testing.T) {
 	}
 	if _, err := s.GetChannel(ctx, created.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("get after delete: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestChannelSecretAndScope(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	created, err := s.CreateChannel(ctx, Channel{
+		Name: "shop-nöbet", Type: ChannelTelegram, Target: "-1001234", Secret: "123:abc", Namespaces: []string{"shop", "billing"}, Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetChannel(ctx, created.ID)
+	if err != nil || !reflect.DeepEqual(got, created) || got.Secret != "123:abc" || len(got.Namespaces) != 2 {
+		t.Errorf("get = %+v, %v; want %+v", got, err, created)
+	}
+
+	// Which monitors a channel hears about.
+	for namespace, want := range map[string]bool{"shop": true, "billing": true, "other": false, "": false} {
+		if got.Covers(Monitor{Namespace: namespace}) != want {
+			t.Errorf("scoped channel covers namespace %q = %v, want %v", namespace, !want, want)
+		}
+	}
+	everything := Channel{}
+	if !everything.Covers(Monitor{Namespace: "other"}) || !everything.Covers(Monitor{}) {
+		t.Error("a channel without a scope does not cover every monitor")
+	}
+
+	// An update changes everything but the type and the creation time.
+	got.Name, got.Target, got.Secret, got.Namespaces, got.Enabled, got.Type = "herkes", "-1009999", "456:def", []string{}, false, ChannelSlack
+	updated, err := s.UpdateChannel(ctx, got)
+	want := Channel{ID: created.ID, Name: "herkes", Type: ChannelTelegram, Target: "-1009999", Secret: "456:def", CreatedAt: created.CreatedAt}
+	if err != nil || !reflect.DeepEqual(updated, want) {
+		t.Errorf("updated = %+v, %v; want %+v", updated, err, want)
+	}
+	if stored, _ := s.GetChannel(ctx, created.ID); !reflect.DeepEqual(stored, want) {
+		t.Errorf("stored after update = %+v", stored)
+	}
+
+	other, _ := s.CreateChannel(ctx, Channel{Name: "ops", Type: ChannelWebhook, Target: "https://x", Enabled: true})
+	other.Name = "herkes"
+	if _, err := s.UpdateChannel(ctx, other); !errors.Is(err, ErrConflict) {
+		t.Errorf("rename to a taken name: err = %v, want ErrConflict", err)
+	}
+	other.ID, other.Name = 999, "nobody"
+	if _, err := s.UpdateChannel(ctx, other); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown id: err = %v, want ErrNotFound", err)
 	}
 }
 
@@ -276,7 +325,7 @@ func TestChannelsSurviveTheTypeMigration(t *testing.T) {
 
 	got, err := s.GetChannel(ctx, 7)
 	want := Channel{ID: 7, Name: "ops", Type: ChannelWebhook, Target: "https://hooks.example.com/abc", Enabled: false, CreatedAt: time.UnixMilli(1000).UTC()}
-	if err != nil || got != want {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("channel after upgrade = %+v, %v; want %+v", got, err, want)
 	}
 	if _, err := s.CreateChannel(ctx, Channel{Name: "mail", Type: ChannelEmail, Target: "a@example.com", Enabled: true}); err != nil {
