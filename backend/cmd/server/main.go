@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/api"
+	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -25,14 +26,26 @@ func main() {
 		addr = ":8080"
 	}
 
+	dbPath := os.Getenv("UPTIME_DB_PATH")
+	if dbPath == "" {
+		dbPath = "uptime.db"
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	db, err := store.OpenSQLite(ctx, dbPath)
+	if err != nil {
+		logger.Error("open database failed", "path", dbPath, "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           api.NewHandler(version),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -45,9 +58,10 @@ func main() {
 		}
 	}()
 
-	logger.Info("server listening", "addr", addr, "version", version)
+	logger.Info("server listening", "addr", addr, "version", version, "db", dbPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server failed", "error", err)
+		db.Close()
 		os.Exit(1)
 	}
 	// ListenAndServe returns as soon as Shutdown starts; wait for it to drain.
