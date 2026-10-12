@@ -16,6 +16,7 @@ export function IncidentTable({
         <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
           <tr>
             {showMonitor && <th className="px-4 py-2 font-medium">Monitor</th>}
+            <th className="px-4 py-2 font-medium">Tür</th>
             <th className="px-4 py-2 font-medium">Durum</th>
             <th className="px-4 py-2 font-medium">Başlangıç</th>
             <th className="px-4 py-2 text-right font-medium">Süre</th>
@@ -33,10 +34,21 @@ export function IncidentTable({
                 </td>
               )}
               <td className="whitespace-nowrap px-4 py-2">
+                {i.kind === "cert" ? "Sertifika" : "Kesinti"}
+              </td>
+              <td className="whitespace-nowrap px-4 py-2">
                 {i.resolved_at ? (
                   <span className="text-zinc-500">Çözüldü</span>
                 ) : (
-                  <span className="font-medium text-red-700 dark:text-red-400">Devam ediyor</span>
+                  <span
+                    className={`font-medium ${
+                      i.kind === "cert"
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-red-700 dark:text-red-400"
+                    }`}
+                  >
+                    Devam ediyor
+                  </span>
                 )}
               </td>
               <td className="whitespace-nowrap px-4 py-2 tabular-nums">{dateTime(i.started_at)}</td>

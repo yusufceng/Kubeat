@@ -296,6 +296,18 @@ func TestUpdateMonitor(t *testing.T) {
 		t.Errorf("incident after pause = %+v, %v", incidents, err)
 	}
 
+	// A certificate warning is closed by pausing as well.
+	if _, err := db.OpenIncident(ctx, store.Incident{MonitorID: 2, Kind: store.IncidentCert, StartedAt: time.Now(), Cause: "expires"}); err != nil {
+		t.Fatal(err)
+	}
+	var web monitorResponse
+	if do(t, "GET", base+"/2", "", &web); !web.CertWarning || web.OpenIncident != nil {
+		t.Errorf("monitor with a cert incident: warning=%v incident=%+v", web.CertWarning, web.OpenIncident)
+	}
+	if do(t, "PATCH", base+"/2", `{"enabled":false}`, &web); web.CertWarning {
+		t.Error("cert warning survived pausing the monitor")
+	}
+
 	if do(t, "PATCH", base+"/1", `{"enabled":true}`, &got); !got.Enabled || got.Status == statusPaused || got.OpenIncident != nil {
 		t.Errorf("resumed monitor = enabled:%v status:%s incident:%+v", got.Enabled, got.Status, got.OpenIncident)
 	}

@@ -36,6 +36,7 @@ type webhookMonitor struct {
 
 type webhookIncident struct {
 	ID         int64      `json:"id"`
+	Kind       string     `json:"kind"`
 	StartedAt  time.Time  `json:"started_at"`
 	ResolvedAt *time.Time `json:"resolved_at"`
 	Cause      string     `json:"cause"`
@@ -47,7 +48,11 @@ func newWebhookBody(n Notification) webhookBody {
 		return body
 	}
 	body.Monitor = &webhookMonitor{ID: n.Monitor.ID, Name: n.Monitor.Name, Type: string(n.Monitor.Type), Target: n.Monitor.Target}
-	body.Incident = &webhookIncident{ID: n.Incident.ID, StartedAt: n.Incident.StartedAt, Cause: n.Incident.Cause}
+	kind := n.Incident.Kind
+	if kind == "" {
+		kind = store.IncidentDown
+	}
+	body.Incident = &webhookIncident{ID: n.Incident.ID, Kind: string(kind), StartedAt: n.Incident.StartedAt, Cause: n.Incident.Cause}
 	if !n.Incident.Open() {
 		body.Incident.ResolvedAt = &n.Incident.ResolvedAt
 	}
@@ -63,6 +68,20 @@ func Text(n Notification) string {
 	case EventUp:
 		return fmt.Sprintf("🟢 %s tekrar çalışıyor (%s). Kesinti süresi: %s",
 			n.Monitor.Name, n.Monitor.Target, n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second))
+	case EventCertExpiring:
+		days := int(n.CertExpiresAt.Sub(n.Incident.StartedAt).Hours() / 24)
+		when := fmt.Sprintf("%d gün sonra", days)
+		switch {
+		case n.CertExpiresAt.Before(n.Incident.StartedAt):
+			when = "süresi doldu"
+		case days == 0:
+			when = "24 saat içinde"
+		}
+		return fmt.Sprintf("🟡 %s sertifikasının süresi bitiyor: %s (%s) (%s)",
+			n.Monitor.Name, when, n.CertExpiresAt.Format("2006-01-02"), n.Monitor.Target)
+	case EventCertRenewed:
+		return fmt.Sprintf("🟢 %s sertifikası yenilendi; yeni bitiş tarihi %s (%s)",
+			n.Monitor.Name, n.CertExpiresAt.Format("2006-01-02"), n.Monitor.Target)
 	default:
 		return "Kubeat test bildirimi: bu kanal çalışıyor."
 	}

@@ -74,12 +74,28 @@ type CheckResult struct {
 	Latency    time.Duration
 	StatusCode int    // 0 when not applicable
 	Error      string // empty on success
+	// CertExpiresAt is when the target's TLS certificate expires; zero when
+	// the check saw no certificate.
+	CertExpiresAt time.Time
 }
 
-// Incident is a period during which a monitor was considered down.
+// IncidentKind says what an incident is about.
+type IncidentKind string
+
+const (
+	IncidentDown IncidentKind = "down" // the target is failing its checks
+	IncidentCert IncidentKind = "cert" // the target's certificate expires soon
+)
+
+// IncidentKinds lists every kind.
+var IncidentKinds = []IncidentKind{IncidentDown, IncidentCert}
+
+// Incident is a period during which something was wrong with a monitor.
 type Incident struct {
-	ID          int64
-	MonitorID   int64
+	ID        int64
+	MonitorID int64
+	// Kind defaults to IncidentDown when written empty.
+	Kind        IncidentKind
 	MonitorName string // filled in when read; ignored when written
 	StartedAt   time.Time
 	ResolvedAt  time.Time // zero while the incident is open
@@ -134,11 +150,13 @@ const (
 // statistics over a time window.
 type MonitorStatus struct {
 	Monitor
-	Last       *CheckResult // nil until the first check has run
-	Incident   *Incident    // the open incident, if any
-	Checks     int          // results in the window
-	UpChecks   int          // of which successful
-	AvgLatency time.Duration
+	Last     *CheckResult // nil until the first check has run
+	Incident *Incident    // the open outage, if any
+	// CertWarning reports an open certificate incident.
+	CertWarning bool
+	Checks      int // results in the window
+	UpChecks    int // of which successful
+	AvgLatency  time.Duration
 }
 
 // Store persists monitors and their check results.
@@ -178,11 +196,11 @@ type Store interface {
 	Series(ctx context.Context, monitorID int64, source SeriesSource, from, to time.Time, bucket time.Duration) ([]SeriesPoint, error)
 
 	// OpenIncident records a new open incident. It returns ErrConflict when
-	// the monitor already has one.
+	// the monitor already has an open one of that kind.
 	OpenIncident(ctx context.Context, i Incident) (Incident, error)
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
-	// GetOpenIncident returns ErrNotFound when the monitor has none.
-	GetOpenIncident(ctx context.Context, monitorID int64) (Incident, error)
+	// GetOpenIncident returns ErrNotFound when the monitor has none of that kind.
+	GetOpenIncident(ctx context.Context, monitorID int64, kind IncidentKind) (Incident, error)
 	// ListIncidents returns up to limit incidents, newest first, for one
 	// monitor or for all when monitorID is 0.
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]Incident, error)

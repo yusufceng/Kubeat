@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const incidentColumns = "i.id, i.monitor_id, m.name, i.started_at, i.resolved_at, i.cause"
+const incidentColumns = "i.id, i.monitor_id, i.kind, m.name, i.started_at, i.resolved_at, i.cause"
 
 func scanIncident(row rowScanner) (Incident, error) {
 	var (
@@ -16,7 +16,7 @@ func scanIncident(row rowScanner) (Incident, error) {
 		startedAt  int64
 		resolvedAt sql.NullInt64
 	)
-	if err := row.Scan(&i.ID, &i.MonitorID, &i.MonitorName, &startedAt, &resolvedAt, &i.Cause); err != nil {
+	if err := row.Scan(&i.ID, &i.MonitorID, &i.Kind, &i.MonitorName, &startedAt, &resolvedAt, &i.Cause); err != nil {
 		return Incident{}, err
 	}
 	i.StartedAt = time.UnixMilli(startedAt).UTC()
@@ -27,9 +27,12 @@ func scanIncident(row rowScanner) (Incident, error) {
 }
 
 func (s *SQLite) OpenIncident(ctx context.Context, i Incident) (Incident, error) {
+	if i.Kind == "" {
+		i.Kind = IncidentDown
+	}
 	res, err := s.write.ExecContext(ctx,
-		"INSERT INTO incidents (monitor_id, started_at, cause) VALUES (?, ?, ?)",
-		i.MonitorID, i.StartedAt.UnixMilli(), i.Cause)
+		"INSERT INTO incidents (monitor_id, kind, started_at, cause) VALUES (?, ?, ?, ?)",
+		i.MonitorID, i.Kind, i.StartedAt.UnixMilli(), i.Cause)
 	if isUniqueViolation(err) {
 		return Incident{}, ErrConflict
 	}
@@ -60,10 +63,10 @@ func (s *SQLite) ResolveIncident(ctx context.Context, id int64, resolvedAt time.
 	return nil
 }
 
-func (s *SQLite) GetOpenIncident(ctx context.Context, monitorID int64) (Incident, error) {
+func (s *SQLite) GetOpenIncident(ctx context.Context, monitorID int64, kind IncidentKind) (Incident, error) {
 	i, err := scanIncident(s.read.QueryRowContext(ctx,
 		"SELECT "+incidentColumns+` FROM incidents i JOIN monitors m ON m.id = i.monitor_id
-		 WHERE i.monitor_id = ? AND i.resolved_at IS NULL`, monitorID))
+		 WHERE i.monitor_id = ? AND i.kind = ? AND i.resolved_at IS NULL`, monitorID, kind))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Incident{}, ErrNotFound
 	}

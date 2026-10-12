@@ -252,6 +252,14 @@ func (s *SQLite) ListMonitors(ctx context.Context) ([]Monitor, error) {
 	return monitors, nil
 }
 
+// unixMilliOrZero converts a nullable timestamp column; NULL is the zero time.
+func unixMilliOrZero(v sql.NullInt64) time.Time {
+	if !v.Valid {
+		return time.Time{}
+	}
+	return time.UnixMilli(v.Int64).UTC()
+}
+
 // isUniqueViolation reports whether err is a UNIQUE constraint failure.
 func isUniqueViolation(err error) bool {
 	var sqliteErr *sqlite.Error
@@ -264,11 +272,12 @@ const statusQuery = `
 SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.timeout_seconds, m.failure_threshold, m.enabled, m.created_at,
        m.namespace, m.source,
        m.http_method, m.http_expected_status, m.http_keyword, m.http_headers, m.tls_skip_verify,
-       r.checked_at, r.up, r.latency_ms, r.status_code, r.error,
+       r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.cert_expires_at,
        COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.avg_latency_ms, 0),
-       i.id, i.started_at, i.cause
+       i.id, i.started_at, i.cause, c.id IS NOT NULL
 FROM monitors m
-LEFT JOIN incidents i ON i.monitor_id = m.id AND i.resolved_at IS NULL
+LEFT JOIN incidents i ON i.monitor_id = m.id AND i.kind = 'down' AND i.resolved_at IS NULL
+LEFT JOIN incidents c ON c.monitor_id = m.id AND c.kind = 'cert' AND c.resolved_at IS NULL
 LEFT JOIN check_results r ON r.id = (
     SELECT id FROM check_results
     WHERE monitor_id = m.id
@@ -321,13 +330,14 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			incidentID, incidentStart    sql.NullInt64
 			incidentCause                sql.NullString
 			headers                      string
+			certExpires                  sql.NullInt64
 		)
 		err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Target, &interval, &timeout, &st.FailureThreshold, &st.Enabled, &createdAt,
 			&st.Namespace, &st.Source,
 			&st.HTTP.Method, &st.HTTP.ExpectedStatus, &st.HTTP.Keyword, &headers, &st.HTTP.SkipTLSVerify,
-			&checkedAt, &up, &latencyMS, &statusCode, &errText,
+			&checkedAt, &up, &latencyMS, &statusCode, &errText, &certExpires,
 			&st.Checks, &st.UpChecks, &avgLatencyMS,
-			&incidentID, &incidentStart, &incidentCause)
+			&incidentID, &incidentStart, &incidentCause, &st.CertWarning)
 		if err != nil {
 			return nil, err
 		}
@@ -346,12 +356,15 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 				Latency:    time.Duration(latencyMS.Int64) * time.Millisecond,
 				StatusCode: int(statusCode.Int64),
 				Error:      errText.String,
+
+				CertExpiresAt: unixMilliOrZero(certExpires),
 			}
 		}
 		if incidentID.Valid {
 			st.Incident = &Incident{
 				ID:          incidentID.Int64,
 				MonitorID:   st.ID,
+				Kind:        IncidentDown,
 				MonitorName: st.Name,
 				StartedAt:   time.UnixMilli(incidentStart.Int64).UTC(),
 				Cause:       incidentCause.String,
@@ -421,8 +434,8 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO check_results (monitor_id, checked_at, up, latency_ms, status_code, error)
-		 VALUES (?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO check_results (monitor_id, checked_at, up, latency_ms, status_code, error, cert_expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("insert check results: %w", err)
 	}
@@ -430,16 +443,20 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 
 	for _, r := range results {
 		var (
-			statusCode sql.NullInt64
-			errText    sql.NullString
+			statusCode  sql.NullInt64
+			errText     sql.NullString
+			certExpires sql.NullInt64
 		)
+		if !r.CertExpiresAt.IsZero() {
+			certExpires = sql.NullInt64{Int64: r.CertExpiresAt.UnixMilli(), Valid: true}
+		}
 		if r.StatusCode != 0 {
 			statusCode = sql.NullInt64{Int64: int64(r.StatusCode), Valid: true}
 		}
 		if r.Error != "" {
 			errText = sql.NullString{String: r.Error, Valid: true}
 		}
-		_, err := stmt.ExecContext(ctx, r.MonitorID, r.CheckedAt.UnixMilli(), r.Up, r.Latency.Milliseconds(), statusCode, errText)
+		_, err := stmt.ExecContext(ctx, r.MonitorID, r.CheckedAt.UnixMilli(), r.Up, r.Latency.Milliseconds(), statusCode, errText, certExpires)
 		if err != nil {
 			return fmt.Errorf("insert check results: %w", err)
 		}
@@ -452,7 +469,7 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 
 func (s *SQLite) ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]CheckResult, error) {
 	rows, err := s.read.QueryContext(ctx,
-		`SELECT monitor_id, checked_at, up, latency_ms, status_code, error
+		`SELECT monitor_id, checked_at, up, latency_ms, status_code, error, cert_expires_at
 		 FROM check_results WHERE monitor_id = ?
 		 ORDER BY checked_at DESC, id DESC LIMIT ?`, monitorID, limit)
 	if err != nil {
@@ -467,14 +484,16 @@ func (s *SQLite) ListCheckResults(ctx context.Context, monitorID int64, limit in
 			checkedAt, latencyMS int64
 			statusCode           sql.NullInt64
 			errText              sql.NullString
+			certExpires          sql.NullInt64
 		)
-		if err := rows.Scan(&r.MonitorID, &checkedAt, &r.Up, &latencyMS, &statusCode, &errText); err != nil {
+		if err := rows.Scan(&r.MonitorID, &checkedAt, &r.Up, &latencyMS, &statusCode, &errText, &certExpires); err != nil {
 			return nil, fmt.Errorf("list check results: %w", err)
 		}
 		r.CheckedAt = time.UnixMilli(checkedAt).UTC()
 		r.Latency = time.Duration(latencyMS) * time.Millisecond
 		r.StatusCode = int(statusCode.Int64)
 		r.Error = errText.String
+		r.CertExpiresAt = unixMilliOrZero(certExpires)
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {

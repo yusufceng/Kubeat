@@ -37,6 +37,7 @@ type Config struct {
 
 	DefaultFailureThreshold int           // UPTIME_DEFAULT_FAILURE_THRESHOLD
 	RecoveryThreshold       int           // UPTIME_RECOVERY_THRESHOLD
+	CertWarning             time.Duration // UPTIME_CERT_WARNING
 	NotifyQueueSize         int           // UPTIME_NOTIFY_QUEUE_SIZE
 	NotifyAttempts          int           // UPTIME_NOTIFY_ATTEMPTS
 	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
@@ -78,6 +79,7 @@ func Load() (Config, error) {
 		{&cfg.RollupRetention, "UPTIME_ROLLUP_RETENTION", 365 * 24 * time.Hour},
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
+		{&cfg.CertWarning, "UPTIME_CERT_WARNING", 14 * 24 * time.Hour},
 		{&cfg.NotifyRetryDelay, "UPTIME_NOTIFY_RETRY_DELAY", 5 * time.Second},
 		{&cfg.NotifyTimeout, "UPTIME_NOTIFY_TIMEOUT", 5 * time.Second},
 		{&cfg.KubeTimeout, "UPTIME_KUBE_TIMEOUT", 10 * time.Second},

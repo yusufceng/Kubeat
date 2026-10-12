@@ -16,7 +16,7 @@ func TestIncidents(t *testing.T) {
 	web, _ := s.CreateMonitor(ctx, newMonitor("web"))
 	base := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
 
-	if _, err := s.GetOpenIncident(ctx, api.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetOpenIncident(ctx, api.ID, IncidentDown); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("no incident yet: err = %v, want ErrNotFound", err)
 	}
 
@@ -31,11 +31,11 @@ func TestIncidents(t *testing.T) {
 		t.Errorf("second open incident: err = %v, want ErrConflict", err)
 	}
 
-	got, err := s.GetOpenIncident(ctx, api.ID)
+	got, err := s.GetOpenIncident(ctx, api.ID, IncidentDown)
 	if err != nil {
 		t.Fatalf("get open: %v", err)
 	}
-	want := Incident{ID: opened.ID, MonitorID: api.ID, MonitorName: "api", StartedAt: base, Cause: "timeout"}
+	want := Incident{ID: opened.ID, MonitorID: api.ID, Kind: IncidentDown, MonitorName: "api", StartedAt: base, Cause: "timeout"}
 	if got != want {
 		t.Errorf("open incident = %+v, want %+v", got, want)
 	}
@@ -168,5 +168,63 @@ func TestUpgradeFromVersion1(t *testing.T) {
 	}
 	if _, err := s.OpenIncident(ctx, Incident{MonitorID: list[0].ID, StartedAt: time.Now(), Cause: "x"}); err != nil {
 		t.Errorf("incidents table unusable after upgrade: %v", err)
+	}
+}
+
+func TestCertificateIncidentsAndExpiry(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	api, _ := s.CreateMonitor(ctx, newMonitor("api"))
+	base := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	expiry := base.Add(10 * 24 * time.Hour)
+
+	err := s.InsertCheckResults(ctx, []CheckResult{
+		{MonitorID: api.ID, CheckedAt: base, Up: true, StatusCode: 200},
+		{MonitorID: api.ID, CheckedAt: base.Add(time.Minute), Up: true, StatusCode: 200, CertExpiresAt: expiry},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, _ := s.ListCheckResults(ctx, api.ID, 10)
+	if len(results) != 2 || !results[0].CertExpiresAt.Equal(expiry) || !results[1].CertExpiresAt.IsZero() {
+		t.Errorf("cert expiry round trip: %+v", results)
+	}
+
+	// One open incident of each kind can coexist; a second of a kind cannot.
+	if _, err := s.OpenIncident(ctx, Incident{MonitorID: api.ID, StartedAt: base, Cause: "timeout"}); err != nil {
+		t.Fatal(err)
+	}
+	cert, err := s.OpenIncident(ctx, Incident{MonitorID: api.ID, Kind: IncidentCert, StartedAt: base, Cause: "expires soon"})
+	if err != nil {
+		t.Fatalf("cert incident beside an outage: %v", err)
+	}
+	if _, err := s.OpenIncident(ctx, Incident{MonitorID: api.ID, Kind: IncidentCert, StartedAt: base, Cause: "again"}); !errors.Is(err, ErrConflict) {
+		t.Errorf("second cert incident: err = %v, want ErrConflict", err)
+	}
+
+	got, err := s.GetOpenIncident(ctx, api.ID, IncidentCert)
+	if err != nil || got.ID != cert.ID || got.Kind != IncidentCert {
+		t.Errorf("open cert incident = %+v, %v", got, err)
+	}
+	if down, _ := s.GetOpenIncident(ctx, api.ID, IncidentDown); down.Kind != IncidentDown || down.ID == cert.ID {
+		t.Errorf("open outage = %+v", down)
+	}
+
+	st, err := s.GetMonitorStatus(ctx, api.ID, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.CertWarning || st.Incident == nil || st.Incident.Kind != IncidentDown || !st.Last.CertExpiresAt.Equal(expiry) {
+		t.Errorf("status = warning:%v incident:%+v last:%+v", st.CertWarning, st.Incident, st.Last)
+	}
+
+	if err := s.ResolveIncident(ctx, cert.ID, base.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := s.GetMonitorStatus(ctx, api.ID, base); st.CertWarning || st.Incident == nil {
+		t.Errorf("after resolving the cert incident: warning:%v incident:%+v", st.CertWarning, st.Incident)
+	}
+	if all, _ := s.ListIncidents(ctx, 0, 10); len(all) != 2 {
+		t.Errorf("incidents = %+v", all)
 	}
 }

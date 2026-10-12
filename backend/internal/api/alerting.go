@@ -17,13 +17,14 @@ type incidentResponse struct {
 	ID          int64      `json:"id"`
 	MonitorID   int64      `json:"monitor_id"`
 	MonitorName string     `json:"monitor_name"`
+	Kind        string     `json:"kind"` // "down" or "cert"
 	StartedAt   time.Time  `json:"started_at"`
 	ResolvedAt  *time.Time `json:"resolved_at"` // null while open
 	Cause       string     `json:"cause"`
 }
 
 func toIncidentResponse(i store.Incident) incidentResponse {
-	resp := incidentResponse{ID: i.ID, MonitorID: i.MonitorID, MonitorName: i.MonitorName, StartedAt: i.StartedAt, Cause: i.Cause}
+	resp := incidentResponse{ID: i.ID, MonitorID: i.MonitorID, MonitorName: i.MonitorName, Kind: string(i.Kind), StartedAt: i.StartedAt, Cause: i.Cause}
 	if !i.Open() {
 		resp.ResolvedAt = &i.ResolvedAt
 	}

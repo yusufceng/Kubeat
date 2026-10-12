@@ -139,6 +139,11 @@ art arda `UPTIME_RECOVERY_THRESHOLD` kez başarılı olunca kapanır. Her iki
 durumda etkin tüm kanallara bir bildirim gider; olay açıkken tekrar bildirim
 gönderilmez.
 
+HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
+`UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir "sertifika" olayı
+açılır ve bildirim gider; sertifika yenilenince olay kapanır. Bu olay
+kesintilerden bağımsızdır: hedef çalışırken de açık olabilir.
+
 Webhook kanalına şu gövdeyle `POST` yapılır. `text` alanı insan tarafından
 okunabilir özettir.
 
@@ -147,11 +152,12 @@ okunabilir özettir.
   "event": "down",
   "text": "🔴 odeme-api erişilemiyor (https://...). Art arda 3 kontrol başarısız. Son hata: ...",
   "monitor": { "id": 1, "name": "odeme-api", "type": "http", "target": "https://..." },
-  "incident": { "id": 7, "started_at": "...", "resolved_at": null, "cause": "..." }
+  "incident": { "id": 7, "kind": "down", "started_at": "...", "resolved_at": null, "cause": "..." }
 }
 ```
 
-`event` değeri `down`, `up` ya da `test` olur.
+`event` değeri `down`, `up`, `cert_expiring`, `cert_renewed` ya da `test`
+olur; `incident.kind` ise `down` ya da `cert`.
 
 ## Yapılandırma
 
@@ -182,6 +188,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |
 | `UPTIME_DEFAULT_FAILURE_THRESHOLD` | `3` | Monitor'da belirtilmezse, olay açmak için gereken art arda başarısız kontrol sayısı |
 | `UPTIME_RECOVERY_THRESHOLD` | `1` | Olayı kapatmak için gereken art arda başarılı kontrol sayısı |
+| `UPTIME_CERT_WARNING` | `336h` | Sertifika bitişine bu kadar kala uyarı olayı açılır |
 | `UPTIME_NOTIFY_ATTEMPTS` | `3` | Kanal başına bildirim deneme sayısı |
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |

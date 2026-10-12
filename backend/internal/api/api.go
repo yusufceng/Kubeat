@@ -23,7 +23,7 @@ type Store interface {
 	GetMonitor(ctx context.Context, id int64) (store.Monitor, error)
 	UpdateMonitor(ctx context.Context, m store.Monitor) (store.Monitor, error)
 	DeleteMonitor(ctx context.Context, id int64) error
-	GetOpenIncident(ctx context.Context, monitorID int64) (store.Incident, error)
+	GetOpenIncident(ctx context.Context, monitorID int64, kind store.IncidentKind) (store.Incident, error)
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (store.MonitorStatus, error)
@@ -77,7 +77,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 4
+const Revision = 5
 
 // Health is the response body of the health endpoint.
 type Health struct {

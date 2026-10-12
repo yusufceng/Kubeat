@@ -44,6 +44,7 @@ func TestLoadDefaults(t *testing.T) {
 
 		DefaultFailureThreshold: 3,
 		RecoveryThreshold:       1,
+		CertWarning:             14 * 24 * time.Hour,
 		NotifyQueueSize:         100,
 		NotifyAttempts:          3,
 		NotifyRetryDelay:        5 * time.Second,

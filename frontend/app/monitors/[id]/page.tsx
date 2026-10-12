@@ -60,6 +60,19 @@ async function MonitorDetail({
 
   const label = monitorLabel(monitor);
 
+  // Days left on the certificate as of the latest check, so the page renders
+  // the same on the server and needs no clock of its own.
+  const cert = monitor.last_result?.cert_expires_at
+    ? {
+        expiresAt: monitor.last_result.cert_expires_at,
+        daysLeft: Math.floor(
+          (new Date(monitor.last_result.cert_expires_at).getTime() -
+            new Date(monitor.last_result.checked_at).getTime()) /
+            86_400_000,
+        ),
+      }
+    : null;
+
   return (
     <>
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -87,7 +100,7 @@ async function MonitorDetail({
         <MonitorActions monitor={monitor} />
       </header>
 
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <dl className={`grid grid-cols-2 gap-3 ${cert ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         <Field label="Durum">
           <StatusBadge state={displayState(monitor)} />
         </Field>
@@ -100,11 +113,31 @@ async function MonitorDetail({
             alarm eşiği: art arda {monitor.failure_threshold} hata
           </div>
         </Field>
+        {cert && (
+          <Field label="TLS sertifikası">
+            <span className={monitor.cert_warning ? "text-amber-700 dark:text-amber-400" : undefined}>
+              {cert.daysLeft < 0 ? "Süresi doldu" : `${cert.daysLeft} gün kaldı`}
+            </span>
+            <div className="mt-0.5 text-xs font-normal text-zinc-500">
+              bitiş: {dateTime(cert.expiresAt)}
+            </div>
+          </Field>
+        )}
       </dl>
 
       {!monitor.enabled && (
         <p className="rounded-lg border border-black/10 bg-black/5 p-4 text-sm dark:border-white/15 dark:bg-white/5">
           Bu monitor durduruldu; kontrol yapılmıyor ve alarm üretilmiyor.
+        </p>
+      )}
+
+      {monitor.cert_warning && (
+        <p
+          role="alert"
+          className="rounded-lg border border-amber-600/40 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-300"
+        >
+          Bu hedefin TLS sertifikasının süresi dolmak üzere
+          {cert && cert.daysLeft >= 0 && `: ${cert.daysLeft} gün kaldı`}.
         </p>
       )}
 

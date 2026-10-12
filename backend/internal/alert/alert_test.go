@@ -79,6 +79,7 @@ func newFixture(t *testing.T, failureThreshold, recoveryThreshold int) *fixture 
 	sender := &recorder{}
 	engine := New(db, sender, Options{
 		RecoveryThreshold: recoveryThreshold,
+		CertWarning:       14 * 24 * time.Hour,
 		QueueSize:         10,
 		Attempts:          3,
 		RetryDelay:        time.Millisecond,
@@ -407,5 +408,93 @@ func TestPausedMonitorOpensNoIncident(t *testing.T) {
 
 	if got := f.incidents(); len(got) != 0 {
 		t.Errorf("paused monitor opened an incident: %+v", got)
+	}
+}
+
+// checkCert stores a successful HTTPS result whose certificate has the given
+// time left, and evaluates it.
+func (f *fixture) checkCert(remaining time.Duration) store.CheckResult {
+	f.t.Helper()
+	f.clock = f.clock.Add(30 * time.Second)
+	r := store.CheckResult{MonitorID: f.monitor.ID, CheckedAt: f.clock, Up: true, Latency: time.Millisecond, StatusCode: 200}
+	if remaining != 0 {
+		r.CertExpiresAt = f.clock.Add(remaining)
+	}
+	if err := f.db.InsertCheckResults(context.Background(), []store.CheckResult{r}); err != nil {
+		f.t.Fatal(err)
+	}
+	f.engine.Evaluate(context.Background(), []store.CheckResult{r})
+	return r
+}
+
+func TestCertificateWarning(t *testing.T) {
+	f := newFixture(t, 3, 1)
+	day := 24 * time.Hour
+
+	f.checkCert(60 * day)
+	if got := f.incidents(); len(got) != 0 {
+		t.Fatalf("incident for a certificate with 60 days left: %+v", got)
+	}
+
+	first := f.checkCert(10 * day)
+	f.checkCert(10 * day) // still expiring: no second incident, no second notification
+	f.checkCert(0)        // a result without certificate info changes nothing
+	got := f.incidents()
+	if len(got) != 1 || got[0].Kind != store.IncidentCert || !got[0].Open() || !got[0].StartedAt.Equal(first.CheckedAt) {
+		t.Fatalf("incidents = %+v, want one open cert incident", got)
+	}
+	if want := "certificate expires on " + first.CertExpiresAt.Format(time.RFC3339); got[0].Cause != want {
+		t.Errorf("cause = %q, want %q", got[0].Cause, want)
+	}
+
+	// An outage is tracked separately and does not close the warning.
+	f.check(false)
+	f.check(false)
+	f.check(false)
+	if got := f.incidents(); len(got) != 2 {
+		t.Fatalf("incidents during an outage = %+v, want cert + down", got)
+	}
+	f.check(true)
+
+	renewed := f.checkCert(90 * day)
+	for _, i := range f.incidents() {
+		if i.Open() {
+			t.Errorf("incident still open after renewal and recovery: %+v", i)
+		}
+		if i.Kind == store.IncidentCert && !i.ResolvedAt.Equal(renewed.CheckedAt) {
+			t.Errorf("cert incident resolved at %s, want %s", i.ResolvedAt, renewed.CheckedAt)
+		}
+	}
+
+	f.flush()
+	events := f.sender.events()
+	want := []Event{EventCertExpiring, EventDown, EventUp, EventCertRenewed}
+	if len(events) != len(want) {
+		t.Fatalf("notifications = %v, want %v", events, want)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Errorf("notification %d = %s, want %s", i, events[i], want[i])
+		}
+	}
+	if n := f.sender.sent[0]; !n.CertExpiresAt.Equal(first.CertExpiresAt) || !strings.Contains(Text(n), "10 gün sonra") {
+		t.Errorf("expiring notification = %+v, text %q", n, Text(n))
+	}
+	if text := Text(f.sender.sent[3]); !strings.Contains(text, "yenilendi") {
+		t.Errorf("renewed text = %q", text)
+	}
+}
+
+func TestCertificateTextForImminentAndPastExpiry(t *testing.T) {
+	start := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	n := Notification{Event: EventCertExpiring, Monitor: store.Monitor{Name: "api"}, Incident: store.Incident{StartedAt: start}}
+
+	n.CertExpiresAt = start.Add(5 * time.Hour)
+	if text := Text(n); !strings.Contains(text, "24 saat içinde") {
+		t.Errorf("5 hours left: %q", text)
+	}
+	n.CertExpiresAt = start.Add(-time.Hour)
+	if text := Text(n); !strings.Contains(text, "süresi doldu") {
+		t.Errorf("already expired: %q", text)
 	}
 }

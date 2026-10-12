@@ -62,7 +62,7 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	var err error
 	switch m.Type {
 	case store.MonitorHTTP:
-		result.StatusCode, err = c.checkHTTP(ctx, m)
+		result.StatusCode, result.CertExpiresAt, err = c.checkHTTP(ctx, m)
 	case store.MonitorTCP:
 		err = c.checkTCP(ctx, m.Target)
 	default:
@@ -78,17 +78,19 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	return result
 }
 
-// checkHTTP reports the response status code, and an error unless the
-// response satisfies the monitor's expectations.
-func (c *Checker) checkHTTP(ctx context.Context, m store.Monitor) (int, error) {
+// checkHTTP reports the response status code and, for HTTPS, when the
+// server's certificate expires. The error is nil only if the response
+// satisfies the monitor's expectations.
+func (c *Checker) checkHTTP(ctx context.Context, m store.Monitor) (int, time.Time, error) {
+	var noCert time.Time
 	expected, err := ParseStatusSet(m.HTTP.ExpectedStatus)
 	if err != nil {
-		return 0, fmt.Errorf("expected status: %w", err)
+		return 0, noCert, fmt.Errorf("expected status: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, m.HTTP.Method, m.Target, nil)
 	if err != nil {
-		return 0, err
+		return 0, noCert, err
 	}
 	if c.opts.UserAgent != "" {
 		req.Header.Set("User-Agent", c.opts.UserAgent)
@@ -107,28 +109,34 @@ func (c *Checker) checkHTTP(ctx context.Context, m store.Monitor) (int, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, noCert, err
 	}
 	defer resp.Body.Close()
+
+	// The leaf certificate of the connection that answered (after redirects).
+	var certExpiry time.Time
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		certExpiry = resp.TLS.PeerCertificates[0].NotAfter.UTC()
+	}
 
 	if !expected.Contains(resp.StatusCode) {
 		// Drain a bounded amount so the connection can be reused.
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
-		return resp.StatusCode, fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return resp.StatusCode, certExpiry, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	if m.HTTP.Keyword == "" {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
-		return resp.StatusCode, nil
+		return resp.StatusCode, certExpiry, nil
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, c.opts.KeywordBodyLimit))
 	if err != nil {
-		return resp.StatusCode, fmt.Errorf("read body: %w", err)
+		return resp.StatusCode, certExpiry, fmt.Errorf("read body: %w", err)
 	}
 	if !bytes.Contains(body, []byte(m.HTTP.Keyword)) {
-		return resp.StatusCode, fmt.Errorf("keyword %q not found in the first %d bytes of the response", m.HTTP.Keyword, len(body))
+		return resp.StatusCode, certExpiry, fmt.Errorf("keyword %q not found in the first %d bytes of the response", m.HTTP.Keyword, len(body))
 	}
-	return resp.StatusCode, nil
+	return resp.StatusCode, certExpiry, nil
 }
 
 func (c *Checker) checkTCP(ctx context.Context, target string) error {

@@ -137,6 +137,11 @@ async function Monitors() {
                               <LiveDuration since={m.open_incident.started_at} />
                             </div>
                           )}
+                          {m.cert_warning && (
+                            <div className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                              Sertifika süresi doluyor
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <HistoryStrip results={histories[i]} slots={config.historyLimit} />

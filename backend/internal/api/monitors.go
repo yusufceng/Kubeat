@@ -43,6 +43,8 @@ type monitorResponse struct {
 	Last   *resultResponse `json:"last_result"`
 	// OpenIncident is set while the monitor is in an alerting state.
 	OpenIncident *incidentResponse `json:"open_incident"`
+	// CertWarning is true while the target's certificate is close to expiry.
+	CertWarning bool `json:"cert_warning"`
 
 	// Statistics over the last WindowSeconds. UptimePercent is null when no
 	// check ran in the window.
@@ -58,6 +60,8 @@ type resultResponse struct {
 	LatencyMS  int64     `json:"latency_ms"`
 	StatusCode *int      `json:"status_code"`
 	Error      *string   `json:"error"`
+	// CertExpiresAt is set when the check saw a TLS certificate.
+	CertExpiresAt *time.Time `json:"cert_expires_at"`
 }
 
 func toResultResponse(r store.CheckResult) resultResponse {
@@ -67,6 +71,9 @@ func toResultResponse(r store.CheckResult) resultResponse {
 	}
 	if r.Error != "" {
 		resp.Error = &r.Error
+	}
+	if !r.CertExpiresAt.IsZero() {
+		resp.CertExpiresAt = &r.CertExpiresAt
 	}
 	return resp
 }
@@ -87,6 +94,7 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		AvgLatencyMS:    st.AvgLatency.Milliseconds(),
 
 		FailureThreshold: st.FailureThreshold,
+		CertWarning:      st.CertWarning,
 		Namespace:        st.Namespace,
 		Source:           st.Source,
 	}
@@ -410,22 +418,24 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toMonitorResponse(st, h.opts.StatsWindow))
 }
 
-// closeIncident resolves the monitor's open incident, if any, without
-// notifying: the target did not recover, it just stopped being watched.
+// closeIncident resolves the monitor's open incidents, if any, without
+// notifying: nothing recovered, the target just stopped being watched.
 func (h *handler) closeIncident(r *http.Request, m store.Monitor) error {
-	incident, err := h.opts.Store.GetOpenIncident(r.Context(), m.ID)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil
+	for _, kind := range store.IncidentKinds {
+		incident, err := h.opts.Store.GetOpenIncident(r.Context(), m.ID, kind)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		h.opts.Logger.Info("incident closed because its monitor was paused", "monitor", m.Name, "incident_id", incident.ID, "kind", kind)
+		err = h.opts.Store.ResolveIncident(r.Context(), incident.ID, time.Now().UTC())
+		if err != nil && !errors.Is(err, store.ErrNotFound) { // not found: resolved in the meantime
+			return err
+		}
 	}
-	if err != nil {
-		return err
-	}
-	h.opts.Logger.Info("incident closed because its monitor was paused", "monitor", m.Name, "incident_id", incident.ID)
-	err = h.opts.Store.ResolveIncident(r.Context(), incident.ID, time.Now().UTC())
-	if errors.Is(err, store.ErrNotFound) {
-		return nil // resolved in the meantime
-	}
-	return err
+	return nil
 }
 
 func (h *handler) deleteMonitor(w http.ResponseWriter, r *http.Request) {

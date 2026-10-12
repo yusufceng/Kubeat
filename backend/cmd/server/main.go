@@ -49,6 +49,7 @@ func main() {
 
 	alerts := alert.New(db, &alert.WebhookSender{Client: &http.Client{}, UserAgent: userAgent}, alert.Options{
 		RecoveryThreshold: cfg.RecoveryThreshold,
+		CertWarning:       cfg.CertWarning,
 		QueueSize:         cfg.NotifyQueueSize,
 		Attempts:          cfg.NotifyAttempts,
 		RetryDelay:        cfg.NotifyRetryDelay,

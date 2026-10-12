@@ -18,6 +18,9 @@ const (
 	EventDown Event = "down" // an incident opened
 	EventUp   Event = "up"   // an incident resolved
 	EventTest Event = "test" // a channel test requested by a user
+
+	EventCertExpiring Event = "cert_expiring" // a certificate is about to expire
+	EventCertRenewed  Event = "cert_renewed"  // it was replaced in time
 )
 
 // Notification is one message to deliver to every enabled channel.
@@ -25,13 +28,15 @@ type Notification struct {
 	Event    Event
 	Monitor  store.Monitor
 	Incident store.Incident
+	// CertExpiresAt is set for the certificate events.
+	CertExpiresAt time.Time
 }
 
 // Store is the part of the persistence layer the engine needs.
 type Store interface {
 	GetMonitor(ctx context.Context, id int64) (store.Monitor, error)
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]store.CheckResult, error)
-	GetOpenIncident(ctx context.Context, monitorID int64) (store.Incident, error)
+	GetOpenIncident(ctx context.Context, monitorID int64, kind store.IncidentKind) (store.Incident, error)
 	OpenIncident(ctx context.Context, i store.Incident) (store.Incident, error)
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
 	ListChannels(ctx context.Context) ([]store.Channel, error)
@@ -48,6 +53,9 @@ type Options struct {
 	// open incident. Values above 1 keep a flapping target from producing a
 	// stream of down/up notifications.
 	RecoveryThreshold int
+	// CertWarning is how long before a certificate's expiry a warning
+	// incident opens.
+	CertWarning time.Duration
 	// QueueSize bounds notifications waiting for delivery; when it is full
 	// new ones are dropped and logged rather than stalling result writes.
 	QueueSize int
@@ -101,7 +109,13 @@ func (e *Engine) evaluate(ctx context.Context, monitorID int64) error {
 		return nil
 	}
 
-	incident, err := e.store.GetOpenIncident(ctx, monitorID)
+	// The two kinds are independent: a failing evaluation of one must not
+	// hide the other.
+	return errors.Join(e.evaluateDown(ctx, m), e.evaluateCert(ctx, m))
+}
+
+func (e *Engine) evaluateDown(ctx context.Context, m store.Monitor) error {
+	incident, err := e.store.GetOpenIncident(ctx, m.ID, store.IncidentDown)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return e.maybeOpen(ctx, m)
@@ -110,6 +124,53 @@ func (e *Engine) evaluate(ctx context.Context, monitorID int64) error {
 	default:
 		return e.maybeResolve(ctx, m, incident)
 	}
+}
+
+// evaluateCert opens a certificate incident when the newest result shows a
+// certificate within CertWarning of its expiry, and resolves it once a
+// result shows one that is not. A result without certificate information
+// (plain HTTP, or a connection that failed) changes nothing.
+func (e *Engine) evaluateCert(ctx context.Context, m store.Monitor) error {
+	latest, err := e.store.ListCheckResults(ctx, m.ID, 1)
+	if err != nil || len(latest) == 0 || latest[0].CertExpiresAt.IsZero() {
+		return err
+	}
+	result := latest[0]
+	expiring := result.CertExpiresAt.Sub(result.CheckedAt) < e.opts.CertWarning
+
+	incident, err := e.store.GetOpenIncident(ctx, m.ID, store.IncidentCert)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		if !expiring {
+			return nil
+		}
+		incident, err = e.store.OpenIncident(ctx, store.Incident{
+			MonitorID: m.ID,
+			Kind:      store.IncidentCert,
+			StartedAt: result.CheckedAt,
+			Cause:     "certificate expires on " + result.CertExpiresAt.Format(time.RFC3339),
+		})
+		if err != nil {
+			return err
+		}
+		incident.MonitorName = m.Name
+		e.opts.Logger.Warn("certificate expiring", "monitor", m.Name, "incident_id", incident.ID, "expires_at", result.CertExpiresAt)
+		e.enqueue(Notification{Event: EventCertExpiring, Monitor: m, Incident: incident, CertExpiresAt: result.CertExpiresAt})
+		return nil
+	case err != nil:
+		return err
+	}
+
+	if expiring {
+		return nil
+	}
+	incident.ResolvedAt = result.CheckedAt
+	if err := e.store.ResolveIncident(ctx, incident.ID, incident.ResolvedAt); err != nil {
+		return err
+	}
+	e.opts.Logger.Info("certificate renewed", "monitor", m.Name, "incident_id", incident.ID, "expires_at", result.CertExpiresAt)
+	e.enqueue(Notification{Event: EventCertRenewed, Monitor: m, Incident: incident, CertExpiresAt: result.CertExpiresAt})
+	return nil
 }
 
 // maybeOpen opens an incident when the newest FailureThreshold results all failed.

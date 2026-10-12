@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 4;
+export const REQUIRED_API_REVISION = 5;
 
 export type Health = {
   status: string;
@@ -20,6 +20,8 @@ export type CheckResult = {
   latency_ms: number;
   status_code: number | null;
   error: string | null;
+  /** When the target's TLS certificate expires; null if the check saw none. */
+  cert_expires_at: string | null;
 };
 
 export type MonitorType = "http" | "tcp";
@@ -42,6 +44,8 @@ export type Incident = {
   id: number;
   monitor_id: number;
   monitor_name: string;
+  /** An outage, or a certificate close to its expiry. */
+  kind: "down" | "cert";
   started_at: string;
   /** null while the incident is open */
   resolved_at: string | null;
@@ -79,6 +83,8 @@ export type Monitor = {
   status: "up" | "down" | "pending" | "paused";
   last_result: CheckResult | null;
   open_incident: Incident | null;
+  /** True while the target's certificate is close to its expiry. */
+  cert_warning: boolean;
   window_seconds: number;
   checks: number;
   uptime_percent: number | null;
@@ -127,6 +133,7 @@ function withDefaults(m: Monitor): Monitor {
     failure_threshold: m.failure_threshold ?? 0,
     http: m.http ?? null,
     open_incident: m.open_incident ?? null,
+    cert_warning: m.cert_warning ?? false,
   };
 }
 

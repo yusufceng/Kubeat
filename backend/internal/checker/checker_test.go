@@ -193,7 +193,26 @@ func TestPerMonitorTLSSkip(t *testing.T) {
 		t.Error("self-signed certificate accepted without the monitor opting out")
 	}
 	m.HTTP.SkipTLSVerify = true
-	if got := c.Check(context.Background(), m); !got.Up {
+	got := c.Check(context.Background(), m)
+	if !got.Up {
 		t.Errorf("monitor that skips verification failed: %s", got.Error)
+	}
+	// The certificate's expiry is reported exactly.
+	if want := srv.Certificate().NotAfter; !got.CertExpiresAt.Equal(want) {
+		t.Errorf("CertExpiresAt = %s, want %s", got.CertExpiresAt, want)
+	}
+
+	// Still reported when the check itself fails on the status.
+	m.HTTP.ExpectedStatus = "204"
+	if got := c.Check(context.Background(), m); got.Up || got.CertExpiresAt.IsZero() {
+		t.Errorf("failed HTTPS check lost the certificate expiry: %+v", got)
+	}
+}
+
+func TestPlainHTTPHasNoCertificate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	if got := New(Options{}).Check(context.Background(), httpMonitor(srv.URL)); !got.Up || !got.CertExpiresAt.IsZero() {
+		t.Errorf("plain HTTP check: %+v", got)
 	}
 }
