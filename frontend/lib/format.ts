@@ -27,3 +27,14 @@ export function uptime(percent: number | null): string {
 export function dateTime(iso: string): string {
   return new Date(iso).toLocaleString("tr-TR", { timeZoneName: "short" });
 }
+
+/** Length of a period: 6000 -> "6 sn", 200000 -> "3 dk 20 sn", 9000000 -> "2 sa 30 dk". */
+export function span(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} sn`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} dk ${seconds % 60} sn`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} sa ${minutes % 60} dk`;
+  return `${Math.floor(hours / 24)} gün ${hours % 24} sa`;
+}

@@ -16,6 +16,28 @@ export type CheckResult = {
 
 export type MonitorType = "http" | "tcp";
 
+export type Incident = {
+  id: number;
+  monitor_id: number;
+  monitor_name: string;
+  started_at: string;
+  /** null while the incident is open */
+  resolved_at: string | null;
+  cause: string;
+};
+
+export type Channel = {
+  id: number;
+  name: string;
+  type: "webhook";
+  /** masked by the backend */
+  url: string;
+  enabled: boolean;
+  created_at: string;
+};
+
+export type ChannelTest = { delivered: boolean; error?: string };
+
 export type Monitor = {
   id: number;
   name: string;
@@ -23,10 +45,12 @@ export type Monitor = {
   target: string;
   interval_seconds: number;
   timeout_seconds: number;
+  failure_threshold: number;
   enabled: boolean;
   created_at: string;
   status: "up" | "down" | "pending";
   last_result: CheckResult | null;
+  open_incident: Incident | null;
   window_seconds: number;
   checks: number;
   uptime_percent: number | null;
@@ -35,7 +59,7 @@ export type Monitor = {
 
 export type NewMonitor = Pick<
   Monitor,
-  "name" | "type" | "target" | "interval_seconds" | "timeout_seconds"
+  "name" | "type" | "target" | "interval_seconds" | "timeout_seconds" | "failure_threshold"
 >;
 
 /** A non-2xx answer from the backend. */
@@ -74,3 +98,20 @@ export const createMonitor = (monitor: NewMonitor) =>
 
 export const deleteMonitor = (id: number) =>
   request<void>(`/monitors/${id}`, { method: "DELETE" });
+
+export const listIncidents = (limit: number, monitorId?: number) =>
+  request<Incident[]>(`/incidents?limit=${limit}${monitorId ? `&monitor_id=${monitorId}` : ""}`);
+
+export const listChannels = () => request<Channel[]>("/channels");
+
+export const createChannel = (channel: { name: string; url: string }) =>
+  request<Channel>("/channels", {
+    method: "POST",
+    body: JSON.stringify({ ...channel, type: "webhook" }),
+  });
+
+export const deleteChannel = (id: number) =>
+  request<void>(`/channels/${id}`, { method: "DELETE" });
+
+export const testChannel = (id: number) =>
+  request<ChannelTest>(`/channels/${id}/test`, { method: "POST" });

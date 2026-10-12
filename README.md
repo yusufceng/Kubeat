@@ -1,4 +1,4 @@
-# Uptime
+# Kubeat
 
 OCP/Kubernetes ortamlarındaki servisler için uptime monitoring aracı.
 Go + Next.js + SQLite.
@@ -104,6 +104,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `HISTORY_LIMIT` | `40` | Geçmiş şeridinde gösterilen kontrol sayısı |
 | `RESULTS_LIMIT` | `100` | Monitor sayfasında listelenen kontrol sayısı |
+| `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |
 
 Süreler Go biçimindedir (`500ms`, `5s`, `1m30s`).
 

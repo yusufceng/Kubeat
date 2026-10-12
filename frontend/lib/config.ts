@@ -14,4 +14,6 @@ export const config = {
   historyLimit: positiveInt(process.env.HISTORY_LIMIT, 40),
   /** Number of recent checks listed on a monitor's page. */
   resultsLimit: positiveInt(process.env.RESULTS_LIMIT, 100),
+  /** Number of incidents listed on a page. */
+  incidentsLimit: positiveInt(process.env.INCIDENTS_LIMIT, 100),
 };

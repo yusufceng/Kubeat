@@ -5,7 +5,9 @@ import { config } from "@/lib/config";
 import { duration, uptime } from "@/lib/format";
 import { AddMonitorForm } from "@/app/ui/add-monitor-form";
 import { AutoRefresh } from "@/app/ui/auto-refresh";
-import { HistoryStrip, StatusBadge } from "@/app/ui/status";
+import { BackendError } from "@/app/ui/backend-error";
+import { LiveDuration } from "@/app/ui/live-duration";
+import { type DisplayState, displayState, HistoryStrip, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 
 async function Monitors() {
@@ -15,15 +17,9 @@ async function Monitors() {
     monitors = await listMonitors();
     histories = await Promise.all(monitors.map((m) => listResults(m.id, config.historyLimit)));
   } catch {
-    return (
-      <p
-        role="alert"
-        className="rounded-lg border border-red-600/40 bg-red-600/5 p-4 text-sm text-red-700 dark:text-red-400"
-      >
-        Backend&apos;e ulaşılamıyor. Monitor durumları gösterilemiyor.
-      </p>
-    );
+    return <BackendError what="Monitor durumları" />;
   }
+
   if (monitors.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/20">
@@ -32,14 +28,24 @@ async function Monitors() {
     );
   }
 
-  const count = (status: Monitor["status"]) => monitors.filter((m) => m.status === status).length;
+  const states = monitors.map(displayState);
+  const count = (...wanted: DisplayState[]) => states.filter((s) => wanted.includes(s)).length;
   const window = duration(monitors[0].window_seconds);
 
   return (
     <>
-      <dl className="grid grid-cols-3 gap-3">
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Çalışıyor" value={count("up")} className="text-emerald-600 dark:text-emerald-400" />
-        <Stat label="Erişilemiyor" value={count("down")} className="text-red-600 dark:text-red-400" />
+        <Stat
+          label="Erişilemiyor"
+          value={count("down", "recovering")}
+          className="text-red-600 dark:text-red-400"
+        />
+        <Stat
+          label="Doğrulanıyor"
+          value={count("verifying")}
+          className="text-amber-600 dark:text-amber-400"
+        />
         <Stat label="Bekleniyor" value={count("pending")} className="text-zinc-500" />
       </dl>
 
@@ -67,7 +73,12 @@ async function Monitors() {
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3">
-                  <StatusBadge status={m.status} />
+                  <StatusBadge state={states[i]} />
+                  {m.open_incident && (
+                    <div className="mt-0.5 text-xs text-zinc-500">
+                      <LiveDuration since={m.open_incident.started_at} />
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <HistoryStrip results={histories[i]} slots={config.historyLimit} />
@@ -100,7 +111,7 @@ function Stat({ label, value, className }: { label: string; value: number; class
 export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Uptime</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Monitor&apos;lar</h1>
       <AutoRefresh intervalMs={config.refreshIntervalMs} />
       <Suspense fallback={<p className="text-sm text-zinc-500">Yükleniyor…</p>}>
         <Monitors />

@@ -60,13 +60,24 @@ export function AddMonitorForm() {
           className={inputClass}
         />
       </label>
-      <label className="sm:col-span-2">
+      <label className="sm:col-span-1">
         <span className="mb-1 block text-xs font-medium text-zinc-500">Zaman aşımı (sn)</span>
         <input
           name="timeout_seconds"
           type="number"
           min={1}
           defaultValue={values?.timeout_seconds ?? 5}
+          required
+          className={inputClass}
+        />
+      </label>
+      <label className="sm:col-span-1" title="Art arda bu kadar başarısız kontrolden sonra olay açılır">
+        <span className="mb-1 block text-xs font-medium text-zinc-500">Alarm eşiği</span>
+        <input
+          name="failure_threshold"
+          type="number"
+          min={1}
+          defaultValue={values?.failure_threshold ?? 3}
           required
           className={inputClass}
         />

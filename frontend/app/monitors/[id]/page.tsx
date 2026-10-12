@@ -1,12 +1,23 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ApiError, type CheckResult, getMonitor, listResults, type Monitor } from "@/lib/api";
+import {
+  ApiError,
+  type CheckResult,
+  getMonitor,
+  type Incident,
+  listIncidents,
+  listResults,
+  type Monitor,
+} from "@/lib/api";
 import { config } from "@/lib/config";
 import { dateTime, duration, uptime } from "@/lib/format";
 import { AutoRefresh } from "@/app/ui/auto-refresh";
 import { DeleteMonitorButton } from "@/app/ui/delete-monitor-button";
-import { HistoryStrip, StatusBadge } from "@/app/ui/status";
+import { BackendError } from "@/app/ui/backend-error";
+import { IncidentTable } from "@/app/ui/incident-table";
+import { LiveDuration } from "@/app/ui/live-duration";
+import { displayState, HistoryStrip, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 
 async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -15,19 +26,18 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
 
   let monitor: Monitor;
   let results: CheckResult[];
+  let incidents: Incident[];
   try {
-    [monitor, results] = await Promise.all([getMonitor(id), listResults(id, config.resultsLimit)]);
+    [monitor, results, incidents] = await Promise.all([
+      getMonitor(id),
+      listResults(id, config.resultsLimit),
+      listIncidents(config.incidentsLimit, id),
+    ]);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
-    return (
-      <p
-        role="alert"
-        className="rounded-lg border border-red-600/40 bg-red-600/5 p-4 text-sm text-red-700 dark:text-red-400"
-      >
-        Backend&apos;e ulaşılamıyor. Monitor durumu gösterilemiyor.
-      </p>
-    );
+    return <BackendError what="Monitor durumu" />;
   }
+
   return (
     <>
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -42,7 +52,7 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Field label="Durum">
-          <StatusBadge status={monitor.status} />
+          <StatusBadge state={displayState(monitor)} />
         </Field>
         <Field label={`Uptime (${duration(monitor.window_seconds)})`}>
           {uptime(monitor.uptime_percent)}
@@ -52,8 +62,20 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
         </Field>
         <Field label="Kontrol aralığı">
           {duration(monitor.interval_seconds)} · zaman aşımı {duration(monitor.timeout_seconds)}
+          <div className="mt-0.5 text-xs font-normal text-zinc-500">
+            alarm eşiği: art arda {monitor.failure_threshold} hata
+          </div>
         </Field>
       </dl>
+
+      {monitor.open_incident && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-600/40 bg-red-600/5 p-4 text-sm font-medium text-red-700 dark:text-red-400"
+        >
+          Olay devam ediyor: <LiveDuration since={monitor.open_incident.started_at} />
+        </p>
+      )}
 
       {monitor.last_result?.error && (
         <p
@@ -68,6 +90,15 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
       <section>
         <h2 className="mb-2 text-sm font-semibold">Son {config.historyLimit} kontrol</h2>
         <HistoryStrip results={results} slots={config.historyLimit} />
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold">Olaylar</h2>
+        {incidents.length === 0 ? (
+          <p className="text-sm text-zinc-500">Bu monitor için olay kaydı yok.</p>
+        ) : (
+          <IncidentTable incidents={incidents} showMonitor={false} />
+        )}
       </section>
 
       <section>
@@ -93,7 +124,7 @@ async function MonitorDetail({ params }: { params: Promise<{ id: string }> }) {
                       {dateTime(r.checked_at)}
                     </td>
                     <td className="px-4 py-2">
-                      <StatusBadge status={r.up ? "up" : "down"} />
+                      <StatusBadge state={r.up ? "up" : "down"} />
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums">{r.latency_ms} ms</td>
                     <td className="px-4 py-2 text-right tabular-nums">{r.status_code ?? "–"}</td>
