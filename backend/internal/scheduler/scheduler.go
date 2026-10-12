@@ -8,8 +8,10 @@ import (
 	"math/rand/v2"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -41,7 +43,9 @@ type Options struct {
 	// OnResults, if set, is called with each group of results after they
 	// have been stored. Calls are sequential.
 	OnResults func(ctx context.Context, results []store.CheckResult)
-	Logger    *slog.Logger
+	// Metrics may be nil.
+	Metrics *metrics.Metrics
+	Logger  *slog.Logger
 }
 
 // Scheduler runs checks for all enabled monitors.
@@ -52,6 +56,19 @@ type Scheduler struct {
 
 	mu       sync.Mutex
 	inFlight map[int64]bool
+
+	lastTick atomic.Int64 // Unix nanoseconds of the last completed tick
+}
+
+// LastTick returns when the scheduler last completed a tick, that is, read
+// the monitors from the store and queued the due ones. It is the zero time
+// before the first tick.
+func (s *Scheduler) LastTick() time.Time {
+	ns := s.lastTick.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }
 
 // New returns a Scheduler; call Run to start it.
@@ -145,7 +162,7 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, schedules map[int64
 	})
 
 dispatch:
-	for _, m := range due {
+	for i, m := range due {
 		sc := schedules[m.ID]
 		s.setInFlight(m.ID, true)
 		select {
@@ -158,6 +175,7 @@ dispatch:
 		default:
 			// All workers are busy; the rest stay due and are retried next tick.
 			s.setInFlight(m.ID, false)
+			s.opts.Metrics.DispatchSkipped(len(due) - i)
 			break dispatch
 		}
 	}
@@ -167,6 +185,9 @@ dispatch:
 			delete(schedules, id)
 		}
 	}
+
+	s.lastTick.Store(now.UnixNano())
+	s.opts.Metrics.SchedulerTick(now)
 }
 
 func jitter(max time.Duration) time.Duration {
@@ -195,7 +216,9 @@ func (s *Scheduler) setInFlight(id int64, v bool) {
 func (s *Scheduler) work(ctx context.Context, jobs <-chan store.Monitor, results chan<- store.CheckResult) {
 	for m := range jobs {
 		checkCtx, cancel := context.WithTimeout(ctx, m.Timeout)
+		s.opts.Metrics.CheckStarted()
 		result := s.checker.Check(checkCtx, m)
+		s.opts.Metrics.CheckDone(string(m.Type), result.Up, result.Latency)
 		cancel()
 		s.setInFlight(m.ID, false)
 
@@ -257,6 +280,7 @@ func (s *Scheduler) flush(ctx context.Context, batch []store.CheckResult) {
 		s.opts.Logger.Warn("batch insert failed, retried row by row",
 			"error", err, "rows", len(batch), "dropped", len(batch)-len(stored))
 	}
+	s.opts.Metrics.Results(len(stored), len(batch)-len(stored))
 	if s.opts.OnResults != nil && len(stored) > 0 {
 		s.opts.OnResults(ctx, stored)
 	}

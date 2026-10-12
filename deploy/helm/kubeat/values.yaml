@@ -34,6 +34,26 @@ frontend:
     limits:
       memory: 512Mi
 
+# The backend serves Prometheus metrics at /metrics on its service port.
+metrics:
+  # Creates a ServiceMonitor so the cluster's Prometheus scrapes them. Needs
+  # the prometheus-operator CRDs; on OpenShift, user workload monitoring.
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# Dead man's switch: the backend requests this URL at every interval while
+# it is scheduling checks. Point it at a service that alerts when the
+# requests stop (healthchecks.io, an Uptime Kuma push monitor, ...), ideally
+# one that runs outside this cluster.
+heartbeat:
+  interval: 1m
+  # The URL usually embeds a secret key, so it is read from a Secret.
+  urlSecret:
+    name: ""
+    key: url
+
 # SMTP server for e-mail notification channels. E-mail is off while host or
 # from is empty.
 smtp:

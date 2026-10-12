@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -73,7 +74,9 @@ type Options struct {
 	Attempts    int
 	RetryDelay  time.Duration
 	SendTimeout time.Duration
-	Logger      *slog.Logger
+	// Metrics may be nil.
+	Metrics *metrics.Metrics
+	Logger  *slog.Logger
 }
 
 // Engine evaluates results and delivers notifications.
@@ -286,6 +289,7 @@ func (e *Engine) enqueue(n Notification) {
 	select {
 	case e.queue <- n:
 	default:
+		e.opts.Metrics.NotificationDropped()
 		e.opts.Logger.Error("notification queue full, notification dropped",
 			"event", n.Event, "monitor", n.Monitor.Name, "incident_id", n.Incident.ID)
 	}
@@ -322,7 +326,9 @@ func (e *Engine) deliver(ctx context.Context, n Notification) {
 		if !ch.Enabled {
 			continue
 		}
-		if err := e.sendWithRetry(ctx, ch, n); err != nil {
+		err := e.sendWithRetry(ctx, ch, n)
+		e.opts.Metrics.Notification(string(ch.Type), string(n.Event), err == nil)
+		if err != nil {
 			e.opts.Logger.Error("notification failed", "channel", ch.Name, "event", n.Event, "monitor", n.Monitor.Name, "error", err)
 			continue
 		}

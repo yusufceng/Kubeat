@@ -69,6 +69,8 @@ type Options struct {
 	// DefaultFailureThreshold applies to monitors created without one.
 	DefaultFailureThreshold int
 	Notifier                Notifier
+	// Metrics, if set, is served at /metrics.
+	Metrics http.Handler
 	// EmailEnabled says whether an SMTP server is configured; e-mail
 	// channels cannot be created without one.
 	EmailEnabled bool
@@ -102,6 +104,9 @@ func NewHandler(opts Options) http.Handler {
 	h := &handler{opts: opts}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)
+	if opts.Metrics != nil {
+		mux.Handle("GET /metrics", opts.Metrics)
+	}
 	mux.HandleFunc("GET /api/v1/monitors", h.listMonitors)
 	mux.HandleFunc("POST /api/v1/monitors", h.createMonitor)
 	mux.HandleFunc("GET /api/v1/monitors/{id}", h.getMonitor)

@@ -51,6 +51,7 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 | Metot | Yol | Açıklama |
 | --- | --- | --- |
 | `GET` | `/api/v1/health` | Backend sağlık durumu |
+| `GET` | `/metrics` | Prometheus metrikleri |
 | `GET` | `/api/v1/monitors?window=24h` | Monitor'lar; son durum ve uptime ile |
 | `POST` | `/api/v1/monitors` | Monitor ekler |
 | `GET` | `/api/v1/monitors/{id}?window=24h` | Tek monitor |
@@ -110,6 +111,35 @@ ham sonuçlardan, ham verinin ötesine geçen aralıklar özetlerden hesaplanır
 Yanıt süresi yalnızca başarılı kontrollerden hesaplanır; başarısız bir
 kontrolün süresi çoğunlukla zaman aşımıdır ve yanıt süresi hakkında bir şey
 söylemez.
+
+## Aracın kendi sağlığı
+
+İzleyeni de izlemek gerekir. Bunun için iki mekanizma var.
+
+**Metrikler.** Backend `/metrics` adresinde Prometheus biçiminde metrik
+yayınlar. Başlıcaları:
+
+| Metrik | Anlamı |
+| --- | --- |
+| `kubeat_monitor_up{monitor,namespace,type}` | Son kontrol başarılıysa 1, değilse 0 |
+| `kubeat_monitor_response_seconds` | Son kontrolün süresi |
+| `kubeat_monitor_incident_open` | Açık kesinti varsa 1 |
+| `kubeat_monitor_cert_expiry_timestamp_seconds` | Sertifikanın bitiş zamanı |
+| `kubeat_scheduler_last_tick_timestamp_seconds` | Scheduler'ın son çalıştığı an; ilerlemiyorsa kontrol yapılmıyordur |
+| `kubeat_scheduler_dispatch_skipped_total` | Boş worker olmadığı için bekleyen kontroller; artıyorsa `UPTIME_WORKERS` düşüktür |
+| `kubeat_results_dropped_total` | Veritabanına yazılamayan sonuçlar |
+| `kubeat_notifications_total{channel_type,event,result}` | Bildirim gönderimleri |
+
+Chart'ta `metrics.serviceMonitor.enabled=true` bir ServiceMonitor oluşturur;
+böylece monitor durumları cluster'ın kendi Prometheus ve Alertmanager'ında da
+kullanılabilir.
+
+**Heartbeat (dead man's switch).** `UPTIME_HEARTBEAT_URL` ayarlanırsa backend
+bu adrese her `UPTIME_HEARTBEAT_INTERVAL` sürede bir `GET` atar. Karşı taraf
+(healthchecks.io, Uptime Kuma push monitor vb.) istekler kesilince alarm
+verir. Heartbeat yalnızca scheduler son aralıkta çalıştıysa gönderilir; süreç
+ayakta ama kontrol yapmıyorsa da istekler kesilir. Bu servisin izlenen
+cluster'ın dışında olması gerekir, yoksa ikisi birlikte düşer.
 
 ## Keşif
 
@@ -235,6 +265,10 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_KUBECONFIG` | – | Cluster dışında çalışırken kullanılacak kubeconfig dosyası |
 | `UPTIME_KUBE_CONTEXT` | – | Kubeconfig içindeki bağlam; kubeconfig verildiyse zorunlu |
 | `UPTIME_KUBE_TIMEOUT` | `10s` | Cluster API istekleri için zaman aşımı |
+| `UPTIME_HEARTBEAT_URL` | – | Dead man's switch adresi; boşsa heartbeat gönderilmez |
+| `UPTIME_HEARTBEAT_INTERVAL` | `1m` | Heartbeat aralığı; `UPTIME_SCHEDULER_TICK`'in en az iki katı |
+| `UPTIME_HEARTBEAT_TIMEOUT` | `10s` | Heartbeat isteğinin zaman aşımı |
+| `UPTIME_METRICS_TIMEOUT` | `5s` | `/metrics` için veritabanı okumasının zaman aşımı |
 | `UPTIME_SMTP_HOST` | – | E-posta kanalları için SMTP sunucusu |
 | `UPTIME_SMTP_PORT` | `587` | SMTP portu |
 | `UPTIME_SMTP_FROM` | – | Gönderen adresi, örn. `Kubeat <kubeat@ornek.com>` |

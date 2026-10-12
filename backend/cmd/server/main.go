@@ -4,18 +4,22 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/api"
 	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
+	"github.com/yusufceng/Kubeat/backend/internal/heartbeat"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -47,6 +51,9 @@ func main() {
 	var background sync.WaitGroup
 	userAgent := "kubeat/" + version
 
+	meter := metrics.New(version)
+	meter.WatchMonitors(db, cfg.MetricsTimeout, logger)
+
 	senders := alert.NewRouter(&http.Client{}, userAgent, alert.SMTPConfig{
 		Host:     cfg.SMTPHost,
 		Port:     cfg.SMTPPort,
@@ -63,6 +70,7 @@ func main() {
 		Attempts:          cfg.NotifyAttempts,
 		RetryDelay:        cfg.NotifyRetryDelay,
 		SendTimeout:       cfg.NotifyTimeout,
+		Metrics:           meter,
 		Logger:            logger,
 	})
 	// Notifications raised by the scheduler's final flush must still go out,
@@ -81,8 +89,32 @@ func main() {
 		BatchSize:     cfg.ResultBatchSize,
 		FlushInterval: cfg.ResultFlushInterval,
 		OnResults:     alerts.Evaluate,
+		Metrics:       meter,
 		Logger:        logger,
 	})
+	if cfg.HeartbeatURL != "" {
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			heartbeat.Run(ctx, heartbeat.Options{
+				URL:      cfg.HeartbeatURL,
+				Interval: cfg.HeartbeatInterval,
+				Timeout:  cfg.HeartbeatTimeout,
+				// Alive means the scheduler read its monitors and queued the
+				// due ones at least once since the previous heartbeat.
+				Healthy: func() error {
+					if age := time.Since(sched.LastTick()); age > cfg.HeartbeatInterval {
+						return fmt.Errorf("the scheduler has not completed a tick for %s", age.Round(time.Second))
+					}
+					return nil
+				},
+				Client:  &http.Client{},
+				Metrics: meter,
+				Logger:  logger,
+			})
+		}()
+		logger.Info("heartbeat enabled", "interval", cfg.HeartbeatInterval.String())
+	}
 	background.Add(4)
 	go func() {
 		defer background.Done()
@@ -129,6 +161,7 @@ func main() {
 			StatsWindow:      cfg.StatsWindow,
 			MaxResults:       cfg.MaxResults,
 			Notifier:         alerts,
+			Metrics:          meter.Handler(),
 			EmailEnabled:     senders.EmailEnabled(),
 			Discovery:        discovery,
 			DiscoveryStatus:  discoveryStatus,

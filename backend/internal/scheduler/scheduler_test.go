@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -100,13 +101,19 @@ func testOptions() Options {
 
 // start runs the scheduler and returns a function that stops it and waits.
 func start(st Store, c Checker, opts Options) (stop func()) {
+	_, stop = startScheduler(st, c, opts)
+	return stop
+}
+
+func startScheduler(st Store, c Checker, opts Options) (*Scheduler, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	s := New(st, c, opts)
 	go func() {
 		defer close(done)
-		New(st, c, opts).Run(ctx)
+		s.Run(ctx)
 	}()
-	return func() {
+	return s, func() {
 		cancel()
 		<-done
 	}
@@ -350,5 +357,64 @@ func TestOnResultsSeesOnlyStoredResults(t *testing.T) {
 	}
 	if seen[1] != st.countFor(1) {
 		t.Errorf("callback saw %d results, store has %d", seen[1], st.countFor(1))
+	}
+}
+
+type failingLister struct{ fakeStore }
+
+func (f *failingLister) ListMonitors(context.Context) ([]store.Monitor, error) {
+	return nil, errors.New("database is locked")
+}
+
+func TestLastTickAdvancesOnlyWhileTheStoreAnswers(t *testing.T) {
+	st := &fakeStore{}
+	st.setMonitors(monitor(1, 5*time.Millisecond))
+	s, stop := startScheduler(st, &fakeChecker{}, testOptions())
+	if !s.LastTick().IsZero() && time.Since(s.LastTick()) > time.Minute {
+		t.Errorf("LastTick before any tick = %s", s.LastTick())
+	}
+	waitFor(t, "ticks", func() bool { return !s.LastTick().IsZero() })
+	first := s.LastTick()
+	waitFor(t, "more ticks", func() bool { return s.LastTick().After(first) })
+	stop()
+
+	// A scheduler that cannot read its monitors is not doing its job, and
+	// its tick time must say so.
+	broken, stop := startScheduler(&failingLister{}, &fakeChecker{}, testOptions())
+	time.Sleep(30 * time.Millisecond)
+	stop()
+	if !broken.LastTick().IsZero() {
+		t.Errorf("LastTick advanced although the store never answered: %s", broken.LastTick())
+	}
+}
+
+func TestSchedulerRecordsMetrics(t *testing.T) {
+	st := &fakeStore{rejectID: 2}
+	st.setMonitors(monitor(1, 5*time.Millisecond), monitor(2, 5*time.Millisecond))
+	m := metrics.New("test")
+	opts := testOptions()
+	opts.Metrics = m
+	stop := start(st, &fakeChecker{}, opts)
+	waitFor(t, "stored results", func() bool { return st.countFor(1) >= 5 })
+	stop()
+
+	got, err := m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_checks_total{result=up}{type=http}"] < 10 {
+		t.Errorf("checks_total = %v, want at least 10", got["kubeat_checks_total{result=up}{type=http}"])
+	}
+	if got["kubeat_checks_in_flight"] != 0 {
+		t.Errorf("checks_in_flight after stop = %v, want 0", got["kubeat_checks_in_flight"])
+	}
+	if written := got["kubeat_results_written_total"]; written != float64(st.countFor(1)) {
+		t.Errorf("results_written = %v, store has %d", written, st.countFor(1))
+	}
+	if got["kubeat_results_dropped_total"] < 1 {
+		t.Error("results rejected by the store were not counted as dropped")
+	}
+	if got["kubeat_scheduler_last_tick_timestamp_seconds"] == 0 {
+		t.Error("last tick timestamp was never set")
 	}
 }

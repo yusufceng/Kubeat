@@ -57,6 +57,17 @@ spec:
               value: /data/uptime.db
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
+            {{- with .Values.heartbeat }}
+            {{- if .urlSecret.name }}
+            - name: UPTIME_HEARTBEAT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .urlSecret.name }}
+                  key: {{ .urlSecret.key }}
+            - name: UPTIME_HEARTBEAT_INTERVAL
+              value: {{ .interval | quote }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.smtp }}
             {{- if and .host .from }}
             - name: UPTIME_SMTP_HOST

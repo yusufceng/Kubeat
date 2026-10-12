@@ -50,6 +50,10 @@ func TestLoadDefaults(t *testing.T) {
 		NotifyRetryDelay:        5 * time.Second,
 		NotifyTimeout:           5 * time.Second,
 
+		HeartbeatInterval: time.Minute,
+		HeartbeatTimeout:  10 * time.Second,
+		MetricsTimeout:    5 * time.Second,
+
 		SMTPPort:     587,
 		SMTPSecurity: "starttls",
 
@@ -143,5 +147,24 @@ func TestReminderInterval(t *testing.T) {
 		if _, err := Load(); err == nil {
 			t.Errorf("UPTIME_REMINDER_INTERVAL=%q was accepted", bad)
 		}
+	}
+}
+
+func TestHeartbeatIntervalMustAllowATick(t *testing.T) {
+	t.Setenv("UPTIME_HEARTBEAT_URL", "https://hc.example.com/ping/x")
+	t.Setenv("UPTIME_SCHEDULER_TICK", "10s")
+	t.Setenv("UPTIME_HEARTBEAT_INTERVAL", "15s")
+	if _, err := Load(); err == nil {
+		t.Error("a heartbeat interval shorter than two scheduler ticks was accepted")
+	}
+	t.Setenv("UPTIME_HEARTBEAT_INTERVAL", "20s")
+	if _, err := Load(); err != nil {
+		t.Errorf("interval of exactly two ticks rejected: %v", err)
+	}
+	// Without a URL the interval is not used, so it is not checked.
+	t.Setenv("UPTIME_HEARTBEAT_URL", "")
+	t.Setenv("UPTIME_HEARTBEAT_INTERVAL", "1s")
+	if _, err := Load(); err != nil {
+		t.Errorf("unused heartbeat interval rejected: %v", err)
 	}
 }

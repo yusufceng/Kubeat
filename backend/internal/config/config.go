@@ -44,6 +44,13 @@ type Config struct {
 	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
 	NotifyTimeout           time.Duration // UPTIME_NOTIFY_TIMEOUT
 
+	// Heartbeats go to an external dead man's switch; off while the URL is
+	// empty. MetricsTimeout bounds the database read done for a scrape.
+	HeartbeatURL      string        // UPTIME_HEARTBEAT_URL
+	HeartbeatInterval time.Duration // UPTIME_HEARTBEAT_INTERVAL
+	HeartbeatTimeout  time.Duration // UPTIME_HEARTBEAT_TIMEOUT
+	MetricsTimeout    time.Duration // UPTIME_METRICS_TIMEOUT
+
 	// SMTP settings for e-mail channels; e-mail is off unless both the host
 	// and the sender address are set.
 	SMTPHost     string // UPTIME_SMTP_HOST
@@ -67,6 +74,8 @@ func Load() (Config, error) {
 	cfg := Config{
 		Addr:   envString("UPTIME_ADDR", ":8080"),
 		DBPath: envString("UPTIME_DB_PATH", "uptime.db"),
+
+		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
 
 		SMTPHost:     envString("UPTIME_SMTP_HOST", ""),
 		SMTPUsername: envString("UPTIME_SMTP_USERNAME", ""),
@@ -99,6 +108,9 @@ func Load() (Config, error) {
 		{&cfg.NotifyRetryDelay, "UPTIME_NOTIFY_RETRY_DELAY", 5 * time.Second},
 		{&cfg.NotifyTimeout, "UPTIME_NOTIFY_TIMEOUT", 5 * time.Second},
 		{&cfg.KubeTimeout, "UPTIME_KUBE_TIMEOUT", 10 * time.Second},
+		{&cfg.HeartbeatInterval, "UPTIME_HEARTBEAT_INTERVAL", time.Minute},
+		{&cfg.HeartbeatTimeout, "UPTIME_HEARTBEAT_TIMEOUT", 10 * time.Second},
+		{&cfg.MetricsTimeout, "UPTIME_METRICS_TIMEOUT", 5 * time.Second},
 	}
 	for _, d := range durations {
 		v, err := envDuration(d.key, d.def)
@@ -137,6 +149,11 @@ func Load() (Config, error) {
 	case "starttls", "tls", "none":
 	default:
 		return Config{}, fmt.Errorf("UPTIME_SMTP_SECURITY: must be starttls, tls or none, got %q", cfg.SMTPSecurity)
+	}
+	if cfg.HeartbeatURL != "" && cfg.HeartbeatInterval < 2*cfg.SchedulerTick {
+		// A heartbeat needs a scheduler tick since the previous one.
+		return Config{}, fmt.Errorf("UPTIME_HEARTBEAT_INTERVAL: must be at least twice UPTIME_SCHEDULER_TICK (%s), got %s",
+			cfg.SchedulerTick, cfg.HeartbeatInterval)
 	}
 	if cfg.MinCheckInterval < time.Second {
 		// Intervals are stored in whole seconds.
