@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/piaycoskun/uptime/backend/internal/api"
+	"github.com/yusufceng/Kubeat/backend/internal/api"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
