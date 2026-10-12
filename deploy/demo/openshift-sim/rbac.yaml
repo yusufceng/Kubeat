@@ -1,0 +1,14 @@
+# OpenShift ships this ClusterRole; Thanos Querier lets its holders query
+# metrics. The chart binds Kubeat's service account to it when
+# prometheus.openshiftMonitoringView is set. The stand-in grants what the
+# kube-rbac-proxy in thanos-querier.yaml checks for.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-monitoring-view
+rules:
+  - nonResourceURLs: ["/api", "/api/*"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]

@@ -17,6 +17,10 @@ backend:
   persistence:
     size: 2Gi
     storageClass: ""   # empty uses the cluster default
+  # Extra volumes for the backend, e.g. a CA bundle for the metrics server or
+  # for checks of targets signed by an internal CA.
+  extraVolumes: []
+  extraVolumeMounts: []
 
 frontend:
   replicas: 1

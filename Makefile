@@ -12,12 +12,15 @@ ADMIN_PASSWORD ?= admin
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.19.0
+VERSION ?= 0.20.0
 CHART := deploy/helm/kubeat
 # Ek helm ayarları, örn. HELM_ARGS="--set prometheus.url=http://..."
 HELM_ARGS ?=
+# Minikube'da backend'in volume'una yazabilmesi için gereken ayar. OpenShift
+# benzetimi bunu kendi değerleriyle değiştirir.
+MINIKUBE_SECURITY ?= --set podSecurityContext.fsGroup=1001
 
-.PHONY: dev backend frontend test lint build images minikube-deploy minikube-open minikube-demo minikube-password
+.PHONY: dev backend frontend test lint build images minikube-deploy minikube-open minikube-demo minikube-password minikube-openshift-sim
 
 # Backend ve frontend'i birlikte çalıştırır; Ctrl-C ikisini de durdurur.
 dev:
@@ -51,7 +54,16 @@ minikube-deploy: images
 	helm --kube-context $(KUBE_CONTEXT) upgrade --install kubeat $(CHART) \
 		--namespace $(NAMESPACE) --create-namespace \
 		--set backend.image.tag=$(VERSION) --set frontend.image.tag=$(VERSION) \
-		--set podSecurityContext.fsGroup=1001 $(HELM_ARGS) --wait
+		$(MINIKUBE_SECURITY) $(HELM_ARGS) --wait
+
+# Minikube'u Kubeat'in gözünde OpenShift'e benzetir (Route ve ServiceMonitor
+# CRD'leri, token ve TLS isteyen bir thanos-querier, kısıtlı pod güvenliği) ve
+# chart'ı OpenShift'teki ayarlarıyla ayrı bir namespace'e kurar. Önce
+# minikube-demo gerekir. Kaldırmak için: helm -n kubeat-ocp uninstall kubeat
+minikube-openshift-sim: images
+	KUBE_CONTEXT=$(KUBE_CONTEXT) deploy/demo/openshift-sim/install.sh
+	$(MAKE) minikube-deploy NAMESPACE=kubeat-ocp MINIKUBE_SECURITY= \
+		HELM_ARGS="-f deploy/demo/openshift-sim/values.yaml $(HELM_ARGS)"
 
 # Arayüzü http://localhost:$(FRONTEND_PORT) adresine açar.
 minikube-open:

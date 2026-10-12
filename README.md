@@ -47,6 +47,68 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 - Ayarlar `backend.env` ve `frontend.env` altında ortam değişkeni olarak
   verilir; bkz. [values.yaml](deploy/helm/kubeat/values.yaml).
 
+### OpenShift
+
+OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakılır,
+UID ve fsGroup'u SCC atar:
+
+```
+helm upgrade --install kubeat deploy/helm/kubeat -n kubeat --create-namespace \
+  --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
+  --set metrics.serviceMonitor.enabled=true \
+  --set prometheus.url=https://thanos-querier.openshift-monitoring.svc:9091 \
+  --set prometheus.tokenFile=/var/run/secrets/kubernetes.io/serviceaccount/token \
+  --set prometheus.caFile=/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt \
+  --set prometheus.openshiftMonitoringView=true
+```
+
+İmajlar UBI tabanlıdır, kök olmayan ve rastgele bir UID ile, salt okunur
+kök dosya sistemiyle ve tüm capability'ler düşürülmüş olarak çalışır
+(`restricted-v2` SCC'nin istedikleri). Backend yalnızca `/data`, `/backup` ve
+`/tmp` dizinlerine yazar.
+
+**Benzetim.** Elimizde gerçek bir OpenShift olmadığı için minikube,
+Kubeat'in gözünde OpenShift'e benzetilir:
+
+```
+make minikube-demo
+make minikube-openshift-sim
+```
+
+Bu komut `deploy/demo/openshift-sim/install.sh` ile şunları kurar ve chart'ı
+yukarıdaki değerlerle (`deploy/demo/openshift-sim/values.yaml`) ayrı bir
+`kubeat-ocp` namespace'ine kurar:
+
+- Route, ServiceMonitor ve PrometheusRule CRD'leri (OpenShift ve
+  prometheus-operator'ın kendi tanımları).
+- `openshift-monitoring` namespace'inde bir **thanos-querier**: demo
+  Prometheus'un önünde, benzetilmiş bir "service CA" ile TLS konuşan ve
+  gelen token'ı TokenReview, yetkiyi SubjectAccessReview ile denetleyen
+  kube-rbac-proxy. `cluster-monitoring-view` ClusterRole'ü de oluşturulur;
+  chart'ın bağlaması gerçekte olduğu gibi ona yapılır.
+- Her namespace'te bulunan `openshift-service-ca.crt` ConfigMap'inin bir
+  kopyası; benzetimde CA bu ConfigMap'ten `backend.extraVolumes` ile
+  bağlanır (OpenShift'te pod'a kendiliğinden gelir).
+- `kubeat-ocp` namespace'inde `restricted` Pod Security Standard;
+  `restricted-v2` SCC'nin en yakın karşılığı. Pod'lar SCC'nin atayacağı
+  türden rastgele bir UID (1000680000) ile çalışır.
+- `shop-demo`'da iki Route: biri cluster içinden çözülen bir host ile
+  (kontrolü router olmadan da geçer), diğeri gerçek bir Route gibi apps alan
+  adı ve edge TLS ile (host çözülmediği için kontrolü başarısız kalır).
+
+Benzetimle doğrulananlar: kısıtlı güvenlik bağlamı altında çalışma, Route ve
+ServiceMonitor şablonlarının API tarafından kabulü, Route keşfi ve Route
+üzerinden pod çözümleme, servis hesabı token'ı ve service CA ile metrik
+okuma, `cluster-monitoring-view` bağlaması, yetkisiz ICMP ile ping.
+
+Benzetimin yapamadıkları: Route'un gerçekten trafik taşıması (router yok),
+SCC admission'ın UID'yi kendisinin ataması, service CA'nın pod'a
+kendiliğinden gelmesi, Thanos Querier'ın gerçek yetki kuralı, iç registry ve
+pull secret'lar, OAuth proxy. Bunlar ilk gerçek kurulumda denenmelidir.
+
+Benzetimi kaldırmak: `helm -n kubeat-ocp uninstall kubeat`; CRD'ler ve
+`openshift-monitoring` namespace'i kalır.
+
 ## Güvenlik
 
 Backend API'si, `UPTIME_API_TOKEN` ayarlandığında yalnızca bu anahtarı

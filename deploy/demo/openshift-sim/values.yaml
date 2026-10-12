@@ -1,0 +1,39 @@
+# How Kubeat is installed on OpenShift, applied to the minikube that
+# install.sh prepared. The differences from a real OpenShift install are
+# marked.
+podSecurityContext:
+  # The restricted-v2 SCC assigns these from the namespace's range; here
+  # they are given by hand. Leave podSecurityContext empty on OpenShift.
+  runAsUser: 1000680000
+  runAsGroup: 0
+  fsGroup: 1000680000
+  supplementalGroups: [0]
+
+route:
+  enabled: true
+  host: kubeat.apps.sim.example
+
+metrics:
+  serviceMonitor:
+    enabled: true
+
+prometheus:
+  url: https://thanos-querier.openshift-monitoring.svc:9091
+  tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+  # On OpenShift: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt,
+  # which every pod gets. Here the simulated CA is mounted from a ConfigMap.
+  caFile: /etc/kubeat/service-ca/service-ca.crt
+  openshiftMonitoringView: true
+
+backend:
+  extraVolumes:
+    - name: service-ca
+      configMap:
+        name: openshift-service-ca.crt
+  extraVolumeMounts:
+    - name: service-ca
+      mountPath: /etc/kubeat/service-ca
+      readOnly: true
+
+backup:
+  enabled: true

@@ -1,0 +1,84 @@
+# Stands in for OpenShift's Thanos Querier: kube-rbac-proxy serves TLS on
+# 9091 with the simulated service CA, checks the bearer token with a
+# TokenReview and the caller's rights with a SubjectAccessReview, and passes
+# the query on to the demo Prometheus. Kubeat talks to it exactly as it
+# would on OpenShift.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: thanos-querier
+  namespace: openshift-monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openshift-sim-thanos-querier
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openshift-sim-thanos-querier
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openshift-sim-thanos-querier
+subjects:
+  - kind: ServiceAccount
+    name: thanos-querier
+    namespace: openshift-monitoring
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-querier
+  namespace: openshift-monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: thanos-querier}
+  template:
+    metadata:
+      labels: {app: thanos-querier}
+    spec:
+      serviceAccountName: thanos-querier
+      containers:
+        - name: kube-rbac-proxy
+          image: quay.io/brancz/kube-rbac-proxy:v0.19.1
+          args:
+            - --secure-listen-address=0.0.0.0:9091
+            - --upstream=http://prometheus.monitoring-demo.svc:9090/
+            - --tls-cert-file=/etc/tls/tls.crt
+            - --tls-private-key-file=/etc/tls/tls.key
+            - --logtostderr=true
+            - --v=3
+          ports:
+            - {name: web, containerPort: 9091}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+            seccompProfile: {type: RuntimeDefault}
+          volumeMounts:
+            - {name: tls, mountPath: /etc/tls, readOnly: true}
+      volumes:
+        - name: tls
+          secret: {secretName: thanos-querier-tls}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: thanos-querier
+  namespace: openshift-monitoring
+spec:
+  selector: {app: thanos-querier}
+  ports:
+    - {name: web, port: 9091, targetPort: web}

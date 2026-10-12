@@ -14,6 +14,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "kubeat.containerSecurityContext" -}}
 allowPrivilegeEscalation: false
 runAsNonRoot: true
+readOnlyRootFilesystem: true
 capabilities:
   drop: ["ALL"]
 seccompProfile:

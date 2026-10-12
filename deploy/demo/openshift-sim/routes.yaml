@@ -1,0 +1,30 @@
+# Routes for the demo namespace. There is no router here, so a Route does not
+# actually route; what Kubeat does with Routes (discovery, the pods behind
+# them) can still be tried.
+#
+# This one names a host the cluster resolves on its own, so the monitor made
+# from it passes even without a router.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: web
+  namespace: shop-demo
+spec:
+  host: web.shop-demo.svc
+  to: {kind: Service, name: web}
+  port: {targetPort: http}
+---
+# What a real Route looks like: an apps domain and TLS at the edge. Nothing
+# resolves the host here, so its monitor fails; that is expected.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: web-public
+  namespace: shop-demo
+spec:
+  host: web-shop-demo.apps.sim.example
+  to: {kind: Service, name: web}
+  port: {targetPort: http}
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

@@ -56,16 +56,30 @@ Kuma'da olmayıp burada olanlar: cluster'dan keşif (Service, Ingress, Route),
 monitor'un arkasındaki pod'lar ile CPU/bellek, Helm chart ve OpenShift
 kısıtlarına uygun imajlar, `/metrics` ve heartbeat ile kendi kendini izleme.
 
-## Gerçek OpenShift'te doğrulanması gerekenler
+## OpenShift
 
-Geliştirme minikube'da yapıldı. Aşağıdakiler yalnızca birim testleriyle ya
-da şablon render edilerek doğrulandı:
+Gerçek bir OpenShift'te hiç çalıştırılmadı. 2026-10-12'den beri minikube
+üzerinde bir benzetim var (`make minikube-openshift-sim`, ayrıntısı
+README'de): Route ve ServiceMonitor CRD'leri, token ve TLS isteyen bir
+thanos-querier taklidi, `cluster-monitoring-view`, kısıtlı Pod Security
+Standard ve rastgele UID.
 
-- Route keşfi ve Route üzerinden pod çözümleme
-- Kısıtlı SCC altında çalışma (docker'da rastgele UID ile taklit edildi)
-- Thanos Querier'a servis hesabı token'ı ve service CA ile erişim
-- ServiceMonitor ve `cluster-monitoring-view` bağlaması
-- Chart'taki Route şablonu
+Benzetimle doğrulandı:
+
+- Kısıtlı güvenlik bağlamı: rastgele UID, GID 0, salt okunur kök dosya
+  sistemi, tüm capability'ler düşük; backend, frontend, ping ve DNS çalıştı
+- Route keşfi ve Route üzerinden pod çözümleme (gerçek API sunucusu, CRD ile)
+- Chart'ın Route ve ServiceMonitor şablonlarının kabulü
+- Servis hesabı token'ı ve service CA ile metrik okuma; chart'ın
+  `cluster-monitoring-view` bağlaması
+
+Hâlâ gerçek OpenShift gerektirenler:
+
+- Router'ın Route'u taşıması ve host ataması
+- SCC admission'ın UID/fsGroup atamasıyla volume izinleri
+- Service CA'nın pod'a kendiliğinden gelmesi (`service-ca.crt`)
+- Thanos Querier'ın gerçek yetki kuralı
+- İç registry, pull secret, OAuth proxy ile arayüz koruması
 
 ## Bilinen sınırlar
 
@@ -80,5 +94,6 @@ da şablon render edilerek doğrulandı:
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.
-- Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır. Minikube'da
-  kısıtlı güvenlik bağlamındaki pod'dan çalıştı; OpenShift'te denenmedi.
+- Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır. Kısıtlı
+  güvenlik bağlamındaki pod'dan minikube'da çalıştı; RHCOS'ta CRI-O bu izni
+  varsayılan olarak verir, ama denenmedi.

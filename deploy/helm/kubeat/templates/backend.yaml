@@ -177,6 +177,12 @@ spec:
             - name: backup
               mountPath: /backup
             {{- end }}
+            # The root filesystem is read-only; SQLite keeps temporary files here.
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.backend.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -185,6 +191,11 @@ spec:
         - name: backup
           persistentVolumeClaim:
             claimName: {{ .Values.backup.persistence.existingClaim | default (printf "%s-backup" .Release.Name) }}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.backend.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
 ---
 apiVersion: v1
