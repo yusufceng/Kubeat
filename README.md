@@ -685,6 +685,42 @@ Cluster dışında çalışırken keşif için hem `UPTIME_KUBECONFIG` hem
 `UPTIME_KUBE_CONTEXT` verilmelidir; kubeconfig'in o anki bağlamı bilerek
 kullanılmaz.
 
+### Annotation ile sürekli keşif
+
+Keşif sayfasından içe aktarmak tek seferliktir. Ekiplerin Kubeat'e hiç
+girmeden izlenmesini istemesi için nesneye bir annotation yeter:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: odeme-api
+  annotations:
+    kubeat.io/monitor: "true"
+    kubeat.io/port: "http"            # isteğe bağlı; yoksa her TCP port
+    kubeat.io/path: "/healthz"        # isteğe bağlı; porta HTTP isteği yapılır
+    kubeat.io/interval: "20s"         # isteğe bağlı
+    kubeat.io/timeout: "3s"           # isteğe bağlı
+    kubeat.io/failure-threshold: "2"  # isteğe bağlı
+```
+
+Backend her `UPTIME_DISCOVERY_SYNC_INTERVAL`'da (varsayılan 1 dk) cluster'ı
+okur ve `kubeat.io/monitor: "true"` taşıyan Service, Ingress, Route,
+Deployment, StatefulSet ve DaemonSet'ler için monitor oluşturur. Kontrol,
+keşif sayfasındaki tabloyla aynı kuralla seçilir; `kubeat.io/path` verilirse
+Service portuna o yola HTTP isteği yapılır. Annotation kaldırılınca ya da
+nesne silinince monitor, geçmişiyle birlikte kaldırılır; hedef ya da
+annotation değişince monitor güncellenir. Cluster okunamazsa hiçbir şey
+değiştirilmez.
+
+Bu monitor'lar arayüzde **annotation** rozetiyle görünür. Hedefleri ve
+zamanlamaları nesneden geldiği için arayüzden ya da API'den değiştirilemez
+ve silinemez (`409`); etiket, açıklama, duraklatma ve bildirimler
+değiştirilebilir. Keşif sayfasından elle içe aktarılmış bir nesneye
+annotation eklenirse elle yapılan monitor'a dokunulmaz; durum keşif
+sayfasında "already monitored by hand" olarak görünür. Her değişiklik
+denetim kaydına `discovery` adıyla yazılır.
+
 ## Alarm
 
 Bir monitor art arda `failure_threshold` kez başarısız olursa olay açılır;
@@ -840,6 +876,9 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |
 | `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Gönderilmeyi bekleyebilecek en fazla bildirim sayısı |
 | `UPTIME_DISCOVERY_ENABLED` | `true` | Cluster keşfini açar |
+| `UPTIME_DISCOVERY_SYNC_INTERVAL` | `1m` | `kubeat.io/monitor` annotation'lı nesnelerin ne sıklıkta okunup monitor'larının eşitleneceği; `0` kapalı |
+| `UPTIME_DISCOVERY_DEFAULT_INTERVAL` | `30s` | Annotation'la oluşturulan monitor'un, nesne belirtmediyse kontrol aralığı |
+| `UPTIME_DISCOVERY_DEFAULT_TIMEOUT` | `5s` | Annotation'la oluşturulan monitor'un, nesne belirtmediyse zaman aşımı |
 | `UPTIME_KUBECONFIG` | – | Cluster dışında çalışırken kullanılacak kubeconfig dosyası |
 | `UPTIME_KUBE_CONTEXT` | – | Kubeconfig içindeki bağlam; kubeconfig verildiyse zorunlu |
 | `UPTIME_KUBE_TIMEOUT` | `10s` | Cluster API istekleri için zaman aşımı |

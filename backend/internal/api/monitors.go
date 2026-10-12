@@ -37,8 +37,11 @@ type monitorResponse struct {
 	Target string `json:"target"`
 	// Namespace is the namespace of a discovered monitor or the group of
 	// one entered by hand; Source is empty for the latter.
-	Namespace       string   `json:"namespace"`
-	Source          string   `json:"source"`
+	Namespace string `json:"namespace"`
+	Source    string `json:"source"`
+	// Managed is set on a monitor discovery created from an annotated
+	// object: its target and check settings follow the annotations.
+	Managed         bool     `json:"managed"`
 	Tags            []string `json:"tags"`
 	IntervalSeconds int      `json:"interval_seconds"`
 	TimeoutSeconds  int      `json:"timeout_seconds"`
@@ -139,6 +142,7 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		CertWarning:          st.CertWarning,
 		Namespace:            st.Namespace,
 		Source:               st.Source,
+		Managed:              st.Managed,
 		Tags:                 st.Tags,
 	}
 	if resp.Tags == nil {
@@ -674,6 +678,10 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		}
 		merged.Namespace = *req.Namespace
 	}
+	if current.Managed && h.opts.Sync != nil && changesManagedSettings(req, current) {
+		writeError(w, http.StatusConflict, managedError)
+		return
+	}
 	if req.Tags != nil {
 		merged.Tags = *req.Tags
 	}
@@ -774,6 +782,18 @@ func (h *handler) closeIncident(r *http.Request, m store.Monitor) error {
 	return nil
 }
 
+// managedError answers a change to what discovery owns on a managed monitor.
+const managedError = "this monitor follows the kubeat.io/* annotations of its cluster object; change those instead"
+
+// changesManagedSettings says whether the update touches what the syncer
+// keeps in step with the annotations: the target and the check timing.
+func changesManagedSettings(req updateMonitorRequest, current store.Monitor) bool {
+	return (req.Target != nil && strings.TrimSpace(*req.Target) != current.Target) ||
+		(req.IntervalSeconds != nil && *req.IntervalSeconds != int(current.Interval/time.Second)) ||
+		(req.TimeoutSeconds != nil && *req.TimeoutSeconds != int(current.Timeout/time.Second)) ||
+		(req.FailureThreshold != nil && *req.FailureThreshold != current.FailureThreshold)
+}
+
 func (h *handler) deleteMonitor(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
@@ -791,6 +811,11 @@ func (h *handler) deleteMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if p := principal(r); !p.CanEdit(m.Namespace) {
 		scopeError(w, p)
+		return
+	}
+	if m.Managed && h.opts.Sync != nil {
+		// It would be back within the interval; the annotation is the way.
+		writeError(w, http.StatusConflict, managedError)
 		return
 	}
 	h.audit(r, "delete", "monitor", id, m.Name)

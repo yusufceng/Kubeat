@@ -43,8 +43,13 @@ type Candidate struct {
 	Kind      Kind
 	Namespace string
 	Name      string
-	// Port is the service port; 0 for ingresses and routes.
-	Port int32
+	// Port is the service port; 0 for ingresses and routes. PortName is
+	// its name in the service, when it has one.
+	Port     int32
+	PortName string
+	// Annotations are those of the cluster object, for the ones Kubeat
+	// understands (see the discovery package).
+	Annotations map[string]string
 	// Type and Target are the check proposed for it.
 	Type   store.MonitorType
 	Target string
@@ -157,7 +162,8 @@ func (c *Client) Namespaces(ctx context.Context) ([]string, error) {
 }
 
 // Candidates lists everything monitorable in a namespace: service ports,
-// ingress rules, on OpenShift routes, and the workloads themselves.
+// ingress rules, on OpenShift routes, and the workloads themselves. An
+// empty namespace lists the whole cluster.
 func (c *Client) Candidates(ctx context.Context, namespace string) ([]Candidate, error) {
 	services, err := c.serviceCandidates(ctx, namespace)
 	if err != nil {
@@ -215,10 +221,11 @@ func (c *Client) serviceCandidates(ctx context.Context, namespace string) ([]Can
 				continue
 			}
 			cand := Candidate{
-				Kind: KindService, Namespace: svc.Namespace, Name: svc.Name, Port: port.Port,
-				Type:   store.MonitorTCP,
-				Target: fmt.Sprintf("%s:%d", host, port.Port),
-				Reason: ReasonTCPFallback,
+				Kind: KindService, Namespace: svc.Namespace, Name: svc.Name, Port: port.Port, PortName: port.Name,
+				Annotations: svc.Annotations,
+				Type:        store.MonitorTCP,
+				Target:      fmt.Sprintf("%s:%d", host, port.Port),
+				Reason:      ReasonTCPFallback,
 			}
 			// The application's own probe says what "healthy" means: which
 			// URL, or which gRPC service. Guessing a path would raise false
@@ -371,7 +378,7 @@ func (c *Client) ingressCandidates(ctx context.Context, namespace string) ([]Can
 				}
 				seen[p] = true
 				out = append(out, Candidate{
-					Kind: KindIngress, Namespace: ing.Namespace, Name: ing.Name,
+					Kind: KindIngress, Namespace: ing.Namespace, Name: ing.Name, Annotations: ing.Annotations,
 					Type:   store.MonitorHTTP,
 					Target: fmt.Sprintf("%s://%s%s", scheme, rule.Host, p),
 					Reason: ReasonIngressRule,
@@ -413,7 +420,7 @@ func (c *Client) routeCandidates(ctx context.Context, namespace string) ([]Candi
 			scheme = "https"
 		}
 		out = append(out, Candidate{
-			Kind: KindRoute, Namespace: route.GetNamespace(), Name: route.GetName(),
+			Kind: KindRoute, Namespace: route.GetNamespace(), Name: route.GetName(), Annotations: route.GetAnnotations(),
 			Type:   store.MonitorHTTP,
 			Target: fmt.Sprintf("%s://%s%s", scheme, host, plainPath(path)),
 			Reason: ReasonRouteHost,

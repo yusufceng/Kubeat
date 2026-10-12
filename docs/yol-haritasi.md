@@ -25,6 +25,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 16 | Gizli değerlerin veritabanında şifrelenmesi | Tamamlandı |
 | 15 | Kişisel hesaplar, LDAP girişi, namespace bazlı roller, değişiklik kaydı | Tamamlandı |
 | 15b | Ayarlar ekranı, kişi başına API anahtarları | Planlandı |
+| 17 | Annotation ile sürekli keşif: `kubeat.io/monitor` taşıyan nesneler kendiliğinden izlenir | Tamamlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
@@ -90,7 +91,10 @@ Hâlâ gerçek OpenShift gerektirenler:
   Tek replica olduğu için şimdilik sorun değildir.
 - Gizli değerler `UPTIME_SECRET_KEY` ile şifrelenir; anahtar değiştirme
   (rotation) yoktur ve push token'ları şifrelenmez.
-- Keşif tek seferliktir; sonradan eklenen servisler kendiliğinden izlenmez.
+- Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye
+  `kubeat.io/monitor` annotation'ı eklenir.
+- Annotation eşitlemesi her turda tüm cluster'ın Service, Pod, Ingress, Route
+  ve workload listesini çeker; binlerce pod'lu cluster'da aralık uzatılmalıdır.
 - Bakım sırasındaki başarısız kontroller uptime'a dahildir.
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre

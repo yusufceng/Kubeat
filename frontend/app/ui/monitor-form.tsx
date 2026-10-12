@@ -92,8 +92,10 @@ export function MonitorForm({
 
   const info = monitorTypes[type];
   const http = monitor?.http;
-  // A discovered monitor is named after the object it was made from.
+  // A discovered monitor is named after the object it was made from. One
+  // made from an annotation also takes its target and timing from there.
   const discovered = (monitor?.source ?? "") !== "";
+  const managed = monitor?.managed ?? false;
 
   // Submitted by hand instead of through the form's action: React resets a
   // form after its action, which would throw away a rejected form's values.
@@ -142,6 +144,7 @@ export function MonitorForm({
             <input
               name="target"
               required
+              readOnly={managed}
               defaultValue={monitor?.target}
               placeholder={info.target.placeholder}
               className="field font-mono"
@@ -192,9 +195,11 @@ export function MonitorForm({
       <Section
         title="Zamanlama ve alarm"
         hint={
-          type === "push"
-            ? "Raporun ne sıklıkta beklendiği ve ne kadar gecikmenin hoş görüleceği."
-            : "Ne sıklıkta kontrol edileceği ve kaç hatadan sonra kesinti sayılacağı."
+          managed
+            ? "Bu monitor nesnesindeki kubeat.io/* annotation'larını izler; hedef, aralık, zaman aşımı ve eşik oradan değiştirilir."
+            : type === "push"
+              ? "Raporun ne sıklıkta beklendiği ve ne kadar gecikmenin hoş görüleceği."
+              : "Ne sıklıkta kontrol edileceği ve kaç hatadan sonra kesinti sayılacağı."
         }
       >
         <Field label={type === "push" ? "Rapor aralığı (sn)" : "Kontrol aralığı (sn)"} span={type === "push" ? 2 : 1}>
@@ -203,6 +208,7 @@ export function MonitorForm({
             type="number"
             min={1}
             required
+            readOnly={managed}
             defaultValue={monitor?.interval_seconds ?? defaults.interval}
             className="field"
           />
@@ -213,6 +219,7 @@ export function MonitorForm({
             type="number"
             min={1}
             required
+            readOnly={managed}
             defaultValue={monitor?.timeout_seconds ?? defaults.timeout}
             className="field"
           />
@@ -227,6 +234,7 @@ export function MonitorForm({
             type="number"
             min={1}
             required
+            readOnly={managed}
             defaultValue={monitor?.failure_threshold ?? defaults.failureThreshold}
             className="field"
           />

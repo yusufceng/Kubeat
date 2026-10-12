@@ -8,6 +8,7 @@ import {
   listNamespaces,
 } from "@/lib/api";
 import { BackendError } from "@/app/ui/backend-error";
+import { LocalTime } from "@/app/ui/local-time";
 import { currentUser } from "@/lib/auth";
 import { CandidateForm } from "@/app/ui/candidate-form";
 import { typeLabel } from "@/lib/monitor-types";
@@ -29,6 +30,62 @@ function ClusterError({ err }: { err: unknown }) {
     >
       Cluster&apos;dan okunamadı: <span className="font-mono text-xs">{err.message}</span>
     </p>
+  );
+}
+
+/** How the monitors asked for with annotations are doing. */
+function SyncCard({ sync }: { sync: DiscoveryStatus["sync"] }) {
+  return (
+    <section className="card p-5 text-sm" aria-label="Annotation ile keşif">
+      <h2 className="font-semibold">Annotation ile keşif</h2>
+      <p className="mt-1 text-muted">
+        Bir Service, Ingress, Route, Deployment, StatefulSet ya da DaemonSet&apos;e{" "}
+        <code className="rounded bg-sunken px-1">kubeat.io/monitor: &quot;true&quot;</code> annotation&apos;ı
+        eklenince izlenir; kaldırılınca ya da nesne silinince monitor da kaldırılır. İsteğe bağlı:{" "}
+        <code className="rounded bg-sunken px-1">kubeat.io/interval</code>,{" "}
+        <code className="rounded bg-sunken px-1">kubeat.io/timeout</code>,{" "}
+        <code className="rounded bg-sunken px-1">kubeat.io/failure-threshold</code>; Service için{" "}
+        <code className="rounded bg-sunken px-1">kubeat.io/port</code> ve{" "}
+        <code className="rounded bg-sunken px-1">kubeat.io/path</code>.
+      </p>
+      {sync === null ? (
+        <p className="mt-3 text-xs text-muted">
+          Kapalı: <code>UPTIME_DISCOVERY_SYNC_INTERVAL</code> sıfır.
+        </p>
+      ) : (
+        <>
+          <p className="mt-3 text-xs text-muted">
+            {sync.last_run_at.startsWith("0001") ? (
+              "Henüz çalışmadı."
+            ) : (
+              <>
+                Son tarama <LocalTime iso={sync.last_run_at} /> · her {sync.interval_seconds} sn · {sync.managed}{" "}
+                monitor annotation ile yönetiliyor
+                {sync.created + sync.updated + sync.removed > 0 &&
+                  ` · son taramada ${sync.created} eklendi, ${sync.updated} güncellendi, ${sync.removed} kaldırıldı`}
+              </>
+            )}
+          </p>
+          {sync.error && (
+            <p role="alert" className="mt-2 text-xs text-down">
+              Cluster okunamadı, hiçbir şey değiştirilmedi: <span className="font-mono">{sync.error}</span>
+            </p>
+          )}
+          {sync.skipped.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs">
+              {sync.skipped.map((s) => (
+                <li key={s.namespace + "/" + s.source}>
+                  <span className="font-mono">
+                    {s.namespace}/{s.source}
+                  </span>
+                  <span className="text-muted"> — {s.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -83,7 +140,7 @@ async function Discovery({
     status = await getDiscoveryStatus();
     if (status.enabled) namespaces = await listNamespaces();
   } catch (err) {
-    status = { enabled: true, detail: "" };
+    status = { enabled: true, detail: "", sync: null };
     clusterError = err;
   }
   if (clusterError !== null) return <ClusterError err={clusterError} />;
@@ -108,6 +165,7 @@ async function Discovery({
 
   return (
     <>
+      <SyncCard sync={status.sync} />
       <form method="get" className="flex flex-wrap items-end gap-3">
         <label>
           <span className="mb-1 block text-xs font-medium text-muted">Namespace</span>

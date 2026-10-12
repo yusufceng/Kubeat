@@ -171,6 +171,14 @@ async function MonitorDetail({
             </Link>
             {label.kind && <KindChip kind={label.kind} />}
             <KindChip kind={typeLabel(monitor.type)} />
+            {monitor.managed && (
+              <span
+                className="rounded bg-sunken px-1.5 py-0.5 text-xs"
+                title="kubeat.io/monitor annotation'ı ile oluşturuldu; hedefi ve zamanlaması nesnedeki annotation'lardan gelir"
+              >
+                annotation
+              </span>
+            )}
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight">{label.name}</h1>

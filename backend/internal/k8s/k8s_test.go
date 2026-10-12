@@ -287,3 +287,25 @@ func TestConnectRequiresExplicitContext(t *testing.T) {
 		t.Errorf("kubeconfig without context: err = %v, want a refusal", err)
 	}
 }
+
+func TestCandidatesCarryAnnotationsAcrossNamespaces(t *testing.T) {
+	annotated := service("api", map[string]string{"app": "api"}, corev1.ServicePort{Name: "web", Port: 80})
+	annotated.Annotations = map[string]string{"kubeat.io/monitor": "true"}
+	billing := &corev1.Service{ObjectMeta: objMeta("billing", "db", nil), Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 5432}}}}
+	core := fake.NewSimpleClientset(annotated, billing)
+
+	got, err := NewClient(core, newDynamic(), "test").Candidates(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Candidates(all) = %+v, want both namespaces", got)
+	}
+	api := find(t, got, "service/api:80")
+	if api.Namespace != "shop" || api.PortName != "web" || api.Annotations["kubeat.io/monitor"] != "true" {
+		t.Errorf("api = %+v", api)
+	}
+	if db := find(t, got, "service/db:5432"); db.Namespace != "billing" || len(db.Annotations) != 0 {
+		t.Errorf("db = %+v", db)
+	}
+}

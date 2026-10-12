@@ -111,10 +111,10 @@ func (c *Client) workloadSelector(ctx context.Context, namespace string, kind Ki
 // a namespace: each can be watched for having its pods ready.
 func (c *Client) workloadCandidates(ctx context.Context, namespace string) ([]Candidate, error) {
 	var out []Candidate
-	add := func(kind Kind, name string) {
+	add := func(kind Kind, meta metav1.ObjectMeta) {
 		out = append(out, Candidate{
-			Kind: kind, Namespace: namespace, Name: name,
-			Type: store.MonitorWorkload, Target: WorkloadTarget(namespace, kind, name), Reason: ReasonWorkload,
+			Kind: kind, Namespace: meta.Namespace, Name: meta.Name, Annotations: meta.Annotations,
+			Type: store.MonitorWorkload, Target: WorkloadTarget(meta.Namespace, kind, meta.Name), Reason: ReasonWorkload,
 		})
 	}
 	apps := c.core.AppsV1()
@@ -124,21 +124,21 @@ func (c *Client) workloadCandidates(ctx context.Context, namespace string) ([]Ca
 		return nil, fmt.Errorf("list deployments: %w", err)
 	}
 	for _, d := range deployments.Items {
-		add(KindDeployment, d.Name)
+		add(KindDeployment, d.ObjectMeta)
 	}
 	statefulSets, err := apps.StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list statefulsets: %w", err)
 	}
 	for _, s := range statefulSets.Items {
-		add(KindStatefulSet, s.Name)
+		add(KindStatefulSet, s.ObjectMeta)
 	}
 	daemonSets, err := apps.DaemonSets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list daemonsets: %w", err)
 	}
 	for _, d := range daemonSets.Items {
-		add(KindDaemonSet, d.Name)
+		add(KindDaemonSet, d.ObjectMeta)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Source() < out[j].Source() })
 	return out, nil

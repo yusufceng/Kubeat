@@ -126,6 +126,12 @@ type Config struct {
 	Kubeconfig       string        // UPTIME_KUBECONFIG
 	KubeContext      string        // UPTIME_KUBE_CONTEXT
 	KubeTimeout      time.Duration // UPTIME_KUBE_TIMEOUT
+	// Discovery sync keeps monitors in step with objects annotated
+	// kubeat.io/monitor=true; zero turns it off. The defaults apply to
+	// monitors whose annotations do not set them.
+	DiscoverySyncInterval    time.Duration // UPTIME_DISCOVERY_SYNC_INTERVAL
+	DiscoveryDefaultInterval time.Duration // UPTIME_DISCOVERY_DEFAULT_INTERVAL
+	DiscoveryDefaultTimeout  time.Duration // UPTIME_DISCOVERY_DEFAULT_TIMEOUT
 }
 
 // Load reads the configuration from the environment, falling back to
@@ -192,6 +198,8 @@ func Load() (Config, error) {
 		{&cfg.RollupInterval, "UPTIME_ROLLUP_INTERVAL", time.Minute},
 		{&cfg.RollupRetention, "UPTIME_ROLLUP_RETENTION", 365 * 24 * time.Hour},
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
+		{&cfg.DiscoveryDefaultInterval, "UPTIME_DISCOVERY_DEFAULT_INTERVAL", 30 * time.Second},
+		{&cfg.DiscoveryDefaultTimeout, "UPTIME_DISCOVERY_DEFAULT_TIMEOUT", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
 		{&cfg.StatusPageIncidentWindow, "UPTIME_STATUS_PAGE_INCIDENT_WINDOW", 14 * 24 * time.Hour},
 		{&cfg.SessionTTL, "UPTIME_SESSION_TTL", 12 * time.Hour},
@@ -268,6 +276,15 @@ func Load() (Config, error) {
 	}
 	if cfg.DiscoveryEnabled, err = envBool("UPTIME_DISCOVERY_ENABLED", true); err != nil {
 		return Config{}, err
+	}
+	if cfg.DiscoverySyncInterval, err = envDurationOrZero("UPTIME_DISCOVERY_SYNC_INTERVAL", time.Minute); err != nil {
+		return Config{}, err
+	}
+	if cfg.DiscoveryDefaultTimeout >= cfg.DiscoveryDefaultInterval {
+		return Config{}, fmt.Errorf("UPTIME_DISCOVERY_DEFAULT_TIMEOUT: must be shorter than UPTIME_DISCOVERY_DEFAULT_INTERVAL (%s)", cfg.DiscoveryDefaultInterval)
+	}
+	if cfg.DiscoveryDefaultInterval < cfg.MinCheckInterval {
+		return Config{}, fmt.Errorf("UPTIME_DISCOVERY_DEFAULT_INTERVAL: must be at least UPTIME_MIN_CHECK_INTERVAL (%s)", cfg.MinCheckInterval)
 	}
 	if cfg.HTTPInsecureSkipVerify, err = envBool("UPTIME_HTTP_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err

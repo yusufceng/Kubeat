@@ -231,7 +231,7 @@ func (s *SQLite) Close() error {
 // monitorFields are the columns of a monitor, in the order monitorRow reads them.
 var monitorFields = []string{
 	"id", "name", "description", "type", "target", "interval_seconds", "timeout_seconds", "retry_interval_seconds",
-	"failure_threshold", "inverted", "enabled", "push_token", "created_at", "namespace", "source", "tags", "settings",
+	"failure_threshold", "inverted", "enabled", "push_token", "created_at", "namespace", "source", "tags", "settings", "managed",
 }
 
 var monitorColumns = strings.Join(monitorFields, ", ")
@@ -260,7 +260,7 @@ type monitorRow struct {
 func (r *monitorRow) dest() []any {
 	return []any{
 		&r.m.ID, &r.m.Name, &r.m.Description, &r.m.Type, &r.m.Target, &r.interval, &r.timeout, &r.retry,
-		&r.m.FailureThreshold, &r.m.Inverted, &r.m.Enabled, &r.m.PushToken, &r.createdAt, &r.m.Namespace, &r.m.Source, &r.tags, &r.settings,
+		&r.m.FailureThreshold, &r.m.Inverted, &r.m.Enabled, &r.m.PushToken, &r.createdAt, &r.m.Namespace, &r.m.Source, &r.tags, &r.settings, &r.m.Managed,
 	}
 }
 
@@ -446,10 +446,10 @@ func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 
 	res, err := s.write.ExecContext(ctx,
 		`INSERT INTO monitors (name, description, type, target, interval_seconds, timeout_seconds, retry_interval_seconds,
-		                       failure_threshold, inverted, enabled, push_token, created_at, namespace, source, tags, settings)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                       failure_threshold, inverted, enabled, push_token, created_at, namespace, source, tags, settings, managed)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.Name, m.Description, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), int64(m.RetryInterval/time.Second),
-		m.FailureThreshold, m.Inverted, m.Enabled, m.PushToken, m.CreatedAt.UnixMilli(), m.Namespace, m.Source, tags, encoded)
+		m.FailureThreshold, m.Inverted, m.Enabled, m.PushToken, m.CreatedAt.UnixMilli(), m.Namespace, m.Source, tags, encoded, m.Managed)
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}
@@ -671,12 +671,14 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 }
 
 func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
-	// The type decides which options are stored, and it never changes.
+	// The type decides which options are stored, and it never changes; nor
+	// does who manages the monitor.
 	current, err := s.GetMonitor(ctx, m.ID)
 	if err != nil {
 		return Monitor{}, err
 	}
 	m.Type = current.Type
+	m.Managed = current.Managed
 	if current.Source != "" {
 		// A discovered monitor lives where its object does.
 		m.Namespace = current.Namespace

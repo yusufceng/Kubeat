@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/discovery"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -15,10 +16,18 @@ type discoveryStatusResponse struct {
 	// Detail is how the cluster is reached when enabled, and why discovery
 	// is unavailable otherwise.
 	Detail string `json:"detail"`
+	// Sync is the state of the monitors kept in step with annotated
+	// objects; null when that is off.
+	Sync *discovery.Status `json:"sync"`
 }
 
 func (h *handler) discoveryStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, discoveryStatusResponse{Enabled: h.opts.Discovery != nil, Detail: h.opts.DiscoveryStatus})
+	resp := discoveryStatusResponse{Enabled: h.opts.Discovery != nil, Detail: h.opts.DiscoveryStatus}
+	if h.opts.Sync != nil {
+		st := h.opts.Sync.Status()
+		resp.Sync = &st
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // discovery answers 503 and returns false when no cluster is available.

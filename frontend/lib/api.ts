@@ -202,6 +202,8 @@ export type Monitor = CheckOptions & {
   tags: string[];
   /** The discovered object, e.g. "service/api:80"; empty for manual monitors. */
   source: string;
+  /** Created from a kubeat.io/monitor annotation: target and timing follow the object. */
+  managed: boolean;
   interval_seconds: number;
   timeout_seconds: number;
   /** How soon a failed check is repeated before the outage is confirmed; 0 for the interval. */
@@ -308,6 +310,7 @@ function withDefaults(m: Monitor): Monitor {
     ...m,
     namespace: m.namespace ?? "",
     source: m.source ?? "",
+    managed: m.managed ?? false,
     tags: m.tags ?? [],
     failure_threshold: m.failure_threshold ?? 0,
     description: m.description ?? "",
@@ -382,7 +385,21 @@ export const deleteChannel = (id: number) =>
 export const testChannel = (id: number) =>
   request<ChannelTest>(`/channels/${id}/test`, { method: "POST" });
 
-export type DiscoveryStatus = { enabled: boolean; detail: string };
+/** The monitors kept in step with annotated cluster objects; null when that is off. */
+export type SyncStatus = {
+  interval_seconds: number;
+  /** Zero before the first run. */
+  last_run_at: string;
+  /** Set when the cluster could not be read; nothing was changed then. */
+  error: string;
+  managed: number;
+  created: number;
+  updated: number;
+  removed: number;
+  skipped: { namespace: string; source: string; reason: string }[];
+};
+
+export type DiscoveryStatus = { enabled: boolean; detail: string; sync: SyncStatus | null };
 
 export type Candidate = {
   kind: "service" | "ingress" | "route" | "deployment" | "statefulset" | "daemonset";

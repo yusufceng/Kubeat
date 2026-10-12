@@ -83,6 +83,10 @@ func TestLoadDefaults(t *testing.T) {
 
 		DiscoveryEnabled: true,
 		KubeTimeout:      10 * time.Second,
+
+		DiscoverySyncInterval:    time.Minute,
+		DiscoveryDefaultInterval: 30 * time.Second,
+		DiscoveryDefaultTimeout:  5 * time.Second,
 	}
 	if got != want {
 		t.Errorf("Load() = %+v, want %+v", got, want)

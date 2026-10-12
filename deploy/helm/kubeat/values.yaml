@@ -158,6 +158,9 @@ smtp:
 # (read-only, cluster-wide) so monitors can be created from what is running.
 discovery:
   enabled: true
+  # How often objects annotated kubeat.io/monitor=true are read and their
+  # monitors created, updated or removed; "0" turns that off.
+  syncInterval: 1m
 
 # Pod-level security context for both workloads. Leave empty on OpenShift,
 # which assigns the UID and fsGroup itself. On other clusters set fsGroup so

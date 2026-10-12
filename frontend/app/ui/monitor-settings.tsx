@@ -7,7 +7,7 @@ import type { Monitor } from "@/lib/api";
 import { CopyIcon, EditIcon, PauseIcon, PlayIcon, TrashIcon } from "@/app/ui/icons";
 
 /** What can be done with a monitor: pause or resume, edit, copy, delete. */
-export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "name" | "enabled"> }) {
+export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "name" | "enabled" | "managed"> }) {
   const [error, setError] = useState<string | null>(null);
   const [cloning, startClone] = useTransition();
 
@@ -45,18 +45,25 @@ export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "nam
         <button type="button" onClick={clone} disabled={cloning} className="btn">
           <CopyIcon /> {cloning ? "Kopyalanıyor…" : "Kopyala"}
         </button>
-        <form
-          action={deleteMonitorAction}
-          onSubmit={(e) => {
-            if (!confirm(`"${monitor.name}" ve tüm kontrol geçmişi silinsin mi?`)) e.preventDefault();
-          }}
-        >
-          <input type="hidden" name="id" value={monitor.id} />
-          <button type="submit" className="btn btn-danger">
-            <TrashIcon /> Sil
-          </button>
-        </form>
+        {!monitor.managed && (
+          <form
+            action={deleteMonitorAction}
+            onSubmit={(e) => {
+              if (!confirm(`"${monitor.name}" ve tüm kontrol geçmişi silinsin mi?`)) e.preventDefault();
+            }}
+          >
+            <input type="hidden" name="id" value={monitor.id} />
+            <button type="submit" className="btn btn-danger">
+              <TrashIcon /> Sil
+            </button>
+          </form>
+        )}
       </div>
+      {monitor.managed && (
+        <p className="max-w-xs text-right text-xs text-muted">
+          Silmek için nesnedeki <code>kubeat.io/monitor</code> annotation&apos;ını kaldırın.
+        </p>
+      )}
       {error && (
         <p role="alert" className="text-sm text-down">
           {error}

@@ -67,6 +67,10 @@ type Monitor struct {
 	// object; it is empty for monitors entered by hand.
 	Namespace string
 	Source    string
+	// Managed marks a monitor that discovery created from an annotated
+	// cluster object and keeps in step with it; it is removed with the
+	// annotation. Set at creation and never changed.
+	Managed bool
 	// Tags are free-form labels, sorted and without duplicates.
 	Tags []string
 	// FailureThreshold is how many consecutive failed checks open an incident.

@@ -22,6 +22,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/backup"
 	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
+	"github.com/yusufceng/Kubeat/backend/internal/discovery"
 	"github.com/yusufceng/Kubeat/backend/internal/heartbeat"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
@@ -117,10 +118,11 @@ func main() {
 	// checks. These stay nil interfaces when unavailable, which their users
 	// check for.
 	var (
-		discovery  api.Discovery
+		cluster    api.Discovery
 		workloads  api.Workloads
 		replicas   checker.Workloads
 		podMetrics api.PodMetrics
+		sync       api.Sync
 	)
 	discoveryStatus := "disabled by UPTIME_DISCOVERY_ENABLED"
 	if cfg.DiscoveryEnabled {
@@ -129,8 +131,23 @@ func main() {
 			discoveryStatus = err.Error()
 			logger.Info("cluster discovery unavailable", "reason", err.Error())
 		} else {
-			discovery, workloads, replicas, discoveryStatus = client, client, client, client.Mode
+			cluster, workloads, replicas, discoveryStatus = client, client, client, client.Mode
 			logger.Info("cluster discovery enabled", "mode", client.Mode)
+			if cfg.DiscoverySyncInterval > 0 {
+				syncer := discovery.New(discovery.Options{
+					Cluster: client, Store: db, Interval: cfg.DiscoverySyncInterval,
+					DefaultInterval: cfg.DiscoveryDefaultInterval, DefaultTimeout: cfg.DiscoveryDefaultTimeout,
+					DefaultFailureThreshold: cfg.DefaultFailureThreshold, MinInterval: cfg.MinCheckInterval,
+					Logger: logger,
+				})
+				sync = syncer
+				background.Add(1)
+				go func() {
+					defer background.Done()
+					syncer.Run(ctx)
+				}()
+				logger.Info("annotation discovery enabled", "interval", cfg.DiscoverySyncInterval.String())
+			}
 		}
 	}
 	sched := scheduler.New(db, checker.New(checker.Options{
@@ -264,7 +281,8 @@ func main() {
 			Notifier:                 alerts,
 			Metrics:                  meter.Handler(),
 			EmailEnabled:             senders.EmailEnabled(),
-			Discovery:                discovery,
+			Discovery:                cluster,
+			Sync:                     sync,
 			Workloads:                workloads,
 			PodMetrics:               podMetrics,
 			DiscoveryStatus:          discoveryStatus,

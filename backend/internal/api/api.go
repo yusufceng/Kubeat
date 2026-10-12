@@ -10,6 +10,7 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
+	"github.com/yusufceng/Kubeat/backend/internal/discovery"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -78,6 +79,11 @@ type Discovery interface {
 	Candidates(ctx context.Context, namespace string) ([]k8s.Candidate, error)
 }
 
+// Sync is the discovery syncer, for its status.
+type Sync interface {
+	Status() discovery.Status
+}
+
 // Notifier sends a single notification to a channel, without retries.
 type Notifier interface {
 	SendOnce(ctx context.Context, ch store.Channel, n alert.Notification) error
@@ -129,6 +135,9 @@ type Options struct {
 	// says why. Otherwise DiscoveryStatus describes the connection.
 	Discovery       Discovery
 	DiscoveryStatus string
+	// Sync reports on the monitors kept in step with annotated objects;
+	// nil when that is off.
+	Sync Sync
 	// Workloads reads the pods behind discovered monitors; nil without a
 	// cluster. PodMetrics adds their resource usage; nil when no metrics
 	// server is configured.
@@ -141,7 +150,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 17
+const Revision = 18
 
 // Health is the response body of the health endpoint.
 type Health struct {
