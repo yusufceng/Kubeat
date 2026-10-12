@@ -26,20 +26,35 @@ function durationList(value: string | undefined, fallback: string): number[] {
 
 export const config = {
   backendUrl: process.env.BACKEND_URL ?? "http://localhost:8080",
+  /**
+   * The address shown to jobs inside the cluster for their push reports;
+   * the backend's, unless that is not how other namespaces reach it.
+   */
+  pushInternalUrl: process.env.PUSH_INTERNAL_URL || process.env.BACKEND_URL || "http://localhost:8080",
   /** Shared secret sent to the backend; must match its UPTIME_API_TOKEN. */
   backendToken: process.env.BACKEND_TOKEN ?? "",
   backendTimeoutMs: positiveInt(process.env.BACKEND_TIMEOUT_MS, 3000),
   /** How often open pages reload their data. */
   refreshIntervalMs: positiveInt(process.env.REFRESH_INTERVAL_MS, 5000),
-  /** Number of recent checks drawn in a history strip. */
-  historyLimit: positiveInt(process.env.HISTORY_LIMIT, 40),
+  /** Number of recent checks drawn in a monitor's heartbeat bar. */
+  historyLimit: positiveInt(process.env.HISTORY_LIMIT, 60),
+  /** Number of recent checks drawn next to each monitor in the list. */
+  listBeats: positiveInt(process.env.LIST_BEATS, 14),
   /**
-   * Up to this many monitors the home page lists every one of them; above
-   * it, it shows the problems and a summary per namespace instead.
+   * Up to this many monitors the list shows every namespace opened; above
+   * it, namespaces start closed unless something in them is failing.
    */
   dashboardFlatLimit: positiveInt(process.env.DASHBOARD_FLAT_LIMIT, 50),
-  /** Number of problem monitors listed on the home page. */
-  problemLimit: positiveInt(process.env.PROBLEM_LIMIT, 50),
+  /** Number of recent events listed on the overview. */
+  overviewEvents: positiveInt(process.env.OVERVIEW_EVENTS, 12),
+  /** Number of certificates listed on the overview, soonest to expire first. */
+  overviewCertificates: positiveInt(process.env.OVERVIEW_CERTIFICATES, 5),
+  /** What the form of a new monitor starts with. */
+  newMonitor: {
+    interval: positiveInt(process.env.NEW_MONITOR_INTERVAL_SECONDS, 60),
+    timeout: positiveInt(process.env.NEW_MONITOR_TIMEOUT_SECONDS, 10),
+    failureThreshold: positiveInt(process.env.NEW_MONITOR_FAILURE_THRESHOLD, 3),
+  },
   /** Number of recent checks listed on a monitor's page. */
   resultsLimit: positiveInt(process.env.RESULTS_LIMIT, 30),
   /** Periods for which a monitor's uptime is shown, in seconds. */

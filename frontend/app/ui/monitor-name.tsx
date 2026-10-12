@@ -22,7 +22,7 @@ export function monitorLabel(m: Pick<Monitor, "name" | "source">): {
 
 export function KindChip({ kind }: { kind: string }) {
   return (
-    <span className="rounded bg-black/5 px-1.5 py-0.5 text-xs font-normal dark:bg-white/10">
+    <span className="rounded bg-sunken px-1.5 py-0.5 text-xs font-normal">
       {kind}
     </span>
   );

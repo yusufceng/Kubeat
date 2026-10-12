@@ -114,7 +114,7 @@ export function LatencyChart({ series }: { series: Series }) {
 
   if (points.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/20">
+      <p className="rounded-lg border border-dashed border-line p-8 text-center text-sm text-muted">
         Bu aralıkta kontrol sonucu yok.
       </p>
     );
@@ -281,7 +281,7 @@ export function LatencyChart({ series }: { series: Series }) {
         {geometry && point && active !== null && (
           <div
             role="status"
-            className="pointer-events-none absolute top-2 z-10 rounded-md border border-black/10 bg-background px-3 py-2 text-xs shadow-md dark:border-white/15"
+            className="pointer-events-none absolute top-2 z-10 rounded-lg border border-line bg-panel px-3 py-2 text-xs shadow-md"
             style={{
               width: TOOLTIP_WIDTH,
               // Beside the crosshair, on whichever side has room.
@@ -291,20 +291,20 @@ export function LatencyChart({ series }: { series: Series }) {
                   : geometry.centers[active] + 12,
             }}
           >
-            <div className="text-zinc-500">{bucketLabel(point)}</div>
+            <div className="text-muted">{bucketLabel(point)}</div>
             <div className="mt-1 flex items-center gap-2">
               <span className="h-0.5 w-3 rounded bg-[var(--viz-series)]" aria-hidden />
               <span className="text-sm font-semibold">
                 {point.avg_latency_ms !== null ? ms(point.avg_latency_ms) : "Yanıt yok"}
               </span>
-              <span className="text-zinc-500">ortalama</span>
+              <span className="text-muted">ortalama</span>
             </div>
             {point.max_latency_ms !== null && (
-              <div className="mt-0.5 text-zinc-500">
+              <div className="mt-0.5 text-muted">
                 en yüksek <span className="text-foreground">{ms(point.max_latency_ms)}</span>
               </div>
             )}
-            <div className="mt-1 flex items-center gap-2 border-t border-black/10 pt-1 dark:border-white/15">
+            <div className="mt-1 flex items-center gap-2 border-t border-line pt-1">
               <span
                 className="h-2 w-2 rounded-sm"
                 style={{ background: stateStyle[stateOf(point)].color }}
@@ -312,7 +312,7 @@ export function LatencyChart({ series }: { series: Series }) {
               />
               <span>
                 <span className="font-semibold">{stateStyle[stateOf(point)].label}</span>
-                <span className="text-zinc-500">
+                <span className="text-muted">
                   {" · "}
                   {point.checks} kontrol
                   {point.checks > point.up_checks && `, ${point.checks - point.up_checks} başarısız`}
@@ -323,7 +323,7 @@ export function LatencyChart({ series }: { series: Series }) {
         )}
       </div>
 
-      <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-12 text-xs text-zinc-500">
+      <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-12 text-xs text-muted">
         <span>Erişilebilirlik:</span>
         {(Object.keys(stateStyle) as State[]).map((s) => (
           <span key={s} className="inline-flex items-center gap-1.5">
@@ -338,10 +338,10 @@ export function LatencyChart({ series }: { series: Series }) {
       </figcaption>
 
       <details className="mt-3 text-sm">
-        <summary className="cursor-pointer text-xs text-zinc-500">Tablo olarak göster</summary>
-        <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-black/10 dark:border-white/15">
+        <summary className="cursor-pointer text-xs text-muted">Tablo olarak göster</summary>
+        <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-line">
           <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 border-b border-black/10 bg-background text-zinc-500 dark:border-white/15">
+            <thead className="sticky top-0 border-b border-line bg-background text-muted">
               <tr>
                 <th className="px-3 py-2 font-medium">Aralık</th>
                 <th className="px-3 py-2 text-right font-medium">Ort. yanıt</th>
@@ -350,7 +350,7 @@ export function LatencyChart({ series }: { series: Series }) {
                 <th className="px-3 py-2 text-right font-medium">Başarısız</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-black/5 tabular-nums dark:divide-white/10">
+            <tbody className="divide-y divide-line tabular-nums">
               {width !== null &&
                 points.map((p) => (
                   <tr key={p.start}>

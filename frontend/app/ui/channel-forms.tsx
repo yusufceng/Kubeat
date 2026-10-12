@@ -11,8 +11,7 @@ import {
 import type { ChannelType } from "@/lib/api";
 import { channelTypes } from "@/lib/channel-types";
 
-const inputClass =
-  "w-full rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-white/20";
+const inputClass = "field";
 
 const initialState: ChannelFormState = { error: null, values: null };
 
@@ -25,7 +24,7 @@ export function AddChannelForm() {
   return (
     <form action={action} className="grid gap-4 sm:grid-cols-6">
       <label className="sm:col-span-1">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">Tür</span>
+        <span className="mb-1 block text-xs font-medium text-muted">Tür</span>
         <select
           name="type"
           value={type}
@@ -40,7 +39,7 @@ export function AddChannelForm() {
         </select>
       </label>
       <label className="sm:col-span-1">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">İsim</span>
+        <span className="mb-1 block text-xs font-medium text-muted">İsim</span>
         <input
           name="name"
           required
@@ -50,7 +49,7 @@ export function AddChannelForm() {
         />
       </label>
       <label className="sm:col-span-3">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">{spec.targetLabel}</span>
+        <span className="mb-1 block text-xs font-medium text-muted">{spec.targetLabel}</span>
         <input
           // Remounted per type so a URL typed for one type is not validated
           // as an address list for another.
@@ -67,13 +66,13 @@ export function AddChannelForm() {
         <button
           type="submit"
           disabled={pending}
-          className="w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+          className="w-full btn btn-primary"
         >
           {pending ? "Ekleniyor…" : "Ekle"}
         </button>
       </div>
       {state.error && (
-        <p role="alert" className="text-sm text-red-600 sm:col-span-6 dark:text-red-400">
+        <p role="alert" className="text-sm text-down sm:col-span-6">
           {state.error}
         </p>
       )}
@@ -95,8 +94,8 @@ export function ChannelActions({ id, name }: { id: number; name: string }) {
           role="status"
           className={`text-xs ${
             test.delivered
-              ? "text-emerald-700 dark:text-emerald-400"
-              : "text-red-700 dark:text-red-400"
+              ? "text-up"
+              : "text-down"
           }`}
         >
           {test.delivered ? "Test bildirimi gönderildi" : `Gönderilemedi: ${test.error}`}
@@ -107,7 +106,7 @@ export function ChannelActions({ id, name }: { id: number; name: string }) {
         <button
           type="submit"
           disabled={testing}
-          className="rounded-md border border-black/15 px-3 py-1.5 text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/20 dark:hover:bg-white/10"
+          className="btn"
         >
           {testing ? "Gönderiliyor…" : "Test gönder"}
         </button>
@@ -121,7 +120,7 @@ export function ChannelActions({ id, name }: { id: number; name: string }) {
         <input type="hidden" name="id" value={id} />
         <button
           type="submit"
-          className="rounded-md border border-red-600/40 px-3 py-1.5 text-sm text-red-600 hover:bg-red-600/10 dark:text-red-400"
+          className="btn btn-danger"
         >
           Sil
         </button>

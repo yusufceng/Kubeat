@@ -23,7 +23,7 @@ async function Controls() {
     return (
       <span
         role="alert"
-        className="rounded-md bg-amber-500/15 px-2 py-1 text-xs text-amber-800 dark:text-amber-300"
+        className="rounded-md bg-warn/12 px-2 py-1 text-xs text-warn"
         title="ADMIN_PASSWORD ayarlanmadığı için arayüze erişen herkes değişiklik yapabilir."
       >
         Giriş koruması kapalı
@@ -33,7 +33,7 @@ async function Controls() {
   if (!validSession((await cookies()).get(SESSION_COOKIE)?.value)) return null;
   return (
     <form action={logoutAction}>
-      <button type="submit" className="rounded-md px-3 py-1.5 text-sm text-zinc-500 hover:text-inherit">
+      <button type="submit" className="rounded-md px-3 py-1.5 text-sm text-muted hover:text-ink">
         Çıkış
       </button>
     </form>

@@ -49,3 +49,8 @@ export function memory(bytes: number): string {
   if (mi < 1024) return `${Math.round(mi)} Mi`;
   return `${(mi / 1024).toLocaleString("tr-TR", { maximumFractionDigits: 1 })} Gi`;
 }
+
+/** A response time: 0 -> "<1 ms" (it took some time, just not a whole millisecond), 1234 -> "1.234 ms". */
+export function milliseconds(ms: number): string {
+  return ms < 1 ? "<1 ms" : `${Math.round(ms).toLocaleString("tr-TR")} ms`;
+}

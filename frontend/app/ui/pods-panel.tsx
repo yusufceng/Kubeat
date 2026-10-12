@@ -12,12 +12,12 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
     workload = await getWorkload(monitorId);
   } catch {
     return (
-      <p className="text-sm text-zinc-500">Pod bilgisi şu anda cluster&apos;dan okunamıyor.</p>
+      <p className="text-sm text-muted">Pod bilgisi şu anda cluster&apos;dan okunamıyor.</p>
     );
   }
   if (!workload.available) {
     return (
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-muted">
         Bu monitor&apos;un arkasındaki pod&apos;lar belirlenemiyor.
         <span className="mt-1 block font-mono text-xs">{workload.reason}</span>
       </p>
@@ -27,7 +27,7 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
     return (
       <p
         role="alert"
-        className="rounded-lg border border-red-600/40 bg-red-600/5 p-4 text-sm text-red-700 dark:text-red-400"
+        className="rounded-lg border border-down/40 bg-down/8 p-4 text-sm text-down"
       >
         <span className="font-mono">{workload.service}</span> servisinin arkasında hiç pod yok.
       </p>
@@ -42,20 +42,20 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
         <span
           className={`font-semibold ${
             allReady
-              ? "text-emerald-700 dark:text-emerald-400"
-              : "text-amber-700 dark:text-amber-400"
+              ? "text-up"
+              : "text-warn"
           }`}
         >
           {workload.ready}/{workload.total} pod hazır
         </span>
-        <span className="text-zinc-500">
+        <span className="text-muted">
           {" "}
           · servis <span className="font-mono">{workload.service}</span>
         </span>
       </p>
-      <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+      <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
+          <thead className="border-b border-line text-xs text-muted">
             <tr>
               <th className="px-4 py-2 font-medium">Pod</th>
               <th className="px-4 py-2 font-medium">Durum</th>
@@ -67,25 +67,25 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
               <th className="px-4 py-2 font-medium">Node</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-black/5 dark:divide-white/10">
+          <tbody className="divide-y divide-line">
             {workload.pods.map((p) => (
               <tr key={p.name}>
                 <td className="px-4 py-2 font-mono text-xs">{p.name}</td>
                 <td className="whitespace-nowrap px-4 py-2">
                   <span className="inline-flex items-center gap-2">
                     <span
-                      className={`h-2.5 w-2.5 rounded-full ${p.ready ? "bg-emerald-500" : "bg-red-500"}`}
+                      className={`h-2.5 w-2.5 rounded-full ${p.ready ? "bg-up" : "bg-down"}`}
                       aria-hidden
                     />
                     <span
                       className={
-                        p.ready ? undefined : "font-medium text-red-700 dark:text-red-400"
+                        p.ready ? undefined : "font-medium text-down"
                       }
                     >
                       {p.ready ? "Hazır" : "Hazır değil"}
                     </span>
                     {(!p.ready || p.status !== "Running") && (
-                      <span className="font-mono text-xs text-zinc-500">{p.status}</span>
+                      <span className="font-mono text-xs text-muted">{p.status}</span>
                     )}
                   </span>
                 </td>
@@ -94,12 +94,12 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
                 </td>
                 <td
                   className={`px-4 py-2 text-right tabular-nums ${
-                    p.restarts > 0 ? "text-amber-700 dark:text-amber-400" : ""
+                    p.restarts > 0 ? "text-warn" : ""
                   }`}
                 >
                   {p.restarts}
                 </td>
-                <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums text-zinc-500">
+                <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums text-muted">
                   {p.started_at ? <LiveDuration since={p.started_at} /> : "–"}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">
@@ -108,14 +108,14 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
                 <td className="px-4 py-2 text-right tabular-nums">
                   {p.memory_bytes !== null ? memory(p.memory_bytes) : "–"}
                 </td>
-                <td className="px-4 py-2 text-xs text-zinc-500">{p.node || "–"}</td>
+                <td className="px-4 py-2 text-xs text-muted">{p.node || "–"}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       {!workload.metrics.available && (
-        <p className="mt-2 text-xs text-zinc-500">
+        <p className="mt-2 text-xs text-muted">
           CPU ve bellek gösterilemiyor: {workload.metrics.reason}
         </p>
       )}

@@ -1,41 +1,159 @@
 @import "tailwindcss";
 
+/* The theme is chosen by data-theme on <html>, set before the first paint by
+   the script in the root layout: the viewer's choice, or the system's. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Surfaces, text and the colors that carry a monitor's state. The dark
+   values are steps of their own, chosen for the dark surface. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --sunken: #eef1f4;
+  --line: #dfe3e8;
+  --ink: #14181d;
+  --muted: #65707c;
+  --accent: #0d8f62;
+  --accent-ink: #ffffff;
+
+  --up: #12a06c;
+  --down: #d93d3d;
+  --warn: #c98206;
+  --maint: #2f74d0;
+  --idle: #a3acb6;
+
+  /* Used by the pages that predate the tokens above. */
+  --background: var(--bg);
+  --foreground: var(--ink);
+
+  /* Chart colors: one series hue plus the reserved status colors. */
+  --viz-series: #2a78d6;
+  --viz-grid: #e1e4e8;
+  --viz-axis: #c3c8ce;
+  --viz-muted: #878f98;
+  --viz-good: var(--up);
+  --viz-warning: var(--warn);
+  --viz-critical: var(--down);
+
+  color-scheme: light;
 }
 
-/* Chart colors: one series hue plus the reserved status colors. Dark values
-   are their own steps, chosen for the dark surface. */
-:root {
-  --viz-series: #2a78d6;
-  --viz-grid: #e1e0d9;
-  --viz-axis: #c3c2b7;
-  --viz-muted: #898781;
-  --viz-good: #0ca30c;
-  --viz-warning: #fab219;
-  --viz-critical: #d03b3b;
+:root[data-theme="dark"] {
+  --bg: #0c0f13;
+  --panel: #14191f;
+  --sunken: #1b2129;
+  --line: #262e38;
+  --ink: #e8ebef;
+  --muted: #8a94a0;
+  --accent: #2fbf8a;
+  --accent-ink: #06130e;
+
+  --up: #2fbf8a;
+  --down: #f0605f;
+  --warn: #efb03a;
+  --maint: #5b9bf0;
+  --idle: #566070;
+
+  --viz-series: #4a94ec;
+  --viz-grid: #232a33;
+  --viz-axis: #323b46;
+  --viz-muted: #7d8793;
+
+  color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-warn: var(--warn);
+  --color-maint: var(--maint);
+  --color-idle: var(--idle);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --viz-series: #3987e5;
-    --viz-grid: #2c2c2a;
-    --viz-axis: #383835;
-  }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Panes scroll on their own; a thin bar keeps them from looking boxed in. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+@layer components {
+  /* A raised surface: the unit most of the interface is built from. */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+  }
+
+  .field {
+    width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    outline: none;
+  }
+  .field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .field:disabled {
+    background: var(--sunken);
+    color: var(--muted);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+    border-radius: 0.5rem;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 0.4rem 0.8rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+  }
+  .btn:hover {
+    background: var(--sunken);
+  }
+  .btn:disabled {
+    opacity: 0.6;
+  }
+  .btn-primary {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-primary:hover {
+    background: color-mix(in srgb, var(--accent) 88%, var(--ink));
+  }
+  .btn-danger {
+    border-color: color-mix(in srgb, var(--down) 40%, transparent);
+    color: var(--down);
+  }
+  .btn-danger:hover {
+    background: color-mix(in srgb, var(--down) 10%, transparent);
+  }
 }

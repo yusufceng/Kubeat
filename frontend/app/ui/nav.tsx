@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
+import { PulseIcon } from "@/app/ui/icons";
 
 const links = [
   {
     href: "/",
-    label: "Monitor'lar",
+    label: "Panel",
     match: (p: string) =>
       p === "/" || p.startsWith("/monitors") || p.startsWith("/namespaces"),
   },
@@ -49,17 +50,20 @@ function ActiveNav({ children }: { children?: React.ReactNode }) {
   return <NavBar pathname={usePathname()}>{children}</NavBar>;
 }
 
-/** children sit at the far end of the bar (the session controls). */
+/** children sit at the far end of the bar (theme and session controls). */
 function NavBar({ pathname, children }: { pathname: string | null; children?: React.ReactNode }) {
   // The sign-in page shows the name only: nothing else is reachable yet.
   const signingIn = pathname === "/login";
   return (
-    <header className="border-b border-black/10 dark:border-white/15">
-      <nav className="mx-auto flex w-full max-w-5xl items-center gap-6 px-4 py-3">
-        <Link href="/" className="text-base font-semibold tracking-tight">
+    <header className="shrink-0 border-b border-line bg-panel">
+      <nav className="flex h-12 items-center gap-2 px-4">
+        <Link href="/" className="mr-3 flex items-center gap-2 text-base font-semibold tracking-tight">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-accent-ink">
+            <PulseIcon />
+          </span>
           Kubeat
         </Link>
-        <ul className="flex gap-1 text-sm">
+        <ul className="flex gap-1 overflow-x-auto text-sm">
           {(signingIn ? [] : links).map((link) => {
             const active = pathname !== null && link.match(pathname);
             return (
@@ -67,10 +71,8 @@ function NavBar({ pathname, children }: { pathname: string | null; children?: Re
                 <Link
                   href={link.href}
                   aria-current={active ? "page" : undefined}
-                  className={`rounded-md px-3 py-1.5 ${
-                    active
-                      ? "bg-black/5 font-medium dark:bg-white/10"
-                      : "text-zinc-500 hover:text-inherit"
+                  className={`block rounded-lg px-3 py-1.5 ${
+                    active ? "bg-sunken font-medium text-ink" : "text-muted hover:text-ink"
                   }`}
                 >
                   {link.label}
@@ -79,7 +81,7 @@ function NavBar({ pathname, children }: { pathname: string | null; children?: Re
             );
           })}
         </ul>
-        <div className="ml-auto">{children}</div>
+        <div className="ml-auto flex items-center gap-1">{children}</div>
       </nav>
     </header>
   );

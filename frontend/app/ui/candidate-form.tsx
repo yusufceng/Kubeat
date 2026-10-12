@@ -19,8 +19,7 @@ const reasonLabels: Record<Candidate["reason"], string> = {
   "ingress-rule": "Ingress kuralı",
 };
 
-const inputClass =
-  "w-full rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-white/20";
+const inputClass = "field";
 
 export function CandidateForm({
   namespace,
@@ -51,9 +50,9 @@ export function CandidateForm({
   return (
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="namespace" value={namespace} />
-      <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+      <div className="card overflow-x-auto">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
+          <thead className="border-b border-line text-xs text-muted">
             <tr>
               <th className="w-10 px-4 py-2">
                 <input
@@ -72,11 +71,11 @@ export function CandidateForm({
               <th className="px-4 py-2 font-medium">Durum</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-black/5 dark:divide-white/10">
+          <tbody className="divide-y divide-line">
             {candidates.map((c) => {
               const monitored = c.monitor_id !== null;
               return (
-                <tr key={c.source} className={monitored ? "text-zinc-500" : undefined}>
+                <tr key={c.source} className={monitored ? "text-muted" : undefined}>
                   <td className="px-4 py-2">
                     {!monitored && (
                       <input
@@ -90,7 +89,7 @@ export function CandidateForm({
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2">
-                    <span className="mr-2 rounded bg-black/5 px-1.5 py-0.5 text-xs dark:bg-white/10">
+                    <span className="mr-2 rounded bg-sunken px-1.5 py-0.5 text-xs">
                       {kindLabels[c.kind]}
                     </span>
                     <span className="font-medium">
@@ -99,10 +98,10 @@ export function CandidateForm({
                     </span>
                   </td>
                   <td className="px-4 py-2">
-                    <span className="mr-2 text-xs uppercase text-zinc-500">{c.type}</span>
+                    <span className="mr-2 text-xs uppercase text-muted">{c.type}</span>
                     <span className="break-all font-mono text-xs">{c.target}</span>
                   </td>
-                  <td className="px-4 py-2 text-xs text-zinc-500">{reasonLabels[c.reason]}</td>
+                  <td className="px-4 py-2 text-xs text-muted">{reasonLabels[c.reason]}</td>
                   <td className="whitespace-nowrap px-4 py-2 text-xs">
                     {monitored ? (
                       <Link href={`/monitors/${c.monitor_id}`} className="hover:underline">
@@ -121,7 +120,7 @@ export function CandidateForm({
 
       <div className="grid gap-4 sm:grid-cols-6">
         <label className="sm:col-span-1">
-          <span className="mb-1 block text-xs font-medium text-zinc-500">Kontrol aralığı (sn)</span>
+          <span className="mb-1 block text-xs font-medium text-muted">Kontrol aralığı (sn)</span>
           <input
             name="interval_seconds"
             type="number"
@@ -132,7 +131,7 @@ export function CandidateForm({
           />
         </label>
         <label className="sm:col-span-1">
-          <span className="mb-1 block text-xs font-medium text-zinc-500">Zaman aşımı (sn)</span>
+          <span className="mb-1 block text-xs font-medium text-muted">Zaman aşımı (sn)</span>
           <input
             name="timeout_seconds"
             type="number"
@@ -143,7 +142,7 @@ export function CandidateForm({
           />
         </label>
         <label className="sm:col-span-1">
-          <span className="mb-1 block text-xs font-medium text-zinc-500">Alarm eşiği</span>
+          <span className="mb-1 block text-xs font-medium text-muted">Alarm eşiği</span>
           <input
             name="failure_threshold"
             type="number"
@@ -157,7 +156,7 @@ export function CandidateForm({
           <button
             type="submit"
             disabled={pending || chosen.length === 0}
-            className="w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+            className="w-full btn btn-primary"
           >
             {pending ? "Ekleniyor…" : `Seçilen ${chosen.length} hedefi izlemeye al`}
           </button>
@@ -168,7 +167,7 @@ export function CandidateForm({
         <p
           role="status"
           className={`text-sm ${
-            state.error ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400"
+            state.error ? "text-down" : "text-up"
           }`}
         >
           {state.error ??

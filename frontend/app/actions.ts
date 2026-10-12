@@ -5,97 +5,23 @@ import { redirect } from "next/navigation";
 import {
   ApiError,
   type ChannelType,
+  cloneMonitor,
   createChannel,
   createMaintenance,
   createMonitor,
   deleteChannel,
   deleteMaintenance,
   deleteMonitor,
+  type DnsOptions,
   type HttpOptions,
   importCandidates,
-  type MonitorType,
+  type Monitor,
   type MonitorChanges,
+  type MonitorType,
+  type NewMonitor,
   testChannel,
   updateMonitor,
 } from "@/lib/api";
-
-/** Field values as submitted, so a rejected form can be shown filled in again. */
-type FormValues = {
-  name: string;
-  type: string;
-  target: string;
-  interval_seconds: string;
-  timeout_seconds: string;
-  failure_threshold: string;
-};
-
-export type FormState = { error: string | null; values: FormValues | null };
-
-export async function createMonitorAction(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const field = (name: keyof FormValues) => String(formData.get(name) ?? "");
-  const values: FormValues = {
-    name: field("name"),
-    type: field("type"),
-    target: field("target"),
-    interval_seconds: field("interval_seconds"),
-    timeout_seconds: field("timeout_seconds"),
-    failure_threshold: field("failure_threshold"),
-  };
-
-  try {
-    await createMonitor({
-      name: values.name,
-      type: values.type as MonitorType,
-      target: values.target,
-      interval_seconds: Number(values.interval_seconds),
-      timeout_seconds: Number(values.timeout_seconds),
-      failure_threshold: Number(values.failure_threshold),
-    });
-  } catch (err) {
-    return { error: describe(err), values };
-  }
-  refresh();
-  return { error: null, values: null };
-}
-
-/** null before the first save; afterwards whether it was accepted. */
-export type EditState = { saved: boolean; error: string | null } | null;
-
-export async function updateMonitorAction(_prev: EditState, formData: FormData): Promise<EditState> {
-  const changes: MonitorChanges = {
-    target: String(formData.get("target") ?? ""),
-    interval_seconds: Number(formData.get("interval_seconds")),
-    timeout_seconds: Number(formData.get("timeout_seconds")),
-    failure_threshold: Number(formData.get("failure_threshold")),
-  };
-  // Discovered monitors are named after their source and have no name field.
-  const name = formData.get("name");
-  if (name !== null) changes.name = String(name);
-
-  // The HTTP fields are only in the form of an HTTP monitor.
-  if (formData.get("http_method") !== null) {
-    const headers = parseHeaders(String(formData.get("http_headers") ?? ""));
-    if (typeof headers === "string") return { saved: false, error: headers };
-    changes.http = {
-      method: String(formData.get("http_method")) as HttpOptions["method"],
-      expected_status: String(formData.get("http_expected_status") ?? ""),
-      keyword: String(formData.get("http_keyword") ?? ""),
-      headers,
-      tls_skip_verify: formData.get("tls_skip_verify") === "on",
-    };
-  }
-
-  try {
-    await updateMonitor(Number(formData.get("id")), changes);
-  } catch (err) {
-    return { saved: false, error: describe(err) };
-  }
-  refresh();
-  return { saved: true, error: null };
-}
 
 /** Parses "Name: value" lines; returns a message for a line it cannot read. */
 function parseHeaders(text: string): Record<string, string> | string {
@@ -107,6 +33,110 @@ function parseHeaders(text: string): Record<string, string> | string {
     headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
   }
   return headers;
+}
+
+/**
+ * Creates a monitor, or with an id saves changes to one, from the monitor
+ * form. On success it goes to the monitor's page; otherwise it returns what
+ * was wrong, and the form stays as it is.
+ */
+export async function saveMonitorAction(formData: FormData): Promise<{ error: string } | undefined> {
+  const text = (name: string) => String(formData.get(name) ?? "").trim();
+  const number = (name: string) => Number(formData.get(name) ?? 0);
+  const checked = (name: string) => formData.get(name) === "on";
+
+  const id = number("id");
+  const type = text("type") as MonitorType;
+  const push = type === "push";
+
+  const settings: MonitorChanges = {
+    description: text("description"),
+    target: push ? "" : text("target"),
+    interval_seconds: number("interval_seconds"),
+    timeout_seconds: number("timeout_seconds"),
+    failure_threshold: number("failure_threshold"),
+    retry_interval_seconds: push ? 0 : number("retry_interval_seconds"),
+    inverted: !push && checked("inverted"),
+  };
+  // Discovered monitors are named after their source and have no name field.
+  if (formData.get("name") !== null) settings.name = text("name");
+
+  switch (type) {
+    case "http": {
+      const headers = parseHeaders(String(formData.get("http_headers") ?? ""));
+      if (typeof headers === "string") return { error: headers };
+      const auth = text("http_auth") as HttpOptions["auth"];
+      const jsonPath = text("http_json_path");
+      settings.http = {
+        method: text("http_method") as HttpOptions["method"],
+        expected_status: text("http_expected_status"),
+        max_redirects: number("http_max_redirects"),
+        // A keyword may begin or end with a space on purpose.
+        keyword: String(formData.get("http_keyword") ?? ""),
+        invert_keyword: checked("http_invert_keyword"),
+        json_path: jsonPath,
+        json_operator: jsonPath ? (text("http_json_operator") as HttpOptions["json_operator"]) : "",
+        json_expected: jsonPath ? text("http_json_expected") : "",
+        headers,
+        body: String(formData.get("http_body") ?? ""),
+        content_type: text("http_content_type"),
+        auth,
+        auth_user: auth === "basic" ? text("http_auth_user") : "",
+        auth_secret: auth ? String(formData.get("http_auth_secret") ?? "") : "",
+        tls_skip_verify: checked("tls_skip_verify"),
+      };
+      break;
+    }
+    case "tcp":
+      settings.tcp = { tls: checked("tcp_tls"), tls_skip_verify: checked("tls_skip_verify") };
+      break;
+    case "dns":
+      settings.dns = {
+        record_type: text("dns_record_type") as DnsOptions["record_type"],
+        resolver: text("dns_resolver"),
+        expected: text("dns_expected"),
+      };
+      break;
+    case "grpc":
+      settings.grpc = {
+        service: text("grpc_service"),
+        tls: checked("grpc_tls"),
+        tls_skip_verify: checked("tls_skip_verify"),
+      };
+      break;
+    case "websocket":
+      settings.websocket = {
+        subprotocol: text("ws_subprotocol"),
+        tls_skip_verify: checked("tls_skip_verify"),
+      };
+      break;
+  }
+
+  let saved: Monitor;
+  try {
+    saved = id
+      ? await updateMonitor(id, settings)
+      : await createMonitor({ ...settings, type } as NewMonitor);
+  } catch (err) {
+    return { error: describe(err) };
+  }
+  refresh(); // the monitor list shows the change at once
+  redirect(`/monitors/${saved.id}`);
+}
+
+/**
+ * Makes a copy of a monitor under the given name and opens the copy's
+ * settings, where it usually needs another target.
+ */
+export async function cloneMonitorAction(id: number, name: string): Promise<{ error: string } | undefined> {
+  let copy: Monitor;
+  try {
+    copy = await cloneMonitor(id, name);
+  } catch (err) {
+    return { error: describe(err) };
+  }
+  refresh();
+  redirect(`/monitors/${copy.id}/edit`);
 }
 
 export async function setMonitorEnabledAction(formData: FormData): Promise<void> {
@@ -121,6 +151,7 @@ export async function deleteMonitorAction(formData: FormData): Promise<void> {
     // Already gone is what the user asked for.
     if (!(err instanceof ApiError && err.status === 404)) throw err;
   }
+  refresh(); // the monitor list drops it at once
   redirect("/");
 }
 

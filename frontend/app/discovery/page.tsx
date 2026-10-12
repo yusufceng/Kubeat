@@ -12,7 +12,7 @@ import { CandidateForm } from "@/app/ui/candidate-form";
 
 function Notice({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/20">
+    <p className="rounded-lg border border-dashed border-line p-8 text-center text-sm text-muted">
       {children}
     </p>
   );
@@ -23,7 +23,7 @@ function ClusterError({ err }: { err: unknown }) {
   return (
     <p
       role="alert"
-      className="rounded-lg border border-red-600/40 bg-red-600/5 p-4 text-sm text-red-700 dark:text-red-400"
+      className="rounded-lg border border-down/40 bg-down/8 p-4 text-sm text-down"
     >
       Cluster&apos;dan okunamadı: <span className="font-mono text-xs">{err.message}</span>
     </p>
@@ -72,11 +72,11 @@ async function Discovery({
     <>
       <form method="get" className="flex flex-wrap items-end gap-3">
         <label>
-          <span className="mb-1 block text-xs font-medium text-zinc-500">Namespace</span>
+          <span className="mb-1 block text-xs font-medium text-muted">Namespace</span>
           <select
             name="namespace"
             defaultValue={namespace}
-            className="min-w-64 rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20"
+            className="field w-auto min-w-64"
           >
             <option value="" disabled>
               Seçin…
@@ -90,7 +90,7 @@ async function Discovery({
         </label>
         <button
           type="submit"
-          className="rounded-md border border-black/15 px-4 py-2 text-sm font-medium hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+          className="btn"
         >
           Tara
         </button>
@@ -114,16 +114,16 @@ async function Discovery({
 
 export default function Page({ searchParams }: PageProps<"/discovery">) {
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6 sm:px-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Keşif</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-sm text-muted">
           Bir namespace&apos;teki Service, Ingress ve Route&apos;ları bulur. Bir Service&apos;in
           arkasındaki pod HTTP probe tanımlıyorsa aynı yol kontrol edilir; yoksa yalnızca porta
           bağlanılır.
         </p>
       </div>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Cluster okunuyor…</p>}>
+      <Suspense fallback={<p className="text-sm text-muted">Cluster okunuyor…</p>}>
         <Discovery searchParams={searchParams} />
       </Suspense>
     </main>

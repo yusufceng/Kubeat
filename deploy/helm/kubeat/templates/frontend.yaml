@@ -32,6 +32,9 @@ spec:
           env:
             - name: BACKEND_URL
               value: "http://{{ .Release.Name }}-backend:8080"
+            # What push monitors show to jobs in other namespaces.
+            - name: PUSH_INTERNAL_URL
+              value: "http://{{ .Release.Name }}-backend.{{ .Release.Namespace }}.svc:8080"
             - name: BACKEND_TOKEN
               valueFrom:
                 secretKeyRef:

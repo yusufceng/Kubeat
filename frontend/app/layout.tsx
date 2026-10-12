@@ -4,6 +4,7 @@ import "./globals.css";
 import { BackendWarning } from "@/app/ui/backend-warning";
 import { Nav } from "@/app/ui/nav";
 import { SessionControls } from "@/app/ui/session-controls";
+import { ThemeToggle, themeScript } from "@/app/ui/theme-toggle";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,16 +23,24 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
+    // The theme script changes data-theme before React hydrates.
     <html
       lang="tr"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body className="flex h-dvh flex-col overflow-hidden">
         <Nav>
+          <ThemeToggle />
           <SessionControls />
         </Nav>
         <BackendWarning />
-        {children}
+        {/* The one scrolling area of pages that are a single column; the
+            workspace fills it and scrolls its two panes instead. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </body>
     </html>
   );

@@ -12,14 +12,16 @@ async function Form({
 
 export default function Page({ searchParams }: PageProps<"/login">) {
   return (
-    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-4 py-16">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Giriş</h1>
-        <p className="mt-1 text-sm text-zinc-500">Devam etmek için yönetici parolasını girin.</p>
+    <main className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center px-4 py-16">
+      <div className="card flex flex-col gap-6 p-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Giriş</h1>
+          <p className="mt-1 text-sm text-muted">Devam etmek için yönetici parolasını girin.</p>
+        </div>
+        <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
+          <Form searchParams={searchParams} />
+        </Suspense>
       </div>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Yükleniyor…</p>}>
-        <Form searchParams={searchParams} />
-      </Suspense>
     </main>
   );
 }

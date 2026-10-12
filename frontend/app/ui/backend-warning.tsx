@@ -25,7 +25,7 @@ async function RevisionCheck() {
   return (
     <p
       role="alert"
-      className="border-b border-amber-600/40 bg-amber-500/10 px-4 py-2 text-center text-sm text-amber-800 dark:text-amber-300"
+      className="border-b border-warn/40 bg-warn/12 px-4 py-2 text-center text-sm text-warn"
     >
       Backend bu arayüzden eski bir sürüm çalıştırıyor; bazı bilgiler eksik görünebilir.
       Backend&apos;i yeniden başlatın ya da güncelleyin.

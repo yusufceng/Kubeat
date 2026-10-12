@@ -8,10 +8,8 @@ import {
 } from "@/app/actions";
 import { duration } from "@/lib/format";
 
-const inputClass =
-  "w-full rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-white/20";
-const buttonClass =
-  "rounded-md border border-black/15 px-3 py-1.5 text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/20 dark:hover:bg-white/10";
+const inputClass = "field";
+const buttonClass = "btn";
 
 const initialState: MaintenanceFormState = { error: null, created: false };
 
@@ -38,11 +36,11 @@ export function MaintenanceForm({
         value={startsAt ? new Date(startsAt).toISOString() : ""}
       />
       <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">Açıklama</span>
+        <span className="mb-1 block text-xs font-medium text-muted">Açıklama</span>
         <input name="name" required placeholder="Sürüm geçişi" className={inputClass} />
       </label>
       <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">Kapsam</span>
+        <span className="mb-1 block text-xs font-medium text-muted">Kapsam</span>
         <select name="scope" defaultValue="all" className={inputClass}>
           {scopes.map((s) => (
             <option key={s.value} value={s.value}>
@@ -52,7 +50,7 @@ export function MaintenanceForm({
         </select>
       </label>
       <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">
+        <span className="mb-1 block text-xs font-medium text-muted">
           Başlangıç (boş bırakılırsa şimdi)
         </span>
         <input
@@ -63,7 +61,7 @@ export function MaintenanceForm({
         />
       </label>
       <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-zinc-500">Süre</span>
+        <span className="mb-1 block text-xs font-medium text-muted">Süre</span>
         <select name="duration_seconds" defaultValue={durations[1] ?? durations[0]} className={inputClass}>
           {durations.map((d) => (
             <option key={d} value={d}>
@@ -76,12 +74,12 @@ export function MaintenanceForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+          className="btn btn-primary"
         >
           {pending ? "Ekleniyor…" : "Bakım penceresi ekle"}
         </button>
         {state.error && !pending && (
-          <span role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <span role="alert" className="text-sm text-down">
             {state.error}
           </span>
         )}
@@ -114,7 +112,7 @@ export function SilenceForm({ monitorId, durations }: { monitorId: number; durat
         name="duration_seconds"
         defaultValue={durations[1] ?? durations[0]}
         aria-label="Susturma süresi"
-        className="rounded-md border border-black/15 bg-transparent px-2 py-1.5 text-sm dark:border-white/20"
+        className="field w-auto"
       >
         {durations.map((d) => (
           <option key={d} value={d}>
@@ -126,7 +124,7 @@ export function SilenceForm({ monitorId, durations }: { monitorId: number; durat
         {pending ? "Susturuluyor…" : "Alarmı sustur"}
       </button>
       {state.error && !pending && (
-        <span role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <span role="alert" className="text-sm text-down">
           {state.error}
         </span>
       )}

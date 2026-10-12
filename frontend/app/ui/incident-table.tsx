@@ -12,9 +12,9 @@ export function IncidentTable({
   showMonitor: boolean;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+    <div className="card overflow-x-auto">
       <table className="w-full text-left text-sm">
-        <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
+        <thead className="border-b border-line text-xs text-muted">
           <tr>
             {showMonitor && <th className="px-4 py-2 font-medium">Monitor</th>}
             <th className="px-4 py-2 font-medium">Tür</th>
@@ -24,7 +24,7 @@ export function IncidentTable({
             <th className="px-4 py-2 font-medium">Neden</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-black/5 dark:divide-white/10">
+        <tbody className="divide-y divide-line">
           {incidents.map((i) => (
             <tr key={i.id}>
               {showMonitor && (
@@ -39,13 +39,13 @@ export function IncidentTable({
               </td>
               <td className="whitespace-nowrap px-4 py-2">
                 {i.resolved_at ? (
-                  <span className="text-zinc-500">Çözüldü</span>
+                  <span className="text-muted">Çözüldü</span>
                 ) : (
                   <span
                     className={`font-medium ${
                       i.kind === "cert"
-                        ? "text-amber-700 dark:text-amber-400"
-                        : "text-red-700 dark:text-red-400"
+                        ? "text-warn"
+                        : "text-down"
                     }`}
                   >
                     Devam ediyor
@@ -60,7 +60,7 @@ export function IncidentTable({
                   <LiveDuration since={i.started_at} />
                 )}
               </td>
-              <td className="px-4 py-2 font-mono text-xs text-zinc-500">{i.cause}</td>
+              <td className="px-4 py-2 font-mono text-xs text-muted">{i.cause}</td>
             </tr>
           ))}
         </tbody>

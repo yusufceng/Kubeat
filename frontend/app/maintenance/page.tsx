@@ -12,9 +12,9 @@ import {
 import { monitorLabel } from "@/app/ui/monitor-name";
 
 const stateLabels: Record<Maintenance["state"], { label: string; className: string }> = {
-  active: { label: "Sürüyor", className: "font-medium text-emerald-700 dark:text-emerald-400" },
+  active: { label: "Sürüyor", className: "font-medium text-up" },
   upcoming: { label: "Planlandı", className: "" },
-  past: { label: "Bitti", className: "text-zinc-500" },
+  past: { label: "Bitti", className: "text-muted" },
 };
 
 function Scope({ window }: { window: Maintenance }) {
@@ -28,7 +28,7 @@ function Scope({ window }: { window: Maintenance }) {
   if (window.namespace) {
     return (
       <>
-        <span className="text-zinc-500">namespace</span> {window.namespace}
+        <span className="text-muted">namespace</span> {window.namespace}
       </>
     );
   }
@@ -60,13 +60,13 @@ async function MaintenanceList() {
   return (
     <>
       {windows.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/20">
+        <p className="rounded-lg border border-dashed border-line p-8 text-center text-sm text-muted">
           Bakım penceresi yok.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
+        <div className="card overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-black/10 text-xs text-zinc-500 dark:border-white/15">
+            <thead className="border-b border-line text-xs text-muted">
               <tr>
                 <th className="px-4 py-2 font-medium">Açıklama</th>
                 <th className="px-4 py-2 font-medium">Kapsam</th>
@@ -76,7 +76,7 @@ async function MaintenanceList() {
                 <th className="px-4 py-2" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-black/5 dark:divide-white/10">
+            <tbody className="divide-y divide-line">
               {windows.map((w) => (
                 <tr key={w.id}>
                   <td className="px-4 py-2 font-medium">{w.name}</td>
@@ -107,7 +107,7 @@ async function MaintenanceList() {
         </div>
       )}
 
-      <section className="rounded-lg border border-black/10 p-5 dark:border-white/15">
+      <section className="card p-5">
         <h2 className="mb-4 text-sm font-semibold">Yeni bakım penceresi</h2>
         <MaintenanceForm scopes={scopes} durations={config.maintenanceDurations} />
       </section>
@@ -117,16 +117,16 @@ async function MaintenanceList() {
 
 export default function Page() {
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6 sm:px-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Bakım</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-sm text-muted">
           Bakım penceresi boyunca kapsamdaki monitor&apos;lar kontrol edilmeye devam eder, ama yeni
           olay açılmaz ve bildirim gitmez. Pencere bittiğinde hedef hâlâ erişilemiyorsa olay o zaman
           açılır.
         </p>
       </div>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Yükleniyor…</p>}>
+      <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
         <MaintenanceList />
       </Suspense>
     </main>

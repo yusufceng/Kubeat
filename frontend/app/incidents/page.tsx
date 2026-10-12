@@ -15,7 +15,7 @@ async function Incidents() {
 
   if (incidents.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/20">
+      <p className="rounded-lg border border-dashed border-line p-8 text-center text-sm text-muted">
         Henüz olay yok. Bir monitor alarm eşiği kadar art arda başarısız olursa burada görünür.
       </p>
     );
@@ -24,7 +24,7 @@ async function Incidents() {
 
   return (
     <>
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-muted">
         {open > 0 ? `${open} olay devam ediyor.` : "Devam eden olay yok."} Son {incidents.length}{" "}
         olay listeleniyor.
       </p>
@@ -35,10 +35,10 @@ async function Incidents() {
 
 export default function Page() {
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6 sm:px-6">
       <h1 className="text-2xl font-semibold tracking-tight">Olaylar</h1>
       <LiveRefresh />
-      <Suspense fallback={<p className="text-sm text-zinc-500">Yükleniyor…</p>}>
+      <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
         <Incidents />
       </Suspense>
     </main>

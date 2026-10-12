@@ -89,6 +89,23 @@ kubectl -n kubeat get secret kubeat-admin -o jsonpath='{.data.password}' | base6
 Lokal geliştirmede `make dev` parolayı `admin` yapar
 (`make dev ADMIN_PASSWORD=...` ile değişir).
 
+## Arayüz
+
+Arayüz bir çalışma alanıdır: solda tüm monitor'ların listesi, sağda genel
+bakış ya da açılan monitor.
+
+- **Liste**: namespace'e göre gruplanır; ada, adrese ya da namespace'e göre
+  aranır; duruma (sorunlu, çalışıyor, pasif) ve tipe göre süzülür. Her satırda
+  durum, 24 saatlik uptime ve son kontroller görünür.
+- **Genel bakış**: durum sayıları, devam eden kesintiler, son olaylar,
+  namespace bazında dağılım ve süresi en yakın sertifikalar.
+- **Monitor sayfası**: son kontrollerin çubuğu, yanıt süresi ve uptime
+  özetleri, grafik, pod'lar, olaylar, kontrol geçmişi ve ayarların özeti.
+  Buradan durdurulur, düzenlenir, kopyalanır ya da silinir.
+- **Yeni monitor / düzenle**: tipe göre değişen tek form.
+- **Tema**: sağ üstteki düğme sistem, açık ve koyu arasında geçer; seçim
+  tarayıcıda saklanır.
+
 ## API
 
 `UPTIME_API_TOKEN` ayarlıysa örneklere `-H "Authorization: Bearer $TOKEN"`
@@ -527,10 +544,16 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `LOGIN_LOCKOUT_MINUTES` | `15` | Kilidin süresi |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
-| `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar ana sayfa tüm monitor'ları listeler; üzerinde sorunluları ve namespace özetini gösterir |
-| `PROBLEM_LIMIT` | `50` | Ana sayfada listelenen sorunlu monitor sayısı |
-| `HISTORY_LIMIT` | `40` | Geçmiş şeridinde gösterilen kontrol sayısı |
+| `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar monitor listesinde tüm namespace'ler açık gelir; üzerinde yalnızca sorunlu olanlar açılır |
+| `LIST_BEATS` | `14` | Monitor listesinde her satırda gösterilen son kontrol sayısı |
+| `HISTORY_LIMIT` | `60` | Monitor sayfasındaki kalp atışı çubuğunda gösterilen kontrol sayısı |
 | `RESULTS_LIMIT` | `30` | Monitor sayfasında listelenen kontrol sayısı |
+| `OVERVIEW_EVENTS` | `12` | Genel bakışta listelenen son olay sayısı |
+| `OVERVIEW_CERTIFICATES` | `5` | Genel bakışta listelenen, süresi en yakın sertifika sayısı |
+| `NEW_MONITOR_INTERVAL_SECONDS` | `60` | Yeni monitor formunun başlangıçtaki kontrol aralığı |
+| `NEW_MONITOR_TIMEOUT_SECONDS` | `10` | Yeni monitor formunun başlangıçtaki zaman aşımı |
+| `NEW_MONITOR_FAILURE_THRESHOLD` | `3` | Yeni monitor formunun başlangıçtaki alarm eşiği |
+| `PUSH_INTERNAL_URL` | `BACKEND_URL` | Push monitor'larında "cluster içinden" gösterilen rapor adresinin kökü |
 | `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |
 | `MAINTENANCE_DURATIONS` | `30m,1h,2h,4h,8h,24h` | Susturma ve bakım için sunulan süreler |
 | `MAINTENANCE_LIMIT` | `50` | Listelenen bakım penceresi sayısı |
