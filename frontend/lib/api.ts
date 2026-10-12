@@ -285,14 +285,21 @@ async function request<T>(
 ): Promise<T> {
   const bearer = token ?? (open ? null : await sessionToken());
   if (!open && !bearer) throw new ApiError(401, "no session");
-  const res = await fetch(`${config.backendUrl}/api/v1${path}`, {
-    ...init,
-    headers: {
-      ...init?.headers,
-      ...(bearer && { Authorization: `Bearer ${bearer}` }),
-    },
-    signal: AbortSignal.timeout(config.backendTimeoutMs),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${config.backendUrl}/api/v1${path}`, {
+      ...init,
+      headers: {
+        ...init?.headers,
+        ...(bearer && { Authorization: `Bearer ${bearer}` }),
+      },
+      signal: AbortSignal.timeout(config.backendTimeoutMs),
+    });
+  } catch (err) {
+    // No connection at all (the backend is starting, or BACKEND_URL is
+    // wrong): the pages show this like any other backend failure.
+    throw new ApiError(503, `backend unreachable at ${config.backendUrl}: ${err instanceof Error ? err.message : String(err)}`);
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new ApiError(res.status, body?.error ?? `backend responded with ${res.status}`);
