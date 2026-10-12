@@ -123,6 +123,16 @@ metrics:
     enabled: false
     interval: 30s
     labels: {}
+  # Creates a PrometheusRule so the cluster's Prometheus raises alerts from
+  # the metrics: KubeatMonitorDown per open outage, KubeatCertificateExpiring,
+  # and KubeatDown / KubeatSchedulerStalled for Kubeat itself. They reach the
+  # Alertmanager and receivers the platform already has.
+  prometheusRule:
+    enabled: false
+    labels: {}
+    # The severity label of the per-monitor alerts.
+    severity: warning
+    certWarningDays: 14
 
 # Dead man's switch: the backend requests this URL at every interval while
 # it is scheduling checks. Point it at a service that alerts when the

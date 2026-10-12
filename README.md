@@ -55,7 +55,7 @@ UID ve fsGroup'u SCC atar:
 ```
 helm upgrade --install kubeat deploy/helm/kubeat -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
-  --set metrics.serviceMonitor.enabled=true \
+  --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
   --set prometheus.url=https://thanos-querier.openshift-monitoring.svc:9091 \
   --set prometheus.tokenFile=/var/run/secrets/kubernetes.io/serviceaccount/token \
   --set prometheus.caFile=/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt \
@@ -635,8 +635,28 @@ yayınlar. Başlıcaları:
 | `kubeat_notifications_total{channel_type,event,result}` | Bildirim gönderimleri |
 
 Chart'ta `metrics.serviceMonitor.enabled=true` bir ServiceMonitor oluşturur;
-böylece monitor durumları cluster'ın kendi Prometheus ve Alertmanager'ında da
-kullanılabilir.
+böylece monitor durumları cluster'ın kendi Prometheus'unda sorgulanabilir
+(OpenShift konsolunda Observe → Metrics). ServiceMonitor `honorLabels`
+kullanır: `kubeat_monitor_*` serilerindeki `namespace` etiketi izlenen
+nesnenin namespace'idir, Kubeat'inki değil.
+
+**Cluster'ın Alertmanager'ı ile alarm.** `metrics.prometheusRule.enabled=true`
+bir PrometheusRule ekler; alarmlar cluster'ın kendi Alertmanager'ına ve
+oradaki alıcılara (PagerDuty, Slack, e-posta…) gider, OpenShift konsolunda
+Observe → Alerting altında görünür. Kubeat'e ayrı bir kanal tanımlamak
+gerekmez; namespace'e göre yönlendirme Alertmanager'ın kendi kurallarıyla
+yapılır. Kurallar:
+
+| Alarm | Koşul |
+| --- | --- |
+| `KubeatMonitorDown` | `kubeat_monitor_incident_open == 1`; etiketlerinde `monitor`, `namespace`, `type` ve `severity` (`metrics.prometheusRule.severity`, varsayılan `warning`) |
+| `KubeatCertificateExpiring` | Sertifikanın bitişine `metrics.prometheusRule.certWarningDays` (14) günden az kaldı |
+| `KubeatDown` | Backend 5 dakikadır scrape edilemiyor (`critical`); bu sırada `KubeatMonitorDown` alarmları susar, çözülmez |
+| `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |
+| `KubeatMetricsIncomplete` | Monitor metrikleri veritabanından okunamıyor |
+
+Her iki nesne de prometheus-operator CRD'lerini ister; OpenShift'te user
+workload monitoring açık olmalıdır (`enableUserWorkload: true`).
 
 **Heartbeat (dead man's switch).** `UPTIME_HEARTBEAT_URL` ayarlanırsa backend
 bu adrese her `UPTIME_HEARTBEAT_INTERVAL` sürede bir `GET` atar. Karşı taraf

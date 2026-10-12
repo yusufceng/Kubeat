@@ -1,0 +1,58 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+# Alerts the cluster's own Prometheus raises from Kubeat's metrics, so that
+# outages reach the Alertmanager and receivers the platform already has.
+# Needs the ServiceMonitor (or another scrape of /metrics) to be in place.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "kubeat.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: kubeat.monitors
+      rules:
+        # Kubeat has already applied the monitor's failure threshold, so the
+        # incident itself is the signal; no extra "for" is needed.
+        - alert: KubeatMonitorDown
+          expr: kubeat_monitor_incident_open == 1
+          labels:
+            severity: {{ .Values.metrics.prometheusRule.severity | quote }}
+          annotations:
+            summary: {{ `"{{ $labels.monitor }} is down"` }}
+            description: {{ `"Kubeat monitor {{ $labels.monitor }} ({{ $labels.type }}{{ if $labels.namespace }}, namespace {{ $labels.namespace }}{{ end }}) has an open outage."` }}
+        - alert: KubeatCertificateExpiring
+          expr: (kubeat_monitor_cert_expiry_timestamp_seconds - time()) < {{ .Values.metrics.prometheusRule.certWarningDays }} * 86400
+          for: 10m
+          labels:
+            severity: {{ .Values.metrics.prometheusRule.severity | quote }}
+          annotations:
+            summary: {{ `"certificate of {{ $labels.monitor }} expires in {{ $value | humanizeDuration }}"` }}
+    - name: kubeat.self
+      rules:
+        - alert: KubeatDown
+          expr: up{job={{ printf "%s-backend" .Release.Name | quote }}} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kubeat's metrics cannot be scraped"
+            description: "Nothing is checking the monitors while Kubeat is down; the KubeatMonitorDown alerts are silent, not resolved."
+        - alert: KubeatSchedulerStalled
+          expr: time() - kubeat_scheduler_last_tick_timestamp_seconds > 60
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kubeat's scheduler has stopped ticking"
+        - alert: KubeatMetricsIncomplete
+          expr: kubeat_monitor_scrape_success == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kubeat could not read its monitors from the database for the metrics"
+{{- end }}

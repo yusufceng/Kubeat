@@ -3,6 +3,17 @@
 Konuşulup bilerek sonraya bırakılan işler. Buradaki bir madde, plana alınana
 kadar yapılacak iş değildir.
 
+## Alertmanager'a doğrudan kanal
+
+Kubeat'in olayları Alertmanager API'sine (`/api/v2/alerts`) kendisinin
+göndermesi. 2026-10-12'de bunun yerine chart'a PrometheusRule eklendi:
+cluster'ın Prometheus'u `/metrics`'ten `kubeat_monitor_incident_open`
+serisini okuyup alarmı kendisi üretir; token, CA ve `resolve_timeout` için
+tekrar gönderme döngüsü gerekmez. Doğrudan kanal yalnızca user workload
+monitoring kapalı cluster'larda anlam kazanır; böyle bir ortam görülürse
+Kubeat'in kanal türü olarak eklenir (OpenShift'te `monitoring-alertmanager-
+edit` rolü ve kube-rbac-proxy üzerinden 9095 portu).
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla

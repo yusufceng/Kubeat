@@ -16,6 +16,8 @@ route:
 metrics:
   serviceMonitor:
     enabled: true
+  prometheusRule:
+    enabled: true
 
 prometheus:
   url: https://thanos-querier.openshift-monitoring.svc:9091
