@@ -77,7 +77,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 3
+const Revision = 4
 
 // Health is the response body of the health endpoint.
 type Health struct {

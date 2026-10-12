@@ -300,3 +300,86 @@ func TestUpdateMonitor(t *testing.T) {
 		t.Errorf("resumed monitor = enabled:%v status:%s incident:%+v", got.Enabled, got.Status, got.OpenIncident)
 	}
 }
+
+func TestHTTPOptionsAPI(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+
+	// Defaults for an HTTP monitor, nothing for a TCP one.
+	var plain, tcp monitorResponse
+	do(t, "POST", base, validMonitor, &plain)
+	if plain.HTTP == nil || plain.HTTP.Method != "GET" || plain.HTTP.ExpectedStatus != "200-399" || plain.HTTP.Keyword != "" || len(plain.HTTP.Headers) != 0 {
+		t.Errorf("default http options = %+v", plain.HTTP)
+	}
+	do(t, "POST", base, `{"name":"db","type":"tcp","target":"db:5432","interval_seconds":30,"timeout_seconds":5}`, &tcp)
+	if tcp.HTTP != nil {
+		t.Errorf("tcp monitor has http options: %+v", tcp.HTTP)
+	}
+
+	body := `{"name":"secure","type":"http","target":"https://x/health","interval_seconds":30,"timeout_seconds":5,
+		"http":{"method":"get","expected_status":"200, 401","keyword":"ok","headers":{"authorization":"Bearer s3cret","x-tenant":"a"},"tls_skip_verify":true}}`
+	var created monitorResponse
+	if code := do(t, "POST", base, body, &created); code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201", code)
+	}
+	o := created.HTTP
+	if o.Method != "GET" || o.ExpectedStatus != "200, 401" || o.Keyword != "ok" || !o.TLSSkipVerify {
+		t.Errorf("created options = %+v", o)
+	}
+	// Header names are canonical and values never leave the server.
+	if len(o.Headers) != 2 || o.Headers["Authorization"] != maskedValue || o.Headers["X-Tenant"] != maskedValue {
+		t.Errorf("headers in response = %v, want canonical names with masked values", o.Headers)
+	}
+	stored, _ := db.GetMonitor(context.Background(), created.ID)
+	if stored.HTTP.Headers["Authorization"] != "Bearer s3cret" {
+		t.Errorf("stored headers = %v", stored.HTTP.Headers)
+	}
+
+	// An update keeps masked values, changes given ones and drops the rest.
+	patch := `{"http":{"method":"GET","expected_status":"204","headers":{"Authorization":"` + maskedValue + `","X-New":"n"}}}`
+	var updated monitorResponse
+	if code := do(t, "PATCH", base+"/3", patch, &updated); code != http.StatusOK {
+		t.Fatalf("update status = %d, want 200", code)
+	}
+	if updated.HTTP.ExpectedStatus != "204" || updated.HTTP.Keyword != "" || updated.HTTP.TLSSkipVerify {
+		t.Errorf("updated options = %+v (keyword and tls flag should be reset)", updated.HTTP)
+	}
+	stored, _ = db.GetMonitor(context.Background(), created.ID)
+	if len(stored.HTTP.Headers) != 2 || stored.HTTP.Headers["Authorization"] != "Bearer s3cret" || stored.HTTP.Headers["X-New"] != "n" {
+		t.Errorf("stored headers after update = %v", stored.HTTP.Headers)
+	}
+	// An update without "http" leaves the options alone.
+	do(t, "PATCH", base+"/3", `{"interval_seconds":60}`, &updated)
+	if updated.HTTP.ExpectedStatus != "204" || len(updated.HTTP.Headers) != 2 {
+		t.Errorf("options changed by an unrelated update: %+v", updated.HTTP)
+	}
+
+	invalid := map[string]string{
+		"bad method":           `{"method":"DELETE"}`,
+		"bad status":           `{"expected_status":"2xx"}`,
+		"keyword with HEAD":    `{"method":"HEAD","keyword":"ok"}`,
+		"bad header name":      `{"headers":{"X Bad":"v"}}`,
+		"line break in value":  `{"headers":{"X-A":"a\r\nX-B: b"}}`,
+		"mask without a value": `{"headers":{"X-Unknown":"` + maskedValue + `"}}`,
+		"duplicate header":     `{"headers":{"x-a":"1","X-A":"2"}}`,
+	}
+	for name, opts := range invalid {
+		if code := do(t, "PATCH", base+"/3", `{"http":`+opts+`}`, nil); code != http.StatusBadRequest {
+			t.Errorf("update, %s: status = %d, want 400", name, code)
+		}
+		create := `{"name":"n","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":5,"http":` + opts + `}`
+		if code := do(t, "POST", base, create, nil); code != http.StatusBadRequest {
+			t.Errorf("create, %s: status = %d, want 400", name, code)
+		}
+	}
+	for _, target := range []string{"POST " + base, "PATCH " + base + "/2"} {
+		method, url, _ := strings.Cut(target, " ")
+		body := `{"http":{"method":"GET"}}`
+		if method == "POST" {
+			body = `{"name":"t","type":"tcp","target":"x:1","interval_seconds":30,"timeout_seconds":5,"http":{"method":"GET"}}`
+		}
+		if code := do(t, method, url, body, nil); code != http.StatusBadRequest {
+			t.Errorf("%s with http options on a tcp monitor: status = %d, want 400", method, code)
+		}
+	}
+}

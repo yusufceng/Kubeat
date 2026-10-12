@@ -36,6 +36,9 @@ type monitorResponse struct {
 	Enabled          bool      `json:"enabled"`
 	CreatedAt        time.Time `json:"created_at"`
 
+	// HTTP holds the check options of an HTTP monitor; null for other types.
+	HTTP *httpOptions `json:"http"`
+
 	Status string          `json:"status"`
 	Last   *resultResponse `json:"last_result"`
 	// OpenIncident is set while the monitor is in an alerting state.
@@ -86,6 +89,9 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		FailureThreshold: st.FailureThreshold,
 		Namespace:        st.Namespace,
 		Source:           st.Source,
+	}
+	if st.Type == store.MonitorHTTP {
+		resp.HTTP = toHTTPOptions(st.HTTP)
 	}
 	if st.Incident != nil {
 		incident := toIncidentResponse(*st.Incident)
@@ -189,6 +195,8 @@ type createMonitorRequest struct {
 	TimeoutSeconds  int    `json:"timeout_seconds"`
 	// FailureThreshold is optional; 0 means the server default.
 	FailureThreshold int `json:"failure_threshold"`
+	// HTTP is optional and only allowed for HTTP monitors.
+	HTTP *httpOptions `json:"http"`
 }
 
 // validate normalizes the request and reports the first problem found.
@@ -247,7 +255,21 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var httpOpts store.HTTPOptions
+	if req.HTTP != nil {
+		if store.MonitorType(req.Type) != store.MonitorHTTP {
+			writeError(w, http.StatusBadRequest, "http options are only valid for http monitors")
+			return
+		}
+		var err error
+		if httpOpts, err = req.HTTP.resolve(nil); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	m, err := h.opts.Store.CreateMonitor(r.Context(), store.Monitor{
+		HTTP:     httpOpts,
 		Name:     req.Name,
 		Type:     store.MonitorType(req.Type),
 		Target:   req.Target,
@@ -276,6 +298,8 @@ type updateMonitorRequest struct {
 	TimeoutSeconds   *int    `json:"timeout_seconds"`
 	FailureThreshold *int    `json:"failure_threshold"`
 	Enabled          *bool   `json:"enabled"`
+	// HTTP, when present, replaces all HTTP options of the monitor.
+	HTTP *httpOptions `json:"http"`
 }
 
 func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
@@ -337,6 +361,16 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	change := current
+	if req.HTTP != nil {
+		if current.Type != store.MonitorHTTP {
+			writeError(w, http.StatusBadRequest, "http options are only valid for http monitors")
+			return
+		}
+		if change.HTTP, err = req.HTTP.resolve(current.HTTP.Headers); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	change.Name = merged.Name
 	change.Target = merged.Target
 	change.Interval = time.Duration(merged.IntervalSeconds) * time.Second

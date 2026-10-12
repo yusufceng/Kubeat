@@ -40,6 +40,30 @@ type Monitor struct {
 	FailureThreshold int
 	Enabled          bool
 	CreatedAt        time.Time
+	// HTTP holds the options of an HTTP check; unused for other types.
+	HTTP HTTPOptions
+}
+
+// Defaults of HTTPOptions, applied by the database to monitors that do not
+// set them.
+const (
+	DefaultHTTPMethod     = "GET"
+	DefaultExpectedStatus = "200-399"
+)
+
+// HTTPOptions configures how an HTTP monitor is checked.
+type HTTPOptions struct {
+	// Method is GET or HEAD.
+	Method string
+	// ExpectedStatus lists the status codes that count as success, as codes
+	// and ranges: "200-299,401".
+	ExpectedStatus string
+	// Keyword, if set, must appear in the response body.
+	Keyword string
+	// Headers are added to the request. Values may be credentials.
+	Headers map[string]string
+	// SkipTLSVerify accepts any certificate, for targets with a private CA.
+	SkipTLSVerify bool
 }
 
 // CheckResult is the outcome of a single check of a monitor.

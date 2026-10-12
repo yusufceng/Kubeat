@@ -36,6 +36,8 @@ func TestLoadDefaults(t *testing.T) {
 		RollupRetention:     365 * 24 * time.Hour,
 		SeriesPoints:        120,
 
+		KeywordBodyLimit: 1 << 20,
+
 		MinCheckInterval: 5 * time.Second,
 		StatsWindow:      24 * time.Hour,
 		MaxResults:       1000,

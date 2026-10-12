@@ -2,6 +2,7 @@
 package checker
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -13,34 +14,42 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
-// maxBodyBytes bounds how much of a response body is read before the
-// connection is released; the body itself is not inspected.
-const maxBodyBytes = 64 << 10
+// drainBytes bounds how much of a response body is read just to release the
+// connection, when the body itself is not inspected.
+const drainBytes = 64 << 10
 
 // Options configures a Checker.
 type Options struct {
-	// InsecureSkipVerify disables TLS certificate verification for HTTP
-	// checks, for clusters whose routes use a private CA.
+	// InsecureSkipVerify disables TLS certificate verification for every
+	// HTTP check; monitors can also opt out individually.
 	InsecureSkipVerify bool
 	UserAgent          string
+	// KeywordBodyLimit is how much of a response body is searched for a
+	// monitor's keyword.
+	KeywordBodyLimit int64
 }
 
 // Checker runs HTTP and TCP checks. It is safe for concurrent use.
 type Checker struct {
-	client    *http.Client
+	verifying *http.Client
+	insecure  *http.Client
 	dialer    *net.Dialer
-	userAgent string
+	opts      Options
 }
 
 // New returns a Checker. Timeouts are not set here; every check is bounded
 // by the context passed to Check.
 func New(opts Options) *Checker {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: opts.InsecureSkipVerify}
+	client := func(skipVerify bool) *http.Client {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: skipVerify}
+		return &http.Client{Transport: transport}
+	}
 	return &Checker{
-		client:    &http.Client{Transport: transport},
+		verifying: client(opts.InsecureSkipVerify),
+		insecure:  client(true),
 		dialer:    &net.Dialer{},
-		userAgent: opts.UserAgent,
+		opts:      opts,
 	}
 }
 
@@ -53,7 +62,7 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	var err error
 	switch m.Type {
 	case store.MonitorHTTP:
-		result.StatusCode, err = c.checkHTTP(ctx, m.Target)
+		result.StatusCode, err = c.checkHTTP(ctx, m)
 	case store.MonitorTCP:
 		err = c.checkTCP(ctx, m.Target)
 	default:
@@ -69,27 +78,55 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	return result
 }
 
-// checkHTTP reports the response status code, and an error unless it is 2xx
-// or 3xx.
-func (c *Checker) checkHTTP(ctx context.Context, target string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+// checkHTTP reports the response status code, and an error unless the
+// response satisfies the monitor's expectations.
+func (c *Checker) checkHTTP(ctx context.Context, m store.Monitor) (int, error) {
+	expected, err := ParseStatusSet(m.HTTP.ExpectedStatus)
+	if err != nil {
+		return 0, fmt.Errorf("expected status: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, m.HTTP.Method, m.Target, nil)
 	if err != nil {
 		return 0, err
 	}
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
+	if c.opts.UserAgent != "" {
+		req.Header.Set("User-Agent", c.opts.UserAgent)
+	}
+	for name, value := range m.HTTP.Headers {
+		if http.CanonicalHeaderKey(name) == "Host" {
+			req.Host = value // net/http takes the Host header from here
+			continue
+		}
+		req.Header.Set(name, value)
 	}
 
-	resp, err := c.client.Do(req)
+	client := c.verifying
+	if m.HTTP.SkipTLSVerify {
+		client = c.insecure
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	// Drain a bounded amount so the connection can be reused.
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBodyBytes))
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+	if !expected.Contains(resp.StatusCode) {
+		// Drain a bounded amount so the connection can be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
 		return resp.StatusCode, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	if m.HTTP.Keyword == "" {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
+		return resp.StatusCode, nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, c.opts.KeywordBodyLimit))
+	if err != nil {
+		return resp.StatusCode, fmt.Errorf("read body: %w", err)
+	}
+	if !bytes.Contains(body, []byte(m.HTTP.Keyword)) {
+		return resp.StatusCode, fmt.Errorf("keyword %q not found in the first %d bytes of the response", m.HTTP.Keyword, len(body))
 	}
 	return resp.StatusCode, nil
 }

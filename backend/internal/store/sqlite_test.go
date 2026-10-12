@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestMonitorCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got != created {
+	if !reflect.DeepEqual(got, created) {
 		t.Errorf("get = %+v, want %+v", got, created)
 	}
 
@@ -274,7 +275,7 @@ func TestMonitorStatuses(t *testing.T) {
 	}
 
 	got := statuses[0]
-	if got.Monitor != api {
+	if !reflect.DeepEqual(got.Monitor, api) {
 		t.Errorf("monitor = %+v, want %+v", got.Monitor, api)
 	}
 	if got.Checks != 4 || got.UpChecks != 3 || got.AvgLatency != 250*time.Millisecond {
@@ -380,10 +381,10 @@ func TestUpdateMonitor(t *testing.T) {
 	}
 	want := change
 	want.Type, want.Namespace, want.Source = created.Type, created.Namespace, created.Source
-	if updated != want {
+	if !reflect.DeepEqual(updated, want) {
 		t.Errorf("updated = %+v, want %+v", updated, want)
 	}
-	if got, _ := s.GetMonitor(ctx, created.ID); got != want {
+	if got, _ := s.GetMonitor(ctx, created.ID); !reflect.DeepEqual(got, want) {
 		t.Errorf("stored = %+v, want %+v", got, want)
 	}
 
@@ -398,5 +399,58 @@ func TestUpdateMonitor(t *testing.T) {
 	change.ID, change.Interval = 999, time.Minute
 	if _, err := s.UpdateMonitor(ctx, change); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown id: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestHTTPOptions(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	// Left empty, the options take the defaults.
+	plain, err := s.CreateMonitor(ctx, newMonitor("plain"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDefaults := HTTPOptions{Method: "GET", ExpectedStatus: "200-399"}
+	if !reflect.DeepEqual(plain.HTTP, wantDefaults) {
+		t.Errorf("returned defaults = %+v, want %+v", plain.HTTP, wantDefaults)
+	}
+	if got, _ := s.GetMonitor(ctx, plain.ID); !reflect.DeepEqual(got.HTTP, wantDefaults) {
+		t.Errorf("stored defaults = %+v, want %+v", got.HTTP, wantDefaults)
+	}
+
+	custom := newMonitor("custom")
+	custom.HTTP = HTTPOptions{
+		Method:         "HEAD",
+		ExpectedStatus: "200,401",
+		Keyword:        `"status":"ok"`,
+		Headers:        map[string]string{"Authorization": "Bearer s3cret", "X-Tenant": "çağrı"},
+		SkipTLSVerify:  true,
+	}
+	created, err := s.CreateMonitor(ctx, custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetMonitor(ctx, created.ID)
+	if err != nil || !reflect.DeepEqual(got.HTTP, custom.HTTP) {
+		t.Errorf("GetMonitor HTTP = %+v, %v; want %+v", got.HTTP, err, custom.HTTP)
+	}
+	if st, _ := s.GetMonitorStatus(ctx, created.ID, time.Now()); !reflect.DeepEqual(st.HTTP, custom.HTTP) {
+		t.Errorf("status HTTP = %+v, want %+v", st.HTTP, custom.HTTP)
+	}
+
+	got.HTTP = HTTPOptions{Method: "GET", ExpectedStatus: "204", Headers: map[string]string{}}
+	updated, err := s.UpdateMonitor(ctx, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (HTTPOptions{Method: "GET", ExpectedStatus: "204"}); !reflect.DeepEqual(updated.HTTP, want) {
+		t.Errorf("after update = %+v, want %+v (headers and keyword cleared)", updated.HTTP, want)
+	}
+
+	bad := newMonitor("bad-method")
+	bad.HTTP.Method = "DELETE"
+	if _, err := s.CreateMonitor(ctx, bad); err == nil {
+		t.Error("method DELETE was accepted")
 	}
 }

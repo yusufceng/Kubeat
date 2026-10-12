@@ -76,8 +76,25 @@ curl -X POST localhost:8090/api/v1/monitors -d '{
 }'
 ```
 
-`type` değeri `http` (2xx/3xx yanıt başarılı sayılır) ya da `tcp`
-(`host:port` bağlantısı kurulabiliyorsa başarılı) olabilir.
+`type` değeri `http` ya da `tcp` (`host:port` bağlantısı kurulabiliyorsa
+başarılı) olabilir. HTTP monitor'ları isteğe bağlı bir `http` nesnesi alır:
+
+```json
+"http": {
+  "method": "GET",
+  "expected_status": "200-299,401",
+  "keyword": "\"status\":\"ok\"",
+  "headers": { "Authorization": "Bearer ..." },
+  "tls_skip_verify": false
+}
+```
+
+- `method`: `GET` ya da `HEAD`.
+- `expected_status`: başarılı sayılan kodlar ve aralıklar; varsayılan `200-399`.
+- `keyword`: yanıt gövdesinde bulunması gereken metin.
+- `headers`: isteğe eklenen header'lar. Değerler API yanıtlarında `********`
+  olarak maskelenir; güncellemede bu değer gönderilirse kayıtlı değer korunur.
+- `tls_skip_verify`: yalnızca bu monitor için sertifika doğrulamasını kapatır.
 
 ## Geçmiş verisi
 
@@ -158,7 +175,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_ROLLUP_INTERVAL` | `1m` | Saatlik özetlerin güncellenme sıklığı |
 | `UPTIME_ROLLUP_RETENTION` | `8760h` | Saatlik özetlerin saklanma süresi; grafik ve uptime en fazla bu kadar geriye gider |
 | `UPTIME_SERIES_POINTS` | `120` | Bir grafikteki yaklaşık nokta sayısı |
-| `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | HTTP kontrollerinde TLS sertifika doğrulamasını kapatır |
+| `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | Tüm HTTP kontrollerinde TLS sertifika doğrulamasını kapatır |
+| `UPTIME_KEYWORD_BODY_LIMIT_BYTES` | `1048576` | Keyword aranırken yanıt gövdesinin okunan kısmı |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |

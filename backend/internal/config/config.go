@@ -29,6 +29,7 @@ type Config struct {
 	SeriesPoints        int           // UPTIME_SERIES_POINTS
 
 	HTTPInsecureSkipVerify bool // UPTIME_HTTP_INSECURE_SKIP_VERIFY
+	KeywordBodyLimit       int  // UPTIME_KEYWORD_BODY_LIMIT_BYTES
 
 	MinCheckInterval time.Duration // UPTIME_MIN_CHECK_INTERVAL
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
@@ -98,6 +99,7 @@ func Load() (Config, error) {
 		{&cfg.ResultBatchSize, "UPTIME_RESULT_BATCH_SIZE", 100},
 		{&cfg.MaxResults, "UPTIME_MAX_RESULTS", 1000},
 		{&cfg.SeriesPoints, "UPTIME_SERIES_POINTS", 120},
+		{&cfg.KeywordBodyLimit, "UPTIME_KEYWORD_BODY_LIMIT_BYTES", 1 << 20},
 		{&cfg.DefaultFailureThreshold, "UPTIME_DEFAULT_FAILURE_THRESHOLD", 3},
 		{&cfg.RecoveryThreshold, "UPTIME_RECOVERY_THRESHOLD", 1},
 		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 100},

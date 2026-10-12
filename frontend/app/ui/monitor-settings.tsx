@@ -7,7 +7,7 @@ import {
   setMonitorEnabledAction,
   updateMonitorAction,
 } from "@/app/actions";
-import type { Monitor } from "@/lib/api";
+import { MASKED_VALUE, type Monitor } from "@/lib/api";
 
 const inputClass =
   "w-full rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-600 dark:border-white/20";
@@ -51,7 +51,14 @@ export function EditMonitorForm({ monitor }: { monitor: Monitor }) {
     // Keyed on the saved values so the fields show them after a save or when
     // someone else changes the monitor.
     <form
-      key={`${monitor.name}|${monitor.target}|${monitor.interval_seconds}|${monitor.timeout_seconds}|${monitor.failure_threshold}`}
+      key={JSON.stringify([
+        monitor.name,
+        monitor.target,
+        monitor.interval_seconds,
+        monitor.timeout_seconds,
+        monitor.failure_threshold,
+        monitor.http,
+      ])}
       action={action}
       className="grid gap-4 sm:grid-cols-6"
     >
@@ -101,6 +108,67 @@ export function EditMonitorForm({ monitor }: { monitor: Monitor }) {
           className={inputClass}
         />
       </label>
+      {monitor.http && (
+        <fieldset className="grid gap-4 border-t border-black/10 pt-4 sm:col-span-6 sm:grid-cols-6 dark:border-white/15">
+          <legend className="sr-only">HTTP kontrol seçenekleri</legend>
+          <label className="sm:col-span-1">
+            <span className="mb-1 block text-xs font-medium text-zinc-500">Metot</span>
+            <select name="http_method" defaultValue={monitor.http.method} className={inputClass}>
+              <option value="GET">GET</option>
+              <option value="HEAD">HEAD</option>
+            </select>
+          </label>
+          <label className="sm:col-span-2">
+            <span className="mb-1 block text-xs font-medium text-zinc-500">
+              Başarılı sayılan durum kodları
+            </span>
+            <input
+              name="http_expected_status"
+              required
+              defaultValue={monitor.http.expected_status}
+              placeholder="200-399"
+              className={inputClass}
+            />
+          </label>
+          <label className="sm:col-span-3">
+            <span className="mb-1 block text-xs font-medium text-zinc-500">
+              Yanıtta aranacak metin (isteğe bağlı)
+            </span>
+            <input
+              name="http_keyword"
+              defaultValue={monitor.http.keyword}
+              placeholder={'"status":"ok"'}
+              className={inputClass}
+            />
+          </label>
+          <label className="sm:col-span-6">
+            <span className="mb-1 block text-xs font-medium text-zinc-500">
+              İstek header&apos;ları (satır başına bir tane, &quot;Ad: değer&quot;)
+            </span>
+            <textarea
+              name="http_headers"
+              rows={Math.max(2, Object.keys(monitor.http.headers).length + 1)}
+              defaultValue={Object.entries(monitor.http.headers)
+                .map(([name, value]) => `${name}: ${value}`)
+                .join("\n")}
+              placeholder="Authorization: Bearer ..."
+              className={`${inputClass} font-mono`}
+            />
+            <span className="mt-1 block text-xs text-zinc-500">
+              Kayıtlı değerler {MASKED_VALUE} olarak gösterilir; satırı öyle bırakırsanız değer
+              korunur.
+            </span>
+          </label>
+          <label className="flex items-center gap-2 text-sm sm:col-span-6">
+            <input
+              type="checkbox"
+              name="tls_skip_verify"
+              defaultChecked={monitor.http.tls_skip_verify}
+            />
+            TLS sertifikasını doğrulama (özel CA kullanan hedefler için)
+          </label>
+        </fieldset>
+      )}
       <div className="flex items-end gap-3 sm:col-span-2">
         <button
           type="submit"

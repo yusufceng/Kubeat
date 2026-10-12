@@ -63,6 +63,7 @@ func main() {
 	sched := scheduler.New(db, checker.New(checker.Options{
 		InsecureSkipVerify: cfg.HTTPInsecureSkipVerify,
 		UserAgent:          userAgent,
+		KeywordBodyLimit:   int64(cfg.KeywordBodyLimit),
 	}), scheduler.Options{
 		Tick:          cfg.SchedulerTick,
 		MaxJitter:     cfg.MaxJitter,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -125,7 +126,8 @@ func (s *SQLite) Close() error {
 	return errors.Join(s.read.Close(), s.write.Close())
 }
 
-const monitorColumns = "id, name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at, namespace, source"
+const monitorColumns = "id, name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at, namespace, source, " +
+	"http_method, http_expected_status, http_keyword, http_headers, tls_skip_verify"
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -136,24 +138,75 @@ func scanMonitor(row rowScanner) (Monitor, error) {
 		m                 Monitor
 		interval, timeout int64
 		createdAt         int64
+		headers           string
 	)
-	err := row.Scan(&m.ID, &m.Name, &m.Type, &m.Target, &interval, &timeout, &m.FailureThreshold, &m.Enabled, &createdAt, &m.Namespace, &m.Source)
+	err := row.Scan(&m.ID, &m.Name, &m.Type, &m.Target, &interval, &timeout, &m.FailureThreshold, &m.Enabled, &createdAt, &m.Namespace, &m.Source,
+		&m.HTTP.Method, &m.HTTP.ExpectedStatus, &m.HTTP.Keyword, &headers, &m.HTTP.SkipTLSVerify)
 	if err != nil {
 		return Monitor{}, err
 	}
 	m.Interval = time.Duration(interval) * time.Second
 	m.Timeout = time.Duration(timeout) * time.Second
 	m.CreatedAt = time.UnixMilli(createdAt).UTC()
+	if m.HTTP.Headers, err = decodeHeaders(headers); err != nil {
+		return Monitor{}, fmt.Errorf("monitor %d: %w", m.ID, err)
+	}
 	return m, nil
 }
 
+// encodeHeaders and decodeHeaders store headers as a JSON object; no headers
+// is "{}" in the database and a nil map in Go.
+func encodeHeaders(h map[string]string) (string, error) {
+	if len(h) == 0 {
+		return "{}", nil
+	}
+	b, err := json.Marshal(h)
+	return string(b), err
+}
+
+func decodeHeaders(s string) (map[string]string, error) {
+	var h map[string]string
+	if err := json.Unmarshal([]byte(s), &h); err != nil {
+		return nil, fmt.Errorf("decode headers: %w", err)
+	}
+	if len(h) == 0 {
+		return nil, nil
+	}
+	return h, nil
+}
+
+// httpColumns returns the stored form of the HTTP options, with defaults
+// filled in for the fields a caller left empty.
+func httpColumns(o HTTPOptions) (method, expected, headers string, err error) {
+	method, expected = o.Method, o.ExpectedStatus
+	if method == "" {
+		method = DefaultHTTPMethod
+	}
+	if expected == "" {
+		expected = DefaultExpectedStatus
+	}
+	headers, err = encodeHeaders(o.Headers)
+	return method, expected, headers, err
+}
+
 func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
+	method, expected, headers, err := httpColumns(m.HTTP)
+	if err != nil {
+		return Monitor{}, fmt.Errorf("create monitor: %w", err)
+	}
+	m.HTTP.Method, m.HTTP.ExpectedStatus = method, expected
+	if len(m.HTTP.Headers) == 0 {
+		m.HTTP.Headers = nil
+	}
 	m.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
+
 	res, err := s.write.ExecContext(ctx,
-		`INSERT INTO monitors (name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at, namespace, source)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO monitors (name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at, namespace, source,
+		                       http_method, http_expected_status, http_keyword, http_headers, tls_skip_verify)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.Name, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.FailureThreshold, m.Enabled, m.CreatedAt.UnixMilli(),
-		m.Namespace, m.Source)
+		m.Namespace, m.Source,
+		method, expected, m.HTTP.Keyword, headers, m.HTTP.SkipTLSVerify)
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}
@@ -210,6 +263,7 @@ func isUniqueViolation(err error) bool {
 const statusQuery = `
 SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.timeout_seconds, m.failure_threshold, m.enabled, m.created_at,
        m.namespace, m.source,
+       m.http_method, m.http_expected_status, m.http_keyword, m.http_headers, m.tls_skip_verify,
        r.checked_at, r.up, r.latency_ms, r.status_code, r.error,
        COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.avg_latency_ms, 0),
        i.id, i.started_at, i.cause
@@ -266,9 +320,11 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			avgLatencyMS                 float64
 			incidentID, incidentStart    sql.NullInt64
 			incidentCause                sql.NullString
+			headers                      string
 		)
 		err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Target, &interval, &timeout, &st.FailureThreshold, &st.Enabled, &createdAt,
 			&st.Namespace, &st.Source,
+			&st.HTTP.Method, &st.HTTP.ExpectedStatus, &st.HTTP.Keyword, &headers, &st.HTTP.SkipTLSVerify,
 			&checkedAt, &up, &latencyMS, &statusCode, &errText,
 			&st.Checks, &st.UpChecks, &avgLatencyMS,
 			&incidentID, &incidentStart, &incidentCause)
@@ -278,6 +334,9 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 		st.Interval = time.Duration(interval) * time.Second
 		st.Timeout = time.Duration(timeout) * time.Second
 		st.CreatedAt = time.UnixMilli(createdAt).UTC()
+		if st.HTTP.Headers, err = decodeHeaders(headers); err != nil {
+			return nil, fmt.Errorf("monitor %d: %w", st.ID, err)
+		}
 		st.AvgLatency = time.Duration(avgLatencyMS * float64(time.Millisecond))
 		if checkedAt.Valid {
 			st.Last = &CheckResult{
@@ -304,11 +363,17 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 }
 
 func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
+	method, expected, headers, err := httpColumns(m.HTTP)
+	if err != nil {
+		return Monitor{}, fmt.Errorf("update monitor: %w", err)
+	}
 	res, err := s.write.ExecContext(ctx,
 		`UPDATE monitors
-		 SET name = ?, target = ?, interval_seconds = ?, timeout_seconds = ?, failure_threshold = ?, enabled = ?
+		 SET name = ?, target = ?, interval_seconds = ?, timeout_seconds = ?, failure_threshold = ?, enabled = ?,
+		     http_method = ?, http_expected_status = ?, http_keyword = ?, http_headers = ?, tls_skip_verify = ?
 		 WHERE id = ?`,
-		m.Name, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.FailureThreshold, m.Enabled, m.ID)
+		m.Name, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.FailureThreshold, m.Enabled,
+		method, expected, m.HTTP.Keyword, headers, m.HTTP.SkipTLSVerify, m.ID)
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}

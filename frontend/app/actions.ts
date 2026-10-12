@@ -8,6 +8,7 @@ import {
   createMonitor,
   deleteChannel,
   deleteMonitor,
+  type HttpOptions,
   importCandidates,
   type MonitorType,
   type MonitorChanges,
@@ -71,6 +72,19 @@ export async function updateMonitorAction(_prev: EditState, formData: FormData):
   const name = formData.get("name");
   if (name !== null) changes.name = String(name);
 
+  // The HTTP fields are only in the form of an HTTP monitor.
+  if (formData.get("http_method") !== null) {
+    const headers = parseHeaders(String(formData.get("http_headers") ?? ""));
+    if (typeof headers === "string") return { saved: false, error: headers };
+    changes.http = {
+      method: String(formData.get("http_method")) as HttpOptions["method"],
+      expected_status: String(formData.get("http_expected_status") ?? ""),
+      keyword: String(formData.get("http_keyword") ?? ""),
+      headers,
+      tls_skip_verify: formData.get("tls_skip_verify") === "on",
+    };
+  }
+
   try {
     await updateMonitor(Number(formData.get("id")), changes);
   } catch (err) {
@@ -78,6 +92,18 @@ export async function updateMonitorAction(_prev: EditState, formData: FormData):
   }
   refresh();
   return { saved: true, error: null };
+}
+
+/** Parses "Name: value" lines; returns a message for a line it cannot read. */
+function parseHeaders(text: string): Record<string, string> | string {
+  const headers: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    const colon = line.indexOf(":");
+    if (colon <= 0) return `Header satırı "Ad: değer" biçiminde olmalı: ${line.trim()}`;
+    headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+  }
+  return headers;
 }
 
 export async function setMonitorEnabledAction(formData: FormData): Promise<void> {

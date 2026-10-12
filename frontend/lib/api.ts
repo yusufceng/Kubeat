@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 3;
+export const REQUIRED_API_REVISION = 4;
 
 export type Health = {
   status: string;
@@ -23,6 +23,20 @@ export type CheckResult = {
 };
 
 export type MonitorType = "http" | "tcp";
+
+/** Shown in place of a stored header value; sent back, it keeps that value. */
+export const MASKED_VALUE = "********";
+
+export type HttpOptions = {
+  method: "GET" | "HEAD";
+  /** Accepted status codes: codes and ranges such as "200-299,401". */
+  expected_status: string;
+  /** Text the body must contain; empty when the body is not inspected. */
+  keyword: string;
+  /** Values come back masked. */
+  headers: Record<string, string>;
+  tls_skip_verify: boolean;
+};
 
 export type Incident = {
   id: number;
@@ -60,6 +74,8 @@ export type Monitor = {
   failure_threshold: number;
   enabled: boolean;
   created_at: string;
+  /** null for monitors that are not HTTP checks. */
+  http: HttpOptions | null;
   status: "up" | "down" | "pending" | "paused";
   last_result: CheckResult | null;
   open_incident: Incident | null;
@@ -109,6 +125,7 @@ function withDefaults(m: Monitor): Monitor {
     namespace: m.namespace ?? "",
     source: m.source ?? "",
     failure_threshold: m.failure_threshold ?? 0,
+    http: m.http ?? null,
     open_incident: m.open_incident ?? null,
   };
 }
@@ -130,7 +147,7 @@ export type MonitorChanges = Partial<
     Monitor,
     "name" | "target" | "interval_seconds" | "timeout_seconds" | "failure_threshold" | "enabled"
   >
->;
+> & { http?: HttpOptions };
 
 export const updateMonitor = (id: number, changes: MonitorChanges) =>
   request<Monitor>(`/monitors/${id}`, { method: "PATCH", body: JSON.stringify(changes) });

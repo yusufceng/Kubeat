@@ -72,8 +72,17 @@ async function MonitorDetail({
           )}
           <h1 className="text-2xl font-semibold tracking-tight">{label.name}</h1>
           <p className="mt-1 break-all text-sm text-zinc-500">
-            {monitor.type.toUpperCase()} · {monitor.target}
+            {monitor.http?.method ?? monitor.type.toUpperCase()} · {monitor.target}
           </p>
+          {monitor.http && (
+            <p className="mt-1 text-xs text-zinc-500">
+              Beklenen durum: {monitor.http.expected_status}
+              {monitor.http.keyword && <> · aranan metin: “{monitor.http.keyword}”</>}
+              {Object.keys(monitor.http.headers).length > 0 &&
+                ` · ${Object.keys(monitor.http.headers).length} header`}
+              {monitor.http.tls_skip_verify && " · TLS doğrulanmıyor"}
+            </p>
+          )}
         </div>
         <MonitorActions monitor={monitor} />
       </header>
