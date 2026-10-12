@@ -144,13 +144,15 @@ func TestRunWaitsForTheIntervalSinceTheNewestBackup(t *testing.T) {
 	failing := &fakeStore{err: errors.New("disk full")}
 	os.RemoveAll(dir)
 	stop = run(failing, 20*time.Millisecond)
-	waitFor("retries", func() bool { return failing.calls.Load() >= 2 })
+	// Wait for the count itself: an attempt is counted when it ends, and
+	// one that is cut short by stopping is not counted at all.
+	waitFor("two counted failures", func() bool {
+		got, _ := m.Gather()
+		return got["kubeat_backups_total{result=failed}"] >= 2
+	})
 	stop()
 	if n := failing.calls.Load(); n > 20 {
 		t.Errorf("%d attempts in a moment: the loop is spinning", n)
-	}
-	if got, _ := m.Gather(); got["kubeat_backups_total{result=failed}"] < 2 {
-		t.Errorf("failed backups counted = %v", got["kubeat_backups_total{result=failed}"])
 	}
 }
 
