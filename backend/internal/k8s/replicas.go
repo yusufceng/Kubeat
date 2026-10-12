@@ -3,6 +3,8 @@ package k8s
 import (
 	"context"
 	"fmt"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sort"
 	"strings"
 
@@ -35,10 +37,23 @@ func ParseWorkloadTarget(target string) (namespace string, kind Kind, name strin
 	return parts[0], Kind(parts[1]), parts[2], nil
 }
 
+// WorkloadStatus is how many pods a workload is meant to have and has
+// ready, and whether it is in the middle of a rollout.
+type WorkloadStatus struct {
+	Desired, Ready int
+	// Rolling is set while an update is being rolled out: a new
+	// generation not yet observed, pods not yet updated, or old pods still
+	// around. Pods that fail after a rollout has completed do not count.
+	Rolling bool
+	// Stalled is set when the cluster has given up on the rollout: a
+	// Deployment past its progress deadline.
+	Stalled bool
+}
+
 // workloadState is what a workload says about its pods.
 type workloadState struct {
-	desired, ready int
-	selector       *metav1.LabelSelector
+	WorkloadStatus
+	selector *metav1.LabelSelector
 }
 
 // workload reads a deployment, statefulset or daemonset.
@@ -52,24 +67,38 @@ func (c *Client) workload(ctx context.Context, namespace string, kind Kind, name
 	case KindDeployment:
 		d, getErr := apps.Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err = getErr; err == nil {
-			st = workloadState{desired: 1, ready: int(d.Status.ReadyReplicas), selector: d.Spec.Selector}
+			st = workloadState{WorkloadStatus: WorkloadStatus{Desired: 1, Ready: int(d.Status.ReadyReplicas)}, selector: d.Spec.Selector}
 			if d.Spec.Replicas != nil {
-				st.desired = int(*d.Spec.Replicas)
+				st.Desired = int(*d.Spec.Replicas)
+			}
+			// The same notion of "complete" as kubectl rollout status, without
+			// the availability part: a pod that dies after the rollout is a
+			// failure, not a rollout.
+			st.Rolling = d.Generation > d.Status.ObservedGeneration ||
+				int(d.Status.UpdatedReplicas) < st.Desired || d.Status.Replicas > d.Status.UpdatedReplicas
+			for _, cond := range d.Status.Conditions {
+				if cond.Type == appsv1.DeploymentProgressing && cond.Status == corev1.ConditionFalse && cond.Reason == "ProgressDeadlineExceeded" {
+					st.Stalled = true
+				}
 			}
 		}
 	case KindStatefulSet:
 		s, getErr := apps.StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err = getErr; err == nil {
-			st = workloadState{desired: 1, ready: int(s.Status.ReadyReplicas), selector: s.Spec.Selector}
+			st = workloadState{WorkloadStatus: WorkloadStatus{Desired: 1, Ready: int(s.Status.ReadyReplicas)}, selector: s.Spec.Selector}
 			if s.Spec.Replicas != nil {
-				st.desired = int(*s.Spec.Replicas)
+				st.Desired = int(*s.Spec.Replicas)
 			}
+			st.Rolling = s.Generation > s.Status.ObservedGeneration ||
+				(s.Status.UpdateRevision != "" && s.Status.CurrentRevision != s.Status.UpdateRevision) ||
+				int(s.Status.UpdatedReplicas) < st.Desired
 		}
 	case KindDaemonSet:
 		d, getErr := apps.DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err = getErr; err == nil {
 			// One pod per node it is meant to run on.
-			st = workloadState{desired: int(d.Status.DesiredNumberScheduled), ready: int(d.Status.NumberReady), selector: d.Spec.Selector}
+			st = workloadState{WorkloadStatus: WorkloadStatus{Desired: int(d.Status.DesiredNumberScheduled), Ready: int(d.Status.NumberReady)}, selector: d.Spec.Selector}
+			st.Rolling = d.Generation > d.Status.ObservedGeneration || d.Status.UpdatedNumberScheduled < d.Status.DesiredNumberScheduled
 		}
 	default:
 		return workloadState{}, fmt.Errorf("%w: %q is not a kind of workload", ErrNoWorkload, kind)
@@ -84,14 +113,15 @@ func (c *Client) workload(ctx context.Context, namespace string, kind Kind, name
 }
 
 // Replicas returns how many pods the workload in the target
-// (namespace/kind/name) should have and how many of them are ready.
-func (c *Client) Replicas(ctx context.Context, target string) (desired, ready int, err error) {
+// (namespace/kind/name) should have, how many of them are ready, and
+// whether it is being rolled out.
+func (c *Client) Replicas(ctx context.Context, target string) (WorkloadStatus, error) {
 	namespace, kind, name, err := ParseWorkloadTarget(target)
 	if err != nil {
-		return 0, 0, err
+		return WorkloadStatus{}, err
 	}
 	st, err := c.workload(ctx, namespace, kind, name)
-	return st.desired, st.ready, err
+	return st.WorkloadStatus, err
 }
 
 // workloadSelector returns the selector of a workload's pods.

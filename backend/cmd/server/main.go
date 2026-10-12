@@ -132,8 +132,8 @@ func main() {
 			discoveryStatus = err.Error()
 			logger.Info("cluster discovery unavailable", "reason", err.Error())
 		} else {
-			cluster, workloads, replicas, discoveryStatus = client, client, client, client.Mode
-			endpoints = podEndpoints{client}
+			cluster, workloads, discoveryStatus = client, client, client.Mode
+			replicas, endpoints = workloadReplicas{client}, podEndpoints{client}
 			logger.Info("cluster discovery enabled", "mode", client.Mode)
 			if cfg.DiscoverySyncInterval > 0 {
 				syncer := discovery.New(discovery.Options{
@@ -159,6 +159,7 @@ func main() {
 		Pushes:             db,
 		Workloads:          replicas,
 		Endpoints:          endpoints,
+		RolloutGrace:       cfg.WorkloadRolloutGrace,
 	}), scheduler.Options{
 		Tick:          cfg.SchedulerTick,
 		MaxJitter:     cfg.MaxJitter,
@@ -408,6 +409,15 @@ func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, lo
 	}
 	logger.Warn("the admin password was reset from UPTIME_ADMIN_PASSWORD; unset UPTIME_ADMIN_PASSWORD_RESET again")
 	return nil
+}
+
+// workloadReplicas hands the cluster's workload state to the checker in its
+// own terms.
+type workloadReplicas struct{ client *k8s.Client }
+
+func (w workloadReplicas) Replicas(ctx context.Context, target string) (checker.WorkloadStatus, error) {
+	st, err := w.client.Replicas(ctx, target)
+	return checker.WorkloadStatus{Desired: st.Desired, Ready: st.Ready, Rolling: st.Rolling, Stalled: st.Stalled}, err
 }
 
 // podEndpoints hands the cluster's endpoints to the checker in its own terms.

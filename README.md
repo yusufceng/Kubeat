@@ -529,6 +529,14 @@ doğrudan sorar: workload'un kaç pod'u olmalı, kaçı hazır?
 - `min_ready` verilirse o kadar pod hazır olduğu sürece kontrol başarılıdır
   (3 kopyalı serviste `2`: tek pod'un düşmesi alarm üretmez).
 - Sıfıra ölçeklenmiş bir workload başarısız sayılır.
+- Rolling update sırasında pod'ların yer değiştirmesi kesinti değildir:
+  workload bir güncellemeyi yayarken (yeni generation, güncellenmemiş ya da
+  eski pod'lar varken) eksik pod'lar `UPTIME_WORKLOAD_ROLLOUT_GRACE` (10 dk)
+  boyunca hoş görülür ve kontrol "rollout in progress" ayrıntısıyla başarılı
+  sayılır. Yayım bu süreyi aşarsa ya da cluster vazgeçerse (Deployment'ın
+  `progressDeadlineSeconds`'ı dolunca) olay açılır. Yayım bittikten sonra
+  düşen bir pod normal kesintidir. Sayaç bellektedir; Kubeat yeniden
+  başlarsa süren bir yayım için baştan sayar.
 - Pod'lara ağ erişimi gerekmez, bu yüzden servisi olmayan işler (kuyruk
   tüketicileri, agent'lar) için de çalışır. Kubeat'in cluster'a bağlı olması
   ve `apps` grubundaki bu üç kaynağı okuyabilmesi gerekir; chart bu yetkiyi
@@ -943,6 +951,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_KUBE_TIMEOUT` | `10s` | Cluster API istekleri için zaman aşımı |
 | `UPTIME_EVENT_WINDOW` | `2h` | Monitor sayfasında pod'ların yanında gösterilen cluster olaylarının ne kadar geriye gideceği |
 | `UPTIME_EVENT_LIMIT` | `20` | En fazla kaç olay gösterileceği |
+| `UPTIME_WORKLOAD_ROLLOUT_GRACE` | `10m` | Workload monitor'un süren bir rolling update'te eksik pod'ları ne kadar hoş göreceği; `0` hiç |
 | `UPTIME_PROMETHEUS_URL` | – | Pod CPU/bellek kullanımının okunduğu Prometheus uyumlu API; boşsa kullanım gösterilmez |
 | `UPTIME_PROMETHEUS_TOKEN_FILE` | – | Her istekte okunan bearer token dosyası |
 | `UPTIME_PROMETHEUS_CA_FILE` | – | Sunucu sertifikasının doğrulanacağı CA dosyası |

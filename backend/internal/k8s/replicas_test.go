@@ -46,6 +46,26 @@ func workloadCluster() *Client {
 			Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 5, NumberReady: 4}},
 		&appsv1.Deployment{ObjectMeta: objMeta("other", "web", nil), Spec: appsv1.DeploymentSpec{Replicas: replicas(9), Selector: selectorFor("web")}},
 
+		// Mid-rollout: one new pod up, old ones still around.
+		&appsv1.Deployment{ObjectMeta: objMeta("shop", "rolling", nil),
+			Spec:   appsv1.DeploymentSpec{Replicas: replicas(3), Selector: selectorFor("rolling")},
+			Status: appsv1.DeploymentStatus{Replicas: 4, UpdatedReplicas: 1, ReadyReplicas: 2}},
+		// The cluster gave up on this rollout.
+		&appsv1.Deployment{ObjectMeta: objMeta("shop", "stuck", nil),
+			Spec: appsv1.DeploymentSpec{Replicas: replicas(3), Selector: selectorFor("stuck")},
+			Status: appsv1.DeploymentStatus{Replicas: 3, UpdatedReplicas: 1, ReadyReplicas: 2, Conditions: []appsv1.DeploymentCondition{
+				{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}}},
+		// Rolled out and then a pod died: not a rollout.
+		&appsv1.Deployment{ObjectMeta: objMeta("shop", "broken", nil),
+			Spec:   appsv1.DeploymentSpec{Replicas: replicas(3), Selector: selectorFor("broken")},
+			Status: appsv1.DeploymentStatus{Replicas: 3, UpdatedReplicas: 3, ReadyReplicas: 2, AvailableReplicas: 2}},
+		&appsv1.StatefulSet{ObjectMeta: objMeta("shop", "cache", nil),
+			Spec:   appsv1.StatefulSetSpec{Replicas: replicas(3), Selector: selectorFor("cache")},
+			Status: appsv1.StatefulSetStatus{ReadyReplicas: 2, UpdatedReplicas: 1, CurrentRevision: "cache-1", UpdateRevision: "cache-2"}},
+		&appsv1.DaemonSet{ObjectMeta: objMeta("shop", "logger", nil),
+			Spec:   appsv1.DaemonSetSpec{Selector: selectorFor("logger")},
+			Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 5, NumberReady: 4, UpdatedNumberScheduled: 3}},
+
 		readyPod("web-1", map[string]string{"app": "web"}, true),
 		readyPod("web-2", map[string]string{"app": "web"}, false),
 		readyPod("db-0", map[string]string{"app": "db"}, true),
@@ -57,23 +77,28 @@ func workloadCluster() *Client {
 func TestReplicas(t *testing.T) {
 	c := workloadCluster()
 	ctx := context.Background()
-	for target, want := range map[string][2]int{
-		"shop/deployment/web":    {3, 2},
-		"shop/deployment/worker": {1, 1},
-		"shop/statefulset/db":    {2, 2},
-		"shop/daemonset/agent":   {5, 4},
-		"other/deployment/web":   {9, 0},
+	for target, want := range map[string]WorkloadStatus{
+		"shop/deployment/web":     {Desired: 3, Ready: 2, Rolling: true}, // fixtures without updatedReplicas look mid-rollout
+		"shop/deployment/worker":  {Desired: 1, Ready: 1, Rolling: true},
+		"shop/statefulset/db":     {Desired: 2, Ready: 2, Rolling: true},
+		"shop/daemonset/agent":    {Desired: 5, Ready: 4, Rolling: true},
+		"other/deployment/web":    {Desired: 9, Ready: 0, Rolling: true},
+		"shop/deployment/rolling": {Desired: 3, Ready: 2, Rolling: true},
+		"shop/deployment/stuck":   {Desired: 3, Ready: 2, Rolling: true, Stalled: true},
+		"shop/deployment/broken":  {Desired: 3, Ready: 2},
+		"shop/statefulset/cache":  {Desired: 3, Ready: 2, Rolling: true},
+		"shop/daemonset/logger":   {Desired: 5, Ready: 4, Rolling: true},
 	} {
-		desired, ready, err := c.Replicas(ctx, target)
-		if err != nil || desired != want[0] || ready != want[1] {
-			t.Errorf("%s: %d desired, %d ready, %v; want %v", target, desired, ready, err, want)
+		got, err := c.Replicas(ctx, target)
+		if err != nil || got != want {
+			t.Errorf("%s: %+v, %v; want %+v", target, got, err, want)
 		}
 	}
-	if _, _, err := c.Replicas(ctx, "shop/deployment/gone"); !errors.Is(err, ErrNoWorkload) {
+	if _, err := c.Replicas(ctx, "shop/deployment/gone"); !errors.Is(err, ErrNoWorkload) {
 		t.Errorf("missing workload: err = %v, want ErrNoWorkload", err)
 	}
 	for _, bad := range []string{"", "shop/web", "shop/pod/web", "shop/deployment/", "/deployment/web", "a/deployment/b/c"} {
-		if _, _, err := c.Replicas(ctx, bad); err == nil {
+		if _, err := c.Replicas(ctx, bad); err == nil {
 			t.Errorf("target %q was accepted", bad)
 		}
 	}
@@ -95,7 +120,10 @@ func TestWorkloadCandidates(t *testing.T) {
 		}
 	}
 	// By kind, then by name; nothing from the other namespace.
-	want := []string{"deployment/web", "deployment/worker", "statefulset/db", "daemonset/agent"}
+	want := []string{
+		"deployment/broken", "deployment/rolling", "deployment/stuck", "deployment/web", "deployment/worker",
+		"statefulset/cache", "statefulset/db", "daemonset/agent", "daemonset/logger",
+	}
 	if len(sources) != len(want) {
 		t.Fatalf("sources = %v, want %v", sources, want)
 	}

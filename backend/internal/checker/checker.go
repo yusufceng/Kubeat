@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
@@ -38,6 +39,9 @@ type Options struct {
 	// Endpoints is required for monitors that check each pod; nil without
 	// a cluster.
 	Endpoints Endpoints
+	// RolloutGrace is how long a workload monitor tolerates missing pods
+	// while a rollout is in progress; zero tolerates none.
+	RolloutGrace time.Duration
 }
 
 // Checker runs the checks of every monitor type. It is safe for concurrent
@@ -47,6 +51,11 @@ type Checker struct {
 	insecure  *http.Transport
 	dialer    *net.Dialer
 	opts      Options
+
+	// rollouts is when each workload target was first seen rolling out.
+	mu       sync.Mutex
+	rollouts map[string]time.Time
+	now      func() time.Time
 }
 
 // New returns a Checker. Timeouts are not set here; every check is bounded
@@ -62,6 +71,8 @@ func New(opts Options) *Checker {
 		insecure:  transport(true),
 		dialer:    &net.Dialer{},
 		opts:      opts,
+		rollouts:  make(map[string]time.Time),
+		now:       time.Now,
 	}
 }
 

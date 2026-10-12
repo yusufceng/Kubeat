@@ -86,6 +86,8 @@ func TestLoadDefaults(t *testing.T) {
 		EventWindow:      2 * time.Hour,
 		EventLimit:       20,
 
+		WorkloadRolloutGrace: 10 * time.Minute,
+
 		DiscoverySyncInterval:    time.Minute,
 		DiscoveryDefaultInterval: 30 * time.Second,
 		DiscoveryDefaultTimeout:  5 * time.Second,

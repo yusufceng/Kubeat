@@ -130,6 +130,9 @@ type Config struct {
 	// many.
 	EventWindow time.Duration // UPTIME_EVENT_WINDOW
 	EventLimit  int           // UPTIME_EVENT_LIMIT
+	// WorkloadRolloutGrace is how long a workload monitor puts up with
+	// missing pods while a rollout is in progress; zero means not at all.
+	WorkloadRolloutGrace time.Duration // UPTIME_WORKLOAD_ROLLOUT_GRACE
 	// Discovery sync keeps monitors in step with objects annotated
 	// kubeat.io/monitor=true; zero turns it off. The defaults apply to
 	// monitors whose annotations do not set them.
@@ -284,6 +287,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.DiscoverySyncInterval, err = envDurationOrZero("UPTIME_DISCOVERY_SYNC_INTERVAL", time.Minute); err != nil {
+		return Config{}, err
+	}
+	if cfg.WorkloadRolloutGrace, err = envDurationOrZero("UPTIME_WORKLOAD_ROLLOUT_GRACE", 10*time.Minute); err != nil {
 		return Config{}, err
 	}
 	if cfg.DiscoveryDefaultTimeout >= cfg.DiscoveryDefaultInterval {

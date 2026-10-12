@@ -488,12 +488,13 @@ func TestTruncate(t *testing.T) {
 }
 
 type fakeWorkloads struct {
-	desired, ready int
-	err            error
+	desired, ready   int
+	rolling, stalled bool
+	err              error
 }
 
-func (f fakeWorkloads) Replicas(context.Context, string) (int, int, error) {
-	return f.desired, f.ready, f.err
+func (f fakeWorkloads) Replicas(context.Context, string) (WorkloadStatus, error) {
+	return WorkloadStatus{Desired: f.desired, Ready: f.ready, Rolling: f.rolling, Stalled: f.stalled}, f.err
 }
 
 func TestWorkloadCheck(t *testing.T) {
@@ -528,5 +529,50 @@ func TestWorkloadCheck(t *testing.T) {
 	}
 	if got := check(nil, 0); got.Up || !strings.Contains(got.Error, "cluster") {
 		t.Errorf("without a cluster: %+v", got)
+	}
+}
+
+func TestWorkloadCheckTolaratesRollouts(t *testing.T) {
+	m := store.Monitor{Type: store.MonitorWorkload, Target: "shop/deployment/web"}
+	clock := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
+	c := New(Options{Workloads: nil, RolloutGrace: 10 * time.Minute})
+	c.now = func() time.Time { return clock }
+	check := func(w Workloads) store.CheckResult {
+		c.opts.Workloads = w
+		return c.Check(context.Background(), m)
+	}
+
+	// Missing pods during a rollout are not a failure.
+	if got := check(fakeWorkloads{desired: 3, ready: 2, rolling: true}); !got.Up || !strings.HasPrefix(got.Detail, "rollout in progress for 0s") {
+		t.Errorf("rollout just started: %+v", got)
+	}
+	clock = clock.Add(9 * time.Minute)
+	if got := check(fakeWorkloads{desired: 3, ready: 1, rolling: true}); !got.Up || !strings.Contains(got.Detail, "for 9m0s") {
+		t.Errorf("rollout at 9m: %+v", got)
+	}
+	// ...until it has gone on for too long.
+	clock = clock.Add(2 * time.Minute)
+	if got := check(fakeWorkloads{desired: 3, ready: 1, rolling: true}); got.Up || !strings.Contains(got.Error, "going on for 11m0s") {
+		t.Errorf("rollout at 11m: %+v", got)
+	}
+	// ...or the cluster has given up on it.
+	if got := check(fakeWorkloads{desired: 3, ready: 1, rolling: true, stalled: true}); got.Up || !strings.Contains(got.Error, "stalled") {
+		t.Errorf("stalled rollout: %+v", got)
+	}
+	// The rollout finishing clears the clock; the next one starts fresh.
+	if got := check(fakeWorkloads{desired: 3, ready: 3}); !got.Up || got.Detail != "3 of 3 pods are ready" {
+		t.Errorf("after the rollout: %+v", got)
+	}
+	if got := check(fakeWorkloads{desired: 3, ready: 2, rolling: true}); !got.Up || !strings.HasPrefix(got.Detail, "rollout in progress for 0s") {
+		t.Errorf("next rollout: %+v", got)
+	}
+	// All pods ready mid-rollout is simply fine.
+	if got := check(fakeWorkloads{desired: 3, ready: 3, rolling: true}); !got.Up || got.Detail != "3 of 3 pods are ready, rollout in progress" {
+		t.Errorf("ready during rollout: %+v", got)
+	}
+	// Without grace, a rollout gets no allowance.
+	c.opts.RolloutGrace = 0
+	if got := check(fakeWorkloads{desired: 3, ready: 2, rolling: true}); got.Up {
+		t.Errorf("no grace: %+v", got)
 	}
 }
