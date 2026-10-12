@@ -15,15 +15,17 @@ import {
   type UptimeWindow,
 } from "@/lib/api";
 import { config } from "@/lib/config";
-import { dateTime, duration, uptime } from "@/lib/format";
+import { duration, uptime } from "@/lib/format";
 import { LiveRefresh } from "@/app/ui/live-refresh";
 import { BackendError } from "@/app/ui/backend-error";
+import { HistoryStrip } from "@/app/ui/history-strip";
 import { IncidentTable } from "@/app/ui/incident-table";
 import { LatencyChart } from "@/app/ui/latency-chart";
 import { LiveDuration } from "@/app/ui/live-duration";
+import { LocalTime } from "@/app/ui/local-time";
 import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
 import { EditMonitorForm, MonitorActions } from "@/app/ui/monitor-settings";
-import { displayState, HistoryStrip, StatusBadge } from "@/app/ui/status";
+import { displayState, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 
 async function MonitorDetail({
@@ -119,7 +121,7 @@ async function MonitorDetail({
               {cert.daysLeft < 0 ? "Süresi doldu" : `${cert.daysLeft} gün kaldı`}
             </span>
             <div className="mt-0.5 text-xs font-normal text-zinc-500">
-              bitiş: {dateTime(cert.expiresAt)}
+              bitiş: <LocalTime iso={cert.expiresAt} seconds={false} />
             </div>
           </Field>
         )}
@@ -249,7 +251,7 @@ async function MonitorDetail({
                 {results.map((r) => (
                   <tr key={r.checked_at}>
                     <td className="whitespace-nowrap px-4 py-2 tabular-nums">
-                      {dateTime(r.checked_at)}
+                      <LocalTime iso={r.checked_at} />
                     </td>
                     <td className="px-4 py-2">
                       <StatusBadge state={r.up ? "up" : "down"} />

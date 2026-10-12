@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { Incident } from "@/lib/api";
-import { dateTime, span } from "@/lib/format";
+import { span } from "@/lib/format";
 import { LiveDuration } from "@/app/ui/live-duration";
+import { LocalTime } from "@/app/ui/local-time";
 
 export function IncidentTable({
   incidents,
@@ -51,7 +52,7 @@ export function IncidentTable({
                   </span>
                 )}
               </td>
-              <td className="whitespace-nowrap px-4 py-2 tabular-nums">{dateTime(i.started_at)}</td>
+              <td className="whitespace-nowrap px-4 py-2 tabular-nums"><LocalTime iso={i.started_at} /></td>
               <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums">
                 {i.resolved_at ? (
                   span(new Date(i.resolved_at).getTime() - new Date(i.started_at).getTime())

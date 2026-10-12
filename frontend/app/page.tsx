@@ -6,9 +6,10 @@ import { duration, uptime } from "@/lib/format";
 import { AddMonitorForm } from "@/app/ui/add-monitor-form";
 import { LiveRefresh } from "@/app/ui/live-refresh";
 import { BackendError } from "@/app/ui/backend-error";
+import { HistoryStrip } from "@/app/ui/history-strip";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
-import { type DisplayState, displayState, HistoryStrip, StatusBadge } from "@/app/ui/status";
+import { type DisplayState, displayState, StatusBadge } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 
 async function Monitors() {

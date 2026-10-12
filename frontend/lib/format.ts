@@ -25,10 +25,6 @@ export function uptime(percent: number | null): string {
   return `%${floored.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}`;
 }
 
-export function dateTime(iso: string): string {
-  return new Date(iso).toLocaleString("tr-TR", { timeZoneName: "short" });
-}
-
 /** Length of a period: 6000 -> "6 sn", 200000 -> "3 dk 20 sn", 9000000 -> "2 sa 30 dk". */
 export function span(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
