@@ -30,9 +30,10 @@ type SQLite struct {
 var _ Store = (*SQLite)(nil)
 
 // OpenSQLite opens (creating if needed) the database at path and applies
-// pending migrations.
-func OpenSQLite(ctx context.Context, path string) (*SQLite, error) {
-	write, err := openPool(path, true)
+// pending migrations. busyTimeout is how long a connection waits for a lock
+// held by another connection before giving up.
+func OpenSQLite(ctx context.Context, path string, busyTimeout time.Duration) (*SQLite, error) {
+	write, err := openPool(path, busyTimeout, true)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +44,7 @@ func OpenSQLite(ctx context.Context, path string) (*SQLite, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
-	read, err := openPool(path, false)
+	read, err := openPool(path, busyTimeout, false)
 	if err != nil {
 		write.Close()
 		return nil, err
@@ -51,11 +52,11 @@ func OpenSQLite(ctx context.Context, path string) (*SQLite, error) {
 	return &SQLite{write: write, read: read}, nil
 }
 
-func openPool(path string, writer bool) (*sql.DB, error) {
+func openPool(path string, busyTimeout time.Duration, writer bool) (*sql.DB, error) {
 	q := url.Values{}
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "synchronous(NORMAL)")
-	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeout.Milliseconds()))
 	q.Add("_pragma", "foreign_keys(1)")
 	if writer {
 		// Take the write lock up front instead of failing on lock upgrade.

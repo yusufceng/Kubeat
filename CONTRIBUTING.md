@@ -51,6 +51,13 @@ Kapsamlar: `backend`, `frontend`, `agent`, `helm`, `ci`.
 
 Örnek: `feat(backend): add health endpoint`
 
+## Yapılandırma
+
+Adres, port, yol, süre, eşik ve kimlik bilgisi gibi ortama göre değişen
+değerler koda gömülmez. Backend'de `internal/config` üzerinden ortam
+değişkeni olarak okunur, makul bir varsayılanı olur ve README'deki tabloya
+eklenir. Gizli bilgiler (token, parola) repoya girmez; varsayılanı yoktur.
+
 ## Definition of Done
 
 - Kod review'dan geçti

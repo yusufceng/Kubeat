@@ -9,9 +9,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/api"
+	"github.com/yusufceng/Kubeat/backend/internal/config"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -21,44 +21,40 @@ var version = "dev"
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	addr := os.Getenv("UPTIME_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
-
-	dbPath := os.Getenv("UPTIME_DB_PATH")
-	if dbPath == "" {
-		dbPath = "uptime.db"
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Error("invalid configuration", "error", err)
+		os.Exit(1)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	db, err := store.OpenSQLite(ctx, dbPath)
+	db, err := store.OpenSQLite(ctx, cfg.DBPath, cfg.DBBusyTimeout)
 	if err != nil {
-		logger.Error("open database failed", "path", dbPath, "error", err)
+		logger.Error("open database failed", "path", cfg.DBPath, "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              cfg.Addr,
 		Handler:           api.NewHandler(version),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 	}
 
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			logger.Error("shutdown failed", "error", err)
 		}
 	}()
 
-	logger.Info("server listening", "addr", addr, "version", version, "db", dbPath)
+	logger.Info("server listening", "addr", cfg.Addr, "version", version, "db", cfg.DBPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server failed", "error", err)
 		db.Close()

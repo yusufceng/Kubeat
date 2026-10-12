@@ -11,7 +11,7 @@ import (
 
 func openTest(t *testing.T) *SQLite {
 	t.Helper()
-	s, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "test.db"), 5*time.Second)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestReopenKeepsDataAndSkipsAppliedMigrations(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "test.db")
 
-	s, err := OpenSQLite(ctx, path)
+	s, err := OpenSQLite(ctx, path, 5*time.Second)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestReopenKeepsDataAndSkipsAppliedMigrations(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	s, err = OpenSQLite(ctx, path)
+	s, err = OpenSQLite(ctx, path, 5*time.Second)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
