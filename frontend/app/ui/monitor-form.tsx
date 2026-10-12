@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { saveMonitorAction } from "@/app/actions";
 import type { DnsRecordType, HttpMethod, JsonOperator, Monitor, MonitorType } from "@/lib/api";
 import { MASKED_VALUE } from "@/lib/constants";
-import { monitorTypeOrder, monitorTypes } from "@/lib/monitor-types";
+import { isDatabaseType, monitorTypeOrder, monitorTypes } from "@/lib/monitor-types";
 
 const httpMethods: HttpMethod[] = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 const jsonOperators: { value: JsonOperator; label: string }[] = [
@@ -420,6 +420,58 @@ export function MonitorForm({
           </Field>
           <Check name="grpc_tls" label="TLS kullan" defaultChecked={monitor?.grpc?.tls} />
           <Check name="tls_skip_verify" label="TLS sertifikasını doğrulama" defaultChecked={monitor?.grpc?.tls_skip_verify} />
+        </Section>
+      )}
+
+      {isDatabaseType(type) && (
+        <Section
+          title="Giriş bilgileri"
+          hint={
+            type === "redis"
+              ? "Sunucu parola istemiyorsa boş bırakın. Kullanıcı adı yalnızca ACL kullanan sunucular içindir."
+              : "Yalnızca okuma yetkisi olan bir kullanıcı yeterlidir."
+          }
+        >
+          <Field label={type === "redis" ? "Kullanıcı (isteğe bağlı)" : "Kullanıcı"} span={3}>
+            <input
+              name="db_username"
+              required={type !== "redis"}
+              defaultValue={monitor?.database?.username}
+              autoComplete="off"
+              className="field"
+            />
+          </Field>
+          <Field
+            label="Parola"
+            span={3}
+            hint={monitor?.database?.password ? "Kayıtlı değer gösterilmez; değiştirmezseniz korunur." : undefined}
+          >
+            <input
+              name="db_password"
+              type="password"
+              // The stored password never reaches the browser; the mask stands for it.
+              defaultValue={monitor?.database?.password}
+              autoComplete="new-password"
+              className="field font-mono"
+            />
+          </Field>
+          {type !== "redis" && (
+            <>
+              <Field label="Veritabanı (isteğe bağlı)" span={2}>
+                <input name="db_database" defaultValue={monitor?.database?.database} placeholder="orders" className="field font-mono" />
+              </Field>
+              <Field label="Sorgu" span={4} hint="Giriş yaptıktan sonra çalıştırılır; hata verirse kontrol başarısızdır.">
+                <input
+                  name="db_query"
+                  defaultValue={monitor?.database?.query || "SELECT 1"}
+                  maxLength={1000}
+                  className="field font-mono"
+                />
+              </Field>
+            </>
+          )}
+          <Check name="db_tls" label="TLS kullan" defaultChecked={monitor?.database?.tls} />
+          <Check name="tls_skip_verify" label="TLS sertifikasını doğrulama" defaultChecked={monitor?.database?.tls_skip_verify} />
         </Section>
       )}
 

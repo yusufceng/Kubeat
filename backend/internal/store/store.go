@@ -28,11 +28,20 @@ const (
 	MonitorPush      MonitorType = "push"      // the target reports in by itself
 	MonitorGRPC      MonitorType = "grpc"      // the gRPC health checking protocol
 	MonitorWebSocket MonitorType = "websocket" // a WebSocket handshake
+	MonitorPostgres  MonitorType = "postgres"  // a query on a PostgreSQL server
+	MonitorMySQL     MonitorType = "mysql"     // a query on a MySQL or MariaDB server
+	MonitorRedis     MonitorType = "redis"     // a PING to a Redis server
 )
 
 // MonitorTypes lists every type.
 var MonitorTypes = []MonitorType{
 	MonitorHTTP, MonitorTCP, MonitorPing, MonitorDNS, MonitorPush, MonitorGRPC, MonitorWebSocket,
+	MonitorPostgres, MonitorMySQL, MonitorRedis,
+}
+
+// IsDatabase reports whether monitors of the type log in to a database.
+func (t MonitorType) IsDatabase() bool {
+	return t == MonitorPostgres || t == MonitorMySQL || t == MonitorRedis
 }
 
 // Monitor is an endpoint that is checked periodically.
@@ -77,6 +86,7 @@ type Monitor struct {
 	DNS       DNSOptions
 	GRPC      GRPCOptions
 	WebSocket WebSocketOptions
+	Database  DatabaseOptions
 }
 
 // Defaults of the check options, applied to monitors that do not set them.
@@ -85,6 +95,7 @@ const (
 	DefaultExpectedStatus = "200-399"
 	DefaultMaxRedirects   = 10
 	DefaultDNSRecordType  = "A"
+	DefaultDatabaseQuery  = "SELECT 1"
 )
 
 // HTTPAuth is how an HTTP monitor authenticates.
@@ -159,6 +170,22 @@ type GRPCOptions struct {
 type WebSocketOptions struct {
 	// Subprotocol, if set, is requested and must be accepted by the server.
 	Subprotocol   string `json:"subprotocol,omitempty"`
+	SkipTLSVerify bool   `json:"skip_tls_verify,omitempty"`
+}
+
+// DatabaseOptions configures a check that logs in to a database server:
+// PostgreSQL, MySQL or Redis. The target is the server's host:port.
+type DatabaseOptions struct {
+	// Username and Password log in. Redis needs neither unless it is set up
+	// to; with only a password it is the server's shared one.
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	// Database is the database to connect to; unused for Redis.
+	Database string `json:"database,omitempty"`
+	// Query is run after logging in, and must succeed; unused for Redis,
+	// which is sent a PING.
+	Query         string `json:"query,omitempty"`
+	TLS           bool   `json:"tls,omitempty"`
 	SkipTLSVerify bool   `json:"skip_tls_verify,omitempty"`
 }
 

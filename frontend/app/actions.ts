@@ -116,6 +116,18 @@ export async function saveMonitorAction(formData: FormData): Promise<{ error: st
         tls_skip_verify: checked("tls_skip_verify"),
       };
       break;
+    case "postgres":
+    case "mysql":
+    case "redis":
+      settings.database = {
+        username: text("db_username"),
+        password: String(formData.get("db_password") ?? ""),
+        database: type === "redis" ? "" : text("db_database"),
+        query: type === "redis" ? "" : text("db_query"),
+        tls: checked("db_tls"),
+        tls_skip_verify: checked("tls_skip_verify"),
+      };
+      break;
     case "websocket":
       settings.websocket = {
         subprotocol: text("ws_subprotocol"),

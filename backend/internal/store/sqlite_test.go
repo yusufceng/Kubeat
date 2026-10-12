@@ -489,6 +489,7 @@ func TestOptionsByType(t *testing.T) {
 		m.DNS = DNSOptions{RecordType: "MX", Resolver: "10.0.0.10:53", Expected: "mail"}
 		m.GRPC = GRPCOptions{Service: "shop.Cart", TLS: true}
 		m.WebSocket = WebSocketOptions{Subprotocol: "graphql-ws"}
+		m.Database = DatabaseOptions{Username: "probe", Password: "s3cret", Database: "shop", Query: "SELECT count(*) FROM orders", TLS: true}
 		return m
 	}
 
@@ -510,6 +511,11 @@ func TestOptionsByType(t *testing.T) {
 			want.GRPC = input.GRPC
 		case MonitorWebSocket:
 			want.WebSocket = input.WebSocket
+		case MonitorPostgres, MonitorMySQL:
+			want.Database = input.Database
+		case MonitorRedis:
+			// Redis has no database name or query to keep.
+			want.Database = DatabaseOptions{Username: "probe", Password: "s3cret", TLS: true}
 		}
 		stored, err := s.GetMonitor(ctx, created.ID)
 		if err != nil {
@@ -517,8 +523,8 @@ func TestOptionsByType(t *testing.T) {
 		}
 		for _, got := range []Monitor{created, stored} {
 			if !reflect.DeepEqual(got.HTTP, want.HTTP) || got.TCP != want.TCP || got.DNS != want.DNS ||
-				got.GRPC != want.GRPC || got.WebSocket != want.WebSocket {
-				t.Errorf("%s: options = %+v %+v %+v %+v %+v", typ, got.HTTP, got.TCP, got.DNS, got.GRPC, got.WebSocket)
+				got.GRPC != want.GRPC || got.WebSocket != want.WebSocket || got.Database != want.Database {
+				t.Errorf("%s: options = %+v %+v %+v %+v %+v %+v", typ, got.HTTP, got.TCP, got.DNS, got.GRPC, got.WebSocket, got.Database)
 			}
 		}
 	}

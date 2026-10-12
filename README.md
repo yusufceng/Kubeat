@@ -217,8 +217,12 @@ Her monitor'da ortak alanlar: `name`, `type`, `target`, `interval_seconds`,
 | `push` | (boş) | Hedef kendisi rapor verir; rapor gelmezse başarısız |
 | `grpc` | `host:port` | gRPC sağlık protokolü (`grpc.health.v1.Health/Check`) |
 | `websocket` | `wss://host/yol` | WebSocket el sıkışması |
+| `postgres` | `host:port` | PostgreSQL'e giriş yapıp sorgu çalıştırır |
+| `mysql` | `host:port` | MySQL ya da MariaDB'ye giriş yapıp sorgu çalıştırır |
+| `redis` | `host:port` | Redis'e bağlanır, gerekiyorsa giriş yapar, `PING` gönderir |
 
-Tipe özel ayarlar, tipin adını taşıyan nesnede verilir. Güncellemede bu nesne
+Tipe özel ayarlar, tipin adını taşıyan nesnede verilir (üç veritabanı tipi
+`database` nesnesini paylaşır). Güncellemede bu nesne
 gönderilirse o tipin **tüm** ayarlarının yerine geçer; gönderilmezse ayarlar
 değişmez.
 
@@ -319,6 +323,40 @@ command: ["sh", "-c", "yedek-al && curl -fsS 'http://kubeat-backend:8080/api/pus
 `"grpc": {"service": "shop.Cart", "tls": false, "tls_skip_verify": false}`:
 Kubernetes'in gRPC probe'larıyla aynı protokol. `service` boşsa sunucunun
 genel durumu sorulur. Yanıt `SERVING` değilse kontrol başarısızdır.
+
+### `postgres`, `mysql`, `redis`
+
+```json
+"database": {
+  "username": "probe",
+  "password": "...",
+  "database": "orders",
+  "query": "SELECT 1",
+  "tls": false,
+  "tls_skip_verify": false
+}
+```
+
+Bir portun açık olması veritabanının çalıştığını göstermez; bu tipler giriş
+yapıp gerçekten bir şey sorar.
+
+- `postgres` ve `mysql`: `username` zorunludur. `query` giriş yaptıktan sonra
+  çalıştırılır ve hata verirse kontrol başarısızdır; varsayılan `SELECT 1`.
+  Yalnızca okuma yetkisi olan bir kullanıcı yeterlidir.
+- `redis`: `PING` gönderilir, `PONG` beklenir. Sunucu parola istiyorsa
+  `password`, ACL kullanıyorsa ayrıca `username` verilir; `database` ve
+  `query` kullanılmaz.
+- `password` API yanıtlarında `********` olarak maskelenir; güncellemede bu
+  değer gönderilirse kayıtlı parola korunur. Hata mesajları sunucunun
+  söylediğini taşır (`password authentication failed for user "probe"`),
+  parolayı taşımaz.
+
+Gerçek sunuculara karşı testler, adresleri verildiğinde çalışır:
+
+```
+KUBEAT_TEST_POSTGRES=127.0.0.1:5432 KUBEAT_TEST_MYSQL=127.0.0.1:3306 \
+KUBEAT_TEST_REDIS=127.0.0.1:6379 go test ./internal/checker/
+```
 
 ### `websocket`
 

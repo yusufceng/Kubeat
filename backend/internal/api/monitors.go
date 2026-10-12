@@ -390,7 +390,7 @@ func validateTarget(typ store.MonitorType, target string) error {
 		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
 			return errors.New("target must be a ws:// or wss:// URL")
 		}
-	case store.MonitorTCP, store.MonitorGRPC:
+	case store.MonitorTCP, store.MonitorGRPC, store.MonitorPostgres, store.MonitorMySQL, store.MonitorRedis:
 		host, port, err := net.SplitHostPort(target)
 		if err != nil || host == "" {
 			return errors.New("target must be host:port")
@@ -533,6 +533,11 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	m.Enabled = true
 	if err := req.checkOptions.apply(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// A SQL server cannot be asked anything without logging in.
+	if (m.Type == store.MonitorPostgres || m.Type == store.MonitorMySQL) && m.Database.Username == "" {
+		writeError(w, http.StatusBadRequest, "database options with a username are required for this type")
 		return
 	}
 	h.storeMonitor(w, r, m)

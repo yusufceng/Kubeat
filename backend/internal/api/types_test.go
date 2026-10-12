@@ -360,3 +360,63 @@ func TestTagsAndGroupsAPI(t *testing.T) {
 		t.Errorf("a 63-character group with non-ASCII letters: status = %d", code)
 	}
 }
+
+func TestDatabaseMonitors(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	ctx := context.Background()
+
+	var pg, redis, mysql monitorResponse
+	body := monitorJSON("orders-db", "postgres", "orders-db.shop.svc:5432",
+		`"database":{"username":"probe","password":"s3cret","database":"orders","tls":true,"tls_skip_verify":true}`)
+	if code := do(t, "POST", base, body, &pg); code != http.StatusCreated {
+		t.Fatalf("create postgres: status = %d", code)
+	}
+	d := pg.Database
+	if d == nil || d.Username != "probe" || d.Password != maskedValue || d.Database != "orders" || d.Query != "SELECT 1" || !d.TLS || !d.TLSSkipVerify || pg.HTTP != nil {
+		t.Errorf("postgres options = %+v", d)
+	}
+	if stored, _ := db.GetMonitor(ctx, pg.ID); stored.Database.Password != "s3cret" {
+		t.Errorf("stored password = %q", stored.Database.Password)
+	}
+
+	body = monitorJSON("cache", "redis", "cache.shop.svc:6379", "")
+	if code := do(t, "POST", base, body, &redis); code != http.StatusCreated || redis.Database == nil || redis.Database.Query != "" {
+		t.Errorf("redis without options: status = %d, options = %+v", code, redis.Database)
+	}
+	body = monitorJSON("legacy", "mysql", "legacy:3306", `"database":{"username":"probe","query":"SELECT count(*) FROM jobs WHERE failed"}`)
+	if code := do(t, "POST", base, body, &mysql); code != http.StatusCreated || mysql.Database.Query != "SELECT count(*) FROM jobs WHERE failed" || mysql.Database.Password != "" {
+		t.Errorf("mysql: status = %d, options = %+v", code, mysql.Database)
+	}
+
+	// An update keeps the masked password and takes a new one.
+	var updated monitorResponse
+	patch := `{"database":{"username":"probe2","password":"` + maskedValue + `","database":"orders"}}`
+	if code := do(t, "PATCH", base+"/1", patch, &updated); code != http.StatusOK || updated.Database.Username != "probe2" || updated.Database.TLS {
+		t.Errorf("update: status = %d, options = %+v", code, updated.Database)
+	}
+	if stored, _ := db.GetMonitor(ctx, pg.ID); stored.Database.Password != "s3cret" || stored.Database.Username != "probe2" {
+		t.Errorf("stored after the update = %+v", stored.Database)
+	}
+	do(t, "PATCH", base+"/2", `{"database":{"password":"redis-pass"}}`, nil)
+	if stored, _ := db.GetMonitor(ctx, redis.ID); stored.Database.Password != "redis-pass" {
+		t.Errorf("stored redis password = %q", stored.Database.Password)
+	}
+
+	invalid := map[string]string{
+		"postgres without options": monitorJSON("x", "postgres", "db:5432", ""),
+		"postgres without a user":  monitorJSON("x", "postgres", "db:5432", `"database":{"password":"p"}`),
+		"mysql without a port":     monitorJSON("x", "mysql", "db", `"database":{"username":"u"}`),
+		"redis with a query":       monitorJSON("x", "redis", "c:6379", `"database":{"query":"SELECT 1"}`),
+		"redis user, no password":  monitorJSON("x", "redis", "c:6379", `"database":{"username":"u"}`),
+		"long query":               monitorJSON("x", "mysql", "db:3306", `"database":{"username":"u","query":"`+strings.Repeat("a", 1001)+`"}`),
+		"database on a tcp check":  monitorJSON("x", "tcp", "db:5432", `"database":{"username":"u"}`),
+		"http on a postgres check": monitorJSON("x", "postgres", "db:5432", `"http":{"method":"GET"}`),
+		"mask without a password":  monitorJSON("x", "postgres", "db:5432", `"database":{"username":"u","password":"`+maskedValue+`"}`),
+	}
+	for name, body := range invalid {
+		if code := do(t, "POST", base, body, nil); code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, code)
+		}
+	}
+}

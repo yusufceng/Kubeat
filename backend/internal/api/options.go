@@ -36,6 +36,8 @@ type checkOptions struct {
 	DNS       *dnsOptions       `json:"dns"`
 	GRPC      *grpcOptions      `json:"grpc"`
 	WebSocket *websocketOptions `json:"websocket"`
+	// Database belongs to the postgres, mysql and redis types.
+	Database *databaseOptions `json:"database"`
 }
 
 type httpOptions struct {
@@ -81,6 +83,19 @@ type websocketOptions struct {
 	TLSSkipVerify bool   `json:"tls_skip_verify"`
 }
 
+type databaseOptions struct {
+	Username string `json:"username"`
+	// Password comes back masked.
+	Password string `json:"password"`
+	// Database and Query do not apply to Redis.
+	Database      string `json:"database"`
+	Query         string `json:"query"`
+	TLS           bool   `json:"tls"`
+	TLSSkipVerify bool   `json:"tls_skip_verify"`
+}
+
+const maxQueryLength = 1000
+
 // toCheckOptions returns the options of the monitor's type, with secrets
 // masked.
 func toCheckOptions(m store.Monitor) checkOptions {
@@ -112,6 +127,14 @@ func toCheckOptions(m store.Monitor) checkOptions {
 		o.GRPC = &grpcOptions{Service: m.GRPC.Service, TLS: m.GRPC.TLS, TLSSkipVerify: m.GRPC.SkipTLSVerify}
 	case store.MonitorWebSocket:
 		o.WebSocket = &websocketOptions{Subprotocol: m.WebSocket.Subprotocol, TLSSkipVerify: m.WebSocket.SkipTLSVerify}
+	case store.MonitorPostgres, store.MonitorMySQL, store.MonitorRedis:
+		d := m.Database
+		o.Database = &databaseOptions{
+			Username: d.Username, Database: d.Database, Query: d.Query, TLS: d.TLS, TLSSkipVerify: d.SkipTLSVerify,
+		}
+		if d.Password != "" {
+			o.Database.Password = maskedValue
+		}
 	}
 	return o
 }
@@ -120,10 +143,13 @@ func toCheckOptions(m store.Monitor) checkOptions {
 // type that names none.
 func defaultOptions(typ store.MonitorType) store.Monitor {
 	var m store.Monitor
-	if typ == store.MonitorHTTP {
+	switch typ {
+	case store.MonitorHTTP:
 		m.HTTP = store.HTTPOptions{
 			Method: store.DefaultHTTPMethod, ExpectedStatus: store.DefaultExpectedStatus, MaxRedirects: store.DefaultMaxRedirects,
 		}
+	case store.MonitorPostgres, store.MonitorMySQL:
+		m.Database.Query = store.DefaultDatabaseQuery
 	}
 	return m
 }
@@ -132,13 +158,17 @@ func defaultOptions(typ store.MonitorType) store.Monitor {
 // replace what m has as a whole; options of another type are an error.
 // Masked secrets are filled in from what m holds.
 func (o checkOptions) apply(m *store.Monitor) error {
-	given := map[store.MonitorType]bool{
-		store.MonitorHTTP: o.HTTP != nil, store.MonitorTCP: o.TCP != nil, store.MonitorDNS: o.DNS != nil,
-		store.MonitorGRPC: o.GRPC != nil, store.MonitorWebSocket: o.WebSocket != nil,
+	// The block each type owns; the database types share one.
+	own := string(m.Type)
+	if m.Type.IsDatabase() {
+		own = "database"
 	}
-	for typ, present := range given {
-		if present && typ != m.Type {
-			return fmt.Errorf("%s options are only valid for %s monitors", typ, typ)
+	for name, present := range map[string]bool{
+		"http": o.HTTP != nil, "tcp": o.TCP != nil, "dns": o.DNS != nil,
+		"grpc": o.GRPC != nil, "websocket": o.WebSocket != nil, "database": o.Database != nil,
+	} {
+		if present && name != own {
+			return fmt.Errorf("%s options are not valid for a %s monitor", name, m.Type)
 		}
 	}
 
@@ -154,8 +184,54 @@ func (o checkOptions) apply(m *store.Monitor) error {
 		m.GRPC, err = o.GRPC.resolve()
 	case o.WebSocket != nil:
 		m.WebSocket, err = o.WebSocket.resolve()
+	case o.Database != nil:
+		m.Database, err = o.Database.resolve(m.Type, m.Database)
 	}
 	return err
+}
+
+// resolve validates the options and returns their stored form. existing
+// holds the monitor's current options, from which a masked password is
+// filled in.
+func (o *databaseOptions) resolve(typ store.MonitorType, existing store.DatabaseOptions) (store.DatabaseOptions, error) {
+	none := store.DatabaseOptions{}
+	out := store.DatabaseOptions{
+		Username: strings.TrimSpace(o.Username), Password: o.Password,
+		TLS: o.TLS, SkipTLSVerify: o.TLS && o.TLSSkipVerify,
+	}
+	if out.Password == maskedValue {
+		if existing.Password == "" {
+			return none, errors.New("database.password has no stored value; enter one")
+		}
+		out.Password = existing.Password
+	}
+	if !singleLine(out.Username) || len(out.Password) > maxHeaderValue || strings.ContainsAny(out.Password, "\r\n") {
+		return none, errors.New("database.username or database.password is too long or contains a line break")
+	}
+
+	if typ == store.MonitorRedis {
+		if strings.TrimSpace(o.Database) != "" || strings.TrimSpace(o.Query) != "" {
+			return none, errors.New("database.database and database.query do not apply to redis: the check is a PING")
+		}
+		if out.Username != "" && out.Password == "" {
+			return none, errors.New("database.password is required with a username")
+		}
+		return out, nil
+	}
+
+	out.Database, out.Query = strings.TrimSpace(o.Database), strings.TrimSpace(o.Query)
+	if out.Query == "" {
+		out.Query = store.DefaultDatabaseQuery
+	}
+	switch {
+	case out.Username == "":
+		return none, errors.New("database.username is required")
+	case !singleLine(out.Database):
+		return none, errors.New("database.database is too long or contains a line break")
+	case len(out.Query) > maxQueryLength:
+		return none, fmt.Errorf("database.query must be at most %d bytes", maxQueryLength)
+	}
+	return out, nil
 }
 
 // singleLine reports whether s fits an option that ends up in a header or

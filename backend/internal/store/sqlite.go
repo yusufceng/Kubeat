@@ -303,6 +303,7 @@ type settings struct {
 	DNS       *DNSOptions       `json:"dns,omitempty"`
 	GRPC      *GRPCOptions      `json:"grpc,omitempty"`
 	WebSocket *WebSocketOptions `json:"websocket,omitempty"`
+	Database  *DatabaseOptions  `json:"database,omitempty"`
 }
 
 // normalize fills in the defaults of the monitor's check options and clears
@@ -333,8 +334,16 @@ func normalize(m *Monitor) {
 		kept.GRPC = m.GRPC
 	case MonitorWebSocket:
 		kept.WebSocket = m.WebSocket
+	case MonitorPostgres, MonitorMySQL:
+		kept.Database = m.Database
+		if kept.Database.Query == "" {
+			kept.Database.Query = DefaultDatabaseQuery
+		}
+	case MonitorRedis:
+		kept.Database = m.Database
+		kept.Database.Database, kept.Database.Query = "", ""
 	}
-	m.HTTP, m.TCP, m.DNS, m.GRPC, m.WebSocket = kept.HTTP, kept.TCP, kept.DNS, kept.GRPC, kept.WebSocket
+	m.HTTP, m.TCP, m.DNS, m.GRPC, m.WebSocket, m.Database = kept.HTTP, kept.TCP, kept.DNS, kept.GRPC, kept.WebSocket, kept.Database
 }
 
 // encodeSettings returns the stored form of a normalized monitor's options.
@@ -351,13 +360,15 @@ func encodeSettings(m Monitor) (string, error) {
 		st.GRPC = &m.GRPC
 	case MonitorWebSocket:
 		st.WebSocket = &m.WebSocket
+	case MonitorPostgres, MonitorMySQL, MonitorRedis:
+		st.Database = &m.Database
 	}
 	b, err := json.Marshal(st)
 	return string(b), err
 }
 
 func decodeSettings(text string, m *Monitor) error {
-	st := settings{HTTP: &m.HTTP, TCP: &m.TCP, DNS: &m.DNS, GRPC: &m.GRPC, WebSocket: &m.WebSocket}
+	st := settings{HTTP: &m.HTTP, TCP: &m.TCP, DNS: &m.DNS, GRPC: &m.GRPC, WebSocket: &m.WebSocket, Database: &m.Database}
 	if err := json.Unmarshal([]byte(text), &st); err != nil {
 		return fmt.Errorf("decode settings: %w", err)
 	}

@@ -40,6 +40,21 @@ export const monitorTypes: Record<MonitorType, TypeInfo> = {
     summary: "gRPC sağlık protokolüyle servisin SERVING olup olmadığını sorar.",
     target: { label: "Adres", placeholder: "cart.shop.svc:9090" },
   },
+  postgres: {
+    label: "PostgreSQL",
+    summary: "Sunucuya giriş yapıp bir sorgu çalıştırır.",
+    target: { label: "Adres", placeholder: "orders-db.shop.svc:5432" },
+  },
+  mysql: {
+    label: "MySQL / MariaDB",
+    summary: "Sunucuya giriş yapıp bir sorgu çalıştırır.",
+    target: { label: "Adres", placeholder: "legacy-db.shop.svc:3306" },
+  },
+  redis: {
+    label: "Redis",
+    summary: "Sunucuya bağlanır, gerekiyorsa giriş yapar ve PING gönderir.",
+    target: { label: "Adres", placeholder: "cache.shop.svc:6379" },
+  },
   websocket: {
     label: "WebSocket",
     summary: "Bağlantının WebSocket'e yükseltilebildiğini denetler.",
@@ -48,7 +63,23 @@ export const monitorTypes: Record<MonitorType, TypeInfo> = {
 };
 
 /** The types in the order they are offered. */
-export const monitorTypeOrder: MonitorType[] = ["http", "tcp", "ping", "dns", "grpc", "websocket", "push"];
+export const monitorTypeOrder: MonitorType[] = [
+  "http",
+  "tcp",
+  "ping",
+  "dns",
+  "grpc",
+  "websocket",
+  "postgres",
+  "mysql",
+  "redis",
+  "push",
+];
+
+/** The types whose check logs in to a database server. */
+export function isDatabaseType(type: MonitorType): boolean {
+  return type === "postgres" || type === "mysql" || type === "redis";
+}
 
 export function typeLabel(type: MonitorType): string {
   return monitorTypes[type]?.label ?? type;

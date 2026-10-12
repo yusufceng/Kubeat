@@ -19,7 +19,8 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 11 | Durum sayfaları ve rozetler | Tamamlandı |
 | 12 | Tekrarlayan bakım pencereleri | Tamamlandı |
 | 13 | Bildirim sağlayıcıları: Telegram, Discord, PagerDuty, Mattermost, Google Chat, ntfy, Gotify; kanal düzenleme ve namespace'e göre yönlendirme | Tamamlandı |
-| 14 | Veritabanı ve kuyruk kontrolleri (PostgreSQL, MySQL, Redis, MongoDB, Kafka, RabbitMQ); Kubernetes workload tipi | Planlandı |
+| 14 | Veritabanı kontrolleri: PostgreSQL, MySQL/MariaDB, Redis | Tamamlandı |
+| 14b | MongoDB, Kafka, RabbitMQ kontrolleri; Kubernetes workload tipi | Planlandı |
 | 15 | Ayarlar ekranı, kişisel hesaplar ve roller, API anahtarları | Planlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
@@ -35,8 +36,8 @@ karşılamak. Kuma'nın kaynağı (3.0 beta, 2026-10) incelenerek çıkarıldı.
 | HTTP: metot, gövde, header, kabul edilen kodlar, yönlendirme sınırı, keyword (ve tersi), JSON sorgusu, basic/bearer | Var. NTLM, OAuth2 ve mTLS yok |
 | TCP port, ping, DNS, push, gRPC, WebSocket | Var. gRPC'de keyword yerine standart sağlık protokolü |
 | Tekrar sayısı ve tekrar aralığı, ters mod, sertifika süresi bildirimi | Var |
-| Veritabanları (PostgreSQL, MySQL, SQL Server, MongoDB, Redis, Oracle), MQTT, Kafka, RabbitMQ, SMTP, SNMP, SFTP, NTP, RADIUS | Yok; ilgili olanlar 14. adımda |
-| Docker container, PM2, sistem servisi | Yok; karşılığı Kubernetes workload tipi (14. adım) ve bugünkü pod paneli |
+| Veritabanları (PostgreSQL, MySQL, SQL Server, MongoDB, Redis, Oracle), MQTT, Kafka, RabbitMQ, SMTP, SNMP, SFTP, NTP, RADIUS | PostgreSQL, MySQL/MariaDB ve Redis var. MongoDB, Kafka ve RabbitMQ 14b adımında; kalanı yok |
+| Docker container, PM2, sistem servisi | Yok; karşılığı Kubernetes workload tipi (14b adımı) ve bugünkü pod paneli |
 | Gerçek tarayıcı, oyun sunucuları, Steam, Tailscale, Globalping | Kapsam dışı |
 | Kenar çubuğunda liste, arama ve filtre, toplu seçim | Var |
 | Monitor sayfası: kalp atışı çubuğu, yanıt süresi grafiği, 24 sa / 30 gün / 1 yıl uptime, sertifika bilgisi, olay tablosu | Var |
@@ -76,6 +77,7 @@ da şablon render edilerek doğrulandı:
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.
-- Kanalların token'ları da veritabanında şifresiz durur.
+- Kanalların token'ları ve veritabanı monitor'larının parolaları da
+  veritabanında şifresiz durur.
 - Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır. Minikube'da
   kısıtlı güvenlik bağlamındaki pod'dan çalıştı; OpenShift'te denenmedi.

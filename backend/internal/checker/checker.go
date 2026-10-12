@@ -99,6 +99,12 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 		out = c.checkGRPC(ctx, m)
 	case store.MonitorWebSocket:
 		out = c.checkWebSocket(ctx, m)
+	case store.MonitorPostgres:
+		out = c.checkPostgres(ctx, m)
+	case store.MonitorMySQL:
+		out = c.checkMySQL(ctx, m)
+	case store.MonitorRedis:
+		out = c.checkRedis(ctx, m)
 	default:
 		out = failedf("unsupported monitor type %q", m.Type)
 	}

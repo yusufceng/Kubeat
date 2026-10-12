@@ -29,7 +29,17 @@ export type CheckResult = {
   cert_expires_at: string | null;
 };
 
-export type MonitorType = "http" | "tcp" | "ping" | "dns" | "push" | "grpc" | "websocket";
+export type MonitorType =
+  | "http"
+  | "tcp"
+  | "ping"
+  | "dns"
+  | "push"
+  | "grpc"
+  | "websocket"
+  | "postgres"
+  | "mysql"
+  | "redis";
 
 /** One past check in the compact form the monitor list uses. */
 export type HistoryPoint = {
@@ -97,8 +107,23 @@ export type WebSocketOptions = {
   tls_skip_verify: boolean;
 };
 
+/** How a check logs in to a database server: PostgreSQL, MySQL or Redis. */
+export type DatabaseOptions = {
+  username: string;
+  /** Comes back masked. */
+  password: string;
+  /** The database to connect to; not for Redis. */
+  database: string;
+  /** Run after logging in; not for Redis, which is sent a PING. */
+  query: string;
+  tls: boolean;
+  tls_skip_verify: boolean;
+};
+
 /** The check options of a monitor: only the one of its own type is set. */
 export type CheckOptions = {
+  /** For the postgres, mysql and redis types. */
+  database: DatabaseOptions | null;
   http: HttpOptions | null;
   tcp: TcpOptions | null;
   dns: DnsOptions | null;
@@ -218,6 +243,7 @@ export type MonitorSettings = {
   dns?: Partial<DnsOptions>;
   grpc?: Partial<GrpcOptions>;
   websocket?: Partial<WebSocketOptions>;
+  database?: Partial<DatabaseOptions>;
 };
 
 export type NewMonitor = MonitorSettings & { type: MonitorType };
@@ -277,6 +303,7 @@ function withDefaults(m: Monitor): Monitor {
     dns: m.dns ?? null,
     grpc: m.grpc ?? null,
     websocket: m.websocket ?? null,
+    database: m.database ?? null,
     open_incident: m.open_incident ?? null,
     cert_warning: m.cert_warning ?? false,
     maintenance_until: m.maintenance_until ?? null,

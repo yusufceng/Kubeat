@@ -67,6 +67,14 @@ function checkSettings(m: Monitor): [string, React.ReactNode][] {
     rows.push(["Servis", m.grpc.service || "sunucunun geneli"]);
     rows.push(["TLS", m.grpc.tls ? `açık, sertifika ${tls(m.grpc.tls_skip_verify)}` : "kapalı"]);
   }
+  if (m.database) {
+    const d = m.database;
+    if (d.username) rows.push(["Kullanıcı", d.username]);
+    rows.push(["Parola", d.password ? "kayıtlı" : "yok"]);
+    if (d.database) rows.push(["Veritabanı", d.database]);
+    if (d.query) rows.push(["Sorgu", d.query]);
+    rows.push(["TLS", d.tls ? `açık, sertifika ${tls(d.tls_skip_verify)}` : "kapalı"]);
+  }
   if (m.websocket) {
     if (m.websocket.subprotocol) rows.push(["Alt protokol", m.websocket.subprotocol]);
     if (m.websocket.tls_skip_verify) rows.push(["TLS sertifikası", tls(true)]);
