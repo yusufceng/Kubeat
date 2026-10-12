@@ -146,6 +146,54 @@ func TestServiceCandidates(t *testing.T) {
 	}
 }
 
+func TestGRPCProbeCandidates(t *testing.T) {
+	grpcProbe := func(port int32, service *string) *corev1.Probe {
+		return &corev1.Probe{ProbeHandler: corev1.ProbeHandler{GRPC: &corev1.GRPCAction{Port: port, Service: service}}}
+	}
+	cart := "shop.Cart"
+	core := fake.NewSimpleClientset(
+		// A gRPC readiness probe that names a service.
+		pod("cart-1", map[string]string{"app": "cart"}, corev1.Container{
+			Ports:          []corev1.ContainerPort{{Name: "grpc", ContainerPort: 9090}},
+			ReadinessProbe: grpcProbe(9090, &cart),
+		}),
+		service("cart", map[string]string{"app": "cart"}, corev1.ServicePort{Port: 9000, TargetPort: intstr.FromString("grpc")}),
+
+		// Only a liveness probe, about the server as a whole.
+		pod("stock-1", map[string]string{"app": "stock"}, corev1.Container{LivenessProbe: grpcProbe(5000, nil)}),
+		service("stock", map[string]string{"app": "stock"}, corev1.ServicePort{Port: 5000}),
+
+		// An HTTP probe on the same port wins: it is the more specific check.
+		pod("mixed-1", map[string]string{"app": "mixed"}, corev1.Container{
+			ReadinessProbe: grpcProbe(8080, nil),
+			LivenessProbe:  httpGet("/livez", intstr.FromInt32(8080), ""),
+		}),
+		service("mixed", map[string]string{"app": "mixed"}, corev1.ServicePort{Port: 8080}),
+
+		// The gRPC probe is on another port than the one the service exposes.
+		pod("side-1", map[string]string{"app": "side"}, corev1.Container{ReadinessProbe: grpcProbe(7000, nil)}),
+		service("side", map[string]string{"app": "side"}, corev1.ServicePort{Port: 7001}),
+	)
+
+	got, err := NewClient(core, newDynamic(), "test").Candidates(context.Background(), "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := find(t, got, "service/cart:9000"); c.Type != store.MonitorGRPC || c.Target != "cart.shop.svc:9000" ||
+		c.Reason != ReasonReadinessProbe || c.GRPCService != "shop.Cart" {
+		t.Errorf("cart:9000 = %+v", c)
+	}
+	if c := find(t, got, "service/stock:5000"); c.Type != store.MonitorGRPC || c.Reason != ReasonLivenessProbe || c.GRPCService != "" {
+		t.Errorf("stock:5000 = %+v", c)
+	}
+	if c := find(t, got, "service/mixed:8080"); c.Type != store.MonitorHTTP || c.Target != "http://mixed.shop.svc:8080/livez" {
+		t.Errorf("mixed:8080 = %+v", c)
+	}
+	if c := find(t, got, "service/side:7001"); c.Type != store.MonitorTCP || c.Reason != ReasonTCPFallback {
+		t.Errorf("side:7001 = %+v", c)
+	}
+}
+
 func TestIngressAndRouteCandidates(t *testing.T) {
 	prefix := networkingv1.PathTypePrefix
 	path := func(p string) networkingv1.HTTPIngressPath {

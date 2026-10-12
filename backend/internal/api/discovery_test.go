@@ -182,3 +182,33 @@ func TestClusterErrorIsBadGateway(t *testing.T) {
 		t.Errorf("candidates: status = %d, want 502", code)
 	}
 }
+
+// A service with a gRPC probe becomes a gRPC monitor that asks about the
+// service the probe names, and an HTTP one follows redirects like any other.
+func TestImportKeepsTheProbe(t *testing.T) {
+	srv := newDiscoveryAPI(t, &fakeDiscovery{candidates: []k8s.Candidate{
+		{Kind: k8s.KindService, Namespace: "shop", Name: "cart", Port: 9000, Type: store.MonitorGRPC,
+			Target: "cart.shop.svc:9000", Reason: k8s.ReasonReadinessProbe, GRPCService: "shop.Cart"},
+		{Kind: k8s.KindService, Namespace: "shop", Name: "web", Port: 80, Type: store.MonitorHTTP,
+			Target: "http://web.shop.svc:80/healthz", Reason: k8s.ReasonReadinessProbe},
+	}})
+
+	var candidates []candidateResponse
+	do(t, "GET", srv.URL+"/api/v1/discovery/candidates?namespace=shop", "", &candidates)
+	if len(candidates) != 2 || candidates[0].Type != "grpc" || candidates[0].Target != "cart.shop.svc:9000" {
+		t.Fatalf("candidates = %+v", candidates)
+	}
+
+	var result importResponse
+	body := `{"namespace":"shop","sources":["service/cart:9000","service/web:80"],"interval_seconds":30,"timeout_seconds":5}`
+	if code := do(t, "POST", srv.URL+"/api/v1/discovery/import", body, &result); code != http.StatusOK || len(result.Created) != 2 {
+		t.Fatalf("import: status = %d, result = %+v", code, result)
+	}
+	cart, web := result.Created[0], result.Created[1]
+	if cart.Type != "grpc" || cart.GRPC == nil || cart.GRPC.Service != "shop.Cart" || cart.HTTP != nil {
+		t.Errorf("cart = %+v", cart)
+	}
+	if web.HTTP == nil || *web.HTTP.MaxRedirects != store.DefaultMaxRedirects || web.GRPC != nil {
+		t.Errorf("web = %+v", web)
+	}
+}

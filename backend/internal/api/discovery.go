@@ -197,6 +197,7 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 		monitor.Name = monitorName(c)
 		monitor.Type = c.Type
 		monitor.Target = c.Target
+		monitor.GRPC.Service = c.GRPCService
 		monitor.Namespace = c.Namespace
 		monitor.Source = source
 		monitor.Interval = time.Duration(settings.IntervalSeconds) * time.Second

@@ -47,6 +47,9 @@ type Candidate struct {
 	Target string
 	// Reason says how the check was chosen, for display.
 	Reason string
+	// GRPCService is the service name of the gRPC probe a gRPC check was
+	// taken from; empty when the probe asks about the server as a whole.
+	GRPCService string
 }
 
 // Source identifies the candidate within its namespace. It is stored on the
@@ -206,12 +209,17 @@ func (c *Client) serviceCandidates(ctx context.Context, namespace string) ([]Can
 				Target: fmt.Sprintf("%s:%d", host, port.Port),
 				Reason: ReasonTCPFallback,
 			}
-			// The application's own probe says which URL means "healthy";
-			// guessing a path would raise false alarms on a 404.
-			if probe, ok := httpProbeFor(port, backing); ok {
+			// The application's own probe says what "healthy" means: which
+			// URL, or which gRPC service. Guessing a path would raise false
+			// alarms on a 404.
+			if probe, reason, ok := findProbe(port, backing, httpProbeOn); ok {
 				cand.Type = store.MonitorHTTP
 				cand.Target = fmt.Sprintf("%s://%s:%d%s", probe.scheme, host, port.Port, probe.path)
-				cand.Reason = probe.reason
+				cand.Reason = reason
+			} else if service, reason, ok := findProbe(port, backing, grpcProbeOn); ok {
+				cand.Type = store.MonitorGRPC
+				cand.Reason = reason
+				cand.GRPCService = service
 			}
 			out = append(out, cand)
 		}
@@ -235,33 +243,32 @@ func podsFor(svc corev1.Service, pods []corev1.Pod) []corev1.Pod {
 }
 
 type httpProbe struct {
-	scheme, path, reason string
+	scheme, path string
 }
 
-// httpProbeFor finds an HTTP readiness (or else liveness) probe that targets
-// the container port behind the given service port.
-func httpProbeFor(port corev1.ServicePort, pods []corev1.Pod) (httpProbe, bool) {
-	var liveness *httpProbe
+// findProbe looks through the containers behind a service port for a
+// readiness (or else liveness) probe that match accepts, and returns what
+// match made of it together with the reason to show.
+func findProbe[T any](port corev1.ServicePort, pods []corev1.Pod, match func(*corev1.Probe, corev1.Container, int32) (T, bool)) (T, string, bool) {
+	var (
+		liveness      T
+		foundLiveness bool
+	)
 	for _, pod := range pods {
 		for _, container := range pod.Spec.Containers {
 			target, ok := containerPort(port, container)
 			if !ok {
 				continue
 			}
-			if p, ok := probeOn(container.ReadinessProbe, container, target); ok {
-				p.reason = ReasonReadinessProbe
-				return p, true
+			if p, ok := match(container.ReadinessProbe, container, target); ok {
+				return p, ReasonReadinessProbe, true
 			}
-			if p, ok := probeOn(container.LivenessProbe, container, target); ok && liveness == nil {
-				p.reason = ReasonLivenessProbe
-				liveness = &p
+			if p, ok := match(container.LivenessProbe, container, target); ok && !foundLiveness {
+				liveness, foundLiveness = p, true
 			}
 		}
 	}
-	if liveness != nil {
-		return *liveness, true
-	}
-	return httpProbe{}, false
+	return liveness, ReasonLivenessProbe, foundLiveness
 }
 
 // containerPort resolves which port of the container a service port reaches.
@@ -285,7 +292,19 @@ func namedPort(container corev1.Container, name string) (int32, bool) {
 	return 0, false
 }
 
-func probeOn(probe *corev1.Probe, container corev1.Container, target int32) (httpProbe, bool) {
+// grpcProbeOn reports the service name of a gRPC probe on the target port.
+func grpcProbeOn(probe *corev1.Probe, _ corev1.Container, target int32) (string, bool) {
+	if probe == nil || probe.GRPC == nil || probe.GRPC.Port != target {
+		return "", false
+	}
+	if probe.GRPC.Service == nil {
+		return "", true
+	}
+	return *probe.GRPC.Service, true
+}
+
+// httpProbeOn reports the scheme and path of an HTTP probe on the target port.
+func httpProbeOn(probe *corev1.Probe, container corev1.Container, target int32) (httpProbe, bool) {
 	if probe == nil || probe.HTTPGet == nil {
 		return httpProbe{}, false
 	}

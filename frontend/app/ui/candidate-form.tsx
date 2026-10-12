@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { importCandidatesAction, type ImportState } from "@/app/actions";
 import type { Candidate } from "@/lib/api";
+import { typeLabel } from "@/lib/monitor-types";
 
 const kindLabels: Record<Candidate["kind"], string> = {
   route: "Route",
@@ -12,9 +13,9 @@ const kindLabels: Record<Candidate["kind"], string> = {
 };
 
 const reasonLabels: Record<Candidate["reason"], string> = {
-  "readiness-probe": "Readiness probe'un yolu",
-  "liveness-probe": "Liveness probe'un yolu",
-  "tcp-fallback": "HTTP probe yok, port bağlantısı",
+  "readiness-probe": "Readiness probe'undan",
+  "liveness-probe": "Liveness probe'undan",
+  "tcp-fallback": "HTTP ya da gRPC probe yok, port bağlantısı",
   "route-host": "Route adresi",
   "ingress-rule": "Ingress kuralı",
 };
@@ -98,7 +99,7 @@ export function CandidateForm({
                     </span>
                   </td>
                   <td className="px-4 py-2">
-                    <span className="mr-2 text-xs uppercase text-muted">{c.type}</span>
+                    <span className="mr-2 text-xs text-muted">{typeLabel(c.type)}</span>
                     <span className="break-all font-mono text-xs">{c.target}</span>
                   </td>
                   <td className="px-4 py-2 text-xs text-muted">{reasonLabels[c.reason]}</td>

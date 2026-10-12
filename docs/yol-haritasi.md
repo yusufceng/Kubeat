@@ -74,7 +74,5 @@ da şablon render edilerek doğrulandı:
 - Bakım pencereleri tek seferliktir ve bakım sırasındaki başarısız
   kontroller uptime'a dahildir.
 - Slack ve Teams gönderimi gerçek servislere karşı denenmedi.
-- Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır; minikube
-  ve OpenShift'te denenmedi.
-- gRPC kontrolü gerçek bir cluster servisine karşı değil, testlerde
-  ayağa kaldırılan bir gRPC sunucusuna karşı denendi.
+- Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır. Minikube'da
+  kısıtlı güvenlik bağlamındaki pod'dan çalıştı; OpenShift'te denenmedi.

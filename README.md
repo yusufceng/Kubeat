@@ -401,11 +401,12 @@ namespace'e göre gruplanır. Erişim yalnızca okuma amaçlıdır.
 | Route (OpenShift) | Route adresine HTTP |
 | Ingress | Her host ve yol için HTTP |
 | Service, pod'unda HTTP probe var | Service üzerinden probe'un yoluna HTTP |
-| Service, HTTP probe yok | Porta TCP bağlantısı |
+| Service, pod'unda gRPC probe var | Service üzerinden gRPC sağlık kontrolü, probe'un sorduğu servis adıyla |
+| Service, ikisi de yok | Porta TCP bağlantısı |
 
 Service için yol tahmin edilmez: uygulamanın kendi readiness (yoksa liveness)
-probe'u hangi adresin "sağlıklı" anlamına geldiğini zaten söyler; rastgele bir
-yol 404 dönüp yanlış alarm üretir.
+probe'u neyin "sağlıklı" anlamına geldiğini zaten söyler; rastgele bir yol 404
+dönüp yanlış alarm üretir.
 
 Denemek için `make minikube-demo` örnek bir `shop-demo` namespace'i kurar.
 
