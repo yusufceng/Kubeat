@@ -18,14 +18,22 @@ import (
 )
 
 type fakeWorkloads struct {
-	workload k8s.Workload
-	err      error
-	asked    []string
+	workload  k8s.Workload
+	err       error
+	eventsErr error
+	asked     []string
 }
 
 func (f *fakeWorkloads) Workload(_ context.Context, namespace, source string) (k8s.Workload, error) {
 	f.asked = append(f.asked, namespace+" "+source)
 	return f.workload, f.err
+}
+
+func (f *fakeWorkloads) Events(_ context.Context, _ string, pods []string, _ time.Time, _ int) ([]k8s.Event, error) {
+	if f.eventsErr != nil {
+		return nil, f.eventsErr
+	}
+	return []k8s.Event{{At: time.Now(), Type: "Warning", Reason: "BackOff", Object: "Pod/" + pods[0], Message: "restarting", Count: 3}}, nil
 }
 
 type fakePodMetrics struct {
@@ -100,12 +108,21 @@ func TestWorkloadEndpoint(t *testing.T) {
 		t.Errorf("pending pod = %+v", pending)
 	}
 
-	// The metrics server failing leaves the pod list intact.
+	if len(got.Events) != 1 || got.Events[0].Reason != "BackOff" || got.Events[0].Count != 3 || got.EventsReason != "" {
+		t.Errorf("events = %+v (%s)", got.Events, got.EventsReason)
+	}
+
+	// The metrics server failing leaves the pod list intact; so does the
+	// event list being out of reach.
 	podMetrics.err = errors.New("connection refused")
+	workloads.eventsErr = errors.New(`events is forbidden`)
 	got = workloadResponse{}
 	do(t, "GET", srv.URL+"/api/v1/monitors/1/workload", "", &got)
 	if !got.Available || got.Total != 3 || got.Metrics.Available || got.Metrics.Reason == "" || got.Pods[1].CPUCores != nil {
 		t.Errorf("with failing metrics: available=%v total=%d metrics=%+v", got.Available, got.Total, got.Metrics)
+	}
+	if len(got.Events) != 0 || got.EventsReason == "" {
+		t.Errorf("with failing events = %+v (%s)", got.Events, got.EventsReason)
 	}
 }
 

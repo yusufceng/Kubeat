@@ -143,7 +143,11 @@ type Options struct {
 	// server is configured.
 	Workloads  Workloads
 	PodMetrics PodMetrics
-	Logger     *slog.Logger
+	// EventWindow is how far back the cluster events shown with a
+	// monitor's pods reach; EventLimit how many at most.
+	EventWindow time.Duration
+	EventLimit  int
+	Logger      *slog.Logger
 }
 
 // Revision identifies the shape of the API. Increase it whenever a response

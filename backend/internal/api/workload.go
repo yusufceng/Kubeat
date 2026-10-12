@@ -11,9 +11,11 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
-// Workloads reads the pods behind a discovered monitor from the cluster.
+// Workloads reads the pods behind a discovered monitor from the cluster,
+// and what the cluster has recorded about them.
 type Workloads interface {
 	Workload(ctx context.Context, namespace, source string) (k8s.Workload, error)
+	Events(ctx context.Context, namespace string, pods []string, since time.Time, limit int) ([]k8s.Event, error)
 }
 
 // PodMetrics reads pod resource usage from the cluster's metrics.
@@ -33,6 +35,20 @@ type workloadResponse struct {
 	// Metrics says whether CPU and memory could be read. The pod list itself
 	// comes from the cluster API and does not depend on it.
 	Metrics workloadMetrics `json:"metrics"`
+	// Events are the cluster's recent events about the pods and what
+	// manages them, newest first; EventsReason says why there are none to
+	// show when they could not be read.
+	Events       []eventResponse `json:"events"`
+	EventsReason string          `json:"events_reason,omitempty"`
+}
+
+type eventResponse struct {
+	At      time.Time `json:"at"`
+	Type    string    `json:"type"` // "Normal" or "Warning"
+	Reason  string    `json:"reason"`
+	Object  string    `json:"object"`
+	Message string    `json:"message"`
+	Count   int32     `json:"count"`
 }
 
 type workloadMetrics struct {
@@ -55,7 +71,7 @@ type podResponse struct {
 }
 
 func unavailable(reason string) workloadResponse {
-	return workloadResponse{Reason: reason, Pods: []podResponse{}, Metrics: workloadMetrics{Reason: reason}}
+	return workloadResponse{Reason: reason, Pods: []podResponse{}, Metrics: workloadMetrics{Reason: reason}, Events: []eventResponse{}}
 }
 
 // monitorWorkload returns the pods behind a discovered monitor with their
@@ -106,10 +122,24 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := workloadResponse{Available: true, Service: workload.Service, Total: len(workload.Pods), Pods: make([]podResponse, 0, len(workload.Pods))}
+	resp := workloadResponse{
+		Available: true, Service: workload.Service, Total: len(workload.Pods),
+		Pods: make([]podResponse, 0, len(workload.Pods)), Events: []eventResponse{},
+	}
 	names := make([]string, 0, len(workload.Pods))
 	for _, p := range workload.Pods {
 		names = append(names, p.Name)
+	}
+
+	// The events are the "why" behind a pod's state. Another extra: a
+	// service account without access to them still gets the pod list.
+	events, err := h.opts.Workloads.Events(r.Context(), namespace, names, time.Now().Add(-h.opts.EventWindow), h.opts.EventLimit)
+	if err != nil {
+		h.opts.Logger.Warn("reading events failed", "monitor", m.Name, "error", err)
+		resp.EventsReason = "the cluster's events could not be read: " + err.Error()
+	}
+	for _, e := range events {
+		resp.Events = append(resp.Events, eventResponse{At: e.At, Type: e.Type, Reason: e.Reason, Object: e.Object, Message: e.Message, Count: e.Count})
 	}
 
 	// Usage is an extra: failing to read it must not hide the pod list.

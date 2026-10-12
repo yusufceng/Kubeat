@@ -1,6 +1,37 @@
 import { getWorkload, type Workload } from "@/lib/api";
 import { cpu, memory } from "@/lib/format";
 import { LiveDuration } from "@/app/ui/live-duration";
+import { LocalTime } from "@/app/ui/local-time";
+
+/** What the cluster recorded about the pods lately: the "why" behind a restart or a pod that will not start. */
+function Events({ workload }: { workload: Workload }) {
+  if (workload.events_reason) {
+    return <p className="mt-2 text-xs text-muted">Olaylar okunamadı: {workload.events_reason}</p>;
+  }
+  if (workload.events.length === 0) {
+    return <p className="mt-2 text-xs text-muted">Cluster bu pod&apos;lar için yakın zamanda olay kaydetmemiş.</p>;
+  }
+  return (
+    <div className="mt-3">
+      <h3 className="mb-1.5 text-xs font-semibold text-muted">Cluster olayları</h3>
+      <ul className="card divide-y divide-line text-sm">
+        {workload.events.map((e, i) => (
+          <li key={i} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-4 py-2">
+            <span className="whitespace-nowrap text-xs tabular-nums text-muted">
+              <LocalTime iso={e.at} />
+            </span>
+            <span className={`text-xs font-medium ${e.type === "Warning" ? "text-warn" : "text-muted"}`}>
+              {e.reason}
+              {e.count > 1 && ` ×${e.count}`}
+            </span>
+            <span className="font-mono text-xs text-muted">{e.object}</span>
+            <span className="min-w-0 flex-1 break-words">{e.message}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 /**
  * The pods behind a discovered monitor, read live from the cluster. A check
@@ -127,6 +158,7 @@ export async function PodsPanel({ monitorId }: { monitorId: number }) {
           CPU ve bellek gösterilemiyor: {workload.metrics.reason}
         </p>
       )}
+      <Events workload={workload} />
     </>
   );
 }

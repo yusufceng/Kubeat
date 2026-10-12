@@ -586,6 +586,13 @@ pod'lar kontrole girmez; onlar `workload` monitor'unun işidir. Chart'ın
 ClusterRole'ü bunun için `discovery.k8s.io/endpointslices` listeleme izni
 içerir.
 
+Pod'ların altında cluster'ın o pod'lar ve onları yöneten ReplicaSet,
+Deployment, StatefulSet ya da DaemonSet hakkında son `UPTIME_EVENT_WINDOW`
+içinde kaydettiği olaylar listelenir (`BackOff`, `Unhealthy`,
+`FailedScheduling`, `ScalingReplicaSet` …): bir restart'ın ya da başlamayan
+pod'un nedeni çoğu zaman oradadır. Chart'ın ClusterRole'ü bunun için
+`events` listeleme izni içerir; izin yoksa pod listesi yine gösterilir.
+
 Bu bilgi sayfa açıldığında cluster API'sinden canlı okunur; Kubeat bunu
 saklamaz ve bunun için alarm üretmez. Replika eksikliği ya da sürekli
 yeniden başlayan pod alarmları cluster'ın kendi izleme altyapısının işidir.
@@ -920,6 +927,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_KUBECONFIG` | – | Cluster dışında çalışırken kullanılacak kubeconfig dosyası |
 | `UPTIME_KUBE_CONTEXT` | – | Kubeconfig içindeki bağlam; kubeconfig verildiyse zorunlu |
 | `UPTIME_KUBE_TIMEOUT` | `10s` | Cluster API istekleri için zaman aşımı |
+| `UPTIME_EVENT_WINDOW` | `2h` | Monitor sayfasında pod'ların yanında gösterilen cluster olaylarının ne kadar geriye gideceği |
+| `UPTIME_EVENT_LIMIT` | `20` | En fazla kaç olay gösterileceği |
 | `UPTIME_PROMETHEUS_URL` | – | Pod CPU/bellek kullanımının okunduğu Prometheus uyumlu API; boşsa kullanım gösterilmez |
 | `UPTIME_PROMETHEUS_TOKEN_FILE` | – | Her istekte okunan bearer token dosyası |
 | `UPTIME_PROMETHEUS_CA_FILE` | – | Sunucu sertifikasının doğrulanacağı CA dosyası |

@@ -12,7 +12,7 @@ ADMIN_PASSWORD ?= admin
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.23.0
+VERSION ?= 0.24.0
 CHART := deploy/helm/kubeat
 # Ek helm ayarları, örn. HELM_ARGS="--set prometheus.url=http://..."
 HELM_ARGS ?=

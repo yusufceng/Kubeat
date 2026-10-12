@@ -126,6 +126,10 @@ type Config struct {
 	Kubeconfig       string        // UPTIME_KUBECONFIG
 	KubeContext      string        // UPTIME_KUBE_CONTEXT
 	KubeTimeout      time.Duration // UPTIME_KUBE_TIMEOUT
+	// The cluster events shown with a monitor's pods: how far back and how
+	// many.
+	EventWindow time.Duration // UPTIME_EVENT_WINDOW
+	EventLimit  int           // UPTIME_EVENT_LIMIT
 	// Discovery sync keeps monitors in step with objects annotated
 	// kubeat.io/monitor=true; zero turns it off. The defaults apply to
 	// monitors whose annotations do not set them.
@@ -198,6 +202,7 @@ func Load() (Config, error) {
 		{&cfg.RollupInterval, "UPTIME_ROLLUP_INTERVAL", time.Minute},
 		{&cfg.RollupRetention, "UPTIME_ROLLUP_RETENTION", 365 * 24 * time.Hour},
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
+		{&cfg.EventWindow, "UPTIME_EVENT_WINDOW", 2 * time.Hour},
 		{&cfg.DiscoveryDefaultInterval, "UPTIME_DISCOVERY_DEFAULT_INTERVAL", 30 * time.Second},
 		{&cfg.DiscoveryDefaultTimeout, "UPTIME_DISCOVERY_DEFAULT_TIMEOUT", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
@@ -239,6 +244,7 @@ func Load() (Config, error) {
 		{&cfg.SeriesPoints, "UPTIME_SERIES_POINTS", 120},
 		{&cfg.KeywordBodyLimit, "UPTIME_KEYWORD_BODY_LIMIT_BYTES", 1 << 20},
 		{&cfg.DefaultFailureThreshold, "UPTIME_DEFAULT_FAILURE_THRESHOLD", 3},
+		{&cfg.EventLimit, "UPTIME_EVENT_LIMIT", 20},
 		{&cfg.RecoveryThreshold, "UPTIME_RECOVERY_THRESHOLD", 1},
 		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 100},
 		{&cfg.NotifyAttempts, "UPTIME_NOTIFY_ATTEMPTS", 3},

@@ -536,6 +536,19 @@ export type Workload = {
   total: number;
   pods: Pod[];
   metrics: { available: boolean; reason?: string };
+  /** The cluster's recent events about the pods and what manages them, newest first. */
+  events: ClusterEvent[];
+  events_reason?: string;
+};
+
+export type ClusterEvent = {
+  at: string;
+  type: "Normal" | "Warning";
+  reason: string;
+  /** "Kind/name" of what the event is about. */
+  object: string;
+  message: string;
+  count: number;
 };
 
 export const getWorkload = (id: number) => request<Workload>(`/monitors/${id}/workload`);

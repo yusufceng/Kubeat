@@ -288,6 +288,8 @@ func main() {
 			Sync:                     sync,
 			Workloads:                workloads,
 			PodMetrics:               podMetrics,
+			EventWindow:              cfg.EventWindow,
+			EventLimit:               cfg.EventLimit,
 			DiscoveryStatus:          discoveryStatus,
 			Logger:                   logger,
 

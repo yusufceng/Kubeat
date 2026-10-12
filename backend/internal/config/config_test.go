@@ -83,6 +83,8 @@ func TestLoadDefaults(t *testing.T) {
 
 		DiscoveryEnabled: true,
 		KubeTimeout:      10 * time.Second,
+		EventWindow:      2 * time.Hour,
+		EventLimit:       20,
 
 		DiscoverySyncInterval:    time.Minute,
 		DiscoveryDefaultInterval: 30 * time.Second,
