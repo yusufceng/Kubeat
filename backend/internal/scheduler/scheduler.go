@@ -58,6 +58,10 @@ type Scheduler struct {
 
 	mu       sync.Mutex
 	inFlight map[int64]bool
+	// failures counts each monitor's failed checks in a row, and retryAt is
+	// when a failing monitor is checked again ahead of its interval.
+	failures map[int64]int
+	retryAt  map[int64]time.Time
 
 	lastTick atomic.Int64 // Unix nanoseconds of the last completed tick
 }
@@ -75,7 +79,10 @@ func (s *Scheduler) LastTick() time.Time {
 
 // New returns a Scheduler; call Run to start it.
 func New(st Store, checker Checker, opts Options) *Scheduler {
-	return &Scheduler{store: st, checker: checker, opts: opts, inFlight: make(map[int64]bool)}
+	return &Scheduler{
+		store: st, checker: checker, opts: opts,
+		inFlight: make(map[int64]bool), failures: make(map[int64]int), retryAt: make(map[int64]time.Time),
+	}
 }
 
 // Run blocks until ctx is cancelled, then waits for running checks to stop
@@ -141,6 +148,7 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, sched
 
 	seen := make(map[int64]bool, len(monitors))
 	var due []store.Monitor
+	dueAt := make(map[int64]time.Time)
 	for _, m := range monitors {
 		if !m.Enabled {
 			continue
@@ -158,15 +166,17 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, sched
 		}
 		sc.interval = m.Interval
 
-		if !now.Before(sc.next) && !s.isInFlight(m.ID) {
+		at, inFlight := s.dueTime(m.ID, sc.next)
+		if !now.Before(at) && !inFlight {
 			due = append(due, m)
+			dueAt[m.ID] = at
 		}
 	}
 
 	// Most overdue first, so that when there are more due monitors than free
 	// workers the ones skipped on this tick go first on the next.
 	sort.Slice(due, func(i, j int) bool {
-		return schedules[due[i].ID].next.Before(schedules[due[j].ID].next)
+		return dueAt[due[i].ID].Before(dueAt[due[j].ID])
 	})
 
 	// Hand the due monitors to the workers, waiting for a free one for as
@@ -178,18 +188,21 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, sched
 dispatch:
 	for i, m := range due {
 		sc := schedules[m.ID]
-		s.setInFlight(m.ID, true)
+		retry := s.start(m.ID)
 		select {
 		case jobs <- m:
-			sc.next = nextAfter(sc.next, sc.interval, now)
+			// An early retry leaves the monitor's place in its cycle alone.
+			if !now.Before(sc.next) {
+				sc.next = nextAfter(sc.next, sc.interval, now)
+			}
 		case <-deadline.C:
 			// The workers were busy for the whole tick; the rest stay due
 			// and go first on the next one.
-			s.setInFlight(m.ID, false)
+			s.abandon(m.ID, retry)
 			s.opts.Metrics.DispatchSkipped(len(due) - i)
 			break dispatch
 		case <-ctx.Done():
-			s.setInFlight(m.ID, false)
+			s.abandon(m.ID, retry)
 			return
 		}
 	}
@@ -197,6 +210,7 @@ dispatch:
 	for id := range schedules {
 		if !seen[id] {
 			delete(schedules, id)
+			s.forget(id)
 		}
 	}
 
@@ -226,20 +240,63 @@ func jitter(max time.Duration) time.Duration {
 	return rand.N(max)
 }
 
-func (s *Scheduler) isInFlight(id int64) bool {
+// dueTime returns when the monitor is next due, which is its scheduled
+// time or an earlier retry, and whether a check of it is still running.
+func (s *Scheduler) dueTime(id int64, scheduled time.Time) (time.Time, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.inFlight[id]
+	if retry, ok := s.retryAt[id]; ok && retry.Before(scheduled) {
+		scheduled = retry
+	}
+	return scheduled, s.inFlight[id]
 }
 
-func (s *Scheduler) setInFlight(id int64, v bool) {
+// start marks a check of the monitor as running and takes its pending
+// retry, which the check about to run replaces. It returns that retry so
+// that abandon can put it back.
+func (s *Scheduler) start(id int64) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if v {
-		s.inFlight[id] = true
-	} else {
-		delete(s.inFlight, id)
+	s.inFlight[id] = true
+	retry := s.retryAt[id]
+	delete(s.retryAt, id)
+	return retry
+}
+
+// abandon undoes start for a check that was not handed to a worker.
+func (s *Scheduler) abandon(id int64, retry time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.inFlight, id)
+	if !retry.IsZero() {
+		s.retryAt[id] = retry
 	}
+}
+
+// finish records the outcome of a check. While a monitor is failing but has
+// not yet failed often enough to open an incident, it is checked again
+// after its retry interval, so that an outage is confirmed, or dismissed,
+// sooner than a whole interval later.
+func (s *Scheduler) finish(m store.Monitor, up bool, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.inFlight, m.ID)
+	if up {
+		delete(s.failures, m.ID)
+		return
+	}
+	s.failures[m.ID]++
+	if m.RetryInterval > 0 && m.RetryInterval < m.Interval && s.failures[m.ID] < m.FailureThreshold {
+		s.retryAt[m.ID] = now.Add(m.RetryInterval)
+	}
+}
+
+// forget drops what is remembered about a monitor that is gone or paused.
+func (s *Scheduler) forget(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.failures, id)
+	delete(s.retryAt, id)
 }
 
 func (s *Scheduler) work(ctx context.Context, jobs <-chan store.Monitor, results chan<- store.CheckResult) {
@@ -249,7 +306,7 @@ func (s *Scheduler) work(ctx context.Context, jobs <-chan store.Monitor, results
 		result := s.checker.Check(checkCtx, m)
 		s.opts.Metrics.CheckDone(string(m.Type), result.Up, result.Latency)
 		cancel()
-		s.setInFlight(m.ID, false)
+		s.finish(m, result.Up, time.Now())
 
 		// A check interrupted by shutdown says nothing about the target.
 		if ctx.Err() != nil {

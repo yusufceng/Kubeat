@@ -17,7 +17,8 @@ import (
 // returns it.
 func httpMonitor(target string) store.Monitor {
 	return store.Monitor{ID: 7, Type: store.MonitorHTTP, Target: target,
-		HTTP: store.HTTPOptions{Method: store.DefaultHTTPMethod, ExpectedStatus: store.DefaultExpectedStatus}}
+		HTTP: store.HTTPOptions{Method: store.DefaultHTTPMethod, ExpectedStatus: store.DefaultExpectedStatus,
+			MaxRedirects: store.DefaultMaxRedirects}}
 }
 
 func TestHTTPCheck(t *testing.T) {
@@ -39,7 +40,7 @@ func TestHTTPCheck(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := New(Options{UserAgent: "kubeat/test", KeywordBodyLimit: 1 << 20})
+	c := New(Options{UserAgent: "kubeat/test", BodyLimit: 1 << 20})
 
 	tests := []struct {
 		path       string
@@ -141,7 +142,7 @@ func TestHTTPOptions(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := New(Options{KeywordBodyLimit: 50})
+	c := New(Options{BodyLimit: 50})
 	ctx := context.Background()
 
 	check := func(path string, edit func(*store.HTTPOptions)) store.CheckResult {

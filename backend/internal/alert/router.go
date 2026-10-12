@@ -51,9 +51,9 @@ func Facts(n Notification) []Fact {
 	if n.Event == EventTest {
 		return nil
 	}
-	facts := []Fact{
-		{"Monitor", n.Monitor.Name},
-		{"Hedef", n.Monitor.Target},
+	facts := []Fact{{"Monitor", n.Monitor.Name}}
+	if n.Monitor.Target != "" { // a push monitor has none
+		facts = append(facts, Fact{"Hedef", n.Monitor.Target})
 	}
 	if n.Monitor.Namespace != "" {
 		facts = append(facts, Fact{"Namespace", n.Monitor.Namespace})

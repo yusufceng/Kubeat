@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
@@ -24,6 +25,8 @@ type Store interface {
 	GetMonitor(ctx context.Context, id int64) (store.Monitor, error)
 	UpdateMonitor(ctx context.Context, m store.Monitor) (store.Monitor, error)
 	DeleteMonitor(ctx context.Context, id int64) error
+	GetMonitorByPushToken(ctx context.Context, token string) (store.Monitor, error)
+	RecordPush(ctx context.Context, report store.PushReport) error
 	GetOpenIncident(ctx context.Context, monitorID int64, kind store.IncidentKind) (store.Incident, error)
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
@@ -95,7 +98,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 9
+const Revision = 10
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -122,6 +125,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/monitors/{id}", h.getMonitor)
 	mux.HandleFunc("PATCH /api/v1/monitors/{id}", h.updateMonitor)
 	mux.HandleFunc("DELETE /api/v1/monitors/{id}", h.deleteMonitor)
+	mux.HandleFunc("POST /api/v1/monitors/{id}/clone", h.cloneMonitor)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/results", h.listResults)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/series", h.monitorSeries)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/uptime", h.monitorUptime)
@@ -138,19 +142,25 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("POST /api/v1/channels", h.createChannel)
 	mux.HandleFunc("DELETE /api/v1/channels/{id}", h.deleteChannel)
 	mux.HandleFunc("POST /api/v1/channels/{id}/test", h.testChannel)
+	// Whatever the source has at hand reports: curl, wget, an HTTP client.
+	mux.HandleFunc("GET "+pushPath+"{token}", h.push)
+	mux.HandleFunc("POST "+pushPath+"{token}", h.push)
 	return requireToken(opts.Token, mux)
 }
 
 // requireToken guards the API with a shared secret. The health check stays
 // open for the kubelet's probes and /metrics for the cluster's Prometheus;
-// neither changes anything.
+// neither changes anything. Push reports carry their own secret, the
+// monitor's token, in the path.
 func requireToken(token string, next http.Handler) http.Handler {
 	if token == "" {
 		return next
 	}
 	want := []byte("Bearer " + token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		open := r.URL.Path == "/api/v1/health" || r.URL.Path == "/metrics"
+		// A push path is the prefix and a token, nothing below or beside it.
+		token, isPush := strings.CutPrefix(r.URL.Path, pushPath)
+		open := r.URL.Path == "/api/v1/health" || r.URL.Path == "/metrics" || (isPush && !strings.Contains(token, "/"))
 		got := []byte(r.Header.Get("Authorization"))
 		if !open && subtle.ConstantTimeCompare(got, want) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="kubeat"`)

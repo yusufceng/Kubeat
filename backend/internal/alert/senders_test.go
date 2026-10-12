@@ -338,3 +338,24 @@ func TestRouterPicksSenderByType(t *testing.T) {
 		t.Error("unknown channel type reported success")
 	}
 }
+
+// A push monitor has no target; its notifications do not show an empty one.
+func TestNotificationWithoutATarget(t *testing.T) {
+	n := sampleDown()
+	n.Monitor = store.Monitor{ID: 9, Name: "gece-yedeği", Type: store.MonitorPush, FailureThreshold: 1}
+	n.Incident.Cause = "no push received for 2m5s; one is expected every 1m0s"
+
+	want := "🔴 gece-yedeği erişilemiyor. Art arda 1 kontrol başarısız. Son hata: " + n.Incident.Cause
+	if got := Text(n); got != want {
+		t.Errorf("Text = %q\nwant   %q", got, want)
+	}
+	for _, fact := range Facts(n) {
+		if fact.Label == "Hedef" {
+			t.Errorf("an empty target is listed: %+v", fact)
+		}
+	}
+	// With a target, both still carry it.
+	if n := sampleDown(); !strings.Contains(Text(n), "erişilemiyor (https://pay.example.com/healthz).") || Facts(n)[1] != (Fact{"Hedef", n.Monitor.Target}) {
+		t.Errorf("text = %q, facts = %+v", Text(n), Facts(n))
+	}
+}

@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -469,11 +472,219 @@ func TestHTTPOptions(t *testing.T) {
 	if want := (HTTPOptions{Method: "GET", ExpectedStatus: "204"}); !reflect.DeepEqual(updated.HTTP, want) {
 		t.Errorf("after update = %+v, want %+v (headers and keyword cleared)", updated.HTTP, want)
 	}
+}
 
-	bad := newMonitor("bad-method")
-	bad.HTTP.Method = "DELETE"
-	if _, err := s.CreateMonitor(ctx, bad); err == nil {
-		t.Error("method DELETE was accepted")
+// Each type keeps its own options and nothing of the others.
+func TestOptionsByType(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	everything := func(name string, typ MonitorType) Monitor {
+		m := newMonitor(name)
+		m.Type = typ
+		m.HTTP = HTTPOptions{Method: "POST", ExpectedStatus: "201", Body: `{"a":1}`, ContentType: "application/json",
+			Auth: HTTPAuthBasic, AuthUser: "u", AuthSecret: "p", MaxRedirects: 3, JSONPath: "status", JSONOperator: "==", JSONExpected: "ok",
+			InvertKeyword: true, Keyword: "error"}
+		m.TCP = TCPOptions{TLS: true, SkipTLSVerify: true}
+		m.DNS = DNSOptions{RecordType: "MX", Resolver: "10.0.0.10:53", Expected: "mail"}
+		m.GRPC = GRPCOptions{Service: "shop.Cart", TLS: true}
+		m.WebSocket = WebSocketOptions{Subprotocol: "graphql-ws"}
+		return m
+	}
+
+	for _, typ := range MonitorTypes {
+		input := everything("m-"+string(typ), typ)
+		created, err := s.CreateMonitor(ctx, input)
+		if err != nil {
+			t.Fatalf("%s: %v", typ, err)
+		}
+		want := Monitor{}
+		switch typ {
+		case MonitorHTTP:
+			want.HTTP = input.HTTP
+		case MonitorTCP:
+			want.TCP = input.TCP
+		case MonitorDNS:
+			want.DNS = input.DNS
+		case MonitorGRPC:
+			want.GRPC = input.GRPC
+		case MonitorWebSocket:
+			want.WebSocket = input.WebSocket
+		}
+		stored, err := s.GetMonitor(ctx, created.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, got := range []Monitor{created, stored} {
+			if !reflect.DeepEqual(got.HTTP, want.HTTP) || got.TCP != want.TCP || got.DNS != want.DNS ||
+				got.GRPC != want.GRPC || got.WebSocket != want.WebSocket {
+				t.Errorf("%s: options = %+v %+v %+v %+v %+v", typ, got.HTTP, got.TCP, got.DNS, got.GRPC, got.WebSocket)
+			}
+		}
+	}
+
+	// A DNS monitor without a record type asks for A records.
+	plain := newMonitor("plain-dns")
+	plain.Type = MonitorDNS
+	if created, _ := s.CreateMonitor(ctx, plain); created.DNS.RecordType != "A" {
+		t.Errorf("default record type = %q", created.DNS.RecordType)
+	}
+}
+
+func TestMonitorExtras(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+
+	m := newMonitor("nightly-job")
+	m.Type, m.Target = MonitorPush, ""
+	m.Description, m.RetryInterval, m.Inverted, m.PushToken = "gece yedeği", 20*time.Second, true, "tok-1"
+	created, err := s.CreateMonitor(ctx, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetMonitor(ctx, created.ID)
+	if err != nil || got.Description != "gece yedeği" || got.RetryInterval != 20*time.Second || !got.Inverted || got.PushToken != "tok-1" {
+		t.Errorf("stored = %+v, %v", got, err)
+	}
+
+	// Tokens are unique, and a monitor is found by its token.
+	dup := newMonitor("other-job")
+	dup.Type, dup.PushToken = MonitorPush, "tok-1"
+	if _, err := s.CreateMonitor(ctx, dup); !errors.Is(err, ErrConflict) {
+		t.Errorf("duplicate token: err = %v, want ErrConflict", err)
+	}
+	if byToken, err := s.GetMonitorByPushToken(ctx, "tok-1"); err != nil || byToken.ID != created.ID {
+		t.Errorf("by token = %+v, %v", byToken, err)
+	}
+	for _, token := range []string{"", "nope"} {
+		if _, err := s.GetMonitorByPushToken(ctx, token); !errors.Is(err, ErrNotFound) {
+			t.Errorf("token %q: err = %v, want ErrNotFound", token, err)
+		}
+	}
+
+	// An update changes the extras but never the token.
+	got.Description, got.RetryInterval, got.Inverted, got.PushToken = "", 0, false, "tok-2"
+	updated, err := s.UpdateMonitor(ctx, got)
+	if err != nil || updated.Description != "" || updated.RetryInterval != 0 || updated.Inverted || updated.PushToken != "tok-1" {
+		t.Errorf("updated = %+v, %v", updated, err)
+	}
+
+	// The latest report replaces the one before it.
+	if _, err := s.LastPush(ctx, created.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("no report yet: err = %v, want ErrNotFound", err)
+	}
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	for i, report := range []PushReport{
+		{MonitorID: created.ID, ReceivedAt: at.Add(-time.Minute), Up: true, Message: "ok", Latency: 120 * time.Millisecond},
+		{MonitorID: created.ID, ReceivedAt: at, Up: false, Message: "disk dolu"},
+	} {
+		if err := s.RecordPush(ctx, report); err != nil {
+			t.Fatal(err)
+		}
+		if last, err := s.LastPush(ctx, created.ID); err != nil || last != report {
+			t.Errorf("report %d: last = %+v, %v; want %+v", i, last, err, report)
+		}
+	}
+	if err := s.RecordPush(ctx, PushReport{MonitorID: 999, ReceivedAt: at, Up: true}); err == nil {
+		t.Error("a report for an unknown monitor was accepted")
+	}
+
+	// A result carries what the check found.
+	result := CheckResult{MonitorID: created.ID, CheckedAt: at, Up: true, Detail: "10.0.0.1, 10.0.0.2"}
+	if err := s.InsertCheckResults(ctx, []CheckResult{result}); err != nil {
+		t.Fatal(err)
+	}
+	if results, _ := s.ListCheckResults(ctx, created.ID, 1); len(results) != 1 || results[0].Detail != result.Detail {
+		t.Errorf("results = %+v", results)
+	}
+	if st, _ := s.GetMonitorStatus(ctx, created.ID, at); st.Last == nil || st.Last.Detail != result.Detail {
+		t.Errorf("status last = %+v", st.Last)
+	}
+}
+
+// A database written before the monitors table was rebuilt keeps its
+// monitors, their options and everything that refers to them.
+func TestUpgradeFromColumnOptions(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "old.db")
+
+	old, err := openPool(path, time.Second, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, _ := fs.Glob(migrationFiles, "migrations/*.sql")
+	sort.Strings(names)
+	const before = 9 // the last schema version with one column per option
+	for _, name := range names[:before] {
+		body, _ := migrationFiles.ReadFile(name)
+		if _, err := old.ExecContext(ctx, string(body)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	for _, stmt := range []string{
+		fmt.Sprintf("PRAGMA user_version = %d", before),
+		`INSERT INTO monitors (id, name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at, namespace, source,
+		                       http_method, http_expected_status, http_keyword, http_headers, tls_skip_verify)
+		 VALUES (1, 'shop/api', 'http', 'https://api.shop.svc/healthz', 30, 5, 2, 1, 1000, 'shop', 'service/api:443',
+		         'HEAD', '200,401', '', '{"Authorization":"Bearer s3cret"}', 1),
+		        (2, 'plain', 'http', 'http://plain/', 60, 5, 3, 0, 2000, '', '', 'GET', '200-399', 'ok', '{}', 0),
+		        (3, 'db', 'tcp', 'db:5432', 60, 5, 3, 1, 3000, '', '', 'GET', '200-399', '', '{}', 0)`,
+		`INSERT INTO check_results (monitor_id, checked_at, up, latency_ms) VALUES (1, 5000, 1, 12), (3, 6000, 0, 40)`,
+		`INSERT INTO incidents (monitor_id, started_at, cause) VALUES (3, 6000, 'refused')`,
+		`INSERT INTO maintenance_windows (name, starts_at, ends_at, monitor_id, created_at) VALUES ('w', 1, 2, 1, 1)`,
+	} {
+		if _, err := old.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	old.Close()
+
+	s, err := OpenSQLite(ctx, path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	monitors, err := s.ListMonitors(ctx)
+	if err != nil || len(monitors) != 3 {
+		t.Fatalf("monitors = %+v, %v", monitors, err)
+	}
+	api, plain, db := monitors[0], monitors[1], monitors[2]
+	wantAPI := HTTPOptions{Method: "HEAD", ExpectedStatus: "200,401", Headers: map[string]string{"Authorization": "Bearer s3cret"},
+		SkipTLSVerify: true, MaxRedirects: 10}
+	if !reflect.DeepEqual(api.HTTP, wantAPI) || api.Namespace != "shop" || api.Source != "service/api:443" ||
+		api.FailureThreshold != 2 || api.Interval != 30*time.Second || !api.Enabled {
+		t.Errorf("api = %+v", api)
+	}
+	if want := (HTTPOptions{Method: "GET", ExpectedStatus: "200-399", Keyword: "ok", MaxRedirects: 10}); !reflect.DeepEqual(plain.HTTP, want) || plain.Enabled {
+		t.Errorf("plain = %+v", plain)
+	}
+	if db.Type != MonitorTCP || db.TCP != (TCPOptions{}) || !reflect.DeepEqual(db.HTTP, HTTPOptions{}) {
+		t.Errorf("db = %+v", db)
+	}
+
+	// Nothing that refers to a monitor was lost, and the references work.
+	if results, _ := s.ListCheckResults(ctx, 1, 10); len(results) != 1 {
+		t.Errorf("results of monitor 1 = %+v", results)
+	}
+	if incident, err := s.GetOpenIncident(ctx, 3, IncidentDown); err != nil || incident.Cause != "refused" {
+		t.Errorf("incident = %+v, %v", incident, err)
+	}
+	if windows, _ := s.ListMaintenance(ctx, 10); len(windows) != 1 || windows[0].MonitorID != 1 {
+		t.Errorf("maintenance = %+v", windows)
+	}
+	if err := s.DeleteMonitor(ctx, 3); err != nil {
+		t.Fatal(err)
+	}
+	if results, _ := s.ListCheckResults(ctx, 3, 10); len(results) != 0 {
+		t.Errorf("results outlived their monitor: %+v", results)
+	}
+	// The rules of the old table still hold in the new one.
+	if _, err := s.CreateMonitor(ctx, Monitor{Name: "shop/api", Type: MonitorTCP, Target: "x:1", Interval: time.Minute, Timeout: time.Second, FailureThreshold: 1}); !errors.Is(err, ErrConflict) {
+		t.Errorf("duplicate name: err = %v, want ErrConflict", err)
+	}
+	if err := s.InsertCheckResults(ctx, []CheckResult{{MonitorID: 999, CheckedAt: time.Now()}}); err == nil {
+		t.Error("a result for an unknown monitor was accepted: foreign keys are off")
 	}
 }
 

@@ -192,17 +192,18 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 			resp.Skipped = append(resp.Skipped, importSkip{Source: source, Reason: "not found in the cluster"})
 			continue
 		}
-		m, err := h.opts.Store.CreateMonitor(r.Context(), store.Monitor{
-			Name:             monitorName(c),
-			Type:             c.Type,
-			Target:           c.Target,
-			Namespace:        c.Namespace,
-			Source:           source,
-			Interval:         time.Duration(settings.IntervalSeconds) * time.Second,
-			Timeout:          time.Duration(settings.TimeoutSeconds) * time.Second,
-			FailureThreshold: settings.FailureThreshold,
-			Enabled:          true,
-		})
+		// The check options are the defaults of a monitor made by hand.
+		monitor := defaultOptions(c.Type)
+		monitor.Name = monitorName(c)
+		monitor.Type = c.Type
+		monitor.Target = c.Target
+		monitor.Namespace = c.Namespace
+		monitor.Source = source
+		monitor.Interval = time.Duration(settings.IntervalSeconds) * time.Second
+		monitor.Timeout = time.Duration(settings.TimeoutSeconds) * time.Second
+		monitor.FailureThreshold = settings.FailureThreshold
+		monitor.Enabled = true
+		m, err := h.opts.Store.CreateMonitor(r.Context(), monitor)
 		if errors.Is(err, store.ErrConflict) {
 			resp.Skipped = append(resp.Skipped, importSkip{Source: source, Reason: "already monitored"})
 			continue

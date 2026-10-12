@@ -20,50 +20,152 @@ var (
 type MonitorType string
 
 const (
-	MonitorHTTP MonitorType = "http"
-	MonitorTCP  MonitorType = "tcp"
+	MonitorHTTP      MonitorType = "http"      // an HTTP(S) request
+	MonitorTCP       MonitorType = "tcp"       // a TCP connection, optionally with a TLS handshake
+	MonitorPing      MonitorType = "ping"      // an ICMP echo
+	MonitorDNS       MonitorType = "dns"       // a DNS lookup
+	MonitorPush      MonitorType = "push"      // the target reports in by itself
+	MonitorGRPC      MonitorType = "grpc"      // the gRPC health checking protocol
+	MonitorWebSocket MonitorType = "websocket" // a WebSocket handshake
 )
+
+// MonitorTypes lists every type.
+var MonitorTypes = []MonitorType{
+	MonitorHTTP, MonitorTCP, MonitorPing, MonitorDNS, MonitorPush, MonitorGRPC, MonitorWebSocket,
+}
 
 // Monitor is an endpoint that is checked periodically.
 type Monitor struct {
-	ID       int64
-	Name     string
-	Type     MonitorType
+	ID          int64
+	Name        string
+	Description string
+	Type        MonitorType
+	// Target is what is checked: a URL, host:port or a name, depending on
+	// the type. Push monitors have none.
 	Target   string
 	Interval time.Duration
-	Timeout  time.Duration
+	// Timeout bounds one check. For a push monitor it is how late a report
+	// may be before the monitor counts as failing.
+	Timeout time.Duration
+	// RetryInterval is how soon a failed check is repeated while fewer than
+	// FailureThreshold checks have failed in a row; zero means Interval.
+	RetryInterval time.Duration
 	// Namespace groups the monitor; Source identifies the cluster object it
 	// was discovered from. Both are empty for monitors entered by hand.
 	Namespace string
 	Source    string
 	// FailureThreshold is how many consecutive failed checks open an incident.
 	FailureThreshold int
-	Enabled          bool
-	CreatedAt        time.Time
-	// HTTP holds the options of an HTTP check; unused for other types.
-	HTTP HTTPOptions
+	// Inverted turns the outcome around: the monitor is up while its target
+	// fails, for things that must not be reachable.
+	Inverted bool
+	Enabled  bool
+	// PushToken is the secret in the URL a push monitor's source reports to;
+	// empty for other types.
+	PushToken string
+	CreatedAt time.Time
+
+	// The options of the check. Only the part of the monitor's own type is
+	// used and stored.
+	HTTP      HTTPOptions
+	TCP       TCPOptions
+	DNS       DNSOptions
+	GRPC      GRPCOptions
+	WebSocket WebSocketOptions
 }
 
-// Defaults of HTTPOptions, applied by the database to monitors that do not
-// set them.
+// Defaults of the check options, applied to monitors that do not set them.
 const (
 	DefaultHTTPMethod     = "GET"
 	DefaultExpectedStatus = "200-399"
+	DefaultMaxRedirects   = 10
+	DefaultDNSRecordType  = "A"
+)
+
+// HTTPAuth is how an HTTP monitor authenticates.
+type HTTPAuth string
+
+const (
+	HTTPAuthNone   HTTPAuth = ""
+	HTTPAuthBasic  HTTPAuth = "basic"  // AuthUser and AuthSecret as user and password
+	HTTPAuthBearer HTTPAuth = "bearer" // AuthSecret as the token
 )
 
 // HTTPOptions configures how an HTTP monitor is checked.
 type HTTPOptions struct {
-	// Method is GET or HEAD.
-	Method string
+	Method string `json:"method"`
 	// ExpectedStatus lists the status codes that count as success, as codes
 	// and ranges: "200-299,401".
-	ExpectedStatus string
-	// Keyword, if set, must appear in the response body.
-	Keyword string
+	ExpectedStatus string `json:"expected_status"`
+	// Keyword, if set, must appear in the response body, or with
+	// InvertKeyword must not.
+	Keyword       string `json:"keyword,omitempty"`
+	InvertKeyword bool   `json:"invert_keyword,omitempty"`
+	// JSONPath, if set, selects a value in a JSON response, such as
+	// "status" or "checks[0].state"; it is compared to JSONExpected with
+	// JSONOperator (see checker.JSONOperators).
+	JSONPath     string `json:"json_path,omitempty"`
+	JSONOperator string `json:"json_operator,omitempty"`
+	JSONExpected string `json:"json_expected,omitempty"`
 	// Headers are added to the request. Values may be credentials.
-	Headers map[string]string
+	Headers map[string]string `json:"headers,omitempty"`
+	// Body is sent with the request, as ContentType.
+	Body        string `json:"body,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	// Auth, AuthUser and AuthSecret set the Authorization header.
+	Auth       HTTPAuth `json:"auth,omitempty"`
+	AuthUser   string   `json:"auth_user,omitempty"`
+	AuthSecret string   `json:"auth_secret,omitempty"`
+	// MaxRedirects is how many redirects are followed. With zero the first
+	// response is the one that is judged, redirect or not.
+	MaxRedirects int `json:"max_redirects"`
 	// SkipTLSVerify accepts any certificate, for targets with a private CA.
-	SkipTLSVerify bool
+	SkipTLSVerify bool `json:"skip_tls_verify,omitempty"`
+}
+
+// TCPOptions configures a TCP monitor.
+type TCPOptions struct {
+	// TLS completes a TLS handshake after connecting, which also tells when
+	// the certificate expires.
+	TLS           bool `json:"tls,omitempty"`
+	SkipTLSVerify bool `json:"skip_tls_verify,omitempty"`
+}
+
+// DNSOptions configures a DNS monitor; its target is the name to look up.
+type DNSOptions struct {
+	// RecordType is one of checker.DNSRecordTypes.
+	RecordType string `json:"record_type"`
+	// Resolver is the server to ask, as host or host:port; empty uses the
+	// resolver of the machine the checks run on.
+	Resolver string `json:"resolver,omitempty"`
+	// Expected, if set, must appear in at least one of the records found.
+	Expected string `json:"expected,omitempty"`
+}
+
+// GRPCOptions configures a gRPC health check.
+type GRPCOptions struct {
+	// Service is the name asked about; empty asks for the server as a whole.
+	Service       string `json:"service,omitempty"`
+	TLS           bool   `json:"tls,omitempty"`
+	SkipTLSVerify bool   `json:"skip_tls_verify,omitempty"`
+}
+
+// WebSocketOptions configures a WebSocket handshake check.
+type WebSocketOptions struct {
+	// Subprotocol, if set, is requested and must be accepted by the server.
+	Subprotocol   string `json:"subprotocol,omitempty"`
+	SkipTLSVerify bool   `json:"skip_tls_verify,omitempty"`
+}
+
+// PushReport is the latest report of a push monitor's source.
+type PushReport struct {
+	MonitorID  int64
+	ReceivedAt time.Time
+	// Up is false when the source itself reported a failure.
+	Up      bool
+	Message string
+	// Latency is a duration the source chose to report; zero if none.
+	Latency time.Duration
 }
 
 // CheckResult is the outcome of a single check of a monitor.
@@ -74,6 +176,9 @@ type CheckResult struct {
 	Latency    time.Duration
 	StatusCode int    // 0 when not applicable
 	Error      string // empty on success
+	// Detail is what a successful check found, where that says more than
+	// "up": the records of a DNS lookup, the message of a push.
+	Detail string
 	// CertExpiresAt is when the target's TLS certificate expires; zero when
 	// the check saw no certificate.
 	CertExpiresAt time.Time
@@ -202,12 +307,18 @@ type Store interface {
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]MonitorStatus, error)
 	// GetMonitorStatus is ListMonitorStatuses for a single monitor.
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (MonitorStatus, error)
-	// UpdateMonitor changes the editable fields of the monitor with m.ID:
-	// name, target, interval, timeout, failure threshold and enabled. Type,
-	// namespace and source never change.
+	// UpdateMonitor changes the monitor with m.ID. Its type, namespace,
+	// source, push token and creation time never change.
 	UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error)
 	// DeleteMonitor removes the monitor and all of its check results.
 	DeleteMonitor(ctx context.Context, id int64) error
+
+	// GetMonitorByPushToken returns ErrNotFound for an unknown token.
+	GetMonitorByPushToken(ctx context.Context, token string) (Monitor, error)
+	// RecordPush stores a push monitor's report, replacing its previous one.
+	RecordPush(ctx context.Context, report PushReport) error
+	// LastPush returns ErrNotFound when the monitor never reported.
+	LastPush(ctx context.Context, monitorID int64) (PushReport, error)
 
 	// InsertCheckResults writes the batch in a single transaction.
 	InsertCheckResults(ctx context.Context, results []CheckResult) error

@@ -53,13 +53,16 @@ Backend API'si, `UPTIME_API_TOKEN` ayarlandığında yalnızca bu anahtarı
 `Authorization: Bearer ...` başlığıyla gönderen isteklere yanıt verir.
 Arayüz aynı anahtarı `BACKEND_TOKEN` ile gönderir. Sağlık kontrolü
 (`/api/v1/health`) ve `/metrics` anahtarsız okunabilir; ikisi de bir şey
-değiştirmez. Anahtar ayarlanmazsa API açıktır ve backend bunu açılışta
-uyarı olarak loglar.
+değiştirmez. Push raporları (`/api/push/{token}`) da anahtar istemez: adresteki
+token o monitor'un sırrıdır ve yalnızca o monitor'a rapor yazabilir. Anahtar
+ayarlanmazsa API açıktır ve backend bunu açılışta uyarı olarak loglar.
 
 Helm chart anahtarı ilk kurulumda rastgele üretir, bir Secret'ta saklar ve
 güncellemelerde korur. Ek olarak `networkPolicy.enabled=true`, backend'e
 yalnızca arayüz pod'larının bağlanmasına izin verir (NetworkPolicy uygulayan
-bir ağ eklentisi gerekir).
+bir ağ eklentisi gerekir). Bu durumda başka namespace'lerdeki işler push
+raporlarını arayüzün adresine göndermeli ya da `networkPolicy.backendIngressFrom`
+ile izin almalıdır.
 
 ### Giriş
 
@@ -100,6 +103,8 @@ eklenmelidir.
 | `GET` | `/api/v1/monitors/{id}?window=24h` | Tek monitor |
 | `PATCH` | `/api/v1/monitors/{id}` | Monitor'u düzenler; `{"enabled": false}` ile durdurur |
 | `DELETE` | `/api/v1/monitors/{id}` | Monitor'u ve sonuçlarını siler |
+| `POST` | `/api/v1/monitors/{id}/clone` | Monitor'un `{"name"}` adıyla bir kopyasını oluşturur; gizli değerler de kopyalanır |
+| `GET`, `POST` | `/api/push/{token}?status=up&msg=...&ping=...` | Push monitor'unun raporu; API anahtarı gerekmez |
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
 | `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş |
 | `GET` | `/api/v1/monitors/{id}/uptime?windows=24h,168h` | İstenen her dönem için uptime |
@@ -124,25 +129,137 @@ curl -X POST localhost:8090/api/v1/monitors -d '{
 }'
 ```
 
-`type` değeri `http` ya da `tcp` (`host:port` bağlantısı kurulabiliyorsa
-başarılı) olabilir. HTTP monitor'ları isteğe bağlı bir `http` nesnesi alır:
+Her monitor'da ortak alanlar: `name`, `type`, `target`, `interval_seconds`,
+`timeout_seconds` ve isteğe bağlı olarak:
+
+- `description`: serbest açıklama.
+- `failure_threshold`: art arda kaç başarısız kontrolün kesinti sayılacağı.
+- `retry_interval_seconds`: bir kontrol başarısız olduğunda, kesinti
+  kesinleşene kadar sonraki kontrolün kaç saniye sonra yapılacağı. `0` ise
+  normal aralık beklenir. Kısa bir değer, kesintiyi daha erken doğrular ya da
+  geçici bir hatayı daha erken eler.
+- `inverted`: sonucu tersine çevirir; hedef **başarısız** olduğu sürece
+  monitor "çalışıyor" sayılır. Erişilmemesi gereken şeyler için.
+
+## Monitor tipleri
+
+| `type` | `target` | Ne kontrol edilir |
+| --- | --- | --- |
+| `http` | `https://host/yol` | HTTP isteği: durum kodu, gövdede metin ya da JSON değeri, sertifika süresi |
+| `tcp` | `host:port` | TCP bağlantısı; istenirse TLS el sıkışması ve sertifika süresi |
+| `ping` | `host` ya da IP | ICMP echo; yanıt süresi gidiş-dönüş süresidir |
+| `dns` | alan adı | DNS sorgusu: kayıt var mı, beklenen değeri içeriyor mu |
+| `push` | (boş) | Hedef kendisi rapor verir; rapor gelmezse başarısız |
+| `grpc` | `host:port` | gRPC sağlık protokolü (`grpc.health.v1.Health/Check`) |
+| `websocket` | `wss://host/yol` | WebSocket el sıkışması |
+
+Tipe özel ayarlar, tipin adını taşıyan nesnede verilir. Güncellemede bu nesne
+gönderilirse o tipin **tüm** ayarlarının yerine geçer; gönderilmezse ayarlar
+değişmez.
+
+### `http`
 
 ```json
 "http": {
-  "method": "GET",
+  "method": "POST",
   "expected_status": "200-299,401",
   "keyword": "\"status\":\"ok\"",
-  "headers": { "Authorization": "Bearer ..." },
+  "invert_keyword": false,
+  "json_path": "checks[0].state",
+  "json_operator": "==",
+  "json_expected": "up",
+  "headers": { "X-Tenant": "a" },
+  "body": "{\"deep\": true}",
+  "content_type": "application/json",
+  "auth": "basic",
+  "auth_user": "probe",
+  "auth_secret": "...",
+  "max_redirects": 10,
   "tls_skip_verify": false
 }
 ```
 
-- `method`: `GET` ya da `HEAD`.
+- `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` ya da `OPTIONS`.
 - `expected_status`: başarılı sayılan kodlar ve aralıklar; varsayılan `200-399`.
-- `keyword`: yanıt gövdesinde bulunması gereken metin.
-- `headers`: isteğe eklenen header'lar. Değerler API yanıtlarında `********`
-  olarak maskelenir; güncellemede bu değer gönderilirse kayıtlı değer korunur.
+- `keyword`: yanıt gövdesinde bulunması gereken metin. `invert_keyword`
+  verilirse tersine, bulunmaması gerekir (örneğin `error`).
+- `json_path`: JSON yanıtta bakılacak değer: `status`, `checks[0].state`,
+  `data.items[2].id`. `json_operator` (`==`, `!=`, `>`, `>=`, `<`, `<=`,
+  `contains`) ile `json_expected` değerine karşılaştırılır. Sayılar değerce
+  karşılaştırılır (`12` ile `12.0` eşittir); sıralama operatörleri iki tarafta
+  da sayı ister.
+- `headers`: isteğe eklenen header'lar.
+- `body`, `content_type`: istekle gönderilen gövde.
+- `auth`: `basic` (`auth_user` + `auth_secret`) ya da `bearer` (`auth_secret`
+  token olarak). Açıkça verilen bir `Authorization` header'ı bunun önüne geçer.
+- `max_redirects`: kaç yönlendirmenin izleneceği; varsayılan `10`. `0` ise ilk
+  yanıt değerlendirilir, yönlendirme olsa bile.
 - `tls_skip_verify`: yalnızca bu monitor için sertifika doğrulamasını kapatır.
+
+Header değerleri ve `auth_secret` API yanıtlarında `********` olarak
+maskelenir; güncellemede bu değer gönderilirse kayıtlı değer korunur.
+
+### `tcp`
+
+`"tcp": {"tls": true, "tls_skip_verify": false}`: bağlantıdan sonra TLS el
+sıkışması yapılır. Böylece HTTP olmayan servislerin (LDAPS, Kafka, API
+server) sertifika süresi de izlenir ve sertifika alarmı onlar için de çalışır.
+
+### `ping`
+
+Ayarı yoktur. Yetkisiz ICMP soketi kullanılır; ek bir capability gerekmez ama
+çekirdeğin buna izin vermesi gerekir (`net.ipv4.ping_group_range`). İzin
+yoksa kontrol, nedenini söyleyen bir hatayla başarısız olur.
+
+### `dns`
+
+`"dns": {"record_type": "A", "resolver": "10.96.0.10", "expected": "10.0.0.5"}`
+
+- `record_type`: `A`, `AAAA`, `CNAME`, `MX`, `NS`, `TXT`, `SRV` ya da `PTR`;
+  varsayılan `A`.
+- `resolver`: sorulacak sunucu, `host` ya da `host:port`. Boşsa backend'in
+  çalıştığı ortamın çözümleyicisi kullanılır (cluster içinde CoreDNS).
+- `expected`: bulunan kayıtlardan en az birinin içermesi gereken metin.
+
+Bulunan kayıtlar sonuçla birlikte saklanır ve arayüzde görünür.
+
+### `push`
+
+Kontrol edilecek bir adres yoktur; izlenen şey (bir CronJob, bir yedekleme
+betiği) işini bitirince Kubeat'e haber verir. Monitor oluşturulunca yanıtta
+bir `push_token` döner; rapor adresi:
+
+```
+https://<kubeat-adresi>/api/push/<token>?status=up&msg=tamam&ping=820
+```
+
+- `status`: `up` (varsayılan) ya da `down`; iş kendi başarısızlığını da
+  bildirebilir.
+- `msg`: sonuçla birlikte saklanan kısa bir metin.
+- `ping`: işin bildirmek istediği süre, milisaniye.
+
+`interval_seconds` raporun ne sıklıkta beklendiğidir; `timeout_seconds` ise
+ne kadar gecikmeye göz yumulacağı. Bu süre içinde rapor gelmezse monitor
+başarısız olur. Adres hem arayüzün adresinden hem cluster içinde backend
+servisinden (`http://<release>-backend:8080/api/push/<token>`) kabul edilir;
+API anahtarı ya da oturum gerekmez, token'ın kendisi sırdır.
+
+```yaml
+# Bir CronJob'un sonunda:
+command: ["sh", "-c", "yedek-al && curl -fsS 'http://kubeat-backend:8080/api/push/<token>'"]
+```
+
+### `grpc`
+
+`"grpc": {"service": "shop.Cart", "tls": false, "tls_skip_verify": false}`:
+Kubernetes'in gRPC probe'larıyla aynı protokol. `service` boşsa sunucunun
+genel durumu sorulur. Yanıt `SERVING` değilse kontrol başarısızdır.
+
+### `websocket`
+
+`"websocket": {"subprotocol": "graphql-ws", "tls_skip_verify": false}`:
+sunucunun bağlantıyı WebSocket'e yükseltip yükseltmediğine bakılır.
+`subprotocol` verilirse sunucunun onu kabul etmesi gerekir.
 
 ## Geçmiş verisi
 
@@ -363,8 +480,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_ROLLUP_INTERVAL` | `1m` | Saatlik özetlerin güncellenme sıklığı |
 | `UPTIME_ROLLUP_RETENTION` | `8760h` | Saatlik özetlerin saklanma süresi; grafik ve uptime en fazla bu kadar geriye gider |
 | `UPTIME_SERIES_POINTS` | `120` | Bir grafikteki yaklaşık nokta sayısı |
-| `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | Tüm HTTP kontrollerinde TLS sertifika doğrulamasını kapatır |
-| `UPTIME_KEYWORD_BODY_LIMIT_BYTES` | `1048576` | Keyword aranırken yanıt gövdesinin okunan kısmı |
+| `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | TLS kullanan tüm kontrollerde (HTTP, TCP, gRPC, WebSocket) sertifika doğrulamasını kapatır |
+| `UPTIME_KEYWORD_BODY_LIMIT_BYTES` | `1048576` | Keyword ya da JSON değeri aranırken yanıt gövdesinin okunan kısmı |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |

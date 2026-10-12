@@ -374,7 +374,17 @@ func TestHTTPOptionsAPI(t *testing.T) {
 	}
 
 	invalid := map[string]string{
-		"bad method":           `{"method":"DELETE"}`,
+		"bad method":           `{"method":"TRACE"}`,
+		"json path with HEAD":  `{"method":"HEAD","json_path":"status"}`,
+		"bad json path":        `{"json_path":"a..b"}`,
+		"bad json operator":    `{"json_path":"a","json_operator":"~"}`,
+		"too many redirects":   `{"max_redirects":21}`,
+		"negative redirects":   `{"max_redirects":-1}`,
+		"unknown auth":         `{"auth":"digest"}`,
+		"basic without a user": `{"auth":"basic","auth_secret":"p"}`,
+		"bearer without token": `{"auth":"bearer"}`,
+		"mask without secret":  `{"auth":"bearer","auth_secret":"` + maskedValue + `"}`,
+		"line break in type":   `{"body":"x","content_type":"a\r\nX: y"}`,
 		"bad status":           `{"expected_status":"2xx"}`,
 		"keyword with HEAD":    `{"method":"HEAD","keyword":"ok"}`,
 		"bad header name":      `{"headers":{"X Bad":"v"}}`,

@@ -59,18 +59,27 @@ func newWebhookBody(n Notification) webhookBody {
 	return body
 }
 
+// target is the monitor's target in parentheses, with the space before it;
+// empty for a monitor without one, such as a push monitor.
+func target(m store.Monitor) string {
+	if m.Target == "" {
+		return ""
+	}
+	return " (" + m.Target + ")"
+}
+
 // Text is the one-line human-readable form of a notification.
 func Text(n Notification) string {
 	switch n.Event {
 	case EventDown:
-		return fmt.Sprintf("🔴 %s erişilemiyor (%s). Art arda %d kontrol başarısız. Son hata: %s",
-			n.Monitor.Name, n.Monitor.Target, n.Monitor.FailureThreshold, n.Incident.Cause)
+		return fmt.Sprintf("🔴 %s erişilemiyor%s. Art arda %d kontrol başarısız. Son hata: %s",
+			n.Monitor.Name, target(n.Monitor), n.Monitor.FailureThreshold, n.Incident.Cause)
 	case EventUp:
-		return fmt.Sprintf("🟢 %s tekrar çalışıyor (%s). Kesinti süresi: %s",
-			n.Monitor.Name, n.Monitor.Target, n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second))
+		return fmt.Sprintf("🟢 %s tekrar çalışıyor%s. Kesinti süresi: %s",
+			n.Monitor.Name, target(n.Monitor), n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second))
 	case EventReminder:
-		return fmt.Sprintf("🔴 %s hâlâ erişilemiyor (%s). Kesinti süresi: %s. Son hata: %s",
-			n.Monitor.Name, n.Monitor.Target, n.At.Sub(n.Incident.StartedAt).Round(time.Second), n.Incident.Cause)
+		return fmt.Sprintf("🔴 %s hâlâ erişilemiyor%s. Kesinti süresi: %s. Son hata: %s",
+			n.Monitor.Name, target(n.Monitor), n.At.Sub(n.Incident.StartedAt).Round(time.Second), n.Incident.Cause)
 	case EventCertExpiring:
 		days := int(n.CertExpiresAt.Sub(n.Incident.StartedAt).Hours() / 24)
 		when := fmt.Sprintf("%d gün sonra", days)
@@ -80,11 +89,11 @@ func Text(n Notification) string {
 		case days == 0:
 			when = "24 saat içinde"
 		}
-		return fmt.Sprintf("🟡 %s sertifikasının süresi bitiyor: %s (%s) (%s)",
-			n.Monitor.Name, when, n.CertExpiresAt.Format("2006-01-02"), n.Monitor.Target)
+		return fmt.Sprintf("🟡 %s sertifikasının süresi bitiyor: %s (%s)%s",
+			n.Monitor.Name, when, n.CertExpiresAt.Format("2006-01-02"), target(n.Monitor))
 	case EventCertRenewed:
-		return fmt.Sprintf("🟢 %s sertifikası yenilendi; yeni bitiş tarihi %s (%s)",
-			n.Monitor.Name, n.CertExpiresAt.Format("2006-01-02"), n.Monitor.Target)
+		return fmt.Sprintf("🟢 %s sertifikası yenilendi; yeni bitiş tarihi %s%s",
+			n.Monitor.Name, n.CertExpiresAt.Format("2006-01-02"), target(n.Monitor))
 	default:
 		return "Kubeat test bildirimi: bu kanal çalışıyor."
 	}

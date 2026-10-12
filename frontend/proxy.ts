@@ -10,6 +10,10 @@ export function proxy(request: NextRequest) {
   if (!loginEnabled) return NextResponse.next();
 
   const { pathname } = request.nextUrl;
+  // Reports of push monitors come from jobs, which have no session; the
+  // token in their path is checked by the backend.
+  if (pathname.startsWith("/api/push/")) return NextResponse.next();
+
   const signedIn = validSession(request.cookies.get(SESSION_COOKIE)?.value);
 
   if (pathname === "/login") {

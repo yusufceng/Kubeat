@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -132,6 +133,11 @@ func openPool(path string, busyTimeout time.Duration, writer bool) (*sql.DB, err
 	return db, nil
 }
 
+// withoutForeignKeys, as the first line of a migration, runs it with foreign
+// key enforcement off. A migration that rebuilds a table needs that:
+// dropping the old table would otherwise delete every row referring to it.
+const withoutForeignKeys = "-- migrate: foreign_keys=off"
+
 // migrate applies the embedded migrations in file name order. The number of
 // applied migrations is tracked in PRAGMA user_version.
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -141,8 +147,15 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 	sort.Strings(names)
 
+	// One connection throughout: the foreign key setting belongs to it.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
 	var version int
-	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
 	if version > len(names) {
@@ -154,24 +167,55 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		if err != nil {
 			return err
 		}
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, string(body)); err != nil {
-			tx.Rollback()
+		if err := applyMigration(ctx, conn, string(body), i+1); err != nil {
 			return fmt.Errorf("%s: %w", names[i], err)
-		}
-		// PRAGMA does not accept bound parameters.
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", i+1)); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
 		}
 	}
 	return nil
+}
+
+func applyMigration(ctx context.Context, conn *sql.Conn, body string, version int) (err error) {
+	rebuild := strings.HasPrefix(body, withoutForeignKeys)
+	if rebuild {
+		// The setting cannot be changed inside a transaction.
+		if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+			return err
+		}
+		defer func() {
+			if _, onErr := conn.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err == nil {
+				err = onErr
+			}
+		}()
+	}
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, body); err != nil {
+		return err
+	}
+	if rebuild {
+		// Nothing enforced the references meanwhile, so check them all.
+		rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")
+		if err != nil {
+			return err
+		}
+		broken := rows.Next()
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+		if broken {
+			return errors.New("the migration left rows that refer to missing rows")
+		}
+	}
+	// PRAGMA does not accept bound parameters.
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Close closes both connection pools.
@@ -179,87 +223,146 @@ func (s *SQLite) Close() error {
 	return errors.Join(s.read.Close(), s.write.Close())
 }
 
-const monitorColumns = "id, name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at, namespace, source, " +
-	"http_method, http_expected_status, http_keyword, http_headers, tls_skip_verify"
+// monitorFields are the columns of a monitor, in the order monitorRow reads them.
+var monitorFields = []string{
+	"id", "name", "description", "type", "target", "interval_seconds", "timeout_seconds", "retry_interval_seconds",
+	"failure_threshold", "inverted", "enabled", "push_token", "created_at", "namespace", "source", "settings",
+}
+
+var monitorColumns = strings.Join(monitorFields, ", ")
+
+// monitorColumnsOf returns the monitor columns qualified with a table alias.
+func monitorColumnsOf(alias string) string {
+	return alias + "." + strings.Join(monitorFields, ", "+alias+".")
+}
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanMonitor(row rowScanner) (Monitor, error) {
-	var (
-		m                 Monitor
-		interval, timeout int64
-		createdAt         int64
-		headers           string
-	)
-	err := row.Scan(&m.ID, &m.Name, &m.Type, &m.Target, &interval, &timeout, &m.FailureThreshold, &m.Enabled, &createdAt, &m.Namespace, &m.Source,
-		&m.HTTP.Method, &m.HTTP.ExpectedStatus, &m.HTTP.Keyword, &headers, &m.HTTP.SkipTLSVerify)
-	if err != nil {
-		return Monitor{}, err
+// monitorRow receives the monitor columns of a row.
+type monitorRow struct {
+	m                                   Monitor
+	interval, timeout, retry, createdAt int64
+	settings                            string
+}
+
+// dest returns where the monitor columns are scanned to.
+func (r *monitorRow) dest() []any {
+	return []any{
+		&r.m.ID, &r.m.Name, &r.m.Description, &r.m.Type, &r.m.Target, &r.interval, &r.timeout, &r.retry,
+		&r.m.FailureThreshold, &r.m.Inverted, &r.m.Enabled, &r.m.PushToken, &r.createdAt, &r.m.Namespace, &r.m.Source, &r.settings,
 	}
-	m.Interval = time.Duration(interval) * time.Second
-	m.Timeout = time.Duration(timeout) * time.Second
-	m.CreatedAt = time.UnixMilli(createdAt).UTC()
-	if m.HTTP.Headers, err = decodeHeaders(headers); err != nil {
+}
+
+// monitor returns the scanned monitor.
+func (r *monitorRow) monitor() (Monitor, error) {
+	m := r.m
+	m.Interval = time.Duration(r.interval) * time.Second
+	m.Timeout = time.Duration(r.timeout) * time.Second
+	m.RetryInterval = time.Duration(r.retry) * time.Second
+	m.CreatedAt = time.UnixMilli(r.createdAt).UTC()
+	if err := decodeSettings(r.settings, &m); err != nil {
 		return Monitor{}, fmt.Errorf("monitor %d: %w", m.ID, err)
 	}
 	return m, nil
 }
 
-// encodeHeaders and decodeHeaders store headers as a JSON object; no headers
-// is "{}" in the database and a nil map in Go.
-func encodeHeaders(h map[string]string) (string, error) {
-	if len(h) == 0 {
-		return "{}", nil
+func scanMonitor(row rowScanner) (Monitor, error) {
+	var r monitorRow
+	if err := row.Scan(r.dest()...); err != nil {
+		return Monitor{}, err
 	}
-	b, err := json.Marshal(h)
+	return r.monitor()
+}
+
+// settings is the stored form of a monitor's check options: only the part
+// that belongs to its type is present.
+type settings struct {
+	HTTP      *HTTPOptions      `json:"http,omitempty"`
+	TCP       *TCPOptions       `json:"tcp,omitempty"`
+	DNS       *DNSOptions       `json:"dns,omitempty"`
+	GRPC      *GRPCOptions      `json:"grpc,omitempty"`
+	WebSocket *WebSocketOptions `json:"websocket,omitempty"`
+}
+
+// normalize fills in the defaults of the monitor's check options and clears
+// the options of other types, so that what is returned to a caller equals
+// what a later read returns.
+func normalize(m *Monitor) {
+	kept := Monitor{}
+	switch m.Type {
+	case MonitorHTTP:
+		kept.HTTP = m.HTTP
+		if kept.HTTP.Method == "" {
+			kept.HTTP.Method = DefaultHTTPMethod
+		}
+		if kept.HTTP.ExpectedStatus == "" {
+			kept.HTTP.ExpectedStatus = DefaultExpectedStatus
+		}
+		if len(kept.HTTP.Headers) == 0 {
+			kept.HTTP.Headers = nil
+		}
+	case MonitorTCP:
+		kept.TCP = m.TCP
+	case MonitorDNS:
+		kept.DNS = m.DNS
+		if kept.DNS.RecordType == "" {
+			kept.DNS.RecordType = DefaultDNSRecordType
+		}
+	case MonitorGRPC:
+		kept.GRPC = m.GRPC
+	case MonitorWebSocket:
+		kept.WebSocket = m.WebSocket
+	}
+	m.HTTP, m.TCP, m.DNS, m.GRPC, m.WebSocket = kept.HTTP, kept.TCP, kept.DNS, kept.GRPC, kept.WebSocket
+}
+
+// encodeSettings returns the stored form of a normalized monitor's options.
+func encodeSettings(m Monitor) (string, error) {
+	var st settings
+	switch m.Type {
+	case MonitorHTTP:
+		st.HTTP = &m.HTTP
+	case MonitorTCP:
+		st.TCP = &m.TCP
+	case MonitorDNS:
+		st.DNS = &m.DNS
+	case MonitorGRPC:
+		st.GRPC = &m.GRPC
+	case MonitorWebSocket:
+		st.WebSocket = &m.WebSocket
+	}
+	b, err := json.Marshal(st)
 	return string(b), err
 }
 
-func decodeHeaders(s string) (map[string]string, error) {
-	var h map[string]string
-	if err := json.Unmarshal([]byte(s), &h); err != nil {
-		return nil, fmt.Errorf("decode headers: %w", err)
+func decodeSettings(text string, m *Monitor) error {
+	st := settings{HTTP: &m.HTTP, TCP: &m.TCP, DNS: &m.DNS, GRPC: &m.GRPC, WebSocket: &m.WebSocket}
+	if err := json.Unmarshal([]byte(text), &st); err != nil {
+		return fmt.Errorf("decode settings: %w", err)
 	}
-	if len(h) == 0 {
-		return nil, nil
-	}
-	return h, nil
-}
-
-// httpColumns returns the stored form of the HTTP options, with defaults
-// filled in for the fields a caller left empty.
-func httpColumns(o HTTPOptions) (method, expected, headers string, err error) {
-	method, expected = o.Method, o.ExpectedStatus
-	if method == "" {
-		method = DefaultHTTPMethod
-	}
-	if expected == "" {
-		expected = DefaultExpectedStatus
-	}
-	headers, err = encodeHeaders(o.Headers)
-	return method, expected, headers, err
+	normalize(m)
+	return nil
 }
 
 func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
-	method, expected, headers, err := httpColumns(m.HTTP)
+	if !slices.Contains(MonitorTypes, m.Type) {
+		return Monitor{}, fmt.Errorf("create monitor: unknown type %q", m.Type)
+	}
+	normalize(&m)
+	encoded, err := encodeSettings(m)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("create monitor: %w", err)
-	}
-	m.HTTP.Method, m.HTTP.ExpectedStatus = method, expected
-	if len(m.HTTP.Headers) == 0 {
-		m.HTTP.Headers = nil
 	}
 	m.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
 
 	res, err := s.write.ExecContext(ctx,
-		`INSERT INTO monitors (name, type, target, interval_seconds, timeout_seconds, failure_threshold, enabled, created_at, namespace, source,
-		                       http_method, http_expected_status, http_keyword, http_headers, tls_skip_verify)
+		`INSERT INTO monitors (name, description, type, target, interval_seconds, timeout_seconds, retry_interval_seconds,
+		                       failure_threshold, inverted, enabled, push_token, created_at, namespace, source, settings)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.Name, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.FailureThreshold, m.Enabled, m.CreatedAt.UnixMilli(),
-		m.Namespace, m.Source,
-		method, expected, m.HTTP.Keyword, headers, m.HTTP.SkipTLSVerify)
+		m.Name, m.Description, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), int64(m.RetryInterval/time.Second),
+		m.FailureThreshold, m.Inverted, m.Enabled, m.PushToken, m.CreatedAt.UnixMilli(), m.Namespace, m.Source, encoded)
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}
@@ -282,6 +385,50 @@ func (s *SQLite) GetMonitor(ctx context.Context, id int64) (Monitor, error) {
 		return Monitor{}, fmt.Errorf("get monitor: %w", err)
 	}
 	return m, nil
+}
+
+func (s *SQLite) GetMonitorByPushToken(ctx context.Context, token string) (Monitor, error) {
+	if token == "" {
+		return Monitor{}, ErrNotFound
+	}
+	m, err := scanMonitor(s.read.QueryRowContext(ctx,
+		"SELECT "+monitorColumns+" FROM monitors WHERE push_token = ?", token))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Monitor{}, ErrNotFound
+	}
+	if err != nil {
+		return Monitor{}, fmt.Errorf("get monitor by push token: %w", err)
+	}
+	return m, nil
+}
+
+func (s *SQLite) RecordPush(ctx context.Context, report PushReport) error {
+	_, err := s.write.ExecContext(ctx,
+		`INSERT INTO push_reports (monitor_id, received_at, up, message, latency_ms) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT (monitor_id) DO UPDATE SET
+		     received_at = excluded.received_at, up = excluded.up, message = excluded.message, latency_ms = excluded.latency_ms`,
+		report.MonitorID, report.ReceivedAt.UnixMilli(), report.Up, report.Message, report.Latency.Milliseconds())
+	if err != nil {
+		return fmt.Errorf("record push: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLite) LastPush(ctx context.Context, monitorID int64) (PushReport, error) {
+	report := PushReport{MonitorID: monitorID}
+	var receivedAt, latencyMS int64
+	err := s.read.QueryRowContext(ctx,
+		"SELECT received_at, up, message, latency_ms FROM push_reports WHERE monitor_id = ?", monitorID).
+		Scan(&receivedAt, &report.Up, &report.Message, &latencyMS)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PushReport{}, ErrNotFound
+	}
+	if err != nil {
+		return PushReport{}, fmt.Errorf("last push: %w", err)
+	}
+	report.ReceivedAt = time.UnixMilli(receivedAt).UTC()
+	report.Latency = time.Duration(latencyMS) * time.Millisecond
+	return report, nil
 }
 
 func (s *SQLite) ListMonitors(ctx context.Context) ([]Monitor, error) {
@@ -328,11 +475,9 @@ const maintenanceCovers = `(w.monitor_id = m.id OR (w.monitor_id IS NULL AND (w.
 // The aggregates come from the hourly summaries: computing them from raw
 // results means reading every result in the window on every request, which
 // took seconds at a few hundred monitors.
-const statusQuery = `
-SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.timeout_seconds, m.failure_threshold, m.enabled, m.created_at,
-       m.namespace, m.source,
-       m.http_method, m.http_expected_status, m.http_keyword, m.http_headers, m.tls_skip_verify,
-       r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.cert_expires_at,
+var statusQuery = `
+SELECT ` + monitorColumnsOf("m") + `,
+       r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.detail, r.cert_expires_at,
        COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.up_latency_sum_ms, 0),
        i.id, i.started_at, i.cause, c.id IS NOT NULL,
        (SELECT MAX(w.ends_at) FROM maintenance_windows w
@@ -382,33 +527,27 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 	var statuses []MonitorStatus
 	for rows.Next() {
 		var (
-			st                           MonitorStatus
-			interval, timeout, createdAt int64
-			checkedAt, latencyMS         sql.NullInt64
-			up                           sql.NullBool
-			statusCode                   sql.NullInt64
-			errText                      sql.NullString
-			upLatencySumMS               int64
-			incidentID, incidentStart    sql.NullInt64
-			incidentCause                sql.NullString
-			headers                      string
-			certExpires                  sql.NullInt64
-			maintenanceUntil             sql.NullInt64
+			row                       monitorRow
+			st                        MonitorStatus
+			checkedAt, latencyMS      sql.NullInt64
+			up                        sql.NullBool
+			statusCode                sql.NullInt64
+			errText, detail           sql.NullString
+			upLatencySumMS            int64
+			incidentID, incidentStart sql.NullInt64
+			incidentCause             sql.NullString
+			certExpires               sql.NullInt64
+			maintenanceUntil          sql.NullInt64
 		)
-		err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Target, &interval, &timeout, &st.FailureThreshold, &st.Enabled, &createdAt,
-			&st.Namespace, &st.Source,
-			&st.HTTP.Method, &st.HTTP.ExpectedStatus, &st.HTTP.Keyword, &headers, &st.HTTP.SkipTLSVerify,
-			&checkedAt, &up, &latencyMS, &statusCode, &errText, &certExpires,
+		err := rows.Scan(append(row.dest(),
+			&checkedAt, &up, &latencyMS, &statusCode, &errText, &detail, &certExpires,
 			&st.Checks, &st.UpChecks, &upLatencySumMS,
-			&incidentID, &incidentStart, &incidentCause, &st.CertWarning, &maintenanceUntil)
+			&incidentID, &incidentStart, &incidentCause, &st.CertWarning, &maintenanceUntil)...)
 		if err != nil {
 			return nil, err
 		}
-		st.Interval = time.Duration(interval) * time.Second
-		st.Timeout = time.Duration(timeout) * time.Second
-		st.CreatedAt = time.UnixMilli(createdAt).UTC()
-		if st.HTTP.Headers, err = decodeHeaders(headers); err != nil {
-			return nil, fmt.Errorf("monitor %d: %w", st.ID, err)
+		if st.Monitor, err = row.monitor(); err != nil {
+			return nil, err
 		}
 		if st.UpChecks > 0 {
 			st.AvgLatency = time.Duration(float64(upLatencySumMS) / float64(st.UpChecks) * float64(time.Millisecond))
@@ -422,6 +561,7 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 				Latency:    time.Duration(latencyMS.Int64) * time.Millisecond,
 				StatusCode: int(statusCode.Int64),
 				Error:      errText.String,
+				Detail:     detail.String,
 
 				CertExpiresAt: unixMilliOrZero(certExpires),
 			}
@@ -442,17 +582,24 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 }
 
 func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
-	method, expected, headers, err := httpColumns(m.HTTP)
+	// The type decides which options are stored, and it never changes.
+	current, err := s.GetMonitor(ctx, m.ID)
+	if err != nil {
+		return Monitor{}, err
+	}
+	m.Type = current.Type
+	normalize(&m)
+	encoded, err := encodeSettings(m)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("update monitor: %w", err)
 	}
 	res, err := s.write.ExecContext(ctx,
 		`UPDATE monitors
-		 SET name = ?, target = ?, interval_seconds = ?, timeout_seconds = ?, failure_threshold = ?, enabled = ?,
-		     http_method = ?, http_expected_status = ?, http_keyword = ?, http_headers = ?, tls_skip_verify = ?
+		 SET name = ?, description = ?, target = ?, interval_seconds = ?, timeout_seconds = ?, retry_interval_seconds = ?,
+		     failure_threshold = ?, inverted = ?, enabled = ?, settings = ?
 		 WHERE id = ?`,
-		m.Name, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), m.FailureThreshold, m.Enabled,
-		method, expected, m.HTTP.Keyword, headers, m.HTTP.SkipTLSVerify, m.ID)
+		m.Name, m.Description, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), int64(m.RetryInterval/time.Second),
+		m.FailureThreshold, m.Inverted, m.Enabled, encoded, m.ID)
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}
@@ -500,8 +647,8 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO check_results (monitor_id, checked_at, up, latency_ms, status_code, error, cert_expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO check_results (monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("insert check results: %w", err)
 	}
@@ -511,8 +658,12 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 		var (
 			statusCode  sql.NullInt64
 			errText     sql.NullString
+			detail      sql.NullString
 			certExpires sql.NullInt64
 		)
+		if r.Detail != "" {
+			detail = sql.NullString{String: r.Detail, Valid: true}
+		}
 		if !r.CertExpiresAt.IsZero() {
 			certExpires = sql.NullInt64{Int64: r.CertExpiresAt.UnixMilli(), Valid: true}
 		}
@@ -522,7 +673,7 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 		if r.Error != "" {
 			errText = sql.NullString{String: r.Error, Valid: true}
 		}
-		_, err := stmt.ExecContext(ctx, r.MonitorID, r.CheckedAt.UnixMilli(), r.Up, r.Latency.Milliseconds(), statusCode, errText, certExpires)
+		_, err := stmt.ExecContext(ctx, r.MonitorID, r.CheckedAt.UnixMilli(), r.Up, r.Latency.Milliseconds(), statusCode, errText, detail, certExpires)
 		if err != nil {
 			return fmt.Errorf("insert check results: %w", err)
 		}
@@ -533,7 +684,7 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 	return nil
 }
 
-const recentResultsQuery = `SELECT monitor_id, checked_at, up, latency_ms, status_code, error, cert_expires_at
+const recentResultsQuery = `SELECT monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at
 		 FROM check_results WHERE monitor_id = ?
 		 ORDER BY checked_at DESC, id DESC LIMIT ?`
 
@@ -588,16 +739,17 @@ func scanCheckResults(rows *sql.Rows) ([]CheckResult, error) {
 			r                    CheckResult
 			checkedAt, latencyMS int64
 			statusCode           sql.NullInt64
-			errText              sql.NullString
+			errText, detail      sql.NullString
 			certExpires          sql.NullInt64
 		)
-		if err := rows.Scan(&r.MonitorID, &checkedAt, &r.Up, &latencyMS, &statusCode, &errText, &certExpires); err != nil {
+		if err := rows.Scan(&r.MonitorID, &checkedAt, &r.Up, &latencyMS, &statusCode, &errText, &detail, &certExpires); err != nil {
 			return nil, fmt.Errorf("list check results: %w", err)
 		}
 		r.CheckedAt = time.UnixMilli(checkedAt).UTC()
 		r.Latency = time.Duration(latencyMS) * time.Millisecond
 		r.StatusCode = int(statusCode.Int64)
 		r.Error = errText.String
+		r.Detail = detail.String
 		r.CertExpiresAt = unixMilliOrZero(certExpires)
 		results = append(results, r)
 	}

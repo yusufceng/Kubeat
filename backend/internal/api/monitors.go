@@ -1,12 +1,15 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -23,21 +26,29 @@ const (
 )
 
 type monitorResponse struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	Type   string `json:"type"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	// Target is empty for push monitors.
 	Target string `json:"target"`
 	// Namespace and Source are empty for monitors entered by hand.
-	Namespace        string    `json:"namespace"`
-	Source           string    `json:"source"`
-	IntervalSeconds  int       `json:"interval_seconds"`
-	TimeoutSeconds   int       `json:"timeout_seconds"`
-	FailureThreshold int       `json:"failure_threshold"`
-	Enabled          bool      `json:"enabled"`
-	CreatedAt        time.Time `json:"created_at"`
+	Namespace       string `json:"namespace"`
+	Source          string `json:"source"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	TimeoutSeconds  int    `json:"timeout_seconds"`
+	// RetryIntervalSeconds is 0 when failed checks are not repeated early.
+	RetryIntervalSeconds int       `json:"retry_interval_seconds"`
+	FailureThreshold     int       `json:"failure_threshold"`
+	Inverted             bool      `json:"inverted"`
+	Enabled              bool      `json:"enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	// PushToken is the secret of a push monitor's report URL,
+	// /api/push/{token}; absent for other types.
+	PushToken string `json:"push_token,omitempty"`
 
-	// HTTP holds the check options of an HTTP monitor; null for other types.
-	HTTP *httpOptions `json:"http"`
+	// The check options of the monitor's type; the others are null.
+	checkOptions
 
 	Status string          `json:"status"`
 	Last   *resultResponse `json:"last_result"`
@@ -76,6 +87,8 @@ type resultResponse struct {
 	LatencyMS  int64     `json:"latency_ms"`
 	StatusCode *int      `json:"status_code"`
 	Error      *string   `json:"error"`
+	// Detail is what a successful check found, when there is something to say.
+	Detail *string `json:"detail"`
 	// CertExpiresAt is set when the check saw a TLS certificate.
 	CertExpiresAt *time.Time `json:"cert_expires_at"`
 }
@@ -88,6 +101,9 @@ func toResultResponse(r store.CheckResult) resultResponse {
 	if r.Error != "" {
 		resp.Error = &r.Error
 	}
+	if r.Detail != "" {
+		resp.Detail = &r.Detail
+	}
 	if !r.CertExpiresAt.IsZero() {
 		resp.CertExpiresAt = &r.CertExpiresAt
 	}
@@ -98,24 +114,26 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 	resp := monitorResponse{
 		ID:              st.ID,
 		Name:            st.Name,
+		Description:     st.Description,
 		Type:            string(st.Type),
 		Target:          st.Target,
 		IntervalSeconds: int(st.Interval / time.Second),
 		TimeoutSeconds:  int(st.Timeout / time.Second),
+		Inverted:        st.Inverted,
 		Enabled:         st.Enabled,
 		CreatedAt:       st.CreatedAt,
+		PushToken:       st.PushToken,
+		checkOptions:    toCheckOptions(st.Monitor),
 		Status:          statusPending,
 		WindowSeconds:   int(window / time.Second),
 		Checks:          st.Checks,
 		AvgLatencyMS:    st.AvgLatency.Milliseconds(),
 
-		FailureThreshold: st.FailureThreshold,
-		CertWarning:      st.CertWarning,
-		Namespace:        st.Namespace,
-		Source:           st.Source,
-	}
-	if st.Type == store.MonitorHTTP {
-		resp.HTTP = toHTTPOptions(st.HTTP)
+		RetryIntervalSeconds: int(st.RetryInterval / time.Second),
+		FailureThreshold:     st.FailureThreshold,
+		CertWarning:          st.CertWarning,
+		Namespace:            st.Namespace,
+		Source:               st.Source,
 	}
 	if !st.MaintenanceUntil.IsZero() {
 		resp.MaintenanceUntil = &st.MaintenanceUntil
@@ -272,14 +290,73 @@ func (h *handler) getMonitor(w http.ResponseWriter, r *http.Request) {
 
 type createMonitorRequest struct {
 	Name            string `json:"name"`
+	Description     string `json:"description"`
 	Type            string `json:"type"`
 	Target          string `json:"target"`
 	IntervalSeconds int    `json:"interval_seconds"`
 	TimeoutSeconds  int    `json:"timeout_seconds"`
+	// RetryIntervalSeconds is optional; 0 repeats failed checks at the
+	// normal interval.
+	RetryIntervalSeconds int `json:"retry_interval_seconds"`
 	// FailureThreshold is optional; 0 means the server default.
-	FailureThreshold int `json:"failure_threshold"`
-	// HTTP is optional and only allowed for HTTP monitors.
-	HTTP *httpOptions `json:"http"`
+	FailureThreshold int  `json:"failure_threshold"`
+	Inverted         bool `json:"inverted"`
+	// Options of the monitor's own type; optional.
+	checkOptions
+}
+
+const maxDescriptionLength = 500
+
+// hostName matches a DNS name, with the underscores service records use.
+var hostName = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_.-]*[A-Za-z0-9_])?\.?$`)
+
+func validHost(host string) bool {
+	return net.ParseIP(host) != nil || (len(host) <= 253 && hostName.MatchString(host))
+}
+
+func validPort(port string) bool {
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
+}
+
+// validateTarget checks that target is what a monitor of the given type
+// checks.
+func validateTarget(typ store.MonitorType, target string) error {
+	switch typ {
+	case store.MonitorHTTP:
+		u, err := url.Parse(target)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("target must be an http:// or https:// URL")
+		}
+	case store.MonitorWebSocket:
+		u, err := url.Parse(target)
+		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
+			return errors.New("target must be a ws:// or wss:// URL")
+		}
+	case store.MonitorTCP, store.MonitorGRPC:
+		host, port, err := net.SplitHostPort(target)
+		if err != nil || host == "" {
+			return errors.New("target must be host:port")
+		}
+		if !validPort(port) {
+			return errors.New("target port must be between 1 and 65535")
+		}
+	case store.MonitorPing, store.MonitorDNS:
+		if !validHost(target) {
+			return errors.New("target must be a host name or an IP address, without a scheme or port")
+		}
+	case store.MonitorPush:
+		if target != "" {
+			return errors.New("a push monitor has no target: its source reports to the monitor's push URL")
+		}
+	default:
+		types := make([]string, len(store.MonitorTypes))
+		for i, t := range store.MonitorTypes {
+			types[i] = string(t)
+		}
+		return fmt.Errorf("type must be one of %s", strings.Join(types, ", "))
+	}
+	return nil
 }
 
 // validate normalizes the request and reports the first problem found.
@@ -291,29 +368,20 @@ func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThre
 		return errors.New("failure_threshold must be at least 1")
 	}
 	req.Name = strings.TrimSpace(req.Name)
+	req.Description = strings.TrimSpace(req.Description)
 	req.Target = strings.TrimSpace(req.Target)
 
 	if req.Name == "" {
 		return errors.New("name is required")
 	}
-	switch store.MonitorType(req.Type) {
-	case store.MonitorHTTP:
-		u, err := url.Parse(req.Target)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return errors.New("target must be an http:// or https:// URL")
-		}
-	case store.MonitorTCP:
-		host, port, err := net.SplitHostPort(req.Target)
-		if err != nil || host == "" {
-			return errors.New("target must be host:port")
-		}
-		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-			return errors.New("target port must be between 1 and 65535")
-		}
-	default:
-		return errors.New("type must be http or tcp")
+	if len(req.Description) > maxDescriptionLength {
+		return fmt.Errorf("description must be at most %d bytes", maxDescriptionLength)
 	}
-	if minSeconds := int(minInterval / time.Second); req.IntervalSeconds < minSeconds {
+	if err := validateTarget(store.MonitorType(req.Type), req.Target); err != nil {
+		return err
+	}
+	minSeconds := int(minInterval / time.Second)
+	if req.IntervalSeconds < minSeconds {
 		return fmt.Errorf("interval_seconds must be at least %d", minSeconds)
 	}
 	if req.TimeoutSeconds < 1 {
@@ -322,46 +390,59 @@ func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThre
 	if req.TimeoutSeconds > req.IntervalSeconds {
 		return errors.New("timeout_seconds must not exceed interval_seconds")
 	}
+	switch {
+	case req.RetryIntervalSeconds == 0:
+	case store.MonitorType(req.Type) == store.MonitorPush:
+		return errors.New("retry_interval_seconds does not apply to push monitors: nothing is checked that could be retried")
+	case req.RetryIntervalSeconds < minSeconds:
+		return fmt.Errorf("retry_interval_seconds must be 0 or at least %d", minSeconds)
+	case req.RetryIntervalSeconds > req.IntervalSeconds:
+		return errors.New("retry_interval_seconds must not exceed interval_seconds")
+	}
 	return nil
 }
 
-func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
-	var req createMonitorRequest
+// monitor returns the monitor a validated request describes, on top of
+// base: a monitor's current state, or the defaults of a new one.
+func (req *createMonitorRequest) monitor(base store.Monitor) store.Monitor {
+	base.Name = req.Name
+	base.Description = req.Description
+	base.Type = store.MonitorType(req.Type)
+	base.Target = req.Target
+	base.Interval = time.Duration(req.IntervalSeconds) * time.Second
+	base.Timeout = time.Duration(req.TimeoutSeconds) * time.Second
+	base.RetryInterval = time.Duration(req.RetryIntervalSeconds) * time.Second
+	base.FailureThreshold = req.FailureThreshold
+	base.Inverted = req.Inverted
+	return base
+}
+
+// newPushToken returns the random secret of a push monitor's URL.
+func newPushToken() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// decodeBody reads a JSON request body into v, answering 400 if it is not
+// one.
+func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := dec.Decode(v); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
+		return false
 	}
-	if err := req.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	return true
+}
+
+// storeMonitor creates m and answers with it, or with why it could not be
+// created.
+func (h *handler) storeMonitor(w http.ResponseWriter, r *http.Request, m store.Monitor) {
+	if m.Type == store.MonitorPush {
+		m.PushToken = newPushToken()
 	}
-
-	var httpOpts store.HTTPOptions
-	if req.HTTP != nil {
-		if store.MonitorType(req.Type) != store.MonitorHTTP {
-			writeError(w, http.StatusBadRequest, "http options are only valid for http monitors")
-			return
-		}
-		var err error
-		if httpOpts, err = req.HTTP.resolve(nil); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
-	m, err := h.opts.Store.CreateMonitor(r.Context(), store.Monitor{
-		HTTP:     httpOpts,
-		Name:     req.Name,
-		Type:     store.MonitorType(req.Type),
-		Target:   req.Target,
-		Interval: time.Duration(req.IntervalSeconds) * time.Second,
-		Timeout:  time.Duration(req.TimeoutSeconds) * time.Second,
-		Enabled:  true,
-
-		FailureThreshold: req.FailureThreshold,
-	})
+	created, err := h.opts.Store.CreateMonitor(r.Context(), m)
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "a monitor with this name already exists")
 		return
@@ -370,19 +451,76 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toMonitorResponse(store.MonitorStatus{Monitor: m}, h.opts.StatsWindow))
+	writeJSON(w, http.StatusCreated, toMonitorResponse(store.MonitorStatus{Monitor: created}, h.opts.StatsWindow))
+}
+
+func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
+	var req createMonitorRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if err := req.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
+	m.Enabled = true
+	if err := req.checkOptions.apply(&m); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.storeMonitor(w, r, m)
+}
+
+type cloneMonitorRequest struct {
+	Name string `json:"name"`
+}
+
+// cloneMonitor creates a copy of a monitor under a new name. It exists
+// because a client cannot copy one itself: the secrets of a monitor never
+// leave the server.
+func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	var req cloneMonitorRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Name = strings.TrimSpace(req.Name); req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	m, err := h.opts.Store.GetMonitor(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	// The copy stays in the namespace, but it is not the discovered object:
+	// that can be monitored only once.
+	m.ID, m.Name, m.Source, m.Enabled = 0, req.Name, "", true
+	h.storeMonitor(w, r, m)
 }
 
 // updateMonitorRequest carries only the fields to change.
 type updateMonitorRequest struct {
-	Name             *string `json:"name"`
-	Target           *string `json:"target"`
-	IntervalSeconds  *int    `json:"interval_seconds"`
-	TimeoutSeconds   *int    `json:"timeout_seconds"`
-	FailureThreshold *int    `json:"failure_threshold"`
-	Enabled          *bool   `json:"enabled"`
-	// HTTP, when present, replaces all HTTP options of the monitor.
-	HTTP *httpOptions `json:"http"`
+	Name                 *string `json:"name"`
+	Description          *string `json:"description"`
+	Target               *string `json:"target"`
+	IntervalSeconds      *int    `json:"interval_seconds"`
+	TimeoutSeconds       *int    `json:"timeout_seconds"`
+	RetryIntervalSeconds *int    `json:"retry_interval_seconds"`
+	FailureThreshold     *int    `json:"failure_threshold"`
+	Inverted             *bool   `json:"inverted"`
+	Enabled              *bool   `json:"enabled"`
+	// The options of the monitor's type, when present, replace all of them.
+	checkOptions
 }
 
 func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
@@ -392,10 +530,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req updateMonitorRequest
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeBody(w, r, &req) {
 		return
 	}
 
@@ -412,15 +547,21 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	// Apply the changes on top of the current values and validate the result
 	// with the same rules as a new monitor.
 	merged := createMonitorRequest{
-		Name:             current.Name,
-		Type:             string(current.Type),
-		Target:           current.Target,
-		IntervalSeconds:  int(current.Interval / time.Second),
-		TimeoutSeconds:   int(current.Timeout / time.Second),
-		FailureThreshold: current.FailureThreshold,
+		Name:                 current.Name,
+		Description:          current.Description,
+		Type:                 string(current.Type),
+		Target:               current.Target,
+		IntervalSeconds:      int(current.Interval / time.Second),
+		TimeoutSeconds:       int(current.Timeout / time.Second),
+		RetryIntervalSeconds: int(current.RetryInterval / time.Second),
+		FailureThreshold:     current.FailureThreshold,
+		Inverted:             current.Inverted,
 	}
 	if req.Name != nil {
 		merged.Name = *req.Name
+	}
+	if req.Description != nil {
+		merged.Description = *req.Description
 	}
 	if req.Target != nil {
 		merged.Target = *req.Target
@@ -430,6 +571,12 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TimeoutSeconds != nil {
 		merged.TimeoutSeconds = *req.TimeoutSeconds
+	}
+	if req.RetryIntervalSeconds != nil {
+		merged.RetryIntervalSeconds = *req.RetryIntervalSeconds
+	}
+	if req.Inverted != nil {
+		merged.Inverted = *req.Inverted
 	}
 	if req.FailureThreshold != nil {
 		if *req.FailureThreshold < 1 {
@@ -443,22 +590,11 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	change := current
-	if req.HTTP != nil {
-		if current.Type != store.MonitorHTTP {
-			writeError(w, http.StatusBadRequest, "http options are only valid for http monitors")
-			return
-		}
-		if change.HTTP, err = req.HTTP.resolve(current.HTTP.Headers); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+	change := merged.monitor(current)
+	if err := req.checkOptions.apply(&change); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	change.Name = merged.Name
-	change.Target = merged.Target
-	change.Interval = time.Duration(merged.IntervalSeconds) * time.Second
-	change.Timeout = time.Duration(merged.TimeoutSeconds) * time.Second
-	change.FailureThreshold = merged.FailureThreshold
 	if req.Enabled != nil {
 		change.Enabled = *req.Enabled
 	}

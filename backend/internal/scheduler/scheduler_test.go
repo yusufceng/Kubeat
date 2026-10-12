@@ -535,3 +535,83 @@ func TestNextAfterKeepsThePhase(t *testing.T) {
 		t.Errorf("monitors that fell behind together are %s apart, want their original 10s offset", gap)
 	}
 }
+
+// A failing monitor is checked again after its retry interval until it has
+// failed often enough to be an outage; its regular cycle does not move.
+func TestRetryInterval(t *testing.T) {
+	m := monitor(1, time.Minute)
+	m.RetryInterval, m.FailureThreshold = 10*time.Second, 3
+	st := &fakeStore{}
+	st.setMonitors(m)
+	s := New(st, nil, testOptions())
+
+	schedules := make(map[int64]*schedule)
+	jobs := make(chan store.Monitor, 1)
+	t0 := time.Unix(1_700_000_000, 0)
+	// dispatched reports whether a tick at t0+after queued the monitor.
+	dispatched := func(after time.Duration) bool {
+		s.tick(context.Background(), t0.Add(after), false, schedules, jobs)
+		select {
+		case <-jobs:
+			return true
+		default:
+			return false
+		}
+	}
+	finish := func(up bool, after time.Duration) { s.finish(m, up, t0.Add(after)) }
+	expect := func(after time.Duration, want bool) {
+		t.Helper()
+		if got := dispatched(after); got != want {
+			t.Fatalf("at +%s: dispatched = %v, want %v", after, got, want)
+		}
+	}
+
+	expect(0, true)
+	finish(false, 0) // first failure: retry at +10s
+	expect(5*time.Second, false)
+	expect(10*time.Second, true)
+	finish(false, 10*time.Second) // second failure: retry at +20s
+	expect(20*time.Second, true)
+	finish(false, 20*time.Second) // third failure: the outage is confirmed
+	expect(30*time.Second, false)
+	expect(59*time.Second, false)
+	expect(time.Minute, true) // the regular check, on its original cycle
+	finish(true, time.Minute)
+	expect(70*time.Second, false) // a success needs no retry
+	expect(2*time.Minute, true)
+	finish(false, 2*time.Minute) // the count started over
+	expect(2*time.Minute+10*time.Second, true)
+
+	// A check that is still running is not retried on top of itself.
+	finish(false, 2*time.Minute+10*time.Second)
+	s.start(m.ID)
+	expect(2*time.Minute+20*time.Second, false)
+	s.abandon(m.ID, t0.Add(2*time.Minute+20*time.Second))
+	expect(2*time.Minute+21*time.Second, true)
+
+	// Without a retry interval, or with one no shorter than the interval,
+	// failures wait for the regular check.
+	for _, retry := range []time.Duration{0, time.Minute, time.Hour} {
+		plain := monitor(2, time.Minute)
+		plain.RetryInterval, plain.FailureThreshold = retry, 3
+		st.setMonitors(plain)
+		s := New(st, nil, testOptions())
+		schedules := make(map[int64]*schedule)
+		s.tick(context.Background(), t0, false, schedules, jobs)
+		<-jobs
+		s.finish(plain, false, t0)
+		s.tick(context.Background(), t0.Add(30*time.Second), false, schedules, jobs)
+		select {
+		case <-jobs:
+			t.Errorf("retry interval %s: checked again before the interval", retry)
+		default:
+		}
+	}
+
+	// What is remembered about a monitor goes when the monitor does.
+	st.setMonitors()
+	s.tick(context.Background(), t0.Add(time.Hour), false, schedules, jobs)
+	if len(s.failures) != 0 || len(s.retryAt) != 0 {
+		t.Errorf("state kept for a removed monitor: failures=%v retryAt=%v", s.failures, s.retryAt)
+	}
+}

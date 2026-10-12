@@ -7,7 +7,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 9;
+export const REQUIRED_API_REVISION = 10;
 
 export type Health = {
   status: string;
@@ -23,11 +23,13 @@ export type CheckResult = {
   latency_ms: number;
   status_code: number | null;
   error: string | null;
+  /** What a successful check found, when there is something to say. */
+  detail: string | null;
   /** When the target's TLS certificate expires; null if the check saw none. */
   cert_expires_at: string | null;
 };
 
-export type MonitorType = "http" | "tcp";
+export type MonitorType = "http" | "tcp" | "ping" | "dns" | "push" | "grpc" | "websocket";
 
 /** One past check in the compact form the monitor list uses. */
 export type HistoryPoint = {
@@ -39,15 +41,69 @@ export type HistoryPoint = {
   error?: string;
 };
 
+export type HttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
+
+export type JsonOperator = "==" | "!=" | ">" | ">=" | "<" | "<=" | "contains";
+
 export type HttpOptions = {
-  method: "GET" | "HEAD";
+  method: HttpMethod;
   /** Accepted status codes: codes and ranges such as "200-299,401". */
   expected_status: string;
-  /** Text the body must contain; empty when the body is not inspected. */
+  /** Text the body must contain, or with invert_keyword must not; empty when not checked. */
   keyword: string;
+  invert_keyword: boolean;
+  /** A value in a JSON response, such as "checks[0].state"; empty when not checked. */
+  json_path: string;
+  json_operator: JsonOperator | "";
+  json_expected: string;
   /** Values come back masked. */
   headers: Record<string, string>;
+  body: string;
+  content_type: string;
+  auth: "" | "basic" | "bearer";
+  auth_user: string;
+  /** The password or token; comes back masked. */
+  auth_secret: string;
+  /** How many redirects are followed; 0 judges the first response. */
+  max_redirects: number;
   tls_skip_verify: boolean;
+};
+
+export type TcpOptions = {
+  /** Complete a TLS handshake, which also reads the certificate's expiry. */
+  tls: boolean;
+  tls_skip_verify: boolean;
+};
+
+export type DnsRecordType = "A" | "AAAA" | "CNAME" | "MX" | "NS" | "TXT" | "SRV" | "PTR";
+
+export type DnsOptions = {
+  record_type: DnsRecordType;
+  /** The server to ask, host or host:port; empty for the system resolver. */
+  resolver: string;
+  /** Text one of the records must contain; empty when any record will do. */
+  expected: string;
+};
+
+export type GrpcOptions = {
+  /** The service asked about; empty for the server as a whole. */
+  service: string;
+  tls: boolean;
+  tls_skip_verify: boolean;
+};
+
+export type WebSocketOptions = {
+  subprotocol: string;
+  tls_skip_verify: boolean;
+};
+
+/** The check options of a monitor: only the one of its own type is set. */
+export type CheckOptions = {
+  http: HttpOptions | null;
+  tcp: TcpOptions | null;
+  dns: DnsOptions | null;
+  grpc: GrpcOptions | null;
+  websocket: WebSocketOptions | null;
 };
 
 export type Incident = {
@@ -76,10 +132,12 @@ export type Channel = {
 
 export type ChannelTest = { delivered: boolean; error?: string };
 
-export type Monitor = {
+export type Monitor = CheckOptions & {
   id: number;
   name: string;
+  description: string;
   type: MonitorType;
+  /** Empty for push monitors. */
   target: string;
   /** Empty for monitors entered by hand. */
   namespace: string;
@@ -87,11 +145,15 @@ export type Monitor = {
   source: string;
   interval_seconds: number;
   timeout_seconds: number;
+  /** How soon a failed check is repeated before the outage is confirmed; 0 for the interval. */
+  retry_interval_seconds: number;
   failure_threshold: number;
+  /** Up while the target fails. */
+  inverted: boolean;
   enabled: boolean;
   created_at: string;
-  /** null for monitors that are not HTTP checks. */
-  http: HttpOptions | null;
+  /** The secret of a push monitor's report URL; absent for other types. */
+  push_token?: string;
   status: "up" | "down" | "pending" | "paused";
   last_result: CheckResult | null;
   open_incident: Incident | null;
@@ -107,10 +169,28 @@ export type Monitor = {
   avg_latency_ms: number;
 };
 
-export type NewMonitor = Pick<
-  Monitor,
-  "name" | "type" | "target" | "interval_seconds" | "timeout_seconds" | "failure_threshold"
->;
+/**
+ * What a client sets on a monitor. Options that are left out take the
+ * backend's defaults; the options of the monitor's own type, when given,
+ * replace all of them.
+ */
+export type MonitorSettings = {
+  name: string;
+  target: string;
+  interval_seconds: number;
+  timeout_seconds: number;
+  failure_threshold: number;
+  description?: string;
+  retry_interval_seconds?: number;
+  inverted?: boolean;
+  http?: Partial<HttpOptions>;
+  tcp?: Partial<TcpOptions>;
+  dns?: Partial<DnsOptions>;
+  grpc?: Partial<GrpcOptions>;
+  websocket?: Partial<WebSocketOptions>;
+};
+
+export type NewMonitor = MonitorSettings & { type: MonitorType };
 
 /** A non-2xx answer from the backend. */
 export class ApiError extends Error {
@@ -158,7 +238,14 @@ function withDefaults(m: Monitor): Monitor {
     namespace: m.namespace ?? "",
     source: m.source ?? "",
     failure_threshold: m.failure_threshold ?? 0,
+    description: m.description ?? "",
+    retry_interval_seconds: m.retry_interval_seconds ?? 0,
+    inverted: m.inverted ?? false,
     http: m.http ?? null,
+    tcp: m.tcp ?? null,
+    dns: m.dns ?? null,
+    grpc: m.grpc ?? null,
+    websocket: m.websocket ?? null,
     open_incident: m.open_incident ?? null,
     cert_warning: m.cert_warning ?? false,
     maintenance_until: m.maintenance_until ?? null,
@@ -192,12 +279,11 @@ export const listResults = (id: number, limit: number) =>
 export const createMonitor = (monitor: NewMonitor) =>
   request<Monitor>("/monitors", { method: "POST", body: JSON.stringify(monitor) });
 
-export type MonitorChanges = Partial<
-  Pick<
-    Monitor,
-    "name" | "target" | "interval_seconds" | "timeout_seconds" | "failure_threshold" | "enabled"
-  >
-> & { http?: HttpOptions };
+export type MonitorChanges = Partial<MonitorSettings & { enabled: boolean }>;
+
+/** A copy of the monitor, secrets included, under a new name. */
+export const cloneMonitor = (id: number, name: string) =>
+  request<Monitor>(`/monitors/${id}/clone`, { method: "POST", body: JSON.stringify({ name }) });
 
 export const updateMonitor = (id: number, changes: MonitorChanges) =>
   request<Monitor>(`/monitors/${id}`, { method: "PATCH", body: JSON.stringify(changes) });

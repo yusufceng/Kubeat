@@ -2,11 +2,10 @@
 package checker
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"time"
@@ -14,25 +13,33 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
-// drainBytes bounds how much of a response body is read just to release the
-// connection, when the body itself is not inspected.
-const drainBytes = 64 << 10
+// maxDetail bounds the text a check stores about what it found.
+const maxDetail = 300
+
+// Pushes gives the latest report of a push monitor.
+type Pushes interface {
+	// LastPush returns store.ErrNotFound when the monitor never reported.
+	LastPush(ctx context.Context, monitorID int64) (store.PushReport, error)
+}
 
 // Options configures a Checker.
 type Options struct {
 	// InsecureSkipVerify disables TLS certificate verification for every
-	// HTTP check; monitors can also opt out individually.
+	// check; monitors can also opt out individually.
 	InsecureSkipVerify bool
 	UserAgent          string
-	// KeywordBodyLimit is how much of a response body is searched for a
-	// monitor's keyword.
-	KeywordBodyLimit int64
+	// BodyLimit is how much of a response body is read to look for a
+	// monitor's keyword or JSON value.
+	BodyLimit int64
+	// Pushes is required for push monitors.
+	Pushes Pushes
 }
 
-// Checker runs HTTP and TCP checks. It is safe for concurrent use.
+// Checker runs the checks of every monitor type. It is safe for concurrent
+// use.
 type Checker struct {
-	verifying *http.Client
-	insecure  *http.Client
+	verifying *http.Transport
+	insecure  *http.Transport
 	dialer    *net.Dialer
 	opts      Options
 }
@@ -40,18 +47,35 @@ type Checker struct {
 // New returns a Checker. Timeouts are not set here; every check is bounded
 // by the context passed to Check.
 func New(opts Options) *Checker {
-	client := func(skipVerify bool) *http.Client {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: skipVerify}
-		return &http.Client{Transport: transport}
+	transport := func(skipVerify bool) *http.Transport {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: skipVerify}
+		return t
 	}
 	return &Checker{
-		verifying: client(opts.InsecureSkipVerify),
-		insecure:  client(true),
+		verifying: transport(opts.InsecureSkipVerify),
+		insecure:  transport(true),
 		dialer:    &net.Dialer{},
 		opts:      opts,
 	}
 }
+
+// outcome is what one check found, before it is turned into a result.
+type outcome struct {
+	statusCode int
+	certExpiry time.Time
+	// detail describes a success, where there is something to say.
+	detail string
+	// latency replaces the measured duration of the check when the check
+	// knows better: a round-trip time, a duration reported by a push.
+	latency time.Duration
+	hasTime bool
+	err     error
+}
+
+func failed(err error) outcome { return outcome{err: err} }
+
+func failedf(format string, args ...any) outcome { return outcome{err: fmt.Errorf(format, args...)} }
 
 // Check runs one check of m and reports the outcome. A failed check is not
 // an error: it is a result with Up == false and Error set.
@@ -59,90 +83,130 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	start := time.Now()
 	result := store.CheckResult{MonitorID: m.ID, CheckedAt: start.UTC().Truncate(time.Millisecond)}
 
-	var err error
+	var out outcome
 	switch m.Type {
 	case store.MonitorHTTP:
-		result.StatusCode, result.CertExpiresAt, err = c.checkHTTP(ctx, m)
+		out = c.checkHTTP(ctx, m)
 	case store.MonitorTCP:
-		err = c.checkTCP(ctx, m.Target)
+		out = c.checkTCP(ctx, m)
+	case store.MonitorPing:
+		out = c.checkPing(ctx, m.Target)
+	case store.MonitorDNS:
+		out = c.checkDNS(ctx, m)
+	case store.MonitorPush:
+		out = c.checkPush(ctx, m, start)
+	case store.MonitorGRPC:
+		out = c.checkGRPC(ctx, m)
+	case store.MonitorWebSocket:
+		out = c.checkWebSocket(ctx, m)
 	default:
-		err = fmt.Errorf("unsupported monitor type %q", m.Type)
+		out = failedf("unsupported monitor type %q", m.Type)
 	}
 
 	result.Latency = time.Since(start)
-	if err != nil {
-		result.Error = err.Error()
+	if out.hasTime {
+		result.Latency = out.latency
+	}
+	result.StatusCode = out.statusCode
+	result.CertExpiresAt = out.certExpiry
+	result.Up = out.err == nil
+	if out.err != nil {
+		result.Error = out.err.Error()
 	} else {
-		result.Up = true
+		result.Detail = truncate(out.detail, maxDetail)
+	}
+
+	if m.Inverted {
+		invert(&result)
 	}
 	return result
 }
 
-// checkHTTP reports the response status code and, for HTTPS, when the
-// server's certificate expires. The error is nil only if the response
-// satisfies the monitor's expectations.
-func (c *Checker) checkHTTP(ctx context.Context, m store.Monitor) (int, time.Time, error) {
-	var noCert time.Time
-	expected, err := ParseStatusSet(m.HTTP.ExpectedStatus)
-	if err != nil {
-		return 0, noCert, fmt.Errorf("expected status: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, m.HTTP.Method, m.Target, nil)
-	if err != nil {
-		return 0, noCert, err
-	}
-	if c.opts.UserAgent != "" {
-		req.Header.Set("User-Agent", c.opts.UserAgent)
-	}
-	for name, value := range m.HTTP.Headers {
-		if http.CanonicalHeaderKey(name) == "Host" {
-			req.Host = value // net/http takes the Host header from here
-			continue
+// invert turns the outcome around for a monitor that expects its target to
+// fail. A check that could not run at all still counts as a failure.
+func invert(r *store.CheckResult) {
+	if r.Up {
+		r.Up = false
+		r.Error = "the target responded, but this monitor expects it to fail"
+		if r.Detail != "" {
+			r.Error += ": " + r.Detail
 		}
-		req.Header.Set(name, value)
+		r.Detail = ""
+		return
 	}
-
-	client := c.verifying
-	if m.HTTP.SkipTLSVerify {
-		client = c.insecure
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, noCert, err
-	}
-	defer resp.Body.Close()
-
-	// The leaf certificate of the connection that answered (after redirects).
-	var certExpiry time.Time
-	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
-		certExpiry = resp.TLS.PeerCertificates[0].NotAfter.UTC()
-	}
-
-	if !expected.Contains(resp.StatusCode) {
-		// Drain a bounded amount so the connection can be reused.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
-		return resp.StatusCode, certExpiry, fmt.Errorf("unexpected status %d", resp.StatusCode)
-	}
-	if m.HTTP.Keyword == "" {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
-		return resp.StatusCode, certExpiry, nil
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, c.opts.KeywordBodyLimit))
-	if err != nil {
-		return resp.StatusCode, certExpiry, fmt.Errorf("read body: %w", err)
-	}
-	if !bytes.Contains(body, []byte(m.HTTP.Keyword)) {
-		return resp.StatusCode, certExpiry, fmt.Errorf("keyword %q not found in the first %d bytes of the response", m.HTTP.Keyword, len(body))
-	}
-	return resp.StatusCode, certExpiry, nil
+	r.Up = true
+	r.Detail = truncate("failed as expected: "+r.Error, maxDetail)
+	r.Error = ""
 }
 
-func (c *Checker) checkTCP(ctx context.Context, target string) error {
-	conn, err := c.dialer.DialContext(ctx, "tcp", target)
-	if err != nil {
-		return err
+// truncate cuts s to at most max bytes without splitting a character.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
 	}
-	return conn.Close()
+	cut := max
+	for cut > 0 && s[cut]&0xC0 == 0x80 { // a continuation byte of UTF-8
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
+// tlsConfig returns the client configuration for a check that speaks TLS
+// outside of the shared HTTP transports.
+func (c *Checker) tlsConfig(serverName string, skipVerify bool) *tls.Config {
+	return &tls.Config{ServerName: serverName, InsecureSkipVerify: skipVerify || c.opts.InsecureSkipVerify}
+}
+
+// leafExpiry returns when the certificate the peer presented expires.
+func leafExpiry(state *tls.ConnectionState) time.Time {
+	if state == nil || len(state.PeerCertificates) == 0 {
+		return time.Time{}
+	}
+	return state.PeerCertificates[0].NotAfter.UTC()
+}
+
+func (c *Checker) checkTCP(ctx context.Context, m store.Monitor) outcome {
+	conn, err := c.dialer.DialContext(ctx, "tcp", m.Target)
+	if err != nil {
+		return failed(err)
+	}
+	defer conn.Close()
+	if !m.TCP.TLS {
+		return outcome{}
+	}
+
+	host, _, err := net.SplitHostPort(m.Target)
+	if err != nil {
+		return failed(err)
+	}
+	secured := tls.Client(conn, c.tlsConfig(host, m.TCP.SkipTLSVerify))
+	if err := secured.HandshakeContext(ctx); err != nil {
+		return failedf("tls handshake: %w", err)
+	}
+	state := secured.ConnectionState()
+	return outcome{certExpiry: leafExpiry(&state), detail: tls.VersionName(state.Version)}
+}
+
+func (c *Checker) checkPush(ctx context.Context, m store.Monitor, now time.Time) outcome {
+	if c.opts.Pushes == nil {
+		return failedf("push monitors are not available")
+	}
+	report, err := c.opts.Pushes.LastPush(ctx, m.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return failedf("no push received yet")
+	}
+	if err != nil {
+		return failed(err)
+	}
+	// A report may be late by the monitor's timeout before it is missed.
+	if age := now.Sub(report.ReceivedAt); age > m.Interval+m.Timeout {
+		return failedf("no push received for %s; one is expected every %s", age.Round(time.Second), m.Interval)
+	}
+	if !report.Up {
+		if report.Message == "" {
+			return failedf("the source reported a failure")
+		}
+		return failedf("the source reported a failure: %s", report.Message)
+	}
+	return outcome{detail: report.Message, latency: report.Latency, hasTime: true}
 }
