@@ -17,7 +17,7 @@ docs/adr/       Mimari karar kayıtları
 ## Lokal çalıştırma
 
 ```
-make backend    # API  -> http://localhost:8080
+make backend    # API  -> http://localhost:8090
 make frontend   # UI   -> http://localhost:3000
 make test
 ```
