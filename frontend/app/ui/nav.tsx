@@ -28,6 +28,11 @@ const links = [
     match: (p: string) => p.startsWith("/maintenance"),
   },
   {
+    href: "/reports",
+    label: "Raporlar",
+    match: (p: string) => p.startsWith("/reports"),
+  },
+  {
     href: "/channels",
     label: "Bildirimler",
     match: (p: string) => p.startsWith("/channels"),

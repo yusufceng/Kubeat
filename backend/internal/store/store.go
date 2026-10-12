@@ -326,6 +326,23 @@ type SeriesPoint struct {
 	MaxLatency time.Duration
 }
 
+// MonitorReport summarizes a monitor over a period: its checks from the
+// hourly rollups, and its outages.
+type MonitorReport struct {
+	Monitor
+	Checks   int
+	UpChecks int
+	// AvgLatency is over successful checks; zero if none.
+	AvgLatency time.Duration
+	// Outages counts the "down" incidents that overlapped the period;
+	// Downtime is the part of them inside the period, LongestOutage the
+	// longest such part. OpenOutage says one is still going.
+	Outages       int
+	Downtime      time.Duration
+	LongestOutage time.Duration
+	OpenOutage    bool
+}
+
 // SeriesSource selects which table a series is read from.
 type SeriesSource int
 
@@ -568,6 +585,9 @@ type Store interface {
 	// including which monitors it shows.
 	UpdateStatusPage(ctx context.Context, p StatusPage) (StatusPage, error)
 	DeleteStatusPage(ctx context.Context, id int64) error
+	// Report summarizes every monitor over [from, to); monitors without
+	// checks in the period are included with zero counts.
+	Report(ctx context.Context, from, to time.Time) ([]MonitorReport, error)
 	// StatusPageDailyUptime summarizes the checks of the page's monitors per
 	// UTC day in [from, to), keyed by monitor; days without checks are left
 	// out. Only Start, Checks and UpChecks of the points are set.

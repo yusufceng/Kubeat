@@ -320,6 +320,7 @@ eklenmelidir.
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
 | `POST` | `/api/v1/discovery/import` | Seçilen hedefleri monitor'a çevirir |
 | `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye |
+| `GET` | `/api/v1/reports?days=30&namespace=shop&format=csv` | Namespace başına uptime, kesinti sayısı ve süresi; `format=csv` ile indirilebilir |
 | `GET` | `/api/v1/maintenance` | Bakım pencereleri, en son başlayan önce |
 | `POST` | `/api/v1/maintenance` | Pencere ekler: `name`, `duration_seconds` ya da `ends_at`, isteğe bağlı `starts_at`, `namespace` ya da `monitor_id`, `repeat` ve `timezone` |
 | `DELETE` | `/api/v1/maintenance/{id}` | Pencereyi siler; süren pencereyi bitirir |
@@ -559,6 +560,18 @@ başına yuvarlanır. Ölçüm ayrıntıları: [docs/yuk-testi.md](docs/yuk-test
 Yanıt süresi yalnızca başarılı kontrollerden hesaplanır; başarısız bir
 kontrolün süresi çoğunlukla zaman aşımıdır ve yanıt süresi hakkında bir şey
 söylemez.
+
+### Raporlar
+
+**Raporlar** sayfası (`GET /api/v1/reports?days=30`) son 1, 7, 30 ya da 90
+günü namespace başına özetler: uptime, kontrol sayısı, ortalama yanıt,
+kesinti sayısı, toplam ve en uzun kesinti süresi; her namespace'te en
+düşük uptime'lı monitor en üsttedir. Hesap saatlik özetlerden ve `down`
+türündeki olaylardan yapılır; döneme taşan kesintilerin yalnızca dönem
+içindeki kısmı sayılır, süren kesinti dönemin sonuna kadar sayılır.
+Kullanıcı yalnızca kapsamındaki namespace'leri görür. `format=csv` (sayfada
+"CSV indir") monitor başına bir satır verir; ekiplere giden aylık rapora
+eklenmek için.
 
 ## Pod'lar ve kaynak kullanımı
 

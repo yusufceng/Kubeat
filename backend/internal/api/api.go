@@ -35,6 +35,7 @@ type Store interface {
 	RecentCheckResults(ctx context.Context, monitorIDs []int64, limit int) (map[int64][]store.CheckResult, error)
 	Series(ctx context.Context, monitorID int64, source store.SeriesSource, from, to time.Time, bucket time.Duration) ([]store.SeriesPoint, error)
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]store.Incident, error)
+	Report(ctx context.Context, from, to time.Time) ([]store.MonitorReport, error)
 	CreateMaintenance(ctx context.Context, m store.Maintenance) (store.Maintenance, error)
 	ListMaintenance(ctx context.Context, limit int) ([]store.Maintenance, error)
 	DeleteMaintenance(ctx context.Context, id int64) error
@@ -191,6 +192,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/discovery/candidates", h.discoveryCandidates)
 	mux.HandleFunc("POST /api/v1/discovery/import", h.discoveryImport)
 	mux.HandleFunc("GET /api/v1/incidents", h.listIncidents)
+	mux.HandleFunc("GET /api/v1/reports", h.report)
 	mux.HandleFunc("GET /api/v1/maintenance", h.listMaintenance)
 	mux.HandleFunc("POST /api/v1/maintenance", h.createMaintenance)
 	mux.HandleFunc("DELETE /api/v1/maintenance/{id}", h.deleteMaintenance)

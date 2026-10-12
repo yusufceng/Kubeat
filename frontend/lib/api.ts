@@ -372,6 +372,45 @@ export const updateMonitor = (id: number, changes: MonitorChanges) =>
 export const deleteMonitor = (id: number) =>
   request<void>(`/monitors/${id}`, { method: "DELETE" });
 
+export type Report = {
+  from: string;
+  to: string;
+  days: number;
+  /** By namespace (the empty one holds the monitors made by hand), each with its totals. */
+  namespaces: NamespaceReport[];
+};
+
+export type NamespaceReport = {
+  namespace: string;
+  /** Share of successful checks, 0..100; null when none ran. */
+  uptime: number | null;
+  outages: number;
+  downtime_seconds: number;
+  /** Worst first. */
+  monitors: MonitorReport[];
+};
+
+export type MonitorReport = {
+  id: number;
+  name: string;
+  type: MonitorType;
+  target: string;
+  enabled: boolean;
+  checks: number;
+  up_checks: number;
+  uptime: number | null;
+  avg_latency_ms: number;
+  outages: number;
+  downtime_seconds: number;
+  longest_outage_seconds: number;
+  open_outage: boolean;
+};
+
+export const getReport = (days: number, namespace?: string) =>
+  request<Report>(
+    `/reports?days=${days}${namespace !== undefined ? `&namespace=${encodeURIComponent(namespace)}` : ""}`,
+  );
+
 export const listIncidents = (limit: number, monitorId?: number) =>
   request<Incident[]>(`/incidents?limit=${limit}${monitorId ? `&monitor_id=${monitorId}` : ""}`);
 
