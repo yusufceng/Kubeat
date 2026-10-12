@@ -16,7 +16,18 @@ export function proxy(request: NextRequest) {
   }
   const signedIn = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
   if (pathname === "/login" || pathname === "/setup") {
-    return signedIn && pathname === "/login" ? NextResponse.redirect(new URL("/", request.url)) : NextResponse.next();
+    if (pathname === "/login" && signedIn) {
+      if (request.nextUrl.searchParams.has("expired")) {
+        // The backend no longer accepts the session (lib/auth.ts sent the
+        // visitor here): drop the cookie, or they would bounce between
+        // here and the page that rejected it.
+        const response = NextResponse.next();
+        response.cookies.delete(SESSION_COOKIE);
+        return response;
+      }
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+    return NextResponse.next();
   }
   if (signedIn) return NextResponse.next();
 
