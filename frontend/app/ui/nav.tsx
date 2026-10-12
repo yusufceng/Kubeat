@@ -8,6 +8,7 @@ const links = [
   { href: "/", label: "Monitor'lar", match: (p: string) => p === "/" || p.startsWith("/monitors") },
   { href: "/discovery", label: "Keşif", match: (p: string) => p.startsWith("/discovery") },
   { href: "/incidents", label: "Olaylar", match: (p: string) => p.startsWith("/incidents") },
+  { href: "/maintenance", label: "Bakım", match: (p: string) => p.startsWith("/maintenance") },
   { href: "/channels", label: "Bildirimler", match: (p: string) => p.startsWith("/channels") },
 ];
 

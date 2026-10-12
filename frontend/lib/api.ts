@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 6;
+export const REQUIRED_API_REVISION = 7;
 
 export type Health = {
   status: string;
@@ -87,6 +87,8 @@ export type Monitor = {
   open_incident: Incident | null;
   /** True while the target's certificate is close to its expiry. */
   cert_warning: boolean;
+  /** Set while a maintenance window covers the monitor. */
+  maintenance_until: string | null;
   window_seconds: number;
   checks: number;
   uptime_percent: number | null;
@@ -136,6 +138,7 @@ function withDefaults(m: Monitor): Monitor {
     http: m.http ?? null,
     open_incident: m.open_incident ?? null,
     cert_warning: m.cert_warning ?? false,
+    maintenance_until: m.maintenance_until ?? null,
   };
 }
 
@@ -245,3 +248,33 @@ export const getUptime = (id: number, windowsSeconds: number[]) =>
   request<UptimeWindow[]>(
     `/monitors/${id}/uptime?windows=${windowsSeconds.map((s) => `${s}s`).join(",")}`,
   );
+
+export type Maintenance = {
+  id: number;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  state: "active" | "upcoming" | "past";
+  /** Scope: one monitor, one namespace, or (both empty) every monitor. */
+  namespace: string;
+  monitor_id: number | null;
+  monitor_name: string;
+};
+
+export type NewMaintenance = {
+  name: string;
+  /** ISO time; omitted to start now. */
+  starts_at?: string;
+  duration_seconds: number;
+  namespace?: string;
+  monitor_id?: number;
+};
+
+export const listMaintenance = (limit: number) =>
+  request<Maintenance[]>(`/maintenance?limit=${limit}`);
+
+export const createMaintenance = (window: NewMaintenance) =>
+  request<Maintenance>("/maintenance", { method: "POST", body: JSON.stringify(window) });
+
+export const deleteMaintenance = (id: number) =>
+  request<void>(`/maintenance/${id}`, { method: "DELETE" });

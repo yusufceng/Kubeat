@@ -64,6 +64,9 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
 | `POST` | `/api/v1/discovery/import` | Seçilen hedefleri monitor'a çevirir |
 | `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye |
+| `GET` | `/api/v1/maintenance` | Bakım pencereleri, en son başlayan önce |
+| `POST` | `/api/v1/maintenance` | Pencere ekler: `name`, `duration_seconds` ya da `ends_at`, isteğe bağlı `starts_at`, `namespace` ya da `monitor_id` |
+| `DELETE` | `/api/v1/maintenance/{id}` | Pencereyi siler; süren pencereyi bitirir |
 | `GET` | `/api/v1/channels` | Bildirim kanalları (URL'ler maskelenir) |
 | `POST` | `/api/v1/channels` | Kanal ekler: `{"name", "type", "target"}` |
 | `DELETE` | `/api/v1/channels/{id}` | Kanalı siler |
@@ -143,6 +146,19 @@ HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
 `UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir "sertifika" olayı
 açılır ve bildirim gider; sertifika yenilenince olay kapanır. Bu olay
 kesintilerden bağımsızdır: hedef çalışırken de açık olabilir.
+
+### Bakım pencereleri ve susturma
+
+Bir bakım penceresi boyunca kapsamındaki monitor'lar kontrol edilmeye ve
+geçmişe yazılmaya devam eder, ama onlar için yeni olay açılmaz ve bildirim
+gitmez. Pencereden önce açılmış bir olay pencere içinde kapanabilir ve
+"tekrar çalışıyor" bildirimi gider. Pencere bittiğinde hedef hâlâ
+erişilemiyorsa olay o zaman açılır.
+
+Kapsam tek bir monitor, bir namespace ya da tüm monitor'lar olabilir. Monitor
+sayfasındaki "Alarmı sustur" düğmesi, o monitor için şimdi başlayan bir
+pencere oluşturur. Pencereler tek seferliktir; tekrarlayan pencere yoktur.
+Bakım sırasındaki başarısız kontroller uptime yüzdesine dahildir.
 
 ### Bildirim kanalları
 
@@ -224,6 +240,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `HISTORY_LIMIT` | `40` | Geçmiş şeridinde gösterilen kontrol sayısı |
 | `RESULTS_LIMIT` | `100` | Monitor sayfasında listelenen kontrol sayısı |
 | `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |
+| `MAINTENANCE_DURATIONS` | `30m,1h,2h,4h,8h,24h` | Susturma ve bakım için sunulan süreler |
+| `MAINTENANCE_LIMIT` | `50` | Listelenen bakım penceresi sayısı |
 | `UPTIME_WINDOWS` | `24h,168h,720h` | Monitor sayfasında uptime'ı gösterilen dönemler |
 | `CHART_RANGES` | `24h,1h,168h,720h` | Grafik için sunulan aralıklar; ilki varsayılandır |
 

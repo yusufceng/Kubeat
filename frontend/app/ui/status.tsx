@@ -7,10 +7,15 @@ import type { Monitor } from "@/lib/api";
  */
 export type DisplayState = "up" | "down" | "verifying" | "recovering" | "pending" | "paused";
 
-export function displayState(m: Pick<Monitor, "status" | "open_incident">): DisplayState {
+export function displayState(
+  m: Pick<Monitor, "status" | "open_incident" | "maintenance_until">,
+): DisplayState {
   if (m.status === "paused") return "paused";
   if (m.open_incident) return m.status === "up" ? "recovering" : "down";
-  return m.status === "down" ? "verifying" : m.status;
+  if (m.status !== "down") return m.status;
+  // A failing monitor without an incident is normally still being verified.
+  // In maintenance no incident will come, so it is simply down.
+  return m.maintenance_until ? "down" : "verifying";
 }
 
 const styles: Record<DisplayState, { dot: string; text: string; label: string }> = {

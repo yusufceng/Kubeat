@@ -30,6 +30,9 @@ type Store interface {
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]store.CheckResult, error)
 	Series(ctx context.Context, monitorID int64, source store.SeriesSource, from, to time.Time, bucket time.Duration) ([]store.SeriesPoint, error)
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]store.Incident, error)
+	CreateMaintenance(ctx context.Context, m store.Maintenance) (store.Maintenance, error)
+	ListMaintenance(ctx context.Context, limit int) ([]store.Maintenance, error)
+	DeleteMaintenance(ctx context.Context, id int64) error
 	CreateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
 	GetChannel(ctx context.Context, id int64) (store.Channel, error)
 	ListChannels(ctx context.Context) ([]store.Channel, error)
@@ -80,7 +83,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 6
+const Revision = 7
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -112,6 +115,9 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/discovery/candidates", h.discoveryCandidates)
 	mux.HandleFunc("POST /api/v1/discovery/import", h.discoveryImport)
 	mux.HandleFunc("GET /api/v1/incidents", h.listIncidents)
+	mux.HandleFunc("GET /api/v1/maintenance", h.listMaintenance)
+	mux.HandleFunc("POST /api/v1/maintenance", h.createMaintenance)
+	mux.HandleFunc("DELETE /api/v1/maintenance/{id}", h.deleteMaintenance)
 	mux.HandleFunc("GET /api/v1/channels", h.listChannels)
 	mux.HandleFunc("POST /api/v1/channels", h.createChannel)
 	mux.HandleFunc("DELETE /api/v1/channels/{id}", h.deleteChannel)

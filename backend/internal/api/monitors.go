@@ -45,6 +45,9 @@ type monitorResponse struct {
 	OpenIncident *incidentResponse `json:"open_incident"`
 	// CertWarning is true while the target's certificate is close to expiry.
 	CertWarning bool `json:"cert_warning"`
+	// MaintenanceUntil is set while a maintenance window covers the monitor;
+	// no incident is opened for it until then.
+	MaintenanceUntil *time.Time `json:"maintenance_until"`
 
 	// Statistics over the last WindowSeconds. UptimePercent is null when no
 	// check ran in the window.
@@ -100,6 +103,9 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 	}
 	if st.Type == store.MonitorHTTP {
 		resp.HTTP = toHTTPOptions(st.HTTP)
+	}
+	if !st.MaintenanceUntil.IsZero() {
+		resp.MaintenanceUntil = &st.MaintenanceUntil
 	}
 	if st.Incident != nil {
 		incident := toIncidentResponse(*st.Incident)

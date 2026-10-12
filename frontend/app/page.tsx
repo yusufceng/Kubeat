@@ -138,6 +138,9 @@ async function Monitors() {
                               <LiveDuration since={m.open_incident.started_at} />
                             </div>
                           )}
+                          {m.maintenance_until && (
+                            <div className="mt-0.5 text-xs text-zinc-500">Bakımda, alarm yok</div>
+                          )}
                           {m.cert_warning && (
                             <div className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
                               Sertifika süresi doluyor

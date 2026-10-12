@@ -40,6 +40,7 @@ type Store interface {
 	OpenIncident(ctx context.Context, i store.Incident) (store.Incident, error)
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
 	ListChannels(ctx context.Context) ([]store.Channel, error)
+	InMaintenance(ctx context.Context, m store.Monitor, at time.Time) (bool, error)
 }
 
 // Sender delivers one notification to one channel.
@@ -83,19 +84,26 @@ func New(st Store, sender Sender, opts Options) *Engine {
 // Evaluate updates incidents for the monitors in results, which must already
 // be stored. It must not be called concurrently with itself.
 func (e *Engine) Evaluate(ctx context.Context, results []store.CheckResult) {
-	seen := make(map[int64]bool, len(results))
+	// One evaluation per monitor, as of its newest result in the batch.
+	var order []int64
+	newest := make(map[int64]time.Time, len(results))
 	for _, r := range results {
-		if seen[r.MonitorID] {
-			continue
+		at, seen := newest[r.MonitorID]
+		if !seen {
+			order = append(order, r.MonitorID)
 		}
-		seen[r.MonitorID] = true
-		if err := e.evaluate(ctx, r.MonitorID); err != nil {
-			e.opts.Logger.Error("alert evaluation failed", "monitor_id", r.MonitorID, "error", err)
+		if !seen || r.CheckedAt.After(at) {
+			newest[r.MonitorID] = r.CheckedAt
+		}
+	}
+	for _, id := range order {
+		if err := e.evaluate(ctx, id, newest[id]); err != nil {
+			e.opts.Logger.Error("alert evaluation failed", "monitor_id", id, "error", err)
 		}
 	}
 }
 
-func (e *Engine) evaluate(ctx context.Context, monitorID int64) error {
+func (e *Engine) evaluate(ctx context.Context, monitorID int64, at time.Time) error {
 	m, err := e.store.GetMonitor(ctx, monitorID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil // deleted while its results were in flight
@@ -109,15 +117,25 @@ func (e *Engine) evaluate(ctx context.Context, monitorID int64) error {
 		return nil
 	}
 
+	// During maintenance nothing new is raised. Incidents that were already
+	// open (and announced) still resolve, so their story gets an ending.
+	quiet, err := e.store.InMaintenance(ctx, m, at)
+	if err != nil {
+		return err
+	}
+
 	// The two kinds are independent: a failing evaluation of one must not
 	// hide the other.
-	return errors.Join(e.evaluateDown(ctx, m), e.evaluateCert(ctx, m))
+	return errors.Join(e.evaluateDown(ctx, m, quiet), e.evaluateCert(ctx, m, quiet))
 }
 
-func (e *Engine) evaluateDown(ctx context.Context, m store.Monitor) error {
+func (e *Engine) evaluateDown(ctx context.Context, m store.Monitor, quiet bool) error {
 	incident, err := e.store.GetOpenIncident(ctx, m.ID, store.IncidentDown)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
+		if quiet {
+			return nil
+		}
 		return e.maybeOpen(ctx, m)
 	case err != nil:
 		return err
@@ -130,7 +148,7 @@ func (e *Engine) evaluateDown(ctx context.Context, m store.Monitor) error {
 // certificate within CertWarning of its expiry, and resolves it once a
 // result shows one that is not. A result without certificate information
 // (plain HTTP, or a connection that failed) changes nothing.
-func (e *Engine) evaluateCert(ctx context.Context, m store.Monitor) error {
+func (e *Engine) evaluateCert(ctx context.Context, m store.Monitor, quiet bool) error {
 	latest, err := e.store.ListCheckResults(ctx, m.ID, 1)
 	if err != nil || len(latest) == 0 || latest[0].CertExpiresAt.IsZero() {
 		return err
@@ -141,7 +159,7 @@ func (e *Engine) evaluateCert(ctx context.Context, m store.Monitor) error {
 	incident, err := e.store.GetOpenIncident(ctx, m.ID, store.IncidentCert)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		if !expiring {
+		if !expiring || quiet {
 			return nil
 		}
 		incident, err = e.store.OpenIncident(ctx, store.Incident{

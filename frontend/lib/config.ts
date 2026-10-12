@@ -36,6 +36,10 @@ export const config = {
   uptimeWindows: durationList(process.env.UPTIME_WINDOWS, "24h,168h,720h"),
   /** Ranges offered for a monitor's charts, in seconds; the first is the default. */
   chartRanges: durationList(process.env.CHART_RANGES, "24h,1h,168h,720h"),
+  /** Lengths offered when silencing a monitor or planning maintenance, in seconds. */
+  maintenanceDurations: durationList(process.env.MAINTENANCE_DURATIONS, "30m,1h,2h,4h,8h,24h"),
+  /** Number of maintenance windows listed. */
+  maintenanceLimit: positiveInt(process.env.MAINTENANCE_LIMIT, 50),
   /** Number of incidents listed on a page. */
   incidentsLimit: positiveInt(process.env.INCIDENTS_LIMIT, 100),
 };

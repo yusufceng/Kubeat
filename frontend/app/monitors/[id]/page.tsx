@@ -23,6 +23,7 @@ import { IncidentTable } from "@/app/ui/incident-table";
 import { LatencyChart } from "@/app/ui/latency-chart";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { LocalTime } from "@/app/ui/local-time";
+import { SilenceForm } from "@/app/ui/maintenance-forms";
 import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
 import { EditMonitorForm, MonitorActions } from "@/app/ui/monitor-settings";
 import { displayState, StatusBadge } from "@/app/ui/status";
@@ -126,6 +127,19 @@ async function MonitorDetail({
           </Field>
         )}
       </dl>
+
+      {monitor.enabled &&
+        (monitor.maintenance_until ? (
+          <p className="rounded-lg border border-black/10 bg-black/5 p-4 text-sm dark:border-white/15 dark:bg-white/5">
+            Bakımda: <LocalTime iso={monitor.maintenance_until} seconds={false} /> tarihine kadar yeni
+            olay açılmaz ve bildirim gitmez.{" "}
+            <Link href="/maintenance" className="underline">
+              Bakım pencereleri
+            </Link>
+          </p>
+        ) : (
+          <SilenceForm monitorId={monitor.id} durations={config.maintenanceDurations} />
+        ))}
 
       {!monitor.enabled && (
         <p className="rounded-lg border border-black/10 bg-black/5 p-4 text-sm dark:border-white/15 dark:bg-white/5">

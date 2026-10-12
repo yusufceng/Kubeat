@@ -152,6 +152,22 @@ const (
 	SeriesRollup
 )
 
+// Maintenance is a period during which no incident is opened for the
+// monitors it covers: one monitor, one namespace, or all of them.
+type Maintenance struct {
+	ID       int64
+	Name     string
+	StartsAt time.Time
+	EndsAt   time.Time
+	// Namespace limits the window to one namespace and MonitorID to one
+	// monitor; at most one of them is set, and neither means everything.
+	Namespace string
+	MonitorID int64
+	// MonitorName is filled in when read; ignored when written.
+	MonitorName string
+	CreatedAt   time.Time
+}
+
 // MonitorStatus is a monitor together with its latest result and its
 // statistics over a time window.
 type MonitorStatus struct {
@@ -160,9 +176,12 @@ type MonitorStatus struct {
 	Incident *Incident    // the open outage, if any
 	// CertWarning reports an open certificate incident.
 	CertWarning bool
-	Checks      int // results in the window
-	UpChecks    int // of which successful
-	AvgLatency  time.Duration
+	// MaintenanceUntil is when the maintenance covering the monitor ends;
+	// zero when it is not in maintenance.
+	MaintenanceUntil time.Time
+	Checks           int // results in the window
+	UpChecks         int // of which successful
+	AvgLatency       time.Duration
 }
 
 // Store persists monitors and their check results.
@@ -210,6 +229,14 @@ type Store interface {
 	// ListIncidents returns up to limit incidents, newest first, for one
 	// monitor or for all when monitorID is 0.
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]Incident, error)
+
+	CreateMaintenance(ctx context.Context, m Maintenance) (Maintenance, error)
+	// ListMaintenance returns up to limit windows, latest start first.
+	ListMaintenance(ctx context.Context, limit int) ([]Maintenance, error)
+	DeleteMaintenance(ctx context.Context, id int64) error
+	// InMaintenance reports whether a window covers the monitor at the
+	// given time.
+	InMaintenance(ctx context.Context, m Monitor, at time.Time) (bool, error)
 
 	CreateChannel(ctx context.Context, c Channel) (Channel, error)
 	GetChannel(ctx context.Context, id int64) (Channel, error)

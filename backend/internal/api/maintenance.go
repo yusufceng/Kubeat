@@ -1,0 +1,167 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/yusufceng/Kubeat/backend/internal/store"
+)
+
+// Where a maintenance window is relative to now.
+const (
+	maintenanceActive   = "active"
+	maintenanceUpcoming = "upcoming"
+	maintenancePast     = "past"
+)
+
+type maintenanceResponse struct {
+	ID       int64     `json:"id"`
+	Name     string    `json:"name"`
+	StartsAt time.Time `json:"starts_at"`
+	EndsAt   time.Time `json:"ends_at"`
+	State    string    `json:"state"`
+	// Scope: one monitor, one namespace, or (both empty) every monitor.
+	Namespace   string `json:"namespace"`
+	MonitorID   *int64 `json:"monitor_id"`
+	MonitorName string `json:"monitor_name"`
+}
+
+func toMaintenanceResponse(m store.Maintenance, now time.Time) maintenanceResponse {
+	resp := maintenanceResponse{
+		ID: m.ID, Name: m.Name, StartsAt: m.StartsAt, EndsAt: m.EndsAt,
+		State: maintenanceActive, Namespace: m.Namespace, MonitorName: m.MonitorName,
+	}
+	switch {
+	case now.Before(m.StartsAt):
+		resp.State = maintenanceUpcoming
+	case !now.Before(m.EndsAt):
+		resp.State = maintenancePast
+	}
+	if m.MonitorID != 0 {
+		resp.MonitorID = &m.MonitorID
+	}
+	return resp
+}
+
+func (h *handler) listMaintenance(w http.ResponseWriter, r *http.Request) {
+	limit, err := h.limit(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	windows, err := h.opts.Store.ListMaintenance(r.Context(), limit)
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	now := time.Now()
+	resp := make([]maintenanceResponse, 0, len(windows))
+	for _, m := range windows {
+		resp = append(resp, toMaintenanceResponse(m, now))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type createMaintenanceRequest struct {
+	Name string `json:"name"`
+	// StartsAt defaults to now.
+	StartsAt *time.Time `json:"starts_at"`
+	// Exactly one of EndsAt and DurationSeconds says when the window ends.
+	EndsAt          *time.Time `json:"ends_at"`
+	DurationSeconds int        `json:"duration_seconds"`
+	// At most one of Namespace and MonitorID; neither means every monitor.
+	Namespace string `json:"namespace"`
+	MonitorID int64  `json:"monitor_id"`
+}
+
+func (h *handler) createMaintenance(w http.ResponseWriter, r *http.Request) {
+	var req createMaintenanceRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	now := time.Now().UTC()
+	m := store.Maintenance{
+		Name:      strings.TrimSpace(req.Name),
+		StartsAt:  now,
+		Namespace: strings.TrimSpace(req.Namespace),
+		MonitorID: req.MonitorID,
+	}
+	if req.StartsAt != nil {
+		m.StartsAt = *req.StartsAt
+	}
+	switch {
+	case m.Name == "":
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	case (req.EndsAt == nil) == (req.DurationSeconds == 0):
+		writeError(w, http.StatusBadRequest, "give either ends_at or duration_seconds")
+		return
+	case req.DurationSeconds < 0:
+		writeError(w, http.StatusBadRequest, "duration_seconds must be positive")
+		return
+	case m.Namespace != "" && m.MonitorID != 0:
+		writeError(w, http.StatusBadRequest, "give a namespace or a monitor_id, not both")
+		return
+	case m.MonitorID < 0:
+		writeError(w, http.StatusBadRequest, "monitor_id must be positive")
+		return
+	}
+	if req.EndsAt != nil {
+		m.EndsAt = *req.EndsAt
+	} else {
+		m.EndsAt = m.StartsAt.Add(time.Duration(req.DurationSeconds) * time.Second)
+	}
+	if !m.EndsAt.After(m.StartsAt) {
+		writeError(w, http.StatusBadRequest, "the window must end after it starts")
+		return
+	}
+	if !m.EndsAt.After(now) {
+		writeError(w, http.StatusBadRequest, "the window is already over")
+		return
+	}
+	if m.MonitorID != 0 {
+		monitor, err := h.opts.Store.GetMonitor(r.Context(), m.MonitorID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, "monitor_id does not exist")
+			return
+		}
+		if err != nil {
+			h.internalError(w, r, err)
+			return
+		}
+		m.MonitorName = monitor.Name
+	}
+
+	created, err := h.opts.Store.CreateMaintenance(r.Context(), m)
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	created.MonitorName = m.MonitorName
+	writeJSON(w, http.StatusCreated, toMaintenanceResponse(created, now))
+}
+
+func (h *handler) deleteMaintenance(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "maintenance window not found")
+		return
+	}
+	err := h.opts.Store.DeleteMaintenance(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "maintenance window not found")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

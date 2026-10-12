@@ -6,8 +6,10 @@ import {
   ApiError,
   type ChannelType,
   createChannel,
+  createMaintenance,
   createMonitor,
   deleteChannel,
+  deleteMaintenance,
   deleteMonitor,
   type HttpOptions,
   importCandidates,
@@ -167,6 +169,39 @@ export async function testChannelAction(
   } catch (err) {
     return { delivered: false, error: describe(err) };
   }
+}
+
+export type MaintenanceFormState = { error: string | null; created: boolean };
+
+export async function createMaintenanceAction(
+  _prev: MaintenanceFormState,
+  formData: FormData,
+): Promise<MaintenanceFormState> {
+  // Scope is "all", "ns:<namespace>" or "mon:<monitor id>".
+  const scope = String(formData.get("scope") ?? "all");
+  const startsAt = String(formData.get("starts_at") ?? "");
+  try {
+    await createMaintenance({
+      name: String(formData.get("name") ?? ""),
+      duration_seconds: Number(formData.get("duration_seconds")),
+      ...(startsAt && { starts_at: startsAt }),
+      ...(scope.startsWith("ns:") && { namespace: scope.slice(3) }),
+      ...(scope.startsWith("mon:") && { monitor_id: Number(scope.slice(4)) }),
+    });
+  } catch (err) {
+    return { error: describe(err), created: false };
+  }
+  refresh();
+  return { error: null, created: true };
+}
+
+export async function deleteMaintenanceAction(formData: FormData): Promise<void> {
+  try {
+    await deleteMaintenance(Number(formData.get("id")));
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 404)) throw err;
+  }
+  refresh();
 }
 
 /** null before the first import; afterwards its outcome. */

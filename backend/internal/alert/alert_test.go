@@ -498,3 +498,93 @@ func TestCertificateTextForImminentAndPastExpiry(t *testing.T) {
 		t.Errorf("already expired: %q", text)
 	}
 }
+
+// maintain puts the fixture's monitor in maintenance from the current clock
+// for the given length.
+func (f *fixture) maintain(length time.Duration) {
+	f.t.Helper()
+	_, err := f.db.CreateMaintenance(context.Background(), store.Maintenance{
+		Name: "deploy", MonitorID: f.monitor.ID, StartsAt: f.clock, EndsAt: f.clock.Add(length),
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func TestMaintenanceSuppressesNewIncidents(t *testing.T) {
+	f := newFixture(t, 2, 1)
+	f.maintain(2 * time.Minute) // covers the next four 30-second checks
+
+	f.check(false)
+	f.check(false)
+	f.check(false)
+	if got := f.incidents(); len(got) != 0 {
+		t.Fatalf("incident opened during maintenance: %+v", got)
+	}
+
+	// Still failing when the window is over: the incident opens then.
+	f.check(false) // t+2m: the window has just ended
+	got := f.incidents()
+	if len(got) != 1 || !got[0].Open() {
+		t.Fatalf("incidents after maintenance = %+v, want one open", got)
+	}
+	f.flush()
+	if events := f.sender.events(); len(events) != 1 || events[0] != EventDown {
+		t.Errorf("notifications = %v, want [down] sent after the window", events)
+	}
+}
+
+func TestMaintenanceStillResolvesOpenIncidents(t *testing.T) {
+	f := newFixture(t, 2, 1)
+	f.check(false)
+	f.check(false) // opens before the window
+	f.maintain(time.Hour)
+
+	f.check(false)
+	f.check(true)
+	if got := f.incidents(); len(got) != 1 || got[0].Open() {
+		t.Fatalf("incident opened before maintenance did not resolve in it: %+v", got)
+	}
+	// A new failure inside the window stays silent.
+	f.check(false)
+	f.check(false)
+	if got := f.incidents(); len(got) != 1 {
+		t.Errorf("new incident during maintenance: %+v", got)
+	}
+
+	f.flush()
+	if events := f.sender.events(); len(events) != 2 || events[1] != EventUp {
+		t.Errorf("notifications = %v, want [down up]", events)
+	}
+}
+
+func TestMaintenanceSuppressesCertificateWarnings(t *testing.T) {
+	f := newFixture(t, 3, 1)
+	f.maintain(time.Minute)
+	f.checkCert(24 * time.Hour)
+	if got := f.incidents(); len(got) != 0 {
+		t.Fatalf("certificate incident during maintenance: %+v", got)
+	}
+	f.checkCert(24 * time.Hour) // t+1m: window over
+	if got := f.incidents(); len(got) != 1 || got[0].Kind != store.IncidentCert {
+		t.Errorf("after maintenance = %+v, want the certificate incident", got)
+	}
+}
+
+func TestEvaluateUsesNewestResultOfABatch(t *testing.T) {
+	f := newFixture(t, 1, 1)
+	f.maintain(45 * time.Second)
+
+	// Two results in one batch: the first inside the window, the second
+	// after it. The monitor is evaluated once, as of the newer one.
+	inside := store.CheckResult{MonitorID: f.monitor.ID, CheckedAt: f.clock.Add(30 * time.Second), Error: "x"}
+	after := store.CheckResult{MonitorID: f.monitor.ID, CheckedAt: f.clock.Add(60 * time.Second), Error: "x"}
+	batch := []store.CheckResult{inside, after}
+	if err := f.db.InsertCheckResults(context.Background(), batch); err != nil {
+		t.Fatal(err)
+	}
+	f.engine.Evaluate(context.Background(), batch)
+	if got := f.incidents(); len(got) != 1 {
+		t.Errorf("incidents = %+v, want one: the newest result is outside the window", got)
+	}
+}

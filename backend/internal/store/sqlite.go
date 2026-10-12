@@ -266,6 +266,10 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
 }
 
+// maintenanceCovers is the condition under which maintenance window w covers
+// monitor m.
+const maintenanceCovers = `(w.monitor_id = m.id OR (w.monitor_id IS NULL AND (w.namespace = '' OR w.namespace = m.namespace)))`
+
 // statusQuery joins each monitor with its newest result (found through the
 // (monitor_id, checked_at) index) and with its aggregates since a cutoff.
 const statusQuery = `
@@ -274,7 +278,9 @@ SELECT m.id, m.name, m.type, m.target, m.interval_seconds, m.timeout_seconds, m.
        m.http_method, m.http_expected_status, m.http_keyword, m.http_headers, m.tls_skip_verify,
        r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.cert_expires_at,
        COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.avg_latency_ms, 0),
-       i.id, i.started_at, i.cause, c.id IS NOT NULL
+       i.id, i.started_at, i.cause, c.id IS NOT NULL,
+       (SELECT MAX(w.ends_at) FROM maintenance_windows w
+        WHERE w.starts_at <= ?3 AND w.ends_at > ?3 AND ` + maintenanceCovers + `)
 FROM monitors m
 LEFT JOIN incidents i ON i.monitor_id = m.id AND i.kind = 'down' AND i.resolved_at IS NULL
 LEFT JOIN incidents c ON c.monitor_id = m.id AND c.kind = 'cert' AND c.resolved_at IS NULL
@@ -311,7 +317,7 @@ func (s *SQLite) GetMonitorStatus(ctx context.Context, id int64, since time.Time
 
 // queryStatuses runs statusQuery for one monitor, or for all when id is 0.
 func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) ([]MonitorStatus, error) {
-	rows, err := s.read.QueryContext(ctx, statusQuery, since.UnixMilli(), id)
+	rows, err := s.read.QueryContext(ctx, statusQuery, since.UnixMilli(), id, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -331,13 +337,14 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			incidentCause                sql.NullString
 			headers                      string
 			certExpires                  sql.NullInt64
+			maintenanceUntil             sql.NullInt64
 		)
 		err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Target, &interval, &timeout, &st.FailureThreshold, &st.Enabled, &createdAt,
 			&st.Namespace, &st.Source,
 			&st.HTTP.Method, &st.HTTP.ExpectedStatus, &st.HTTP.Keyword, &headers, &st.HTTP.SkipTLSVerify,
 			&checkedAt, &up, &latencyMS, &statusCode, &errText, &certExpires,
 			&st.Checks, &st.UpChecks, &avgLatencyMS,
-			&incidentID, &incidentStart, &incidentCause, &st.CertWarning)
+			&incidentID, &incidentStart, &incidentCause, &st.CertWarning, &maintenanceUntil)
 		if err != nil {
 			return nil, err
 		}
@@ -348,6 +355,7 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			return nil, fmt.Errorf("monitor %d: %w", st.ID, err)
 		}
 		st.AvgLatency = time.Duration(avgLatencyMS * float64(time.Millisecond))
+		st.MaintenanceUntil = unixMilliOrZero(maintenanceUntil)
 		if checkedAt.Valid {
 			st.Last = &CheckResult{
 				MonitorID:  st.ID,
