@@ -4,6 +4,7 @@ import { type Incident, listIncidents, type Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
 import { duration, milliseconds, span, uptime } from "@/lib/format";
 import { compareNamespaces, MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
+import { currentUser } from "@/lib/auth";
 import { countStates, type StateCounts, workspaceMonitors } from "@/lib/workspace";
 import { BackendError } from "@/app/ui/backend-error";
 import { PlusIcon } from "@/app/ui/icons";
@@ -134,6 +135,7 @@ function Tile({
 }
 
 async function Overview() {
+  const me = await currentUser();
   let monitors: Monitor[];
   let incidents: Incident[];
   try {
@@ -145,19 +147,29 @@ async function Overview() {
   if (monitors.length === 0) {
     return (
       <div className="card flex flex-col items-center gap-4 p-10 text-center">
-        <h2 className="text-lg font-semibold">Henüz izlenen bir şey yok</h2>
-        <p className="max-w-md text-sm text-muted">
-          Cluster&apos;daki Service, Ingress ve Route&apos;ları keşfederek başlayın ya da bir adresi elle
-          ekleyin: HTTP, TCP, ping, DNS, gRPC, WebSocket ya da kendi rapor veren bir iş.
-        </p>
-        <div className="flex flex-wrap justify-center gap-2">
-          <Link href="/discovery" className="btn btn-primary">
-            Cluster&apos;dan keşfet
-          </Link>
-          <Link href="/monitors/new" className="btn">
-            <PlusIcon /> Elle ekle
-          </Link>
-        </div>
+        <h2 className="text-lg font-semibold">
+          {me.can_edit ? "Henüz izlenen bir şey yok" : "Görebildiğiniz bir monitor yok"}
+        </h2>
+        {me.can_edit ? (
+          <>
+            <p className="max-w-md text-sm text-muted">
+              Cluster&apos;daki Service, Ingress ve Route&apos;ları keşfederek başlayın ya da bir adresi elle
+              ekleyin: HTTP, TCP, ping, DNS, gRPC, WebSocket ya da kendi rapor veren bir iş.
+            </p>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Link href="/discovery" className="btn btn-primary">
+                Cluster&apos;dan keşfet
+              </Link>
+              <Link href="/monitors/new" className="btn">
+                <PlusIcon /> Elle ekle
+              </Link>
+            </div>
+          </>
+        ) : (
+          <p className="max-w-md text-sm text-muted">
+            Hesabınızın kapsamındaki namespace&apos;lerde monitor yok. Bir yönetici kapsamınızı genişletebilir.
+          </p>
+        )}
       </div>
     );
   }
@@ -323,14 +335,25 @@ async function Overview() {
   );
 }
 
+/** The "new monitor" button of narrow screens, for those who may. */
+async function NewMonitorButton() {
+  const me = await currentUser();
+  if (!me.can_edit) return null;
+  return (
+    <Link href="/monitors/new" className="btn lg:hidden">
+      <PlusIcon /> Yeni monitor
+    </Link>
+  );
+}
+
 export default function Home() {
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">Genel bakış</h1>
-        <Link href="/monitors/new" className="btn lg:hidden">
-          <PlusIcon /> Yeni monitor
-        </Link>
+        <Suspense>
+          <NewMonitorButton />
+        </Suspense>
       </div>
       <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
         <Overview />

@@ -1,13 +1,15 @@
+import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { cookies } from "next/headers";
-import { loginEnabled, SESSION_COOKIE, validSession } from "@/lib/session";
+import { getMe } from "@/lib/api";
+import { sessionToken } from "@/lib/session";
 import { logoutAction } from "@/app/login/actions";
 
+const roleLabels = { admin: "yönetici", editor: "editör", viewer: "izleyici" };
+
 /**
- * The sign-out button, or a warning when sign-in is switched off. Rendered
- * per request: whether a password is set is known when the server runs, not
- * when the page shell is built.
+ * Who is signed in, with the way to their account and out. Rendered per
+ * request: the session is request data.
  */
 export function SessionControls() {
   return (
@@ -19,23 +21,63 @@ export function SessionControls() {
 
 async function Controls() {
   await connection();
-  if (!loginEnabled) {
-    return (
-      <span
-        role="alert"
-        className="rounded-md bg-warn/12 px-2 py-1 text-xs text-warn"
-        title="ADMIN_PASSWORD ayarlanmadığı için arayüze erişen herkes değişiklik yapabilir."
-      >
-        Giriş koruması kapalı
-      </span>
-    );
+  if (!(await sessionToken())) return null;
+  let me;
+  try {
+    me = await getMe();
+  } catch {
+    return null; // the page itself will say what is wrong
   }
-  if (!validSession((await cookies()).get(SESSION_COOKIE)?.value)) return null;
   return (
-    <form action={logoutAction}>
-      <button type="submit" className="rounded-md px-3 py-1.5 text-sm text-muted hover:text-ink">
-        Çıkış
-      </button>
-    </form>
+    <div className="flex items-center gap-1">
+      <Link
+        href="/account"
+        className="hidden rounded-lg px-2 py-1.5 text-sm text-muted hover:text-ink sm:block"
+        title={`${me.username} · ${roleLabels[me.role]}`}
+      >
+        {me.display_name || me.username}
+        <span className="ml-1.5 rounded bg-sunken px-1.5 py-0.5 text-xs">{roleLabels[me.role]}</span>
+      </Link>
+      <form action={logoutAction}>
+        <button type="submit" className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">
+          Çıkış
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/** The links only administrators have, in the top bar. */
+export function AdminNav() {
+  return (
+    <Suspense>
+      <AdminLinks />
+    </Suspense>
+  );
+}
+
+async function AdminLinks() {
+  await connection();
+  if (!(await sessionToken())) return null;
+  let me;
+  try {
+    me = await getMe();
+  } catch {
+    return null;
+  }
+  if (!me.admin) return null;
+  return (
+    <>
+      <li>
+        <Link href="/users" className="block rounded-lg px-3 py-1.5 text-muted hover:text-ink">
+          Kullanıcılar
+        </Link>
+      </li>
+      <li>
+        <Link href="/audit" className="block rounded-lg px-3 py-1.5 text-muted hover:text-ink">
+          Kayıt
+        </Link>
+      </li>
+    </>
   );
 }

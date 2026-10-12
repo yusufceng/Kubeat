@@ -247,10 +247,11 @@ func (h *handler) listMonitors(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
+	p := principal(r)
 	resp := make([]monitorResponse, 0, len(statuses))
 	selected := make([]int64, 0, len(statuses))
 	for _, st := range statuses {
-		if (byNamespace && st.Namespace != namespace) || (ids != nil && !ids[st.ID]) {
+		if (byNamespace && st.Namespace != namespace) || (ids != nil && !ids[st.ID]) || !p.CanRead(st.Namespace) {
 			continue
 		}
 		resp = append(resp, toMonitorResponse(st, window))
@@ -286,7 +287,7 @@ func (h *handler) getMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, err := h.opts.Store.GetMonitorStatus(r.Context(), id, time.Now().Add(-window))
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(st.Namespace)) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
@@ -526,6 +527,7 @@ func (h *handler) storeMonitor(w http.ResponseWriter, r *http.Request, m store.M
 		h.internalError(w, r, err)
 		return
 	}
+	h.audit(r, "create", "monitor", created.ID, created.Name)
 	writeJSON(w, http.StatusCreated, toMonitorResponse(store.MonitorStatus{Monitor: created}, h.opts.StatsWindow))
 }
 
@@ -536,6 +538,10 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := req.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if p := principal(r); !p.CanEdit(req.Namespace) {
+		scopeError(w, p)
 		return
 	}
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
@@ -582,6 +588,13 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
+	if p := principal(r); !p.CanRead(m.Namespace) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	} else if !p.CanEdit(m.Namespace) {
+		scopeError(w, p)
+		return
+	}
 	// The copy stays in the namespace, but it is not the discovered object:
 	// that can be monitored only once.
 	m.ID, m.Name, m.Source, m.Enabled = 0, req.Name, "", true
@@ -626,6 +639,16 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.internalError(w, r, err)
+		return
+	}
+
+	p := principal(r)
+	if !p.CanRead(current.Namespace) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	if !p.CanEdit(current.Namespace) {
+		scopeError(w, p)
 		return
 	}
 
@@ -686,6 +709,10 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if merged.Namespace != current.Namespace && !p.CanEdit(merged.Namespace) {
+		scopeError(w, p)
+		return
+	}
 
 	change := merged.monitor(current)
 	if err := req.checkOptions.apply(&change); err != nil {
@@ -718,6 +745,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.audit(r, "update", "monitor", id, updated.Name)
 	st, err := h.opts.Store.GetMonitorStatus(r.Context(), id, time.Now().Add(-h.opts.StatsWindow))
 	if err != nil {
 		h.internalError(w, r, err)
@@ -752,7 +780,21 @@ func (h *handler) deleteMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
-	err := h.opts.Store.DeleteMonitor(r.Context(), id)
+	m, err := h.opts.Store.GetMonitor(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(m.Namespace)) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	if p := principal(r); !p.CanEdit(m.Namespace) {
+		scopeError(w, p)
+		return
+	}
+	h.audit(r, "delete", "monitor", id, m.Name)
+	err = h.opts.Store.DeleteMonitor(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
@@ -777,7 +819,7 @@ func (h *handler) listResults(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Distinguish "no results yet" from "no such monitor".
-	if _, err := h.opts.Store.GetMonitorStatus(r.Context(), id, time.Now()); errors.Is(err, store.ErrNotFound) {
+	if st, err := h.opts.Store.GetMonitorStatus(r.Context(), id, time.Now()); errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(st.Namespace)) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	} else if err != nil {

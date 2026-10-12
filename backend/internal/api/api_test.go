@@ -13,11 +13,21 @@ import (
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
+	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
+// testToken is the service token every test request carries.
+const testToken = "test-token"
+
 // newTestAPI serves the handler over a real SQLite store.
 func newTestAPI(t *testing.T) (*httptest.Server, *store.SQLite) {
+	t.Helper()
+	return newTestAPIWith(t, nil)
+}
+
+// newTestAPIWith is newTestAPI with the options changed by customize first.
+func newTestAPIWith(t *testing.T, customize func(*Options)) (*httptest.Server, *store.SQLite) {
 	t.Helper()
 	db, err := store.OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "test.db"), 5*time.Second)
 	if err != nil {
@@ -27,14 +37,18 @@ func newTestAPI(t *testing.T) (*httptest.Server, *store.SQLite) {
 	notifier := alert.New(db, alert.NewRouter(http.DefaultClient, "kubeat/test", alert.SMTPConfig{}, alert.Endpoints{}), alert.Options{
 		Attempts: 1, SendTimeout: 2 * time.Second, Logger: logger,
 	})
-	srv := httptest.NewServer(NewHandler(Options{
-		Version:          "test",
-		Store:            db,
-		MinCheckInterval: 5 * time.Second,
-		StatsWindow:      24 * time.Hour,
-		MaxResults:       3,
-		Notifier:         notifier,
-		Logger:           logger,
+	opts := Options{
+		Version:           "test",
+		Store:             db,
+		Token:             testToken,
+		SessionTTL:        time.Hour,
+		PasswordMinLength: 8,
+		Throttle:          &auth.Throttle{MaxFailures: 3, Lockout: time.Minute},
+		MinCheckInterval:  5 * time.Second,
+		StatsWindow:       24 * time.Hour,
+		MaxResults:        3,
+		Notifier:          notifier,
+		Logger:            logger,
 
 		StatusPageDays:           3,
 		StatusPageIncidentWindow: 48 * time.Hour,
@@ -43,7 +57,11 @@ func newTestAPI(t *testing.T) (*httptest.Server, *store.SQLite) {
 		RawRetention:            48 * time.Hour,
 		HistoryRetention:        365 * 24 * time.Hour,
 		SeriesPoints:            120,
-	}))
+	}
+	if customize != nil {
+		customize(&opts)
+	}
+	srv := httptest.NewServer(NewHandler(opts))
 	t.Cleanup(func() {
 		srv.Close()
 		db.Close()
@@ -58,6 +76,7 @@ func do(t *testing.T, method, url, body string, out any) int {
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("Authorization", "Bearer "+testToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -423,7 +442,7 @@ func TestAPIToken(t *testing.T) {
 	}
 	metrics := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("kubeat_build_info 1\n")) })
 	srv := httptest.NewServer(NewHandler(Options{
-		Store: db, Token: "s3cret-token", Metrics: metrics, MaxResults: 100, StatsWindow: time.Hour,
+		Store: db, Token: "s3cret-token", Metrics: metrics, MaxResults: 100, StatsWindow: time.Hour, SessionTTL: time.Hour,
 		MinCheckInterval: 5 * time.Second, DefaultFailureThreshold: 3,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))

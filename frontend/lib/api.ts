@@ -1,7 +1,7 @@
 import "server-only";
 
-import { requireSession } from "@/lib/auth";
 import { config } from "@/lib/config";
+import { sessionToken } from "@/lib/session";
 
 /**
  * The backend API revision this frontend was written against; see Revision in
@@ -266,18 +266,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Calls the backend as the signed-in user: the session token goes along,
+ * and the backend decides what that user may see and do. Without a
+ * session, or with one the backend refuses, this fails with status 401;
+ * lib/auth.ts turns that into the sign-in page. Open requests are those
+ * the backend answers to anyone.
+ */
 async function request<T>(
   path: string,
   init?: RequestInit,
-  /** Skip the session check; only for what is public anyway. */
-  { open = false }: { open?: boolean } = {},
+  { open = false, token }: { open?: boolean; token?: string } = {},
 ): Promise<T> {
-  if (!open) await requireSession();
+  const bearer = token ?? (open ? null : await sessionToken());
+  if (!open && !bearer) throw new ApiError(401, "no session");
   const res = await fetch(`${config.backendUrl}/api/v1${path}`, {
     ...init,
     headers: {
       ...init?.headers,
-      ...(config.backendToken && { Authorization: `Bearer ${config.backendToken}` }),
+      ...(bearer && { Authorization: `Bearer ${bearer}` }),
     },
     signal: AbortSignal.timeout(config.backendTimeoutMs),
   });
@@ -580,3 +587,93 @@ export const getStatusPageView = (slug: string) =>
   request<StatusPageView>(`/status-pages/by-slug/${encodeURIComponent(slug)}/view`, undefined, {
     open: true,
   });
+
+export type Role = "admin" | "editor" | "viewer";
+
+export type User = {
+  id: number;
+  username: string;
+  display_name: string;
+  email: string;
+  /** "local" accounts have a password here; "ldap" ones are checked against the directory. */
+  source: "local" | "ldap";
+  role: Role;
+  /** Empty for an admin; ["*"] means every namespace. */
+  namespaces: string[];
+  enabled: boolean;
+  created_at: string;
+  last_login_at: string | null;
+};
+
+/** The signed-in user, with what they may do. */
+export type Me = User & { service: boolean; admin: boolean; sees_all: boolean; can_edit: boolean };
+
+export type Providers = { setup_needed: boolean; ldap: boolean };
+
+export type Session = { token: string; expires_at: string; user: User };
+
+/** What the sign-in page can offer; answered to anyone. */
+export const getProviders = () => request<Providers>("/auth/providers", undefined, { open: true });
+
+/** Creates the first administrator; works only while there is no account. */
+export const setup = (body: { username: string; display_name: string; password: string }) =>
+  request<Session>("/auth/setup", { method: "POST", body: JSON.stringify(body) }, { open: true });
+
+/** Signs in; a refusal is an ApiError with status 401, 403 or 429. */
+export const login = (username: string, password: string) =>
+  request<Session>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }, { open: true });
+
+export const logout = (token: string) =>
+  request<void>("/auth/logout", { method: "POST" }, { open: true, token });
+
+export const getMe = () => request<Me>("/auth/me");
+
+export const changePassword = (current_password: string, new_password: string) =>
+  request<void>("/auth/password", { method: "POST", body: JSON.stringify({ current_password, new_password }) });
+
+export const listUsers = () => request<User[]>("/users");
+
+export type NewUser = {
+  username: string;
+  display_name: string;
+  email: string;
+  password: string;
+  role: Role;
+  namespaces: string[];
+};
+
+export const createUser = (user: NewUser) =>
+  request<User>("/users", { method: "POST", body: JSON.stringify(user) });
+
+export type UserChanges = Partial<Omit<NewUser, "username"> & { enabled: boolean }>;
+
+export const updateUser = (id: number, changes: UserChanges) =>
+  request<User>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(changes) });
+
+export const deleteUser = (id: number) => request<void>(`/users/${id}`, { method: "DELETE" });
+
+export type LdapStatus = { enabled: boolean; url?: string; default_role: Role | "" };
+
+export type GroupRole = { id: number; group_dn: string; role: Role; namespaces: string[]; created_at: string };
+
+export const getLdapStatus = () => request<LdapStatus>("/ldap");
+
+export const listGroupRoles = () => request<GroupRole[]>("/ldap/groups");
+
+export const createGroupRole = (body: { group_dn: string; role: Role; namespaces: string[] }) =>
+  request<GroupRole>("/ldap/groups", { method: "POST", body: JSON.stringify(body) });
+
+export const deleteGroupRole = (id: number) => request<void>(`/ldap/groups/${id}`, { method: "DELETE" });
+
+export type AuditEntry = {
+  id: number;
+  at: string;
+  user_id: number;
+  username: string;
+  action: string;
+  object_type: string;
+  object_id: number;
+  summary: string;
+};
+
+export const listAudit = (limit: number) => request<AuditEntry[]>(`/audit?limit=${limit}`);

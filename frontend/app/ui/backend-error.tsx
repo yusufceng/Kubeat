@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ApiError } from "@/lib/api";
 
 /**
@@ -5,7 +6,18 @@ import { ApiError } from "@/lib/api";
  * API token is called out, since restarting things will not fix it.
  */
 export function BackendError({ what, err }: { what: string; err?: unknown }) {
-  const unauthorized = err instanceof ApiError && err.status === 401;
+  if (err instanceof ApiError && err.status === 401) {
+    return (
+      <p role="alert" className="rounded-lg border border-line bg-sunken p-4 text-sm">
+        Oturumunuz sona erdi.{" "}
+        <Link href="/login?expired=1" className="underline">
+          Yeniden giriş yapın
+        </Link>
+        .
+      </p>
+    );
+  }
+  const unauthorized = false;
   return (
     <p
       role="alert"

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const incidentColumns = "i.id, i.monitor_id, i.kind, m.name, i.started_at, i.resolved_at, i.cause, i.last_notified_at"
+const incidentColumns = "i.id, i.monitor_id, i.kind, m.name, m.namespace, i.started_at, i.resolved_at, i.cause, i.last_notified_at"
 
 func scanIncident(row rowScanner) (Incident, error) {
 	var (
@@ -19,7 +19,7 @@ func scanIncident(row rowScanner) (Incident, error) {
 		resolvedAt   sql.NullInt64
 		lastNotified sql.NullInt64
 	)
-	if err := row.Scan(&i.ID, &i.MonitorID, &i.Kind, &i.MonitorName, &startedAt, &resolvedAt, &i.Cause, &lastNotified); err != nil {
+	if err := row.Scan(&i.ID, &i.MonitorID, &i.Kind, &i.MonitorName, &i.MonitorNamespace, &startedAt, &resolvedAt, &i.Cause, &lastNotified); err != nil {
 		return Incident{}, err
 	}
 	i.StartedAt = time.UnixMilli(startedAt).UTC()
@@ -156,27 +156,37 @@ func scanRawChannel(row rowScanner) (Channel, error) {
 		c          Channel
 		namespaces string
 		createdAt  int64
+		err        error
 	)
 	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Secret, &namespaces, &c.Enabled, &createdAt); err != nil {
 		return Channel{}, err
 	}
-	if err := json.Unmarshal([]byte(namespaces), &c.Namespaces); err != nil {
-		return Channel{}, fmt.Errorf("channel %d: decode namespaces: %w", c.ID, err)
-	}
-	if len(c.Namespaces) == 0 {
-		c.Namespaces = nil
+	if c.Namespaces, err = decodeNamespaces(namespaces); err != nil {
+		return Channel{}, fmt.Errorf("channel %d: %w", c.ID, err)
 	}
 	c.CreatedAt = time.UnixMilli(createdAt).UTC()
 	return c, nil
 }
 
-// encodeNamespaces stores a channel's scope as a JSON array; no scope is "[]".
+// encodeNamespaces stores a list of namespaces as a JSON array; none is "[]".
 func encodeNamespaces(namespaces []string) (string, error) {
 	if len(namespaces) == 0 {
 		return "[]", nil
 	}
 	b, err := json.Marshal(namespaces)
 	return string(b), err
+}
+
+// decodeNamespaces reads what encodeNamespaces wrote; "[]" is nil.
+func decodeNamespaces(text string) ([]string, error) {
+	var namespaces []string
+	if err := json.Unmarshal([]byte(text), &namespaces); err != nil {
+		return nil, fmt.Errorf("decode namespaces: %w", err)
+	}
+	if len(namespaces) == 0 {
+		return nil, nil
+	}
+	return namespaces, nil
 }
 
 func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) {

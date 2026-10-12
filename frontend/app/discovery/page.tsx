@@ -8,7 +8,9 @@ import {
   listNamespaces,
 } from "@/lib/api";
 import { BackendError } from "@/app/ui/backend-error";
+import { currentUser } from "@/lib/auth";
 import { CandidateForm } from "@/app/ui/candidate-form";
+import { typeLabel } from "@/lib/monitor-types";
 
 function Notice({ children }: { children: React.ReactNode }) {
   return (
@@ -30,6 +32,41 @@ function ClusterError({ err }: { err: unknown }) {
   );
 }
 
+/** The candidates of a namespace for a viewer, who may not import them. */
+function ReadOnlyCandidates({ candidates }: { candidates: Candidate[] }) {
+  return (
+    <div className="card overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead className="border-b border-line text-xs text-muted">
+          <tr>
+            <th className="px-4 py-2 font-medium">Nesne</th>
+            <th className="px-4 py-2 font-medium">Önerilen kontrol</th>
+            <th className="px-4 py-2 font-medium">Durum</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {candidates.map((c) => (
+            <tr key={c.source}>
+              <td className="px-4 py-2">
+                <span className="mr-2 text-xs text-muted">{c.kind}</span>
+                {c.name}
+                {c.port > 0 && `:${c.port}`}
+              </td>
+              <td className="px-4 py-2">
+                <span className="mr-2 text-xs text-muted">{typeLabel(c.type)}</span>
+                <span className="break-all font-mono text-xs">{c.target}</span>
+              </td>
+              <td className="whitespace-nowrap px-4 py-2 text-xs text-muted">
+                {c.monitor_id !== null ? "İzleniyor" : "İzlenmiyor; eklemek için bir editöre başvurun"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 async function Discovery({
   searchParams,
 }: {
@@ -37,6 +74,7 @@ async function Discovery({
 }) {
   const param = (await searchParams).namespace;
   const namespace = typeof param === "string" ? param : "";
+  const me = await currentUser();
 
   let status: DiscoveryStatus;
   let namespaces: string[] = [];
@@ -106,7 +144,11 @@ async function Discovery({
       )}
       {candidates && candidates.length > 0 && (
         // Keyed so that selection state starts fresh for another namespace.
-        <CandidateForm key={namespace} namespace={namespace} candidates={candidates} />
+        me.can_edit ? (
+          <CandidateForm key={namespace} namespace={namespace} candidates={candidates} />
+        ) : (
+          <ReadOnlyCandidates candidates={candidates} />
+        )
       )}
     </>
   );

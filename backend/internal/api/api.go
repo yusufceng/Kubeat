@@ -3,14 +3,13 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
+	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -51,6 +50,26 @@ type Store interface {
 	DeleteStatusPage(ctx context.Context, id int64) error
 	StatusPageDailyUptime(ctx context.Context, pageID int64, from, to time.Time) (map[int64][]store.SeriesPoint, error)
 	MonitorIsPublic(ctx context.Context, monitorID int64) (bool, error)
+
+	CreateUser(ctx context.Context, u store.User) (store.User, error)
+	GetUser(ctx context.Context, id int64) (store.User, error)
+	GetUserByUsername(ctx context.Context, username string) (store.User, error)
+	ListUsers(ctx context.Context) ([]store.User, error)
+	CountUsers(ctx context.Context) (int, error)
+	UpdateUser(ctx context.Context, u store.User) (store.User, error)
+	SetPassword(ctx context.Context, id int64, hash string) error
+	DeleteUser(ctx context.Context, id int64) error
+	CreateSession(ctx context.Context, s store.Session) error
+	GetSession(ctx context.Context, tokenHash string, now time.Time) (store.Session, error)
+	TouchSession(ctx context.Context, tokenHash string, at time.Time) error
+	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteUserSessions(ctx context.Context, userID int64) error
+	CreateLDAPGroupRole(ctx context.Context, g store.LDAPGroupRole) (store.LDAPGroupRole, error)
+	ListLDAPGroupRoles(ctx context.Context) ([]store.LDAPGroupRole, error)
+	UpdateLDAPGroupRole(ctx context.Context, g store.LDAPGroupRole) (store.LDAPGroupRole, error)
+	DeleteLDAPGroupRole(ctx context.Context, id int64) error
+	AppendAudit(ctx context.Context, e store.AuditEntry) error
+	ListAudit(ctx context.Context, limit int) ([]store.AuditEntry, error)
 }
 
 // Discovery lists what could be monitored in the cluster.
@@ -87,9 +106,20 @@ type Options struct {
 	// DefaultFailureThreshold applies to monitors created without one.
 	DefaultFailureThreshold int
 	Notifier                Notifier
-	// Token, if set, must be presented as a bearer token on every API
-	// request except the health check. Empty leaves the API open.
+	// Token, if set, is the service credential: presented as a bearer
+	// token it may do everything. Users present their session token instead.
 	Token string
+	// SessionTTL is how long a sign-in lasts; Throttle slows down password
+	// guessing; PasswordMinLength is the shortest password accepted.
+	SessionTTL        time.Duration
+	Throttle          *auth.Throttle
+	PasswordMinLength int
+	// LDAP, if set, lets directory accounts sign in. A directory user gets
+	// the role of the group mappings that match their groups, or else
+	// LDAPDefaultRole (empty: no access) with LDAPDefaultNamespaces.
+	LDAP                  LDAP
+	LDAPDefaultRole       store.Role
+	LDAPDefaultNamespaces []string
 	// Metrics, if set, is served at /metrics.
 	Metrics http.Handler
 	// EmailEnabled says whether an SMTP server is configured; e-mail
@@ -111,7 +141,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 16
+const Revision = 17
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -166,30 +196,26 @@ func NewHandler(opts Options) http.Handler {
 	// Whatever the source has at hand reports: curl, wget, an HTTP client.
 	mux.HandleFunc("GET "+pushPath+"{token}", h.push)
 	mux.HandleFunc("POST "+pushPath+"{token}", h.push)
-	return requireToken(opts.Token, mux)
-}
-
-// requireToken guards the API with a shared secret. The health check stays
-// open for the kubelet's probes and /metrics for the cluster's Prometheus;
-// neither changes anything. Push reports carry their own secret, the
-// monitor's token, in the path.
-func requireToken(token string, next http.Handler) http.Handler {
-	if token == "" {
-		return next
+	mux.HandleFunc("GET /api/v1/auth/providers", h.authProviders)
+	mux.HandleFunc("POST /api/v1/auth/setup", h.authSetup)
+	mux.HandleFunc("POST /api/v1/auth/login", h.authLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", h.authLogout)
+	mux.HandleFunc("GET /api/v1/auth/me", h.authMe)
+	mux.HandleFunc("POST /api/v1/auth/password", h.authPassword)
+	mux.HandleFunc("GET /api/v1/users", h.listUsers)
+	mux.HandleFunc("POST /api/v1/users", h.createUser)
+	mux.HandleFunc("PATCH /api/v1/users/{id}", h.updateUser)
+	mux.HandleFunc("DELETE /api/v1/users/{id}", h.deleteUser)
+	mux.HandleFunc("GET /api/v1/ldap", h.ldapStatus)
+	mux.HandleFunc("GET /api/v1/ldap/groups", h.listGroupRoles)
+	mux.HandleFunc("POST /api/v1/ldap/groups", h.createGroupRole)
+	mux.HandleFunc("PATCH /api/v1/ldap/groups/{id}", h.updateGroupRole)
+	mux.HandleFunc("DELETE /api/v1/ldap/groups/{id}", h.deleteGroupRole)
+	mux.HandleFunc("GET /api/v1/audit", h.listAudit)
+	if h.opts.Throttle == nil {
+		h.opts.Throttle = &auth.Throttle{MaxFailures: 10, Lockout: 15 * time.Minute}
 	}
-	want := []byte("Bearer " + token)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// A push path is the prefix and a token, nothing below or beside it.
-		token, isPush := strings.CutPrefix(r.URL.Path, pushPath)
-		open := r.URL.Path == "/api/v1/health" || r.URL.Path == "/metrics" || (isPush && !strings.Contains(token, "/"))
-		got := []byte(r.Header.Get("Authorization"))
-		if !open && subtle.ConstantTimeCompare(got, want) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="kubeat"`)
-			writeError(w, http.StatusUnauthorized, "a valid API token is required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return h.authenticate(mux)
 }
 
 func (h *handler) health(w http.ResponseWriter, _ *http.Request) {

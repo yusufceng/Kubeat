@@ -1,20 +1,30 @@
 import "server-only";
 
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
-import { loginEnabled, SESSION_COOKIE, validSession } from "@/lib/session";
+import { cache } from "react";
+import { ApiError, getMe, type Me } from "@/lib/api";
+import { sessionToken } from "@/lib/session";
 
 /**
- * Sends the visitor to the sign-in page unless they have a valid session.
- * Called before every backend request, so no page or action can reach the
- * backend without one, whatever route it is on.
+ * Who is signed in, asked of the backend once per request. Without a
+ * session, or with one the backend no longer accepts, the visitor is sent
+ * to the sign-in page.
  */
-export async function requireSession(): Promise<void> {
-  if (!loginEnabled) return;
-  // Whether a session has expired depends on when the request is made, so
-  // this is never part of anything rendered ahead of time.
+export const currentUser = cache(async (): Promise<Me> => {
+  // Whether a session is still good depends on when the request is made.
   await connection();
-  const value = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!validSession(value)) redirect("/login");
+  if (!(await sessionToken())) redirect("/login");
+  try {
+    return await getMe();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) redirect("/login?expired=1");
+    throw err;
+  }
+});
+
+/** Sends the visitor to the sign-in page unless they have a session. */
+export async function requireSession(): Promise<void> {
+  await connection();
+  if (!(await sessionToken())) redirect("/login");
 }

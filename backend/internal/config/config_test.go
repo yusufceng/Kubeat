@@ -69,6 +69,18 @@ func TestLoadDefaults(t *testing.T) {
 		TelegramAPIURL:     "https://api.telegram.org",
 		PagerDutyEventsURL: "https://events.pagerduty.com/v2/enqueue",
 
+		SessionTTL:        12 * time.Hour,
+		LoginMaxFailures:  10,
+		LoginLockout:      15 * time.Minute,
+		PasswordMinLength: 8,
+		AuditRetention:    90 * 24 * time.Hour,
+
+		LDAPUserFilter:      "(uid={username})",
+		LDAPDisplayNameAttr: "cn",
+		LDAPEmailAttr:       "mail",
+		LDAPGroupAttr:       "memberOf",
+		LDAPTimeout:         10 * time.Second,
+
 		DiscoveryEnabled: true,
 		KubeTimeout:      10 * time.Second,
 	}

@@ -35,21 +35,6 @@ spec:
             # What push monitors show to jobs in other namespaces.
             - name: PUSH_INTERNAL_URL
               value: "http://{{ .Release.Name }}-backend.{{ .Release.Namespace }}.svc:8080"
-            - name: BACKEND_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "kubeat.apiTokenSecret" . }}
-                  key: token
-            - name: ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.auth.existingSecret | default (printf "%s-admin" .Release.Name) }}
-                  key: password
-            - name: SESSION_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.auth.existingSecret | default (printf "%s-admin" .Release.Name) }}
-                  key: session-secret
             - name: SESSION_TTL_HOURS
               value: {{ .Values.auth.sessionTtlHours | quote }}
             {{- range $name, $value := .Values.frontend.env }}

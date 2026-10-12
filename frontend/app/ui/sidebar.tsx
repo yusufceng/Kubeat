@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { toListItem, workspaceMonitors } from "@/lib/workspace";
 import { BackendError } from "@/app/ui/backend-error";
@@ -8,6 +9,7 @@ import { MonitorList } from "@/app/ui/monitor-list";
 export async function Sidebar() {
   // The list settings come from the running server's environment.
   await connection();
+  const me = await currentUser();
   let items;
   try {
     items = (await workspaceMonitors()).map(toListItem);
@@ -23,6 +25,7 @@ export async function Sidebar() {
       items={items}
       beats={config.listBeats}
       openByDefault={items.length <= config.dashboardFlatLimit}
+      canEdit={me.can_edit}
     />
   );
 }

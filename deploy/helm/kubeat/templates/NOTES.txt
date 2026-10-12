@@ -1,11 +1,12 @@
 Kubeat is installed.
 
-Administrator password:
+Sign in as "admin" with the password
 {{- if .Values.auth.existingSecret }}
   taken from the Secret "{{ .Values.auth.existingSecret }}" (key "password").
 {{- else }}
   kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-admin -o jsonpath='{.data.password}' | base64 -d; echo
 {{- end }}
+Then create the other accounts under "Kullanıcılar".
 
 Open the UI:
 {{- if .Values.route.enabled }}

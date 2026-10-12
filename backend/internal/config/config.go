@@ -15,11 +15,43 @@ type Config struct {
 	// APIToken, if set, is required as a bearer token on API requests.
 	APIToken string // UPTIME_API_TOKEN
 	// SecretKey, if set, encrypts the secrets kept in the database.
-	SecretKey         string        // UPTIME_SECRET_KEY
-	DBPath            string        // UPTIME_DB_PATH
-	DBBusyTimeout     time.Duration // UPTIME_DB_BUSY_TIMEOUT
-	ReadHeaderTimeout time.Duration // UPTIME_READ_HEADER_TIMEOUT
-	ShutdownTimeout   time.Duration // UPTIME_SHUTDOWN_TIMEOUT
+	SecretKey string // UPTIME_SECRET_KEY
+
+	// Accounts. AdminPassword creates the administrator "admin" when there
+	// is no account yet; with AdminPasswordReset it also resets admin's
+	// password, for an operator locked out.
+	AdminPassword      string        // UPTIME_ADMIN_PASSWORD
+	AdminPasswordReset bool          // UPTIME_ADMIN_PASSWORD_RESET
+	SessionTTL         time.Duration // UPTIME_SESSION_TTL
+	LoginMaxFailures   int           // UPTIME_LOGIN_MAX_FAILURES
+	LoginLockout       time.Duration // UPTIME_LOGIN_LOCKOUT
+	PasswordMinLength  int           // UPTIME_PASSWORD_MIN_LENGTH
+	AuditRetention     time.Duration // UPTIME_AUDIT_RETENTION
+
+	// LDAP; see ldapauth.Config. Empty LDAPURL means local accounts only.
+	LDAPURL                string        // UPTIME_LDAP_URL
+	LDAPStartTLS           bool          // UPTIME_LDAP_START_TLS
+	LDAPCAFile             string        // UPTIME_LDAP_CA_FILE
+	LDAPInsecureSkipVerify bool          // UPTIME_LDAP_INSECURE_SKIP_VERIFY
+	LDAPBindDN             string        // UPTIME_LDAP_BIND_DN
+	LDAPBindPassword       string        // UPTIME_LDAP_BIND_PASSWORD
+	LDAPBaseDN             string        // UPTIME_LDAP_BASE_DN
+	LDAPUserFilter         string        // UPTIME_LDAP_USER_FILTER
+	LDAPDisplayNameAttr    string        // UPTIME_LDAP_DISPLAY_NAME_ATTR
+	LDAPEmailAttr          string        // UPTIME_LDAP_EMAIL_ATTR
+	LDAPGroupAttr          string        // UPTIME_LDAP_GROUP_ATTR
+	LDAPGroupBaseDN        string        // UPTIME_LDAP_GROUP_BASE_DN
+	LDAPGroupFilter        string        // UPTIME_LDAP_GROUP_FILTER
+	LDAPTimeout            time.Duration // UPTIME_LDAP_TIMEOUT
+	// LDAPDefaultRole is what a directory user gets when none of their
+	// groups is mapped; empty refuses them. LDAPDefaultNamespaces is the
+	// scope of that role, as a comma-separated list.
+	LDAPDefaultRole       string        // UPTIME_LDAP_DEFAULT_ROLE
+	LDAPDefaultNamespaces string        // UPTIME_LDAP_DEFAULT_NAMESPACES
+	DBPath                string        // UPTIME_DB_PATH
+	DBBusyTimeout         time.Duration // UPTIME_DB_BUSY_TIMEOUT
+	ReadHeaderTimeout     time.Duration // UPTIME_READ_HEADER_TIMEOUT
+	ShutdownTimeout       time.Duration // UPTIME_SHUTDOWN_TIMEOUT
 
 	SchedulerTick       time.Duration // UPTIME_SCHEDULER_TICK
 	MaxJitter           time.Duration // UPTIME_MAX_JITTER
@@ -106,6 +138,22 @@ func Load() (Config, error) {
 		APIToken:  envString("UPTIME_API_TOKEN", ""),
 		SecretKey: envString("UPTIME_SECRET_KEY", ""),
 
+		AdminPassword: envString("UPTIME_ADMIN_PASSWORD", ""),
+
+		LDAPURL:               envString("UPTIME_LDAP_URL", ""),
+		LDAPCAFile:            envString("UPTIME_LDAP_CA_FILE", ""),
+		LDAPBindDN:            envString("UPTIME_LDAP_BIND_DN", ""),
+		LDAPBindPassword:      envString("UPTIME_LDAP_BIND_PASSWORD", ""),
+		LDAPBaseDN:            envString("UPTIME_LDAP_BASE_DN", ""),
+		LDAPUserFilter:        envString("UPTIME_LDAP_USER_FILTER", "(uid={username})"),
+		LDAPDisplayNameAttr:   envString("UPTIME_LDAP_DISPLAY_NAME_ATTR", "cn"),
+		LDAPEmailAttr:         envString("UPTIME_LDAP_EMAIL_ATTR", "mail"),
+		LDAPGroupAttr:         envString("UPTIME_LDAP_GROUP_ATTR", "memberOf"),
+		LDAPGroupBaseDN:       envString("UPTIME_LDAP_GROUP_BASE_DN", ""),
+		LDAPGroupFilter:       envString("UPTIME_LDAP_GROUP_FILTER", ""),
+		LDAPDefaultRole:       envString("UPTIME_LDAP_DEFAULT_ROLE", ""),
+		LDAPDefaultNamespaces: envString("UPTIME_LDAP_DEFAULT_NAMESPACES", ""),
+
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
 		BackupDir:    envString("UPTIME_BACKUP_DIR", ""),
 
@@ -146,6 +194,10 @@ func Load() (Config, error) {
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
 		{&cfg.StatusPageIncidentWindow, "UPTIME_STATUS_PAGE_INCIDENT_WINDOW", 14 * 24 * time.Hour},
+		{&cfg.SessionTTL, "UPTIME_SESSION_TTL", 12 * time.Hour},
+		{&cfg.LoginLockout, "UPTIME_LOGIN_LOCKOUT", 15 * time.Minute},
+		{&cfg.AuditRetention, "UPTIME_AUDIT_RETENTION", 90 * 24 * time.Hour},
+		{&cfg.LDAPTimeout, "UPTIME_LDAP_TIMEOUT", 10 * time.Second},
 		{&cfg.CertWarning, "UPTIME_CERT_WARNING", 14 * 24 * time.Hour},
 		{&cfg.NotifyRetryDelay, "UPTIME_NOTIFY_RETRY_DELAY", 5 * time.Second},
 		{&cfg.NotifyTimeout, "UPTIME_NOTIFY_TIMEOUT", 5 * time.Second},
@@ -174,6 +226,8 @@ func Load() (Config, error) {
 		{&cfg.ResultBatchSize, "UPTIME_RESULT_BATCH_SIZE", 100},
 		{&cfg.MaxResults, "UPTIME_MAX_RESULTS", 1000},
 		{&cfg.StatusPageDays, "UPTIME_STATUS_PAGE_DAYS", 90},
+		{&cfg.LoginMaxFailures, "UPTIME_LOGIN_MAX_FAILURES", 10},
+		{&cfg.PasswordMinLength, "UPTIME_PASSWORD_MIN_LENGTH", 8},
 		{&cfg.SeriesPoints, "UPTIME_SERIES_POINTS", 120},
 		{&cfg.KeywordBodyLimit, "UPTIME_KEYWORD_BODY_LIMIT_BYTES", 1 << 20},
 		{&cfg.DefaultFailureThreshold, "UPTIME_DEFAULT_FAILURE_THRESHOLD", 3},
@@ -217,6 +271,20 @@ func Load() (Config, error) {
 	}
 	if cfg.HTTPInsecureSkipVerify, err = envBool("UPTIME_HTTP_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err
+	}
+	if cfg.AdminPasswordReset, err = envBool("UPTIME_ADMIN_PASSWORD_RESET", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.LDAPStartTLS, err = envBool("UPTIME_LDAP_START_TLS", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.LDAPInsecureSkipVerify, err = envBool("UPTIME_LDAP_INSECURE_SKIP_VERIFY", false); err != nil {
+		return Config{}, err
+	}
+	switch cfg.LDAPDefaultRole {
+	case "", "admin", "editor", "viewer":
+	default:
+		return Config{}, fmt.Errorf("UPTIME_LDAP_DEFAULT_ROLE: must be admin, editor, viewer or empty, got %q", cfg.LDAPDefaultRole)
 	}
 	return cfg, nil
 }

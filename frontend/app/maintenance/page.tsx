@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { listMaintenance, listMonitors, type Maintenance, type Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
+import { currentUser } from "@/lib/auth";
 import { BackendError } from "@/app/ui/backend-error";
 import { LocalTime } from "@/app/ui/local-time";
 import {
@@ -43,6 +44,7 @@ function Scope({ window }: { window: Maintenance }) {
 }
 
 async function MaintenanceList() {
+  const me = await currentUser();
   let windows: Maintenance[];
   let monitors: Monitor[];
   try {
@@ -123,10 +125,12 @@ async function MaintenanceList() {
         </div>
       )}
 
-      <section className="card p-5">
-        <h2 className="mb-4 text-sm font-semibold">Yeni bakım penceresi</h2>
-        <MaintenanceForm scopes={scopes} durations={config.maintenanceDurations} />
-      </section>
+      {me.can_edit && (
+        <section className="card p-5">
+          <h2 className="mb-4 text-sm font-semibold">Yeni bakım penceresi</h2>
+          <MaintenanceForm scopes={scopes} durations={config.maintenanceDurations} />
+        </section>
+      )}
     </>
   );
 }

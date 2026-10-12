@@ -12,7 +12,6 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/badge/[i
   try {
     const res = await fetch(target, {
       cache: "no-store",
-      headers: config.backendToken ? { Authorization: `Bearer ${config.backendToken}` } : undefined,
       signal: AbortSignal.timeout(config.backendTimeoutMs),
     });
     const headers = new Headers({ "Content-Type": res.headers.get("Content-Type") ?? "application/json" });

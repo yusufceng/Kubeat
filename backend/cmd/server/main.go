@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,11 +18,13 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/api"
+	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/backup"
 	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
 	"github.com/yusufceng/Kubeat/backend/internal/heartbeat"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
+	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/prom"
 	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
@@ -54,6 +57,28 @@ func main() {
 		logger.Error("the secrets in the database cannot be used", "error", err)
 		db.Close()
 		os.Exit(1)
+	}
+	if err := bootstrapAdmin(ctx, db, cfg, logger); err != nil {
+		logger.Error("the administrator account could not be set up", "error", err)
+		db.Close()
+		os.Exit(1)
+	}
+	ldapClient, err := ldapauth.New(ldapauth.Config{
+		URL: cfg.LDAPURL, StartTLS: cfg.LDAPStartTLS, CAFile: cfg.LDAPCAFile, InsecureSkipVerify: cfg.LDAPInsecureSkipVerify,
+		BindDN: cfg.LDAPBindDN, BindPassword: cfg.LDAPBindPassword, BaseDN: cfg.LDAPBaseDN, UserFilter: cfg.LDAPUserFilter,
+		DisplayNameAttr: cfg.LDAPDisplayNameAttr, EmailAttr: cfg.LDAPEmailAttr, GroupAttr: cfg.LDAPGroupAttr,
+		GroupBaseDN: cfg.LDAPGroupBaseDN, GroupFilter: cfg.LDAPGroupFilter, Timeout: cfg.LDAPTimeout,
+	})
+	if err != nil {
+		logger.Error("invalid LDAP configuration", "error", err)
+		db.Close()
+		os.Exit(1)
+	}
+	// An interface holding a nil *Client would not be nil; keep it nil.
+	var ldap api.LDAP
+	if ldapClient != nil {
+		ldap = ldapClient
+		logger.Info("directory sign-in enabled", "url", cfg.LDAPURL)
 	}
 
 	// Background work stops on the same signal as the HTTP server and is
@@ -193,6 +218,11 @@ func main() {
 		defer background.Done()
 		scheduler.RunRetention(ctx, db, cfg.Retention, cfg.RetentionInterval, logger)
 	}()
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		runSessionCleanup(ctx, db, cfg.AuditRetention, logger)
+	}()
 
 	if cfg.PrometheusURL != "" {
 		client, err := prom.New(prom.Options{
@@ -225,6 +255,12 @@ func main() {
 			StatusPageDays:           cfg.StatusPageDays,
 			StatusPageIncidentWindow: cfg.StatusPageIncidentWindow,
 			Token:                    cfg.APIToken,
+			SessionTTL:               cfg.SessionTTL,
+			Throttle:                 &auth.Throttle{MaxFailures: cfg.LoginMaxFailures, Lockout: cfg.LoginLockout},
+			PasswordMinLength:        cfg.PasswordMinLength,
+			LDAP:                     ldap,
+			LDAPDefaultRole:          store.Role(cfg.LDAPDefaultRole),
+			LDAPDefaultNamespaces:    splitList(cfg.LDAPDefaultNamespaces),
 			Notifier:                 alerts,
 			Metrics:                  meter.Handler(),
 			EmailEnabled:             senders.EmailEnabled(),
@@ -309,4 +345,75 @@ func protectSecrets(ctx context.Context, db *store.SQLite, key string, logger *s
 		logger.Info("secrets stored before the key was configured are now encrypted", "count", counts.Plain)
 	}
 	return nil
+}
+
+// bootstrapAdmin creates the administrator "admin" from UPTIME_ADMIN_PASSWORD
+// when there is no account yet, which is how a Helm install gets its first
+// sign-in. With UPTIME_ADMIN_PASSWORD_RESET it also resets that account's
+// password, for an operator who is locked out.
+func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, logger *slog.Logger) error {
+	if cfg.AdminPassword == "" {
+		return nil
+	}
+	n, err := db.CountUsers(ctx)
+	if err != nil {
+		return err
+	}
+	hash, err := auth.HashPassword(cfg.AdminPassword)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := db.CreateUser(ctx, store.User{Username: "admin", DisplayName: "Yönetici", Source: store.UserLocal, PasswordHash: hash, Role: store.RoleAdmin, Enabled: true}); err != nil {
+			return err
+		}
+		logger.Info("administrator account created from UPTIME_ADMIN_PASSWORD", "user", "admin")
+		return nil
+	}
+	if !cfg.AdminPasswordReset {
+		return nil
+	}
+	admin, err := db.GetUserByUsername(ctx, "admin")
+	if err != nil {
+		return fmt.Errorf("reset the admin password: %w", err)
+	}
+	if err := db.SetPassword(ctx, admin.ID, hash); err != nil {
+		return err
+	}
+	if err := db.DeleteUserSessions(ctx, admin.ID); err != nil {
+		return err
+	}
+	logger.Warn("the admin password was reset from UPTIME_ADMIN_PASSWORD; unset UPTIME_ADMIN_PASSWORD_RESET again")
+	return nil
+}
+
+// runSessionCleanup drops expired sessions and old audit entries, hourly.
+func runSessionCleanup(ctx context.Context, db *store.SQLite, auditRetention time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		now := time.Now().UTC()
+		if _, err := db.DeleteExpiredSessions(ctx, now); err != nil && ctx.Err() == nil {
+			logger.Warn("expired sessions not cleaned up", "error", err)
+		}
+		if _, err := db.DeleteAuditBefore(ctx, now.Add(-auditRetention)); err != nil && ctx.Err() == nil {
+			logger.Warn("old audit entries not cleaned up", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// splitList parses a comma-separated list, dropping empty entries.
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

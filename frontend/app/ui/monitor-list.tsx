@@ -53,12 +53,15 @@ export function MonitorList({
   items,
   beats,
   openByDefault,
+  canEdit,
 }: {
   items: ListItem[];
   /** How many recent checks a row has room for. */
   beats: number;
   /** Whether namespaces start opened; problems open theirs either way. */
   openByDefault: boolean;
+  /** Whether the viewer may create and change monitors. */
+  canEdit: boolean;
 }) {
   const pathname = usePathname();
   const activeId = Number(/^\/monitors\/(\d+)/.exec(pathname)?.[1] ?? 0);
@@ -157,9 +160,11 @@ export function MonitorList({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-col gap-3 border-b border-line p-3">
-        <Link href="/monitors/new" className="btn btn-primary w-full">
-          <PlusIcon /> Yeni monitor
-        </Link>
+        {canEdit && (
+          <Link href="/monitors/new" className="btn btn-primary w-full">
+            <PlusIcon /> Yeni monitor
+          </Link>
+        )}
         <label className="relative block">
           <span className="sr-only">Monitor ara</span>
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -221,7 +226,7 @@ export function MonitorList({
               ))}
             </select>
           )}
-          {items.length > 0 && (
+          {canEdit && items.length > 0 && (
             <button
               type="button"
               onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
@@ -267,11 +272,17 @@ export function MonitorList({
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {items.length === 0 && (
           <p className="p-4 text-center text-sm text-muted">
-            Henüz monitor yok. Yukarıdaki düğmeyle ekleyin ya da{" "}
-            <Link href="/discovery" className="text-accent underline">
-              cluster&apos;dan keşfedin
-            </Link>
-            .
+            {canEdit ? (
+              <>
+                Henüz monitor yok. Yukarıdaki düğmeyle ekleyin ya da{" "}
+                <Link href="/discovery" className="text-accent underline">
+                  cluster&apos;dan keşfedin
+                </Link>
+                .
+              </>
+            ) : (
+              "Görebildiğiniz bir monitor yok."
+            )}
           </p>
         )}
         {items.length > 0 && groups.length === 0 && (

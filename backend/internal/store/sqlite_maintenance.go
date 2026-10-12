@@ -29,7 +29,7 @@ func (s *SQLite) CreateMaintenance(ctx context.Context, m Maintenance) (Maintena
 	return m, nil
 }
 
-const maintenanceQuery = `SELECT w.id, w.name, w.starts_at, w.ends_at, w.repeat, w.timezone, w.namespace, w.monitor_id, m.name, w.created_at
+const maintenanceQuery = `SELECT w.id, w.name, w.starts_at, w.ends_at, w.repeat, w.timezone, w.namespace, w.monitor_id, m.name, m.namespace, w.created_at
 		 FROM maintenance_windows w LEFT JOIN monitors m ON m.id = w.monitor_id `
 
 // scanMaintenance reads and closes rows of maintenanceQuery.
@@ -41,11 +41,12 @@ func scanMaintenance(rows *sql.Rows) ([]Maintenance, error) {
 			m                           Maintenance
 			startsAt, endsAt, createdAt int64
 			monitorID                   sql.NullInt64
-			monitorName                 sql.NullString
+			monitorName, monitorNS      sql.NullString
 		)
-		if err := rows.Scan(&m.ID, &m.Name, &startsAt, &endsAt, &m.Repeat, &m.Timezone, &m.Namespace, &monitorID, &monitorName, &createdAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &startsAt, &endsAt, &m.Repeat, &m.Timezone, &m.Namespace, &monitorID, &monitorName, &monitorNS, &createdAt); err != nil {
 			return nil, err
 		}
+		m.MonitorNamespace = monitorNS.String
 		m.StartsAt = time.UnixMilli(startsAt).UTC()
 		m.EndsAt = time.UnixMilli(endsAt).UTC()
 		m.CreatedAt = time.UnixMilli(createdAt).UTC()

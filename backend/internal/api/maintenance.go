@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -67,8 +68,12 @@ func (h *handler) listMaintenance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
+	p := principal(r)
 	resp := make([]maintenanceResponse, 0, len(windows))
 	for _, m := range windows {
+		if !maintenanceVisible(p, m) {
+			continue
+		}
 		resp = append(resp, toMaintenanceResponse(m, now))
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -171,7 +176,11 @@ func (h *handler) createMaintenance(w http.ResponseWriter, r *http.Request) {
 			h.internalError(w, r, err)
 			return
 		}
-		m.MonitorName = monitor.Name
+		m.MonitorName, m.MonitorNamespace = monitor.Name, monitor.Namespace
+	}
+	if p := principal(r); !canEditMaintenance(p, m) {
+		scopeError(w, p)
+		return
 	}
 
 	created, err := h.opts.Store.CreateMaintenance(r.Context(), m)
@@ -180,6 +189,7 @@ func (h *handler) createMaintenance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created.MonitorName = m.MonitorName
+	h.audit(r, "create", "maintenance", created.ID, created.Name)
 	writeJSON(w, http.StatusCreated, toMaintenanceResponse(created, now))
 }
 
@@ -189,7 +199,24 @@ func (h *handler) deleteMaintenance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "maintenance window not found")
 		return
 	}
-	err := h.opts.Store.DeleteMaintenance(r.Context(), id)
+	// Which window it is: the list is bounded, and windows are few.
+	windows, err := h.opts.Store.ListMaintenance(r.Context(), h.opts.MaxResults)
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	i := slices.IndexFunc(windows, func(m store.Maintenance) bool { return m.ID == id })
+	p := principal(r)
+	if i < 0 || !maintenanceVisible(p, windows[i]) {
+		writeError(w, http.StatusNotFound, "maintenance window not found")
+		return
+	}
+	if !canEditMaintenance(p, windows[i]) {
+		scopeError(w, p)
+		return
+	}
+	h.audit(r, "delete", "maintenance", id, windows[i].Name)
+	err = h.opts.Store.DeleteMaintenance(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "maintenance window not found")
 		return

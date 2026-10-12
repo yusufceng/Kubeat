@@ -52,8 +52,12 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
+	p := principal(r)
 	resp := make([]incidentResponse, 0, len(incidents))
 	for _, i := range incidents {
+		if !p.CanRead(i.MonitorNamespace) {
+			continue
+		}
 		resp = append(resp, toIncidentResponse(i))
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -118,8 +122,12 @@ func (h *handler) listChannels(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
+	p := principal(r)
 	resp := make([]channelResponse, 0, len(channels))
 	for _, c := range channels {
+		if !channelVisible(p, c) {
+			continue
+		}
 		resp = append(resp, toChannelResponse(c))
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -248,6 +256,10 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !principal(r).CanEditEach(namespaces) {
+		forbidden(w)
+		return
+	}
 
 	c, err := h.opts.Store.CreateChannel(r.Context(), store.Channel{
 		Name: req.Name, Type: typ, Target: target, Secret: secret, Namespaces: namespaces, Enabled: true,
@@ -260,6 +272,7 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
+	h.audit(r, "create", "channel", c.ID, fmt.Sprintf("%s (%s)", c.Name, c.Type))
 	writeJSON(w, http.StatusCreated, toChannelResponse(c))
 }
 
@@ -285,7 +298,8 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ch, err := h.opts.Store.GetChannel(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) {
+	p := principal(r)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !channelVisible(p, ch)) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
@@ -318,6 +332,10 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if !p.CanEditEach(ch.Namespaces) {
+			forbidden(w)
+			return
+		}
 	}
 	if req.Enabled != nil {
 		ch.Enabled = *req.Enabled
@@ -332,6 +350,7 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		h.internalError(w, r, err)
 	default:
+		h.audit(r, "update", "channel", updated.ID, updated.Name)
 		writeJSON(w, http.StatusOK, toChannelResponse(updated))
 	}
 }
@@ -342,7 +361,17 @@ func (h *handler) deleteChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
-	err := h.opts.Store.DeleteChannel(r.Context(), id)
+	ch, err := h.opts.Store.GetChannel(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !channelVisible(principal(r), ch)) {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	h.audit(r, "delete", "channel", id, ch.Name)
+	err = h.opts.Store.DeleteChannel(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
@@ -369,7 +398,7 @@ func (h *handler) testChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ch, err := h.opts.Store.GetChannel(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !channelVisible(principal(r), ch)) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}

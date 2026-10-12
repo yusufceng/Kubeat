@@ -1,9 +1,11 @@
 import { Suspense } from "react";
 import { type Channel, listChannels, listMonitors } from "@/lib/api";
+import { currentUser } from "@/lib/auth";
 import { BackendError } from "@/app/ui/backend-error";
 import { ChannelForm, ChannelRow } from "@/app/ui/channel-forms";
 
 async function Channels() {
+  const me = await currentUser();
   let channels: Channel[];
   let namespaces: string[];
   try {
@@ -18,7 +20,9 @@ async function Channels() {
     <>
       {channels.length === 0 ? (
         <p className="rounded-xl border border-dashed border-line p-8 text-center text-sm text-muted">
-          Henüz kanal yok. Kanal eklenmeden olaylar kaydedilir ama kimseye bildirim gitmez.
+          {me.can_edit
+            ? "Henüz kanal yok. Kanal eklenmeden olaylar kaydedilir ama kimseye bildirim gitmez."
+            : "Bildirim kanallarını editörler ve yöneticiler yönetir."}
         </p>
       ) : (
         <ul className="card divide-y divide-line">
@@ -27,10 +31,12 @@ async function Channels() {
           ))}
         </ul>
       )}
-      <section className="card p-5">
-        <h2 className="mb-4 text-sm font-semibold">Yeni kanal</h2>
-        <ChannelForm namespaces={namespaces} />
-      </section>
+      {me.can_edit && (
+        <section className="card p-5">
+          <h2 className="mb-4 text-sm font-semibold">Yeni kanal</h2>
+          <ChannelForm namespaces={namespaces} />
+        </section>
+      )}
     </>
   );
 }

@@ -23,7 +23,8 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 14b | Kubernetes workload tipi: hazır pod sayısı, keşifte workload'lar | Tamamlandı |
 | 14c | MongoDB, Kafka, RabbitMQ kontrolleri | Planlandı |
 | 16 | Gizli değerlerin veritabanında şifrelenmesi | Tamamlandı |
-| 15 | Ayarlar ekranı, kişisel hesaplar ve roller, API anahtarları | Planlandı |
+| 15 | Kişisel hesaplar, LDAP girişi, namespace bazlı roller, değişiklik kaydı | Tamamlandı |
+| 15b | Ayarlar ekranı, kişi başına API anahtarları | Planlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
@@ -49,7 +50,7 @@ karşılamak. Kuma'nın kaynağı (3.0 beta, 2026-10) incelenerek çıkarıldı.
 | Bakım: tek seferlik, tekrarlayan, cron | Tek seferlik ve günlük/haftalık/aylık tekrar var, saat dilimiyle. Cron ifadesi ve haftanın birden çok günü yok (her gün için ayrı pencere açılır) |
 | 110 bildirim sağlayıcısı | 11 tanesi var: Slack, Teams, Telegram, Discord, Mattermost, Google Chat, PagerDuty, ntfy, Gotify, e-posta, webhook. Opsgenie eklenmedi: Atlassian ürünü sonlandırıyor |
 | Monitor başına bildirim seçimi | Kanal başına namespace ya da grup kapsamı var; tek tek monitor seçimi yok |
-| Kullanıcı, 2FA, API anahtarları, ayarlar ekranı | Tek yönetici parolası var; kalanı 15. adımda |
+| Kullanıcı, 2FA, API anahtarları, ayarlar ekranı | Hesaplar, LDAP ve namespace bazlı roller var (Kuma tek kullanıcılıdır). 2FA, kişi başına API anahtarı ve ayarlar ekranı yok |
 | Proxy, uzak tarayıcı, Cloudflare tüneli | Kapsam dışı |
 
 Kuma'da olmayıp burada olanlar: cluster'dan keşif (Service, Ingress, Route),
@@ -85,8 +86,8 @@ Hâlâ gerçek OpenShift gerektirenler:
 
 - Backend tek replica çalışır; güncelleme sırasında birkaç saniye kontrol
   yapılmaz.
-- Giriş tek bir yönetici parolasıyladır: kişi bazında hesap, rol (salt
-  okunur kullanıcı gibi) ve kimin neyi değiştirdiğinin kaydı yoktur.
+- Giriş kilidi sayacı backend belleğindedir; yeniden başlatınca sıfırlanır.
+  Tek replica olduğu için şimdilik sorun değildir.
 - Gizli değerler `UPTIME_SECRET_KEY` ile şifrelenir; anahtar değiştirme
   (rotation) yoktur ve push token'ları şifrelenmez.
 - Keşif tek seferliktir; sonradan eklenen servisler kendiliğinden izlenmez.

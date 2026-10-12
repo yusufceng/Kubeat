@@ -244,9 +244,12 @@ type Incident struct {
 	// Kind defaults to IncidentDown when written empty.
 	Kind        IncidentKind
 	MonitorName string // filled in when read; ignored when written
-	StartedAt   time.Time
-	ResolvedAt  time.Time // zero while the incident is open
-	Cause       string
+	// MonitorNamespace is the namespace or group of the monitor, filled in
+	// when read, for scoping what a user may see.
+	MonitorNamespace string
+	StartedAt        time.Time
+	ResolvedAt       time.Time // zero while the incident is open
+	Cause            string
 	// LastNotifiedAt is when a notification about the incident was last
 	// sent; zero if unknown.
 	LastNotifiedAt time.Time
@@ -345,9 +348,11 @@ type Maintenance struct {
 	// monitor; at most one of them is set, and neither means everything.
 	Namespace string
 	MonitorID int64
-	// MonitorName is filled in when read; ignored when written.
-	MonitorName string
-	CreatedAt   time.Time
+	// MonitorName and MonitorNamespace are filled in when read; ignored
+	// when written.
+	MonitorName      string
+	MonitorNamespace string
+	CreatedAt        time.Time
 }
 
 // StatusPage is a public view of some monitors: what a visitor without an
@@ -373,6 +378,81 @@ type StatusPageMonitor struct {
 	// DisplayName is shown instead of the monitor's own name, which is
 	// often an internal one; empty shows the monitor's name.
 	DisplayName string
+}
+
+// Role is what a user may do. Admins do everything; editors change and
+// viewers only see the monitors of the namespaces they were given.
+type Role string
+
+const (
+	RoleAdmin  Role = "admin"
+	RoleEditor Role = "editor"
+	RoleViewer Role = "viewer"
+)
+
+// Roles lists every role.
+var Roles = []Role{RoleAdmin, RoleEditor, RoleViewer}
+
+// AllNamespaces, as the only entry of a Namespaces list, means every
+// namespace and group, including monitors without one.
+const AllNamespaces = "*"
+
+// Where an account comes from.
+const (
+	UserLocal = "local" // a password kept here
+	UserLDAP  = "ldap"  // checked against the directory
+)
+
+// User is an account.
+type User struct {
+	ID          int64
+	Username    string
+	DisplayName string
+	Email       string
+	Source      string
+	// PasswordHash is set for local users; it never leaves the store's
+	// callers.
+	PasswordHash string
+	Role         Role
+	// Namespaces are the namespaces and groups an editor or viewer may see;
+	// nil for an admin, who sees everything.
+	Namespaces  []string
+	Enabled     bool
+	CreatedAt   time.Time
+	LastLoginAt time.Time // zero if never
+}
+
+// Session is a signed-in browser.
+type Session struct {
+	// TokenHash is the SHA-256 of the token the browser holds, as hex.
+	TokenHash  string
+	UserID     int64
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	LastSeenAt time.Time
+}
+
+// LDAPGroupRole gives the members of a directory group a role.
+type LDAPGroupRole struct {
+	ID         int64
+	GroupDN    string
+	Role       Role
+	Namespaces []string
+	CreatedAt  time.Time
+}
+
+// AuditEntry records one thing a user did.
+type AuditEntry struct {
+	ID       int64
+	At       time.Time
+	UserID   int64 // 0 for the service token
+	Username string
+	// Action is "create", "update", "delete", "login" and the like;
+	// ObjectType says what it was done to.
+	Action     string
+	ObjectType string
+	ObjectID   int64
+	Summary    string
 }
 
 // MonitorStatus is a monitor together with its latest result and its
@@ -487,6 +567,39 @@ type Store interface {
 	StatusPageDailyUptime(ctx context.Context, pageID int64, from, to time.Time) (map[int64][]SeriesPoint, error)
 	// MonitorIsPublic reports whether a published status page shows the monitor.
 	MonitorIsPublic(ctx context.Context, monitorID int64) (bool, error)
+
+	// CreateUser returns ErrConflict when the username is taken (whatever
+	// its case).
+	CreateUser(ctx context.Context, u User) (User, error)
+	GetUser(ctx context.Context, id int64) (User, error)
+	GetUserByUsername(ctx context.Context, username string) (User, error)
+	ListUsers(ctx context.Context) ([]User, error)
+	CountUsers(ctx context.Context) (int, error)
+	// UpdateUser changes everything about the user with u.ID except the
+	// password hash and the creation time.
+	UpdateUser(ctx context.Context, u User) (User, error)
+	SetPassword(ctx context.Context, id int64, hash string) error
+	// DeleteUser removes the user and their sessions.
+	DeleteUser(ctx context.Context, id int64) error
+
+	CreateSession(ctx context.Context, s Session) error
+	// GetSession returns ErrNotFound for an unknown or expired token.
+	GetSession(ctx context.Context, tokenHash string, now time.Time) (Session, error)
+	TouchSession(ctx context.Context, tokenHash string, at time.Time) error
+	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteUserSessions(ctx context.Context, userID int64) error
+	DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error)
+
+	// CreateLDAPGroupRole returns ErrConflict when the group is mapped already.
+	CreateLDAPGroupRole(ctx context.Context, g LDAPGroupRole) (LDAPGroupRole, error)
+	ListLDAPGroupRoles(ctx context.Context) ([]LDAPGroupRole, error)
+	UpdateLDAPGroupRole(ctx context.Context, g LDAPGroupRole) (LDAPGroupRole, error)
+	DeleteLDAPGroupRole(ctx context.Context, id int64) error
+
+	AppendAudit(ctx context.Context, e AuditEntry) error
+	// ListAudit returns up to limit entries, newest first.
+	ListAudit(ctx context.Context, limit int) ([]AuditEntry, error)
+	DeleteAuditBefore(ctx context.Context, cutoff time.Time) (int64, error)
 
 	Close() error
 }

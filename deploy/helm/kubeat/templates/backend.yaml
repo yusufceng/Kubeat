@@ -82,6 +82,40 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secretKey.existingSecret | default (printf "%s-secret-key" .Release.Name) }}
                   key: key
+            - name: UPTIME_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret | default (printf "%s-admin" .Release.Name) }}
+                  key: password
+            - name: UPTIME_SESSION_TTL
+              value: {{ printf "%dh" (int .Values.auth.sessionTtlHours) | quote }}
+            {{- with .Values.ldap }}
+            {{- if .url }}
+            - name: UPTIME_LDAP_URL
+              value: {{ .url | quote }}
+            - name: UPTIME_LDAP_BASE_DN
+              value: {{ .baseDN | quote }}
+            - name: UPTIME_LDAP_USER_FILTER
+              value: {{ .userFilter | quote }}
+            - name: UPTIME_LDAP_START_TLS
+              value: {{ .startTLS | quote }}
+            {{- with .bindDN }}
+            - name: UPTIME_LDAP_BIND_DN
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .bindPasswordSecret.name }}
+            - name: UPTIME_LDAP_BIND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .bindPasswordSecret.name }}
+                  key: {{ .bindPasswordSecret.key }}
+            {{- end }}
+            {{- range $name, $value := .extraEnv }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
             {{- if .Values.backup.enabled }}

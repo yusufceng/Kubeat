@@ -1,11 +1,13 @@
 import { Suspense } from "react";
 import { listMonitors, listStatusPages, type StatusPage } from "@/lib/api";
+import { currentUser } from "@/lib/auth";
 import { compareNamespaces } from "@/lib/namespaces";
 import { BackendError } from "@/app/ui/backend-error";
 import { monitorLabel } from "@/app/ui/monitor-name";
 import { type PageMonitorOption, StatusPageForm, StatusPageRow } from "@/app/ui/status-page-forms";
 
 async function StatusPages() {
+  const me = await currentUser();
   let pages: StatusPage[];
   let monitors: PageMonitorOption[];
   try {
@@ -32,10 +34,12 @@ async function StatusPages() {
           ))}
         </ul>
       )}
-      <section className="card p-5">
-        <h2 className="mb-4 text-sm font-semibold">Yeni durum sayfası</h2>
-        <StatusPageForm monitors={monitors} />
-      </section>
+      {me.can_edit && (
+        <section className="card p-5">
+          <h2 className="mb-4 text-sm font-semibold">Yeni durum sayfası</h2>
+          <StatusPageForm monitors={monitors} />
+        </section>
+      )}
     </>
   );
 }

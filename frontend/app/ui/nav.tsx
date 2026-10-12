@@ -43,23 +43,26 @@ const links = [
  * The pathname is request data, so on prerendered dynamic routes the bar is
  * first sent without a highlighted link and filled in when it streams.
  */
-export function Nav({ children }: { children?: React.ReactNode }) {
+export function Nav({ children, tail }: { children?: React.ReactNode; tail?: React.ReactNode }) {
   return (
-    <Suspense fallback={<NavBar pathname={null}>{children}</NavBar>}>
-      <ActiveNav>{children}</ActiveNav>
+    <Suspense fallback={<NavBar pathname={null} tail={tail}>{children}</NavBar>}>
+      <ActiveNav tail={tail}>{children}</ActiveNav>
     </Suspense>
   );
 }
 
-function ActiveNav({ children }: { children?: React.ReactNode }) {
-  return <NavBar pathname={usePathname()}>{children}</NavBar>;
+function ActiveNav({ children, tail }: { children?: React.ReactNode; tail?: React.ReactNode }) {
+  return <NavBar pathname={usePathname()} tail={tail}>{children}</NavBar>;
 }
 
-/** children sit at the far end of the bar (theme and session controls). */
-function NavBar({ pathname, children }: { pathname: string | null; children?: React.ReactNode }) {
-  // The sign-in page and the public status pages show the name only: their
+/**
+ * children sit at the far end of the bar (theme and session controls);
+ * tail comes after the links (what only some users have).
+ */
+function NavBar({ pathname, children, tail }: { pathname: string | null; children?: React.ReactNode; tail?: React.ReactNode }) {
+  // The sign-in pages and the public status pages show the name only: their
   // visitors can reach nothing else.
-  const bare = pathname === "/login" || (pathname?.startsWith("/status/") ?? false);
+  const bare = pathname === "/login" || pathname === "/setup" || (pathname?.startsWith("/status/") ?? false);
   return (
     <header className="shrink-0 border-b border-line bg-panel">
       <nav className="flex h-12 items-center gap-2 px-4">
@@ -89,6 +92,7 @@ function NavBar({ pathname, children }: { pathname: string | null; children?: Re
               </li>
             );
           })}
+          {!bare && tail}
         </ul>
         <div className="ml-auto flex items-center gap-1">{children}</div>
       </nav>

@@ -14,6 +14,7 @@ import {
   type Series,
   type UptimeWindow,
 } from "@/lib/api";
+import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { duration, milliseconds, uptime } from "@/lib/format";
 import { typeLabel } from "@/lib/monitor-types";
@@ -122,6 +123,7 @@ async function MonitorDetail({
   const requested = Number((await searchParams).range);
   const range = config.chartRanges.includes(requested) ? requested : config.chartRanges[0];
 
+  const me = await currentUser();
   let monitor: Monitor;
   let results: CheckResult[];
   let incidents: Incident[];
@@ -184,7 +186,7 @@ async function MonitorDetail({
           )}
           {monitor.target && <p className="mt-1.5 break-all font-mono text-sm text-muted">{monitor.target}</p>}
         </div>
-        <MonitorActions monitor={monitor} />
+        {me.can_edit && <MonitorActions monitor={monitor} />}
       </header>
 
       <section aria-label="Son kontroller" className="card p-5">
@@ -245,7 +247,7 @@ async function MonitorDetail({
             </Link>
           </Notice>
         ) : (
-          <SilenceForm monitorId={monitor.id} durations={config.maintenanceDurations} />
+          me.can_edit && <SilenceForm monitorId={monitor.id} durations={config.maintenanceDurations} />
         ))}
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
@@ -365,9 +367,11 @@ async function MonitorDetail({
       <section className="card p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">Kontrol ayarları</h2>
-          <Link href={`/monitors/${monitor.id}/edit`} className="text-xs text-muted hover:text-ink">
-            Düzenle →
-          </Link>
+          {me.can_edit && (
+            <Link href={`/monitors/${monitor.id}/edit`} className="text-xs text-muted hover:text-ink">
+              Düzenle →
+            </Link>
+          )}
         </div>
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           {checkSettings(monitor).map(([name, value]) => (

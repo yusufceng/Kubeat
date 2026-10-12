@@ -4,15 +4,15 @@ FRONTEND_PORT ?= 3000
 # Lokal geliştirmede backend ile frontend arasındaki ortak anahtar. Gerçek
 # kurulumda chart rastgele bir anahtar üretir.
 API_TOKEN ?= local-dev-token
-# Lokal geliştirmede arayüzün yönetici parolası. Boş bırakılırsa giriş
-# istenmez. Gerçek kurulumda chart rastgele bir parola üretir.
+# Lokal geliştirmede ilk yönetici hesabının ("admin") parolası; hesap yoksa
+# backend açılışta oluşturur. Gerçek kurulumda chart rastgele bir parola üretir.
 ADMIN_PASSWORD ?= admin
 
 # Cluster hedefleri her zaman bu bağlamı kullanır; kubectl'in o anki bağlamını
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.20.0
+VERSION ?= 0.21.0
 CHART := deploy/helm/kubeat
 # Ek helm ayarları, örn. HELM_ARGS="--set prometheus.url=http://..."
 HELM_ARGS ?=
@@ -27,10 +27,10 @@ dev:
 	@trap 'kill 0' INT TERM EXIT; $(MAKE) backend & $(MAKE) frontend & wait
 
 backend:
-	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) UPTIME_API_TOKEN=$(API_TOKEN) go run ./cmd/server
+	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) UPTIME_API_TOKEN=$(API_TOKEN) UPTIME_ADMIN_PASSWORD=$(ADMIN_PASSWORD) go run ./cmd/server
 
 frontend:
-	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) BACKEND_TOKEN=$(API_TOKEN) ADMIN_PASSWORD=$(ADMIN_PASSWORD) npm run dev -- -p $(FRONTEND_PORT)
+	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) npm run dev -- -p $(FRONTEND_PORT)
 
 test:
 	cd backend && go test ./...

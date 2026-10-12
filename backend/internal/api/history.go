@@ -55,8 +55,8 @@ func (h *handler) historyDuration(name, value string) (time.Duration, error) {
 
 // monitorExists answers 404 and returns false for an unknown monitor.
 func (h *handler) monitorExists(w http.ResponseWriter, r *http.Request, id int64) bool {
-	_, err := h.opts.Store.GetMonitor(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) {
+	m, err := h.opts.Store.GetMonitor(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(m.Namespace)) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return false
 	}

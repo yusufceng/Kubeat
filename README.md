@@ -154,33 +154,97 @@ güncellemelerde korur ve release kaldırılsa bile silmez. Okumak için:
 kubectl -n kubeat get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d
 ```
 
-### Giriş
+### Hesaplar ve giriş
 
-Arayüz tek bir yönetici parolasıyla korunur. `ADMIN_PASSWORD` ayarlıysa
-oturumu olmayan her istek giriş sayfasına yönlendirilir; ayarlı değilse
-arayüz açıktır ve üst çubukta "Giriş koruması kapalı" uyarısı görünür.
+Arayüze hesapla girilir. Hesaplar ve roller Kubeat'in içindedir; isteğe
+bağlı olarak kurumsal dizin (LDAP) hesaplarıyla da giriş yapılır.
 
-- Oturum, yalnızca bitiş zamanını taşıyan imzalı bir çerezdir (HttpOnly,
-  SameSite=Lax, HTTPS üzerinden gelindiyse Secure). `SESSION_TTL_HOURS`
-  (varsayılan 12) sonra biter.
-- Çerezi imzalayan anahtar `SESSION_SECRET`'tır; verilmezse paroladan
-  türetilir, yani parola değişince tüm oturumlar kapanır.
-- Art arda `LOGIN_MAX_FAILURES` (10) hatalı denemeden sonra giriş
-  `LOGIN_LOCKOUT_MINUTES` (15) dakika herkes için kapanır. Sayaç arayüz
-  sürecinin belleğindedir; süreç yeniden başlayınca sıfırlanır.
-- Kişi bazında hesap ve yetki yoktur: parolayı bilen herkes yöneticidir.
-- Oturum istemeyen üç adres vardır ve üçü de kendi sınırını taşır: yayındaki
-  durum sayfaları (`/status/...`), o sayfalardaki monitor'ların rozetleri
-  (`/api/badge/...`) ve push raporları (`/api/push/<token>`).
-
-Helm chart parolayı ilk kurulumda rastgele üretir. Okumak için:
+**İlk hesap.** Hiç hesap yokken iki yol vardır: Helm chart ilk kurulumda
+rastgele bir parola üretip backend'e `UPTIME_ADMIN_PASSWORD` olarak verir ve
+backend açılışta `admin` adlı yöneticiyi oluşturur; chart dışı kurulumlarda
+arayüz ilk ziyarette `/setup` sayfasında ilk yöneticiyi oluşturtur.
+Parolayı okumak için:
 
 ```
 kubectl -n kubeat get secret kubeat-admin -o jsonpath='{.data.password}' | base64 -d
 ```
 
-Lokal geliştirmede `make dev` parolayı `admin` yapar
-(`make dev ADMIN_PASSWORD=...` ile değişir).
+`UPTIME_ADMIN_PASSWORD` yalnızca hesap yokken işe yarar. Yönetici parolası
+unutulursa `UPTIME_ADMIN_PASSWORD_RESET=true` ile bir kez başlatılır:
+`admin` hesabının parolası `UPTIME_ADMIN_PASSWORD` değerine çekilir ve
+oturumları kapatılır; sonra ayar kaldırılır.
+
+**Roller.** Her hesabın bir rolü, yönetici dışındakilerin bir de kapsamı
+(namespace ve grup listesi, ya da hepsi için `*`) vardır:
+
+| Rol | Görür | Değiştirir |
+| --- | --- | --- |
+| Yönetici (`admin`) | Her şeyi | Her şeyi; kullanıcıları, LDAP eşlemelerini, kapsamsız kanalları |
+| Editör (`editor`) | Kapsamındaki monitor'ları, olayları, bakım pencerelerini; yalnızca kapsamıyla sınırlı kanalları ve durum sayfalarını | Kapsamında monitor ekler, düzenler, siler, susturur, keşiften içe aktarır; kapsamıyla sınırlı kanal, bakım penceresi ve durum sayfası açar |
+| İzleyici (`viewer`) | Kapsamındaki monitor'ları ve olayları; kapsamını ilgilendiren bakım pencerelerini | Hiçbir şeyi |
+
+Elle eklenen bir monitor'un "grubu" kapsam açısından namespace gibidir: `shop`
+editörü grubu `shop` olan monitor'lar açabilir, grupsuz monitor açamaz.
+Grupsuz monitor'ları yalnızca kapsamı `*` olanlar ve yöneticiler görür.
+Keşif sayfası herkese yalnızca kapsamındaki namespace'leri gösterir.
+
+Yetki backend'de denetlenir; arayüz yalnızca yapılamayanı gizler.
+
+**Oturum.** Giriş yapınca backend rastgele bir oturum token'ı üretir
+(veritabanında hash'i tutulur) ve arayüz onu HttpOnly, SameSite=Lax (HTTPS
+üzerinden Secure) bir çerezde saklar. Oturum `UPTIME_SESSION_TTL`
+(varsayılan 12 saat) sonra biter; parola değişince diğer oturumlar kapanır;
+hesap devre dışı bırakılınca anında kapanır. Bir kullanıcı adı için art arda
+`UPTIME_LOGIN_MAX_FAILURES` (10) hatalı denemeden sonra giriş
+`UPTIME_LOGIN_LOCKOUT` (15 dk) boyunca o ad için kapanır. Sayaç backend
+belleğindedir. Parolalar bcrypt ile saklanır; en az
+`UPTIME_PASSWORD_MIN_LENGTH` (8) karakterdir.
+
+**Kayıt.** Kim ne zaman neyi oluşturdu, değiştirdi, sildi; girişler ve
+başarısız denemeler **Kayıt** sayfasında (yalnızca yöneticiler) listelenir
+ve `UPTIME_AUDIT_RETENTION` (90 gün) boyunca tutulur.
+
+**API anahtarı.** `UPTIME_API_TOKEN` betikler ve otomasyon içindir: onu
+`Authorization: Bearer ...` ile sunan istek yönetici yetkisiyle çalışır ve
+kayıtta `api-token` olarak görünür. Arayüz artık bu anahtarı kullanmaz;
+her isteği kullanıcının oturumuyla yapar.
+
+#### LDAP
+
+`UPTIME_LDAP_URL` ayarlandığında, yerel hesabı olmayan bir kullanıcı adı
+dizinde aranır ve parolası dizine sorulur. Yerel hesabı olan bir ad her
+zaman yerel parolayla denetlenir.
+
+```
+UPTIME_LDAP_URL=ldaps://ldap.example.com:636
+UPTIME_LDAP_BASE_DN=dc=example,dc=com
+UPTIME_LDAP_USER_FILTER=(uid={username})        # Active Directory: (sAMAccountName={username})
+UPTIME_LDAP_BIND_DN=cn=svc-kubeat,ou=svcaccts,dc=example,dc=com
+UPTIME_LDAP_BIND_PASSWORD=...
+```
+
+- Akış: arama hesabıyla bağlanılır, kullanıcı `UPTIME_LDAP_USER_FILTER` ile
+  bulunur, kullanıcının DN'i ile girilen parola denenir. Ad, e-posta ve
+  gruplar `UPTIME_LDAP_DISPLAY_NAME_ATTR` (`cn`), `UPTIME_LDAP_EMAIL_ATTR`
+  (`mail`) ve `UPTIME_LDAP_GROUP_ATTR` (`memberOf`) özniteliklerinden okunur.
+  `memberOf` vermeyen dizinler için `UPTIME_LDAP_GROUP_FILTER`
+  (`(member={dn})`) ve `UPTIME_LDAP_GROUP_BASE_DN` ile gruplar aranır.
+- TLS: `ldaps://` ya da `UPTIME_LDAP_START_TLS=true`; özel CA için
+  `UPTIME_LDAP_CA_FILE` (chart'ta `backend.extraVolumes` ile bağlanır).
+- **Roller gruplardan gelir.** **Kullanıcılar** sayfasındaki LDAP bölümünde
+  grup DN'i → rol (+ kapsam) eşlemeleri yapılır. Birden çok grup eşleşirse en
+  güçlü rol kazanır, aynı roldeki kapsamlar birleşir. Eşleşen grubu olmayan
+  kullanıcı `UPTIME_LDAP_DEFAULT_ROLE` ayarlı değilse giremez; ayarlıysa o
+  rolü `UPTIME_LDAP_DEFAULT_NAMESPACES` kapsamıyla alır.
+- Dizin kullanıcısı ilk girişte burada bir hesap edinir (kaynak `ldap`);
+  rolü her girişte dizindeki gruplara göre yenilenir. Yönetici bu hesabı
+  devre dışı bırakabilir ama rolünü ve parolasını değiştiremez.
+- Dizine ulaşılamazsa giriş "yanlış parola" değil, "dizine ulaşılamadı"
+  hatası verir.
+
+Gerçek bir dizine karşı test: `KUBEAT_TEST_LDAP=ldap://127.0.0.1:3893 go test
+./internal/ldapauth/` (glauth ile; kullanıcılar `deploy/demo` altında değil,
+testin açıklamasında).
 
 ## Arayüz
 
@@ -729,6 +793,24 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_DB_PATH` | `uptime.db` | SQLite dosyasının yolu |
 | `UPTIME_API_TOKEN` | – | API isteklerinde zorunlu tutulan anahtar; boşsa API açıktır |
 | `UPTIME_SECRET_KEY` | – | Veritabanındaki token ve parolaları şifreleyen anahtar; en az 32 karakter. Boşsa şifrelenmezler |
+| `UPTIME_ADMIN_PASSWORD` | – | Hesap yokken `admin` yöneticisini bu parolayla oluşturur |
+| `UPTIME_ADMIN_PASSWORD_RESET` | `false` | `admin` parolasını `UPTIME_ADMIN_PASSWORD` değerine çeker; bir kez kullanılır |
+| `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
+| `UPTIME_LOGIN_MAX_FAILURES` | `10` | Bir kullanıcı adını kilitleyen hatalı deneme sayısı |
+| `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi |
+| `UPTIME_PASSWORD_MIN_LENGTH` | `8` | En kısa parola |
+| `UPTIME_AUDIT_RETENTION` | `2160h` | Kayıt girdilerinin saklanma süresi (90 gün) |
+| `UPTIME_LDAP_URL` | – | Dizin adresi (`ldap://` ya da `ldaps://`); boşsa LDAP kapalı |
+| `UPTIME_LDAP_BASE_DN` | – | Kullanıcıların arandığı DN |
+| `UPTIME_LDAP_USER_FILTER` | `(uid={username})` | Kullanıcıyı bulan süzgeç |
+| `UPTIME_LDAP_BIND_DN`, `UPTIME_LDAP_BIND_PASSWORD` | – | Arama hesabı; boşsa anonim arama |
+| `UPTIME_LDAP_START_TLS` | `false` | `ldap://` bağlantısını StartTLS ile şifreler |
+| `UPTIME_LDAP_CA_FILE` | – | Dizin sertifikasının CA'sı |
+| `UPTIME_LDAP_INSECURE_SKIP_VERIFY` | `false` | Dizin sertifikasını doğrulamaz |
+| `UPTIME_LDAP_DISPLAY_NAME_ATTR`, `UPTIME_LDAP_EMAIL_ATTR`, `UPTIME_LDAP_GROUP_ATTR` | `cn`, `mail`, `memberOf` | Okunan öznitelikler |
+| `UPTIME_LDAP_GROUP_BASE_DN`, `UPTIME_LDAP_GROUP_FILTER` | – | `memberOf` yoksa grupların arandığı yer ve süzgeç (`(member={dn})`) |
+| `UPTIME_LDAP_TIMEOUT` | `10s` | Dizin işlemlerinin zaman aşımı |
+| `UPTIME_LDAP_DEFAULT_ROLE`, `UPTIME_LDAP_DEFAULT_NAMESPACES` | – | Eşleşen grubu olmayan dizin kullanıcısının rolü ve kapsamı; boşsa giremez |
 | `UPTIME_DB_BUSY_TIMEOUT` | `5s` | Kilitli veritabanı için bekleme süresi |
 | `UPTIME_READ_HEADER_TIMEOUT` | `5s` | HTTP istek başlığı okuma süresi |
 | `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi için süre |
@@ -785,12 +867,6 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_TELEGRAM_API_URL` | `https://api.telegram.org` | Telegram Bot API adresi |
 | `UPTIME_PAGERDUTY_EVENTS_URL` | `https://events.pagerduty.com/v2/enqueue` | PagerDuty Events API v2 adresi |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
-| `BACKEND_TOKEN` | – | Backend'e gönderilen anahtar; `UPTIME_API_TOKEN` ile aynı olmalı |
-| `ADMIN_PASSWORD` | – | Arayüzün yönetici parolası; boşsa giriş istenmez |
-| `SESSION_SECRET` | – | Oturum çerezini imzalayan anahtar; boşsa paroladan türetilir |
-| `SESSION_TTL_HOURS` | `12` | Oturum süresi |
-| `LOGIN_MAX_FAILURES` | `10` | Girişi kilitleyen hatalı deneme sayısı |
-| `LOGIN_LOCKOUT_MINUTES` | `15` | Kilidin süresi |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `STATUS_PAGE_REFRESH_MS` | `30000` | Açık bir durum sayfasının yenilenme aralığı (ms) |
@@ -805,6 +881,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `NEW_MONITOR_FAILURE_THRESHOLD` | `3` | Yeni monitor formunun başlangıçtaki alarm eşiği |
 | `PUSH_INTERNAL_URL` | `BACKEND_URL` | Push monitor'larında "cluster içinden" gösterilen rapor adresinin kökü |
 | `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |
+| `AUDIT_LIMIT` | `200` | Kayıt sayfasında listelenen girdi sayısı |
 | `MAINTENANCE_DURATIONS` | `30m,1h,2h,4h,8h,24h` | Susturma ve bakım için sunulan süreler |
 | `MAINTENANCE_LIMIT` | `50` | Listelenen bakım penceresi sayısı |
 | `UPTIME_WINDOWS` | `24h,168h,720h` | Monitor sayfasında uptime'ı gösterilen dönemler |

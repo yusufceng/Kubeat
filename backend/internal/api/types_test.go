@@ -261,7 +261,7 @@ func TestPushBypassesTheAPIToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guarded := requireToken("s3cret", srv.Config.Handler)
+	guarded := srv.Config.Handler
 
 	for path, want := range map[string]int{
 		"/api/push/tok":     http.StatusOK,

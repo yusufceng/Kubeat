@@ -4,16 +4,21 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   ApiError,
+  changePassword,
   type ChannelType,
   cloneMonitor,
+  createGroupRole,
   createChannel,
   createMaintenance,
   createMonitor,
   createStatusPage,
+  createUser,
   deleteChannel,
+  deleteGroupRole,
   deleteMaintenance,
   deleteMonitor,
   deleteStatusPage,
+  deleteUser,
   type DnsOptions,
   type HttpOptions,
   importCandidates,
@@ -22,11 +27,13 @@ import {
   type MonitorChanges,
   type MonitorType,
   type NewMonitor,
+  type Role,
   type StatusPageSettings,
   testChannel,
   updateChannel,
   updateMonitor,
   updateStatusPage,
+  updateUser,
 } from "@/lib/api";
 
 /** Parses "Name: value" lines; returns a message for a line it cannot read. */
@@ -357,7 +364,97 @@ function describe(err: unknown): string {
     if (err.status === 409) return "Bu isim zaten kullanılıyor.";
     if (err.status === 400) return `Geçersiz değer: ${err.message}`;
     if (err.status === 502) return `Cluster'a erişilemedi: ${err.message}`;
-    if (err.status === 401) return "Backend API anahtarını kabul etmedi (BACKEND_TOKEN).";
+    if (err.status === 403) return err.message.startsWith("you may") ? "Bu işlem için yetkiniz yok." : `Yetki yok: ${err.message}`;
+    if (err.status === 404) return "Bulunamadı ya da bu kayda erişim yetkiniz yok.";
+    if (err.status === 401) return "Oturumunuz sona erdi; yeniden giriş yapın.";
   }
   return "Backend'e ulaşılamadı. Biraz sonra tekrar deneyin.";
+}
+
+/** "shop, billing" -> ["shop", "billing"]; "*" stays as it is. */
+function namespaceList(text: string): string[] {
+  return text
+    .split(",")
+    .map((ns) => ns.trim())
+    .filter(Boolean);
+}
+
+export type Outcome = { error: string } | undefined;
+
+export async function createUserAction(formData: FormData): Promise<Outcome> {
+  const text = (name: string) => String(formData.get(name) ?? "").trim();
+  try {
+    await createUser({
+      username: text("username"),
+      display_name: text("display_name"),
+      email: text("email"),
+      password: String(formData.get("password") ?? ""),
+      role: text("role") as Role,
+      namespaces: namespaceList(text("namespaces")),
+    });
+  } catch (err) {
+    return { error: describe(err) };
+  }
+  refresh();
+}
+
+export async function updateUserAction(formData: FormData): Promise<Outcome> {
+  const text = (name: string) => String(formData.get(name) ?? "").trim();
+  const changes: Parameters<typeof updateUser>[1] = {
+    display_name: text("display_name"),
+    email: text("email"),
+    enabled: formData.get("enabled") === "on",
+  };
+  // A directory account's role and password are the directory's.
+  if (formData.get("role") !== null) {
+    changes.role = text("role") as Role;
+    changes.namespaces = namespaceList(text("namespaces"));
+  }
+  const password = String(formData.get("password") ?? "");
+  if (password) changes.password = password;
+  try {
+    await updateUser(Number(formData.get("id")), changes);
+  } catch (err) {
+    return { error: describe(err) };
+  }
+  refresh();
+}
+
+export async function deleteUserAction(formData: FormData): Promise<void> {
+  try {
+    await deleteUser(Number(formData.get("id")));
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 404)) throw err;
+  }
+  refresh();
+}
+
+export async function createGroupRoleAction(formData: FormData): Promise<Outcome> {
+  const text = (name: string) => String(formData.get(name) ?? "").trim();
+  try {
+    await createGroupRole({ group_dn: text("group_dn"), role: text("role") as Role, namespaces: namespaceList(text("namespaces")) });
+  } catch (err) {
+    return { error: describe(err) };
+  }
+  refresh();
+}
+
+export async function deleteGroupRoleAction(formData: FormData): Promise<void> {
+  try {
+    await deleteGroupRole(Number(formData.get("id")));
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 404)) throw err;
+  }
+  refresh();
+}
+
+export async function changePasswordAction(_prev: Outcome, formData: FormData): Promise<Outcome> {
+  const next = String(formData.get("new_password") ?? "");
+  if (next !== String(formData.get("new_password_again") ?? "")) return { error: "Yeni parolalar birbirini tutmuyor." };
+  try {
+    await changePassword(String(formData.get("current_password") ?? ""), next);
+  } catch (err) {
+    return { error: describe(err) };
+  }
+  return { error: "" }; // saved
 }

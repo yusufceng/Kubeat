@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { BackendWarning } from "@/app/ui/backend-warning";
 import { Nav } from "@/app/ui/nav";
-import { SessionControls } from "@/app/ui/session-controls";
+import { AdminNav, SessionControls } from "@/app/ui/session-controls";
 import { ThemeToggle, themeScript } from "@/app/ui/theme-toggle";
 
 const geistSans = Geist({
@@ -33,7 +33,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="flex h-dvh flex-col overflow-hidden">
-        <Nav>
+        <Nav tail={<AdminNav />}>
           <ThemeToggle />
           <SessionControls />
         </Nav>

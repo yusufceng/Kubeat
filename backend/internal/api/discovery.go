@@ -47,7 +47,14 @@ func (h *handler) discoveryNamespaces(w http.ResponseWriter, r *http.Request) {
 		h.clusterError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, namespaces)
+	p := principal(r)
+	visible := make([]string, 0, len(namespaces))
+	for _, ns := range namespaces {
+		if p.CanRead(ns) {
+			visible = append(visible, ns)
+		}
+	}
+	writeJSON(w, http.StatusOK, visible)
 }
 
 type candidateResponse struct {
@@ -86,6 +93,10 @@ func (h *handler) discoveryCandidates(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("namespace")
 	if namespace == "" {
 		writeError(w, http.StatusBadRequest, "namespace is required")
+		return
+	}
+	if !principal(r).CanRead(namespace) {
+		forbidden(w)
 		return
 	}
 
@@ -155,6 +166,10 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "namespace is required")
 		return
 	}
+	if p := principal(r); !p.CanEdit(req.Namespace) {
+		scopeError(w, p)
+		return
+	}
 	if len(req.Sources) == 0 {
 		writeError(w, http.StatusBadRequest, "sources must not be empty")
 		return
@@ -213,6 +228,7 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 			h.internalError(w, r, err)
 			return
 		}
+		h.audit(r, "create", "monitor", m.ID, m.Name)
 		resp.Created = append(resp.Created, toMonitorResponse(store.MonitorStatus{Monitor: m}, h.opts.StatsWindow))
 	}
 	writeJSON(w, http.StatusOK, resp)

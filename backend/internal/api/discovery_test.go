@@ -41,7 +41,7 @@ func newDiscoveryAPI(t *testing.T, d Discovery) *httptest.Server {
 		t.Fatal(err)
 	}
 	opts := Options{
-		Store: db, MinCheckInterval: 5 * time.Second, StatsWindow: 24 * time.Hour, MaxResults: 100,
+		Store: db, Token: testToken, MinCheckInterval: 5 * time.Second, StatsWindow: 24 * time.Hour, MaxResults: 100,
 		DefaultFailureThreshold: 3, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		DiscoveryStatus: "no cluster",
 	}

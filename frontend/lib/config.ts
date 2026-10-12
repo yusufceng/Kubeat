@@ -31,8 +31,6 @@ export const config = {
    * the backend's, unless that is not how other namespaces reach it.
    */
   pushInternalUrl: process.env.PUSH_INTERNAL_URL || process.env.BACKEND_URL || "http://localhost:8080",
-  /** Shared secret sent to the backend; must match its UPTIME_API_TOKEN. */
-  backendToken: process.env.BACKEND_TOKEN ?? "",
   backendTimeoutMs: positiveInt(process.env.BACKEND_TIMEOUT_MS, 3000),
   /** How often open pages reload their data. */
   refreshIntervalMs: positiveInt(process.env.REFRESH_INTERVAL_MS, 5000),
@@ -69,4 +67,6 @@ export const config = {
   maintenanceLimit: positiveInt(process.env.MAINTENANCE_LIMIT, 50),
   /** Number of incidents listed on a page. */
   incidentsLimit: positiveInt(process.env.INCIDENTS_LIMIT, 100),
+  /** Number of audit entries listed. */
+  auditLimit: positiveInt(process.env.AUDIT_LIMIT, 200),
 };

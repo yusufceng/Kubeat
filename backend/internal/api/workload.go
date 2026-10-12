@@ -67,7 +67,7 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := h.opts.Store.GetMonitor(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(m.Namespace)) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}

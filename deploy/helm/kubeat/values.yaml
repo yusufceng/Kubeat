@@ -42,9 +42,29 @@ frontend:
 # chart generates the password once and keeps it; the install notes say how
 # to read it.
 auth:
-  # Name of an existing Secret with the keys "password" and "session-secret".
+  # Name of an existing Secret with the key "password": the password of the
+  # first administrator account, "admin", created on the backend's first
+  # start. Afterwards accounts are managed in the UI.
   existingSecret: ""
   sessionTtlHours: 12
+
+# Sign-in with directory (LDAP) accounts, beside the local ones. Directory
+# users get their role from the group mappings made in the UI. See the
+# README for every UPTIME_LDAP_* setting; the rest go in extraEnv.
+ldap:
+  url: ""                        # ldap://ldap.example.com:389 or ldaps://...:636
+  baseDN: ""                     # where users are searched for
+  userFilter: "(uid={username})" # Active Directory: (sAMAccountName={username})
+  startTLS: false
+  bindDN: ""                     # the account that searches for users
+  bindPasswordSecret:
+    name: ""
+    key: password
+  extraEnv: {}
+    # UPTIME_LDAP_GROUP_ATTR: memberOf
+    # UPTIME_LDAP_CA_FILE: /etc/kubeat/ldap-ca/ca.crt   (mount it with backend.extraVolumes)
+    # UPTIME_LDAP_DEFAULT_ROLE: viewer
+    # UPTIME_LDAP_DEFAULT_NAMESPACES: "*"
 
 # Periodic copies of the database on a volume of their own. A copy on the
 # database's own volume would be lost together with it.

@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { getProviders, type Providers } from "@/lib/api";
 import { LoginForm } from "@/app/login/login-form";
 
 async function Form({
@@ -6,8 +8,28 @@ async function Form({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const next = (await searchParams).next;
-  return <LoginForm next={typeof next === "string" ? next : "/"} />;
+  const params = await searchParams;
+  let providers: Providers | null = null;
+  try {
+    providers = await getProviders();
+  } catch {
+    // The form still shows; signing in will say what is wrong.
+  }
+  // Nobody can sign in until the first account exists. (Outside the try:
+  // redirect() works by throwing.)
+  if (providers?.setup_needed) redirect("/setup");
+  const ldap = providers?.ldap ?? false;
+  const next = params.next;
+  return (
+    <>
+      {params.expired !== undefined && (
+        <p role="status" className="rounded-lg bg-sunken px-3 py-2 text-sm text-muted">
+          Oturumunuz sona erdi; yeniden giriş yapın.
+        </p>
+      )}
+      <LoginForm next={typeof next === "string" ? next : "/"} ldap={ldap} />
+    </>
+  );
 }
 
 export default function Page({ searchParams }: PageProps<"/login">) {
@@ -16,7 +38,7 @@ export default function Page({ searchParams }: PageProps<"/login">) {
       <div className="card flex flex-col gap-6 p-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Giriş</h1>
-          <p className="mt-1 text-sm text-muted">Devam etmek için yönetici parolasını girin.</p>
+          <p className="mt-1 text-sm text-muted">Devam etmek için hesabınızla giriş yapın.</p>
         </div>
         <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
           <Form searchParams={searchParams} />

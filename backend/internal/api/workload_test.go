@@ -58,7 +58,7 @@ func newWorkloadAPI(t *testing.T, workloads Workloads, podMetrics PodMetrics) *h
 	}
 
 	srv := httptest.NewServer(NewHandler(Options{
-		Store: db, Workloads: workloads, PodMetrics: podMetrics, DiscoveryStatus: "no cluster",
+		Store: db, Token: testToken, Workloads: workloads, PodMetrics: podMetrics, DiscoveryStatus: "no cluster",
 		MaxResults: 100, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))
 	t.Cleanup(func() {

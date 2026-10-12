@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -93,21 +94,21 @@ func (h *handler) applyStatusPage(r *http.Request, req statusPageRequest, p *sto
 	if len(*req.Monitors) > maxStatusPageMonitors {
 		return fmt.Errorf("monitors: at most %d", maxStatusPageMonitors)
 	}
-	monitors, err := h.opts.Store.ListMonitors(r.Context())
+	namespaces, err := h.monitorNamespaces(r.Context())
 	if err != nil {
 		return internalFailure{err}
 	}
-	known := make(map[int64]bool, len(monitors))
-	for _, m := range monitors {
-		known[m.ID] = true
-	}
+	who := principal(r)
 	p.Monitors = make([]store.StatusPageMonitor, 0, len(*req.Monitors))
 	seen := make(map[int64]bool)
 	for _, m := range *req.Monitors {
 		name := strings.TrimSpace(m.DisplayName)
+		ns, known := namespaces[m.MonitorID]
 		switch {
-		case !known[m.MonitorID]:
+		case !known || !who.CanRead(ns):
 			return fmt.Errorf("monitors: there is no monitor %d", m.MonitorID)
+		case !who.CanEdit(ns):
+			return fmt.Errorf("monitors: you may not publish monitor %d", m.MonitorID)
 		case seen[m.MonitorID]:
 			return fmt.Errorf("monitors: monitor %d is listed twice", m.MonitorID)
 		case len(name) > maxStatusPageTitle:
@@ -143,11 +144,49 @@ func (h *handler) listStatusPages(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
+	who := principal(r)
+	namespaces, err := h.pageScope(r, who)
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
 	resp := make([]statusPageResponse, 0, len(pages))
 	for _, p := range pages {
+		if !canEditPage(who, p, namespaces) {
+			continue
+		}
 		resp = append(resp, toStatusPageResponse(p))
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// pageScope returns what canEditPage needs for the principal: nothing for
+// an admin, who may edit every page.
+func (h *handler) pageScope(r *http.Request, who auth.Principal) (map[int64]string, error) {
+	if who.IsAdmin() {
+		return nil, nil
+	}
+	return h.monitorNamespaces(r.Context())
+}
+
+// pageForEdit returns the page, or answers why it cannot be edited.
+func (h *handler) pageForEdit(w http.ResponseWriter, r *http.Request, id int64) (store.StatusPage, bool) {
+	p, err := h.opts.Store.GetStatusPage(r.Context(), id)
+	if err != nil {
+		h.statusPageError(w, r, err)
+		return store.StatusPage{}, false
+	}
+	who := principal(r)
+	namespaces, err := h.pageScope(r, who)
+	if err != nil {
+		h.internalError(w, r, err)
+		return store.StatusPage{}, false
+	}
+	if !canEditPage(who, p, namespaces) {
+		writeError(w, http.StatusNotFound, "status page not found")
+		return store.StatusPage{}, false
+	}
+	return p, true
 }
 
 func (h *handler) getStatusPage(w http.ResponseWriter, r *http.Request) {
@@ -156,15 +195,18 @@ func (h *handler) getStatusPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "status page not found")
 		return
 	}
-	p, err := h.opts.Store.GetStatusPage(r.Context(), id)
-	if err != nil {
-		h.statusPageError(w, r, err)
+	p, ok := h.pageForEdit(w, r, id)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, toStatusPageResponse(p))
 }
 
 func (h *handler) createStatusPage(w http.ResponseWriter, r *http.Request) {
+	if who := principal(r); !who.IsAdmin() && who.Role != store.RoleEditor {
+		forbidden(w)
+		return
+	}
 	var req statusPageRequest
 	if !decodeBody(w, r, &req) {
 		return
@@ -184,6 +226,7 @@ func (h *handler) createStatusPage(w http.ResponseWriter, r *http.Request) {
 		h.statusPageError(w, r, err)
 		return
 	}
+	h.audit(r, "create", "status_page", created.ID, created.Slug)
 	writeJSON(w, http.StatusCreated, toStatusPageResponse(created))
 }
 
@@ -197,9 +240,8 @@ func (h *handler) updateStatusPage(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	p, err := h.opts.Store.GetStatusPage(r.Context(), id)
-	if err != nil {
-		h.statusPageError(w, r, err)
+	p, ok := h.pageForEdit(w, r, id)
+	if !ok {
 		return
 	}
 	if err := h.applyStatusPage(r, req, &p); err != nil {
@@ -216,6 +258,7 @@ func (h *handler) updateStatusPage(w http.ResponseWriter, r *http.Request) {
 		h.statusPageError(w, r, err)
 		return
 	}
+	h.audit(r, "update", "status_page", updated.ID, updated.Slug)
 	writeJSON(w, http.StatusOK, toStatusPageResponse(updated))
 }
 
@@ -225,10 +268,15 @@ func (h *handler) deleteStatusPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "status page not found")
 		return
 	}
+	p, ok := h.pageForEdit(w, r, id)
+	if !ok {
+		return
+	}
 	if err := h.opts.Store.DeleteStatusPage(r.Context(), id); err != nil {
 		h.statusPageError(w, r, err)
 		return
 	}
+	h.audit(r, "delete", "status_page", id, p.Slug)
 	w.WriteHeader(http.StatusNoContent)
 }
 
