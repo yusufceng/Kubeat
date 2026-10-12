@@ -62,11 +62,18 @@ type Options struct {
 	Logger          *slog.Logger
 }
 
+// Revision identifies the shape of the API. Increase it whenever a response
+// gains something the frontend depends on, and raise the frontend's required
+// revision in the same change; a frontend talking to an older backend can
+// then say so instead of failing on a missing field.
+const Revision = 1
+
 // Health is the response body of the health endpoint.
 type Health struct {
-	Status  string    `json:"status"`
-	Version string    `json:"version"`
-	Time    time.Time `json:"time"`
+	Status   string    `json:"status"`
+	Version  string    `json:"version"`
+	Revision int       `json:"api_revision"`
+	Time     time.Time `json:"time"`
 }
 
 type handler struct {
@@ -97,9 +104,10 @@ func NewHandler(opts Options) http.Handler {
 
 func (h *handler) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, Health{
-		Status:  "ok",
-		Version: h.opts.Version,
-		Time:    time.Now().UTC(),
+		Status:   "ok",
+		Version:  h.opts.Version,
+		Revision: Revision,
+		Time:     time.Now().UTC(),
 	})
 }
 

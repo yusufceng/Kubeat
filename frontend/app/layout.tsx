@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { BackendWarning } from "@/app/ui/backend-warning";
 import { Nav } from "@/app/ui/nav";
 
 const geistSans = Geist({
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <Nav />
+        <BackendWarning />
         {children}
       </body>
     </html>

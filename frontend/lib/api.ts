@@ -1,8 +1,16 @@
 import { config } from "@/lib/config";
 
+/**
+ * The backend API revision this frontend was written against; see Revision in
+ * the backend's api package. Raise both together.
+ */
+export const REQUIRED_API_REVISION = 1;
+
 export type Health = {
   status: string;
   version: string;
+  /** Missing on backends older than the revision scheme itself. */
+  api_revision?: number;
   time: string;
 };
 
@@ -90,9 +98,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getHealth = () => request<Health>("/health");
 
-export const listMonitors = () => request<Monitor[]>("/monitors");
+/**
+ * Fills in fields an older backend does not send yet, so that a version
+ * mismatch degrades the page instead of crashing it. The mismatch itself is
+ * reported by the layout's backend warning.
+ */
+function withDefaults(m: Monitor): Monitor {
+  return {
+    ...m,
+    namespace: m.namespace ?? "",
+    source: m.source ?? "",
+    failure_threshold: m.failure_threshold ?? 0,
+    open_incident: m.open_incident ?? null,
+  };
+}
 
-export const getMonitor = (id: number) => request<Monitor>(`/monitors/${id}`);
+export const listMonitors = async () =>
+  (await request<Monitor[]>("/monitors")).map(withDefaults);
+
+export const getMonitor = async (id: number) =>
+  withDefaults(await request<Monitor>(`/monitors/${id}`));
 
 export const listResults = (id: number, limit: number) =>
   request<CheckResult[]>(`/monitors/${id}/results?limit=${limit}`);

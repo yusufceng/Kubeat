@@ -74,7 +74,7 @@ func TestHealth(t *testing.T) {
 	if code := do(t, "GET", srv.URL+"/api/v1/health", "", &got); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", code)
 	}
-	if got.Status != "ok" || got.Version != "test" || got.Time.IsZero() {
+	if got.Status != "ok" || got.Version != "test" || got.Revision != Revision || got.Time.IsZero() {
 		t.Errorf("unexpected body: %+v", got)
 	}
 	if code := do(t, "POST", srv.URL+"/api/v1/health", "", nil); code != http.StatusMethodNotAllowed {
