@@ -1,0 +1,49 @@
+backend:
+  image:
+    repository: kubeat-backend
+    tag: ""            # defaults to the chart's appVersion
+    pullPolicy: IfNotPresent
+  # Extra settings as environment variables; see the README for the list.
+  # UPTIME_ADDR and UPTIME_DB_PATH are set by the chart.
+  env: {}
+    # UPTIME_RETENTION: 168h
+    # UPTIME_RECOVERY_THRESHOLD: "2"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  persistence:
+    size: 2Gi
+    storageClass: ""   # empty uses the cluster default
+
+frontend:
+  replicas: 1
+  image:
+    repository: kubeat-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  # BACKEND_URL is set by the chart.
+  env: {}
+    # REFRESH_INTERVAL_MS: "5000"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# Pod-level security context for both workloads. Leave empty on OpenShift,
+# which assigns the UID and fsGroup itself. On other clusters set fsGroup so
+# the backend can write to its volume, e.g. {fsGroup: 1001}.
+podSecurityContext: {}
+
+# Exposes the frontend outside the cluster. Enable at most one.
+route:
+  enabled: false       # OpenShift Route
+  host: ""
+ingress:
+  enabled: false
+  className: ""
+  host: kubeat.local

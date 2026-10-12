@@ -23,6 +23,28 @@ make frontend   # UI   -> http://localhost:3000
 make test
 ```
 
+## Cluster'a kurulum
+
+Chart [deploy/helm/kubeat](deploy/helm/kubeat) altındadır. Minikube için:
+
+```
+minikube start --keep-context   # kubectl'in mevcut bağlamını değiştirmez
+make minikube-deploy            # imajları derler, yükler, chart'ı kurar
+make minikube-open              # arayüz -> http://localhost:3000
+```
+
+Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izlenebilir,
+örneğin `http://servis.namespace.svc:8080/healthz`.
+
+- Backend tek replica çalışır (SQLite tek yazıcıya izin verir) ve verisini bir
+  PVC'de tutar.
+- İmajlar UBI tabanlıdır; container'lar root olmadan, rastgele bir UID ile ve
+  salt okunur kök dosya sistemiyle çalışabilir.
+- OpenShift'te `podSecurityContext` boş bırakılır ve `route.enabled=true`
+  verilir. Chart henüz bir OpenShift cluster'ında denenmedi.
+- Ayarlar `backend.env` ve `frontend.env` altında ortam değişkeni olarak
+  verilir; bkz. [values.yaml](deploy/helm/kubeat/values.yaml).
+
 ## API
 
 | Metot | Yol | Açıklama |

@@ -2,7 +2,14 @@
 BACKEND_PORT ?= 8090
 FRONTEND_PORT ?= 3000
 
-.PHONY: dev backend frontend test lint build
+# Cluster hedefleri her zaman bu bağlamı kullanır; kubectl'in o anki bağlamını
+# asla kullanmaz.
+KUBE_CONTEXT ?= minikube
+NAMESPACE ?= kubeat
+VERSION ?= 0.1.0
+CHART := deploy/helm/kubeat
+
+.PHONY: dev backend frontend test lint build images minikube-deploy minikube-open
 
 # Backend ve frontend'i birlikte çalıştırır; Ctrl-C ikisini de durdurur.
 dev:
@@ -20,7 +27,24 @@ test:
 lint:
 	cd backend && go vet ./...
 	cd frontend && npm run lint
+	helm lint $(CHART)
 
 build:
 	cd backend && go build -o bin/server ./cmd/server
 	cd frontend && npm run build
+
+images:
+	docker build -t kubeat-backend:$(VERSION) --build-arg VERSION=$(VERSION) backend
+	docker build -t kubeat-frontend:$(VERSION) frontend
+
+# İmajları minikube'a yükler ve chart'ı kurar ya da günceller.
+minikube-deploy: images
+	minikube image load kubeat-backend:$(VERSION) kubeat-frontend:$(VERSION)
+	helm --kube-context $(KUBE_CONTEXT) upgrade --install kubeat $(CHART) \
+		--namespace $(NAMESPACE) --create-namespace \
+		--set backend.image.tag=$(VERSION) --set frontend.image.tag=$(VERSION) \
+		--set podSecurityContext.fsGroup=1001 --wait
+
+# Arayüzü http://localhost:$(FRONTEND_PORT) adresine açar.
+minikube-open:
+	kubectl --context $(KUBE_CONTEXT) -n $(NAMESPACE) port-forward svc/kubeat-frontend $(FRONTEND_PORT):3000

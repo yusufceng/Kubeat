@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { type Incident, listIncidents } from "@/lib/api";
 import { config } from "@/lib/config";
-import { AutoRefresh } from "@/app/ui/auto-refresh";
+import { LiveRefresh } from "@/app/ui/live-refresh";
 import { BackendError } from "@/app/ui/backend-error";
 import { IncidentTable } from "@/app/ui/incident-table";
 
@@ -37,7 +37,7 @@ export default function Page() {
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Olaylar</h1>
-      <AutoRefresh intervalMs={config.refreshIntervalMs} />
+      <LiveRefresh />
       <Suspense fallback={<p className="text-sm text-zinc-500">Yükleniyor…</p>}>
         <Incidents />
       </Suspense>

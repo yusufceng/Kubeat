@@ -12,7 +12,7 @@ import {
 } from "@/lib/api";
 import { config } from "@/lib/config";
 import { dateTime, duration, uptime } from "@/lib/format";
-import { AutoRefresh } from "@/app/ui/auto-refresh";
+import { LiveRefresh } from "@/app/ui/live-refresh";
 import { DeleteMonitorButton } from "@/app/ui/delete-monitor-button";
 import { BackendError } from "@/app/ui/backend-error";
 import { IncidentTable } from "@/app/ui/incident-table";
@@ -155,7 +155,7 @@ export default function Page({ params }: PageProps<"/monitors/[id]">) {
       <Link href="/" className="text-sm text-zinc-500 hover:underline">
         ← Tüm monitor&apos;lar
       </Link>
-      <AutoRefresh intervalMs={config.refreshIntervalMs} />
+      <LiveRefresh />
       <Suspense fallback={<p className="text-sm text-zinc-500">Yükleniyor…</p>}>
         <MonitorDetail params={params} />
       </Suspense>
