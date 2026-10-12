@@ -17,6 +17,7 @@ docs/adr/       Mimari karar kayıtları
 ## Lokal çalıştırma
 
 ```
+make dev        # ikisi birlikte; arayüz -> http://localhost:3000
 make backend    # API  -> http://localhost:8090
 make frontend   # UI   -> http://localhost:3000
 make test
@@ -68,6 +69,9 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
+| `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
+| `HISTORY_LIMIT` | `40` | Geçmiş şeridinde gösterilen kontrol sayısı |
+| `RESULTS_LIMIT` | `100` | Monitor sayfasında listelenen kontrol sayısı |
 
 Süreler Go biçimindedir (`500ms`, `5s`, `1m30s`).
 

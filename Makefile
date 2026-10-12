@@ -2,7 +2,11 @@
 BACKEND_PORT ?= 8090
 FRONTEND_PORT ?= 3000
 
-.PHONY: backend frontend test lint build
+.PHONY: dev backend frontend test lint build
+
+# Backend ve frontend'i birlikte çalıştırır; Ctrl-C ikisini de durdurur.
+dev:
+	@trap 'kill 0' INT TERM EXIT; $(MAKE) backend & $(MAKE) frontend & wait
 
 backend:
 	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) go run ./cmd/server

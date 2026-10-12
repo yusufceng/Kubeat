@@ -81,6 +81,7 @@ func main() {
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
+		logger.Info("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
