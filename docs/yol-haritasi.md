@@ -12,7 +12,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 4 | Aracın kendi sağlığı: `/metrics`, heartbeat | Tamamlandı |
 | 5 | Cluster metrikleri: monitor'un arkasındaki pod'lar, Prometheus/Thanos'tan CPU ve bellek | Tamamlandı |
 | 6 | Agent ve çoklu cluster: her cluster'da hafif agent, merkeze push | Ertelendi: şimdilik tek cluster yeterli (2026-10-12) |
-| 7 | Üretime hazırlık: API koruması, kimlik doğrulama, yedekleme, yük testi | Sürüyor |
+| 7 | Üretime hazırlık: API koruması, yük testi, yedekleme, kullanıcı girişi | API koruması, yük testi ve yedekleme tamamlandı; kullanıcı girişi bekliyor |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
