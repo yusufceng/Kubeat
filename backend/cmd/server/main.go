@@ -25,6 +25,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/prom"
 	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
+	"github.com/yusufceng/Kubeat/backend/internal/secretbox"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -49,6 +50,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	if err := protectSecrets(ctx, db, cfg.SecretKey, logger); err != nil {
+		logger.Error("the secrets in the database cannot be used", "error", err)
+		db.Close()
+		os.Exit(1)
+	}
 
 	// Background work stops on the same signal as the HTTP server and is
 	// waited for before the database is closed.
@@ -262,4 +268,45 @@ func main() {
 	// ListenAndServe returns as soon as Shutdown starts; wait for it to drain.
 	<-shutdownDone
 	background.Wait()
+}
+
+// protectSecrets sets the store up to encrypt secrets with key and brings a
+// database written before the key was configured in line with it. Without
+// a key secrets stay as they are, unless the database already holds
+// encrypted ones: starting then would only fail later, one monitor at a time.
+func protectSecrets(ctx context.Context, db *store.SQLite, key string, logger *slog.Logger) error {
+	var box *secretbox.Box
+	if key != "" {
+		var err error
+		if box, err = secretbox.New(key); err != nil {
+			return fmt.Errorf("UPTIME_SECRET_KEY: %w", err)
+		}
+	}
+	db.UseSecrets(box)
+
+	counts, err := db.CountSecrets(ctx)
+	if err != nil {
+		return err
+	}
+	if box == nil {
+		if counts.Sealed > 0 {
+			return errors.New("the database holds encrypted secrets; set UPTIME_SECRET_KEY to the key they were encrypted with")
+		}
+		logger.Warn("UPTIME_SECRET_KEY is not set: tokens and passwords are stored unencrypted in the database")
+		return nil
+	}
+	// Reading everything once tells a wrong key now, with a clear message.
+	if _, err := db.ListMonitors(ctx); err != nil {
+		return err
+	}
+	if _, err := db.ListChannels(ctx); err != nil {
+		return err
+	}
+	if counts.Plain > 0 {
+		if err := db.EncryptSecrets(ctx); err != nil {
+			return err
+		}
+		logger.Info("secrets stored before the key was configured are now encrypted", "count", counts.Plain)
+	}
+	return nil
 }

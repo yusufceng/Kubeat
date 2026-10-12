@@ -59,6 +59,14 @@ apiToken:
   # Name of an existing Secret with the key "token", to manage it yourself.
   existingSecret: ""
 
+# The key that encrypts tokens, passwords and webhook addresses in the
+# database. By default the chart generates it once and keeps it, also when
+# the release is uninstalled. Keep a copy of it with your backups: a
+# database is of no use without the key its secrets were encrypted with.
+secretKey:
+  # Name of an existing Secret with the key "key" (32 characters or more).
+  existingSecret: ""
+
 # Restricts who can connect to the backend at the network level, in addition
 # to the token. Needs a network plugin that enforces NetworkPolicy.
 networkPolicy:

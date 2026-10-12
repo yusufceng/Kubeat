@@ -22,6 +22,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 14 | Veritabanı kontrolleri: PostgreSQL, MySQL/MariaDB, Redis | Tamamlandı |
 | 14b | Kubernetes workload tipi: hazır pod sayısı, keşifte workload'lar | Tamamlandı |
 | 14c | MongoDB, Kafka, RabbitMQ kontrolleri | Planlandı |
+| 16 | Gizli değerlerin veritabanında şifrelenmesi | Tamamlandı |
 | 15 | Ayarlar ekranı, kişisel hesaplar ve roller, API anahtarları | Planlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
@@ -72,13 +73,12 @@ da şablon render edilerek doğrulandı:
   yapılmaz.
 - Giriş tek bir yönetici parolasıyladır: kişi bazında hesap, rol (salt
   okunur kullanıcı gibi) ve kimin neyi değiştirdiğinin kaydı yoktur.
-- İstek header'ları ve webhook adresleri veritabanında şifresiz durur.
+- Gizli değerler `UPTIME_SECRET_KEY` ile şifrelenir; anahtar değiştirme
+  (rotation) yoktur ve push token'ları şifrelenmez.
 - Keşif tek seferliktir; sonradan eklenen servisler kendiliğinden izlenmez.
 - Bakım sırasındaki başarısız kontroller uptime'a dahildir.
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.
-- Kanalların token'ları ve veritabanı monitor'larının parolaları da
-  veritabanında şifresiz durur.
 - Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır. Minikube'da
   kısıtlı güvenlik bağlamındaki pod'dan çalıştı; OpenShift'te denenmedi.

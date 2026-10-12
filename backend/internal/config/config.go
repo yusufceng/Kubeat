@@ -13,7 +13,9 @@ import (
 type Config struct {
 	Addr string // UPTIME_ADDR
 	// APIToken, if set, is required as a bearer token on API requests.
-	APIToken          string        // UPTIME_API_TOKEN
+	APIToken string // UPTIME_API_TOKEN
+	// SecretKey, if set, encrypts the secrets kept in the database.
+	SecretKey         string        // UPTIME_SECRET_KEY
 	DBPath            string        // UPTIME_DB_PATH
 	DBBusyTimeout     time.Duration // UPTIME_DB_BUSY_TIMEOUT
 	ReadHeaderTimeout time.Duration // UPTIME_READ_HEADER_TIMEOUT
@@ -101,7 +103,8 @@ func Load() (Config, error) {
 		Addr:   envString("UPTIME_ADDR", ":8080"),
 		DBPath: envString("UPTIME_DB_PATH", "uptime.db"),
 
-		APIToken: envString("UPTIME_API_TOKEN", ""),
+		APIToken:  envString("UPTIME_API_TOKEN", ""),
+		SecretKey: envString("UPTIME_SECRET_KEY", ""),
 
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
 		BackupDir:    envString("UPTIME_BACKUP_DIR", ""),

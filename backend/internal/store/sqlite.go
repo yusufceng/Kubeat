@@ -16,6 +16,8 @@ import (
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/yusufceng/Kubeat/backend/internal/secretbox"
 )
 
 //go:embed migrations/*.sql
@@ -32,6 +34,9 @@ type SQLite struct {
 	// path and busyTimeout are kept to open extra connections for backups.
 	path        string
 	busyTimeout time.Duration
+	// secrets encrypts the secrets of monitors and channels; nil stores
+	// them as they are.
+	secrets *secretbox.Box
 }
 
 var _ Store = (*SQLite)(nil)
@@ -245,6 +250,10 @@ type monitorRow struct {
 	m                                   Monitor
 	interval, timeout, retry, createdAt int64
 	tags, settings                      string
+	// box decrypts the monitor's secrets. With raw set they are left in
+	// their stored form instead.
+	box *secretbox.Box
+	raw bool
 }
 
 // dest returns where the monitor columns are scanned to.
@@ -264,6 +273,11 @@ func (r *monitorRow) monitor() (Monitor, error) {
 	m.CreatedAt = time.UnixMilli(r.createdAt).UTC()
 	if err := decodeSettings(r.settings, &m); err != nil {
 		return Monitor{}, fmt.Errorf("monitor %d: %w", m.ID, err)
+	}
+	if !r.raw {
+		if err := monitorSecrets(&m, r.box.Open); err != nil {
+			return Monitor{}, fmt.Errorf("monitor %d: %w", m.ID, err)
+		}
 	}
 	if err := json.Unmarshal([]byte(r.tags), &m.Tags); err != nil {
 		return Monitor{}, fmt.Errorf("monitor %d: decode tags: %w", m.ID, err)
@@ -287,8 +301,8 @@ func encodeTags(tags []string) (string, []string, error) {
 	return string(b), sorted, err
 }
 
-func scanMonitor(row rowScanner) (Monitor, error) {
-	var r monitorRow
+func (s *SQLite) scanMonitor(row rowScanner) (Monitor, error) {
+	r := monitorRow{box: s.secrets}
 	if err := row.Scan(r.dest()...); err != nil {
 		return Monitor{}, err
 	}
@@ -373,6 +387,38 @@ func encodeSettings(m Monitor) (string, error) {
 	return string(b), err
 }
 
+// monitorSecrets replaces each secret of the monitor's options with what
+// convert makes of it: sealing them to store, opening them when read.
+func monitorSecrets(m *Monitor, convert func(string) (string, error)) error {
+	var err error
+	if m.HTTP.AuthSecret, err = convert(m.HTTP.AuthSecret); err != nil {
+		return err
+	}
+	if m.Database.Password, err = convert(m.Database.Password); err != nil {
+		return err
+	}
+	if len(m.HTTP.Headers) > 0 {
+		// A map of its own: the caller's must keep its plain values.
+		headers := make(map[string]string, len(m.HTTP.Headers))
+		for name, value := range m.HTTP.Headers {
+			if headers[name], err = convert(value); err != nil {
+				return err
+			}
+		}
+		m.HTTP.Headers = headers
+	}
+	return nil
+}
+
+// storedSettings returns the stored form of a normalized monitor's options,
+// with its secrets encrypted.
+func (s *SQLite) storedSettings(m Monitor) (string, error) {
+	if err := monitorSecrets(&m, s.secrets.Seal); err != nil {
+		return "", err
+	}
+	return encodeSettings(m)
+}
+
 func decodeSettings(text string, m *Monitor) error {
 	st := settings{HTTP: &m.HTTP, TCP: &m.TCP, DNS: &m.DNS, GRPC: &m.GRPC, WebSocket: &m.WebSocket, Database: &m.Database, Workload: &m.Workload}
 	if err := json.Unmarshal([]byte(text), &st); err != nil {
@@ -387,7 +433,7 @@ func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 		return Monitor{}, fmt.Errorf("create monitor: unknown type %q", m.Type)
 	}
 	normalize(&m)
-	encoded, err := encodeSettings(m)
+	encoded, err := s.storedSettings(m)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("create monitor: %w", err)
 	}
@@ -417,7 +463,7 @@ func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 }
 
 func (s *SQLite) GetMonitor(ctx context.Context, id int64) (Monitor, error) {
-	m, err := scanMonitor(s.read.QueryRowContext(ctx,
+	m, err := s.scanMonitor(s.read.QueryRowContext(ctx,
 		"SELECT "+monitorColumns+" FROM monitors WHERE id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Monitor{}, ErrNotFound
@@ -432,7 +478,7 @@ func (s *SQLite) GetMonitorByPushToken(ctx context.Context, token string) (Monit
 	if token == "" {
 		return Monitor{}, ErrNotFound
 	}
-	m, err := scanMonitor(s.read.QueryRowContext(ctx,
+	m, err := s.scanMonitor(s.read.QueryRowContext(ctx,
 		"SELECT "+monitorColumns+" FROM monitors WHERE push_token = ?", token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Monitor{}, ErrNotFound
@@ -481,7 +527,7 @@ func (s *SQLite) ListMonitors(ctx context.Context) ([]Monitor, error) {
 
 	var monitors []Monitor
 	for rows.Next() {
-		m, err := scanMonitor(rows)
+		m, err := s.scanMonitor(rows)
 		if err != nil {
 			return nil, fmt.Errorf("list monitors: %w", err)
 		}
@@ -566,7 +612,7 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 	var statuses []MonitorStatus
 	for rows.Next() {
 		var (
-			row                       monitorRow
+			row                       = monitorRow{box: s.secrets}
 			st                        MonitorStatus
 			checkedAt, latencyMS      sql.NullInt64
 			up                        sql.NullBool
@@ -636,7 +682,7 @@ func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 		m.Namespace = current.Namespace
 	}
 	normalize(&m)
-	encoded, err := encodeSettings(m)
+	encoded, err := s.storedSettings(m)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("update monitor: %w", err)
 	}
@@ -665,7 +711,7 @@ func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 		return Monitor{}, ErrNotFound
 	}
 	// Read back through the writer so the answer reflects this update.
-	updated, err := scanMonitor(s.write.QueryRowContext(ctx, "SELECT "+monitorColumns+" FROM monitors WHERE id = ?", m.ID))
+	updated, err := s.scanMonitor(s.write.QueryRowContext(ctx, "SELECT "+monitorColumns+" FROM monitors WHERE id = ?", m.ID))
 	if err != nil {
 		return Monitor{}, fmt.Errorf("update monitor: %w", err)
 	}

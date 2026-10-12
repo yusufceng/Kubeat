@@ -126,7 +126,32 @@ func (s *SQLite) ListIncidents(ctx context.Context, monitorID int64, limit int) 
 
 const channelColumns = "id, name, type, target, secret, namespaces, enabled, created_at"
 
-func scanChannel(row rowScanner) (Channel, error) {
+// scanChannel reads a channel and decrypts its target and secret.
+func (s *SQLite) scanChannel(row rowScanner) (Channel, error) {
+	c, err := scanRawChannel(row)
+	if err != nil {
+		return Channel{}, err
+	}
+	if c.Target, err = s.secrets.Open(c.Target); err == nil {
+		c.Secret, err = s.secrets.Open(c.Secret)
+	}
+	if err != nil {
+		return Channel{}, fmt.Errorf("channel %d: %w", c.ID, err)
+	}
+	return c, nil
+}
+
+// sealChannel returns the stored forms of a channel's target and secret.
+// The target is encrypted too: a webhook address lets its holder post.
+func (s *SQLite) sealChannel(c Channel) (target, secret string, err error) {
+	if target, err = s.secrets.Seal(c.Target); err != nil {
+		return "", "", err
+	}
+	secret, err = s.secrets.Seal(c.Secret)
+	return target, secret, err
+}
+
+func scanRawChannel(row rowScanner) (Channel, error) {
 	var (
 		c          Channel
 		namespaces string
@@ -165,10 +190,14 @@ func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) 
 	if len(c.Namespaces) == 0 {
 		c.Namespaces = nil
 	}
+	target, secret, err := s.sealChannel(c)
+	if err != nil {
+		return Channel{}, fmt.Errorf("create channel: %w", err)
+	}
 	c.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
 	res, err := s.write.ExecContext(ctx,
 		"INSERT INTO notification_channels (name, type, target, secret, namespaces, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		c.Name, c.Type, c.Target, c.Secret, namespaces, c.Enabled, c.CreatedAt.UnixMilli())
+		c.Name, c.Type, target, secret, namespaces, c.Enabled, c.CreatedAt.UnixMilli())
 	if isUniqueViolation(err) {
 		return Channel{}, ErrConflict
 	}
@@ -186,9 +215,13 @@ func (s *SQLite) UpdateChannel(ctx context.Context, c Channel) (Channel, error) 
 	if err != nil {
 		return Channel{}, fmt.Errorf("update channel: %w", err)
 	}
+	target, secret, err := s.sealChannel(c)
+	if err != nil {
+		return Channel{}, fmt.Errorf("update channel: %w", err)
+	}
 	res, err := s.write.ExecContext(ctx,
 		"UPDATE notification_channels SET name = ?, target = ?, secret = ?, namespaces = ?, enabled = ? WHERE id = ?",
-		c.Name, c.Target, c.Secret, namespaces, c.Enabled, c.ID)
+		c.Name, target, secret, namespaces, c.Enabled, c.ID)
 	if isUniqueViolation(err) {
 		return Channel{}, ErrConflict
 	}
@@ -203,7 +236,7 @@ func (s *SQLite) UpdateChannel(ctx context.Context, c Channel) (Channel, error) 
 		return Channel{}, ErrNotFound
 	}
 	// Read back through the writer so the answer reflects this update.
-	updated, err := scanChannel(s.write.QueryRowContext(ctx,
+	updated, err := s.scanChannel(s.write.QueryRowContext(ctx,
 		"SELECT "+channelColumns+" FROM notification_channels WHERE id = ?", c.ID))
 	if err != nil {
 		return Channel{}, fmt.Errorf("update channel: %w", err)
@@ -212,7 +245,7 @@ func (s *SQLite) UpdateChannel(ctx context.Context, c Channel) (Channel, error) 
 }
 
 func (s *SQLite) GetChannel(ctx context.Context, id int64) (Channel, error) {
-	c, err := scanChannel(s.read.QueryRowContext(ctx,
+	c, err := s.scanChannel(s.read.QueryRowContext(ctx,
 		"SELECT "+channelColumns+" FROM notification_channels WHERE id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Channel{}, ErrNotFound
@@ -232,7 +265,7 @@ func (s *SQLite) ListChannels(ctx context.Context) ([]Channel, error) {
 
 	var channels []Channel
 	for rows.Next() {
-		c, err := scanChannel(rows)
+		c, err := s.scanChannel(rows)
 		if err != nil {
 			return nil, fmt.Errorf("list channels: %w", err)
 		}

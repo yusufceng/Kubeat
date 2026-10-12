@@ -77,6 +77,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "kubeat.apiTokenSecret" . }}
                   key: token
+            - name: UPTIME_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretKey.existingSecret | default (printf "%s-secret-key" .Release.Name) }}
+                  key: key
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
             {{- if .Values.backup.enabled }}

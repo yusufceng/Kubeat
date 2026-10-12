@@ -64,6 +64,34 @@ bir ağ eklentisi gerekir). Bu durumda başka namespace'lerdeki işler push
 raporlarını arayüzün adresine göndermeli ya da `networkPolicy.backendIngressFrom`
 ile izin almalıdır.
 
+### Gizli değerlerin şifrelenmesi
+
+Monitor'ların header değerleri, parola ve token'ları ile bildirim
+kanallarının adresleri ve token'ları veritabanında durur. `UPTIME_SECRET_KEY`
+ayarlandığında bunlar AES-256-GCM ile şifrelenerek yazılır; veritabanı dosyası
+ya da yedeği başkasının eline geçse bile bu değerler okunamaz.
+
+- Anahtar en az 32 karakterlik rastgele bir metin olmalıdır
+  (`openssl rand -base64 36`).
+- Anahtar sonradan ayarlanırsa, açılışta daha önce şifresiz yazılmış değerler
+  de şifrelenir.
+- Anahtar ayarlı değilse değerler şifresiz yazılır ve backend bunu açılışta
+  uyarı olarak loglar. Veritabanında şifreli değer varken anahtar verilmezse
+  ya da yanlış anahtar verilirse backend başlamaz ve nedenini söyler.
+- **Anahtar kaybedilirse şifreli değerler geri getirilemez**; monitor ve
+  kanalların bu alanlarının yeniden girilmesi gerekir. Yedekle birlikte
+  anahtarın da bir kopyasını saklayın.
+- Push monitor'larının token'ı şifrelenmez: gelen her rapor ona göre
+  aranır. Bu token yalnızca o monitor'a rapor yazmaya yarar.
+- Anahtar değiştirme (rotation) yoktur.
+
+Helm chart anahtarı ilk kurulumda üretir (`<release>-secret-key` Secret'ı),
+güncellemelerde korur ve release kaldırılsa bile silmez. Okumak için:
+
+```
+kubectl -n kubeat get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d
+```
+
 ### Giriş
 
 Arayüz tek bir yönetici parolasıyla korunur. `ADMIN_PASSWORD` ayarlıysa
@@ -498,6 +526,10 @@ Geri yükleme:
 3. Backend'i başlatın. Kopyadan sonraki kontrol sonuçları ve değişiklikler
    kaybolur.
 
+Kopyadaki gizli değerler, kopya alındığı sırada kullanılan
+`UPTIME_SECRET_KEY` ile şifrelidir. Başka bir kuruluma geri yüklerken o
+anahtarı da taşıyın; yoksa backend başlamaz.
+
 `kubeat_backup_last_success_timestamp_seconds` metriği son başarılı kopyanın
 zamanını verir; ilerlemiyorsa yedekleme çalışmıyordur.
 
@@ -634,6 +666,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_ADDR` | `:8080` | Backend'in dinlediği adres |
 | `UPTIME_DB_PATH` | `uptime.db` | SQLite dosyasının yolu |
 | `UPTIME_API_TOKEN` | – | API isteklerinde zorunlu tutulan anahtar; boşsa API açıktır |
+| `UPTIME_SECRET_KEY` | – | Veritabanındaki token ve parolaları şifreleyen anahtar; en az 32 karakter. Boşsa şifrelenmezler |
 | `UPTIME_DB_BUSY_TIMEOUT` | `5s` | Kilitli veritabanı için bekleme süresi |
 | `UPTIME_READ_HEADER_TIMEOUT` | `5s` | HTTP istek başlığı okuma süresi |
 | `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi için süre |
