@@ -15,7 +15,9 @@ import (
 // and what the cluster has recorded about them.
 type Workloads interface {
 	Workload(ctx context.Context, namespace, source string) (k8s.Workload, error)
-	Events(ctx context.Context, namespace string, pods []string, since time.Time, limit int) ([]k8s.Event, error)
+	// Events are the cluster's events about the workload between since
+	// and until (zero: now), newest first, at most limit (zero: all).
+	Events(ctx context.Context, namespace string, w k8s.Workload, since, until time.Time, limit int) ([]k8s.Event, error)
 }
 
 // PodMetrics reads pod resource usage from the cluster's metrics.
@@ -101,6 +103,12 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, unavailable(err.Error()))
 			return
 		}
+		// The pods live where the target says, which may differ from the
+		// namespace the monitor is grouped under.
+		if !principal(r).CanRead(ns) {
+			writeJSON(w, http.StatusOK, unavailable("the monitor's workload is outside your namespaces"))
+			return
+		}
 		namespace, source = ns, string(kind)+"/"+name
 	}
 	switch {
@@ -133,7 +141,7 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 
 	// The events are the "why" behind a pod's state. Another extra: a
 	// service account without access to them still gets the pod list.
-	events, err := h.opts.Workloads.Events(r.Context(), namespace, names, time.Now().Add(-h.opts.EventWindow), h.opts.EventLimit)
+	events, err := h.opts.Workloads.Events(r.Context(), namespace, workload, time.Now().Add(-h.opts.EventWindow), time.Time{}, h.opts.EventLimit)
 	if err != nil {
 		h.opts.Logger.Warn("reading events failed", "monitor", m.Name, "error", err)
 		resp.EventsReason = "the cluster's events could not be read: " + err.Error()

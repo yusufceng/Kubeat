@@ -23,6 +23,20 @@ func (k Kind) IsWorkload() bool {
 	return k == KindDeployment || k == KindStatefulSet || k == KindDaemonSet
 }
 
+// apiKind is the kind as the API spells it, for owner references and
+// event objects.
+func (k Kind) apiKind() string {
+	switch k {
+	case KindDeployment:
+		return "Deployment"
+	case KindStatefulSet:
+		return "StatefulSet"
+	case KindDaemonSet:
+		return "DaemonSet"
+	}
+	return string(k)
+}
+
 // WorkloadTarget is the target of a workload monitor: namespace/kind/name.
 func WorkloadTarget(namespace string, kind Kind, name string) string {
 	return fmt.Sprintf("%s/%s/%s", namespace, kind, name)

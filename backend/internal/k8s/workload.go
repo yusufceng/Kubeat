@@ -24,12 +24,19 @@ type Workload struct {
 	// Service is the service the pods were found through; empty when they
 	// were found through the workload itself.
 	Service string
+	// Manager is "Kind/name" of the workload the pods were found through,
+	// when it was one (a Deployment, StatefulSet or DaemonSet); empty for
+	// pods found through a service.
+	Manager string
 	Pods    []Pod
 }
 
 // Pod is the state of one pod, as the cluster reports it.
 type Pod struct {
 	Name string
+	// Owner is "Kind/name" of the controller that created the pod (a
+	// ReplicaSet, StatefulSet, DaemonSet, Job, ...); empty for a bare pod.
+	Owner string
 	// Ready is the pod's Ready condition: whether it receives traffic.
 	Ready           bool
 	ReadyContainers int
@@ -55,6 +62,7 @@ func (c *Client) Workload(ctx context.Context, namespace, source string) (Worklo
 		if selector, err = c.workloadSelector(ctx, namespace, Kind(kind), name); err != nil {
 			return Workload{}, err
 		}
+		w.Manager = Kind(kind).apiKind() + "/" + name
 	} else {
 		service, err := c.serviceFor(ctx, namespace, source)
 		if err != nil {
@@ -154,6 +162,9 @@ func podInfo(p corev1.Pod) Pod {
 	}
 	if p.Status.StartTime != nil {
 		info.StartedAt = p.Status.StartTime.UTC()
+	}
+	if owner := metav1.GetControllerOf(&p); owner != nil {
+		info.Owner = owner.Kind + "/" + owner.Name
 	}
 	for _, cond := range p.Status.Conditions {
 		if cond.Type == corev1.PodReady {

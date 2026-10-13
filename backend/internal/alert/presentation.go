@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Colors of the events, for the channels that show one. Red for an outage,
@@ -80,7 +81,16 @@ func URL(n Notification) string {
 	if n.Monitor.ID == 0 {
 		return base
 	}
-	return base + "/monitors/" + strconv.FormatInt(n.Monitor.ID, 10)
+	link := base + "/monitors/" + strconv.FormatInt(n.Monitor.ID, 10)
+	// The page selects the incident's span, so the reader lands on the
+	// moment rather than on the chart's last hour.
+	if !n.Incident.StartedAt.IsZero() {
+		link += "?from=" + url.QueryEscape(n.Incident.StartedAt.UTC().Format(time.RFC3339))
+		if !n.Incident.ResolvedAt.IsZero() {
+			link += "&to=" + url.QueryEscape(n.Incident.ResolvedAt.UTC().Format(time.RFC3339))
+		}
+	}
+	return link
 }
 
 // itoaCount writes a small count for the texts that embed one.

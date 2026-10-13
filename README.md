@@ -380,6 +380,7 @@ eklenmelidir.
 | `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş |
 | `GET` | `/api/v1/monitors/{id}/uptime?windows=24h,168h` | İstenen her dönem için uptime |
 | `GET` | `/api/v1/monitors/{id}/workload` | Monitor'un arkasındaki pod'lar; hazır olma, restart, CPU ve bellek |
+| `GET` | `/api/v1/monitors/{id}/window?from=&to=` | İki an arasında olanlar: kontrol özeti, başarısız kontroller, kesişen olaylar, cluster olayları |
 | `GET` | `/api/v1/monitors/{id}/channels` | Monitor'un alarmının gittiği etkin kanallar |
 | `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
 | `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
@@ -640,6 +641,32 @@ Yanıt süresi yalnızca başarılı kontrollerden hesaplanır; başarısız bir
 kontrolün süresi çoğunlukla zaman aşımıdır ve yanıt süresi hakkında bir şey
 söylemez.
 
+### Kesinti anına gitmek
+
+Grafikte **sürükleyerek** bir aralık seçilir; erişilebilirlik şeridindeki
+kırmızı ya da sarı bir bloğa **tıklamak** o kesintinin tamamını seçer.
+Seçim adrese yazılır (`/monitors/7?from=…&to=…`), yani paylaşılabilir;
+bildirimlerdeki "Kubeat'te aç" bağlantısı da doğrudan kesintinin aralığına
+açılır. Seçilince grafiğin altında **Seçilen aralık** paneli
+(`GET /api/v1/monitors/{id}/window?from=&to=`) belirir:
+
+- o aralıktaki kontrol sayısı, kaçının başarısız olduğu, ortalama ve en
+  yüksek yanıt süresi (ham kayıtlar `UPTIME_RETENTION` boyunca tutulur;
+  daha eski bir aralıkta yalnızca olaylar bilinir);
+- aralıkla kesişen olaylar;
+- cluster'ın o aralıkta pod'lar ve onları yöneten nesneler hakkında
+  bildirdiği olaylar, eskiden yeniye — yerine yenisi gelmiş pod'larınki
+  dahil, cluster olayı hâlâ tutuyorsa (upstream Kubernetes 1 saat,
+  OpenShift 3 saat). Olaylar aralığın başından bir kontrol aralığı önce
+  başlatılır, çünkü kesinti ilk başarısız kontrolde açılır ve neden ondan
+  az önce olmuştur;
+- başarısız kontrollerin listesi ve hata metinleri.
+
+Pod'ların o anki durumu kaydedilmez; panel bunu söyler ve canlı duruma
+yönlendirir. Bir namespace'in olay listesi `UPTIME_EVENT_CACHE` (10 sn)
+boyunca yeniden okunmaz; aynı sayfanın iki paneli ve ardışık yenilemeler
+cluster'a tek istek yapar.
+
 ### Raporlar
 
 **Raporlar** sayfası (`GET /api/v1/reports?days=30`) son 1, 7, 30 ya da 90
@@ -678,12 +705,15 @@ pod'lar kontrole girmez; onlar `workload` monitor'unun işidir. Chart'ın
 ClusterRole'ü bunun için `discovery.k8s.io/endpointslices` listeleme izni
 içerir.
 
-Pod'ların altında cluster'ın o pod'lar ve onları yöneten ReplicaSet,
-Deployment, StatefulSet ya da DaemonSet hakkında son `UPTIME_EVENT_WINDOW`
-içinde kaydettiği olaylar listelenir (`BackOff`, `Unhealthy`,
-`FailedScheduling`, `ScalingReplicaSet` …): bir restart'ın ya da başlamayan
-pod'un nedeni çoğu zaman oradadır. Chart'ın ClusterRole'ü bunun için
-`events` listeleme izni içerir; izin yoksa pod listesi yine gösterilir.
+Pod'ların altında cluster'ın o pod'lar, aynı yöneticinin yerine yenisi
+gelmiş eski pod'ları ve onları yöneten ReplicaSet, Deployment, StatefulSet
+ya da DaemonSet hakkında son `UPTIME_EVENT_WINDOW` içinde kaydettiği
+olaylar listelenir (`BackOff`, `Unhealthy`, `FailedScheduling`,
+`ScalingReplicaSet` …): bir restart'ın ya da başlamayan pod'un nedeni çoğu
+zaman oradadır. Hangi pod'un kime ait olduğu pod'un `ownerReferences`'ından
+okunur; `web`'in olayları `web-admin`'inkilerle karışmaz. Chart'ın
+ClusterRole'ü bunun için `events` listeleme izni içerir; izin yoksa pod
+listesi yine gösterilir.
 
 Bu bilgi sayfa açıldığında cluster API'sinden canlı okunur; Kubeat bunu
 saklamaz ve bunun için alarm üretmez. Replika eksikliği ya da sürekli
@@ -1106,6 +1136,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_KUBE_TIMEOUT` | `10s` | Cluster API istekleri için zaman aşımı |
 | `UPTIME_EVENT_WINDOW` | `2h` | Monitor sayfasında pod'ların yanında gösterilen cluster olaylarının ne kadar geriye gideceği |
 | `UPTIME_EVENT_LIMIT` | `20` | En fazla kaç olay gösterileceği |
+| `UPTIME_EVENT_CACHE` | `10s` | Bir namespace'in olay listesinin cluster'dan yeniden okunmadan önce ne kadar süre kullanılacağı; `0` her seferinde okur |
 | `UPTIME_WORKLOAD_ROLLOUT_GRACE` | `10m` | Workload monitor'un süren bir rolling update'te eksik pod'ları ne kadar hoş göreceği; `0` hiç |
 | `UPTIME_PROMETHEUS_URL` | – | Pod CPU/bellek kullanımının okunduğu Prometheus uyumlu API; boşsa kullanım gösterilmez |
 | `UPTIME_PROMETHEUS_TOKEN_FILE` | – | Her istekte okunan bearer token dosyası |

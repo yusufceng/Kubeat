@@ -556,6 +556,10 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		scopeError(w, p)
 		return
 	}
+	if err := workloadInScope(r, req); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
 	m.Enabled = true
 	if err := req.checkOptions.apply(&m); err != nil {
@@ -734,6 +738,12 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if req.Target != nil {
+		if err := workloadInScope(r, merged); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
 	if merged.Namespace != current.Namespace && !p.CanEdit(merged.Namespace) {
 		scopeError(w, p)
 		return
@@ -898,4 +908,21 @@ func (h *handler) listResults(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, toResultResponse(res))
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// workloadInScope refuses a workload monitor whose target lies in a
+// namespace the caller cannot read: the check would report on, and the pod
+// panel show, pods the caller is not allowed to see.
+func workloadInScope(r *http.Request, req createMonitorRequest) error {
+	if store.MonitorType(req.Type) != store.MonitorWorkload {
+		return nil
+	}
+	ns, _, _, err := k8s.ParseWorkloadTarget(req.Target)
+	if err != nil {
+		return nil // validate() reports the shape
+	}
+	if !principal(r).CanRead(ns) {
+		return fmt.Errorf("the workload's namespace %q is outside your namespaces", ns)
+	}
+	return nil
 }

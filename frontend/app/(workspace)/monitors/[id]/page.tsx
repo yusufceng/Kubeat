@@ -24,7 +24,7 @@ import { MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
 import { BackendError } from "@/app/ui/backend-error";
 import { HeartbeatBar } from "@/app/ui/heartbeat-bar";
 import { IncidentTable } from "@/app/ui/incident-table";
-import { LatencyChart } from "@/app/ui/latency-chart";
+import { LatencyChart, type Span } from "@/app/ui/latency-chart";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { LocalTime } from "@/app/ui/local-time";
 import { SilenceForm } from "@/app/ui/maintenance-forms";
@@ -36,6 +36,22 @@ import { PushUrl } from "@/app/ui/push-url";
 import { displayState, StatusBadge, StatusPill } from "@/app/ui/status";
 import { Tag } from "@/app/ui/tag";
 import { TimeAgo } from "@/app/ui/time-ago";
+import { WindowPanel } from "@/app/ui/window-panel";
+
+/** A query value as a moment, or null when it is not one. */
+function moment(v: string | string[] | undefined): Date | null {
+  if (typeof v !== "string") return null;
+  const at = new Date(v);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
+/** The selection as query parameters, to carry it across the range links. */
+function selectionQuery(selection: Span | null): string {
+  if (!selection) return "";
+  let q = `&from=${encodeURIComponent(new Date(selection.from).toISOString())}`;
+  if (selection.to !== null) q += `&to=${encodeURIComponent(new Date(selection.to).toISOString())}`;
+  return q;
+}
 
 /** The settings of the check, as label and value pairs. */
 function checkSettings(m: Monitor, t: T): [string, React.ReactNode][] {
@@ -164,9 +180,18 @@ async function MonitorDetail({
   const id = Number((await params).id);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
+  const query = await searchParams;
+  // A span selected on the chart, or named by a notification's link; its
+  // end is open (now) when absent.
+  const selectedFrom = moment(query.from);
+  const selectedTo = selectedFrom ? moment(query.to) : null;
+  let selection: Span | null =
+    selectedFrom && (!selectedTo || selectedTo > selectedFrom)
+      ? { from: selectedFrom.getTime(), to: selectedTo?.getTime() ?? null }
+      : null;
   // Only the offered ranges are accepted; anything else falls back to the default.
-  const requested = Number((await searchParams).range);
-  const range = config.chartRanges.includes(requested) ? requested : config.chartRanges[0];
+  const requested = Number(query.range);
+  let range = config.chartRanges.includes(requested) ? requested : config.chartRanges[0];
 
   const me = await currentUser();
   const t = await getT();
@@ -183,6 +208,24 @@ async function MonitorDetail({
       getUptime(id, config.uptimeWindows),
       getSeries(id, range),
     ]);
+    // A link to an outage that has since ended ("down" messages carry no
+    // end) is framed on the incident, not on everything since.
+    if (selection && selection.to === null) {
+      const from = selection.from;
+      const ended = incidents.find((i) => i.kind === "down" && new Date(i.started_at).getTime() === from && i.resolved_at);
+      if (ended?.resolved_at) selection = { from, to: new Date(ended.resolved_at).getTime() };
+    }
+    // A selection without a range (a notification's link) gets the
+    // shortest range that still reaches it; the series' end is "now".
+    if (selection && !config.chartRanges.includes(requested)) {
+      const ranges = config.chartRanges.toSorted((a, b) => a - b);
+      const age = new Date(series.to).getTime() - selection.from;
+      const needed = ranges.find((r) => r * 1000 >= age) ?? ranges[ranges.length - 1];
+      if (needed !== range) {
+        range = needed;
+        series = await getSeries(id, range);
+      }
+    }
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
     return <BackendError what={t("monitorPage.what")} err={err} />;
@@ -354,7 +397,7 @@ async function MonitorDetail({
               .map((r) => (
                 <Link
                   key={r}
-                  href={`/monitors/${monitor.id}?range=${r}`}
+                  href={`/monitors/${monitor.id}?range=${r}${selectionQuery(selection)}`}
                   scroll={false}
                   aria-current={r === range ? "true" : undefined}
                   className={`rounded-md px-2.5 py-1 ${
@@ -366,11 +409,38 @@ async function MonitorDetail({
               ))}
           </nav>
         </div>
-        <LatencyChart series={series} />
+        <LatencyChart
+          series={series}
+          monitorId={monitor.id}
+          range={range}
+          selection={selection}
+          // Only outages: a click on a failing bucket must not pick an open
+          // certificate incident that covers it too.
+          incidents={incidents
+            .filter((i) => i.kind === "down")
+            .map((i) => ({
+              from: new Date(i.started_at).getTime(),
+              to: i.resolved_at ? new Date(i.resolved_at).getTime() : null,
+            }))}
+        />
         <p className="mt-3 text-xs text-muted">
           {t("monitorPage.chart.caption", { duration: duration(series.bucket_seconds, t) })}
         </p>
       </section>
+
+      {selection && (
+        <Suspense fallback={<p className="text-sm text-muted">{t("common.loading")}</p>}>
+          <WindowPanel
+            monitorId={monitor.id}
+            from={new Date(selection.from).toISOString()}
+            to={new Date(Math.min(selection.to ?? Infinity, new Date(series.to).getTime())).toISOString()}
+            clearHref={`/monitors/${monitor.id}?range=${range}`}
+            failuresShown={config.resultsLimit}
+            beforeChart={selection.from < new Date(series.from).getTime()}
+            hasPods={Boolean(monitor.source) || monitor.type === "workload"}
+          />
+        </Suspense>
+      )}
 
       {(monitor.source || monitor.type === "workload") && (
         <section>

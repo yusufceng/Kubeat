@@ -32,9 +32,12 @@ type Store interface {
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
 	GetMonitorStatus(ctx context.Context, id int64, since time.Time) (store.MonitorStatus, error)
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]store.CheckResult, error)
+	SummarizeChecks(ctx context.Context, monitorID int64, from, to time.Time) (store.CheckSummary, error)
+	ListFailedChecks(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]store.CheckResult, error)
 	RecentCheckResults(ctx context.Context, monitorIDs []int64, limit int) (map[int64][]store.CheckResult, error)
 	Series(ctx context.Context, monitorID int64, source store.SeriesSource, from, to time.Time, bucket time.Duration) ([]store.SeriesPoint, error)
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]store.Incident, error)
+	ListIncidentsBetween(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]store.Incident, error)
 	Report(ctx context.Context, from, to time.Time) ([]store.MonitorReport, error)
 	CreateMaintenance(ctx context.Context, m store.Maintenance) (store.Maintenance, error)
 	ListMaintenance(ctx context.Context, limit int) ([]store.Maintenance, error)
@@ -165,7 +168,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 20
+const Revision = 21
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -197,6 +200,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/monitors/{id}/series", h.monitorSeries)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/uptime", h.monitorUptime)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/workload", h.monitorWorkload)
+	mux.HandleFunc("GET /api/v1/monitors/{id}/window", h.monitorWindow)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/channels", h.monitorChannels)
 	mux.HandleFunc("GET /api/v1/discovery", h.discoveryStatus)
 	mux.HandleFunc("GET /api/v1/discovery/namespaces", h.discoveryNamespaces)

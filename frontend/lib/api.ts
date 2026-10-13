@@ -616,6 +616,26 @@ export type ClusterEvent = {
 
 export const getWorkload = (id: number) => request<Workload>(`/monitors/${id}/workload`);
 
+/** What happened to a monitor between two moments: the chart's selection or an incident's span. */
+export type MonitorWindow = {
+  from: string;
+  to: string;
+  /** null when the window lies before the raw retention; only incidents are known then. */
+  checks: { total: number; failed: number; avg_latency_ms: number; max_latency_ms: number; partial: boolean } | null;
+  /** The failed checks, newest first; failures_truncated says when there were more. */
+  failures: CheckResult[];
+  failures_truncated: boolean;
+  incidents: Incident[];
+  /** The cluster's events about the workload in the window, as far as it still keeps them; oldest first. */
+  events: ClusterEvent[];
+  /** True when more events than shown fell in the window. */
+  events_truncated: boolean;
+  events_reason?: string;
+};
+
+export const getWindow = (id: number, from: string, to: string) =>
+  request<MonitorWindow>(`/monitors/${id}/window?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+
 export type StatusPageMonitor = {
   monitor_id: number;
   /** Shown instead of the monitor's own name; empty for that. */

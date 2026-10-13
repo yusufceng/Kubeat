@@ -71,7 +71,7 @@ func TestSlackSenderPostsTextAndAnAttachment(t *testing.T) {
 	}
 	attachment := got["attachments"].([]any)[0].(map[string]any)
 	if attachment["color"] != colorDown || attachment["title"] != "ödeme-api" ||
-		attachment["title_link"] != "https://kubeat.example/monitors/7" || attachment["footer"] != "Kubeat" {
+		attachment["title_link"] != "https://kubeat.example/monitors/7?from=2026-10-12T12%3A00%3A00Z" || attachment["footer"] != "Kubeat" {
 		t.Errorf("attachment = %v", attachment)
 	}
 	var titles []string
@@ -117,7 +117,7 @@ func TestGoogleChatSenderPostsACard(t *testing.T) {
 	}
 	button := widgets[len(widgets)-1].(map[string]any)["buttonList"].(map[string]any)["buttons"].([]any)[0].(map[string]any)
 	if button["text"] != "Kubeat'te aç" ||
-		button["onClick"].(map[string]any)["openLink"].(map[string]any)["url"] != "https://kubeat.example/monitors/7" {
+		button["onClick"].(map[string]any)["openLink"].(map[string]any)["url"] != "https://kubeat.example/monitors/7?from=2026-10-12T12%3A00%3A00Z" {
 		t.Errorf("button = %v", button)
 	}
 

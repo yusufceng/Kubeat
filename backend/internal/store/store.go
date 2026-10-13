@@ -562,6 +562,10 @@ type Store interface {
 	InsertCheckResults(ctx context.Context, results []CheckResult) error
 	// ListCheckResults returns up to limit results of a monitor, newest first.
 	ListCheckResults(ctx context.Context, monitorID int64, limit int) ([]CheckResult, error)
+	// SummarizeChecks counts the checks of a monitor in [from, to).
+	SummarizeChecks(ctx context.Context, monitorID int64, from, to time.Time) (CheckSummary, error)
+	// ListFailedChecks returns up to limit failed checks in [from, to), newest first.
+	ListFailedChecks(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]CheckResult, error)
 	// RecentCheckResults returns up to limit results, newest first, for each
 	// of the given monitors, keyed by monitor ID.
 	RecentCheckResults(ctx context.Context, monitorIDs []int64, limit int) (map[int64][]CheckResult, error)
@@ -591,6 +595,9 @@ type Store interface {
 	// ListIncidents returns up to limit incidents, newest first, for one
 	// monitor or for all when monitorID is 0.
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]Incident, error)
+	// ListIncidentsBetween returns the incidents of a monitor overlapping
+	// [from, to), newest first, at most limit.
+	ListIncidentsBetween(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]Incident, error)
 
 	CreateMaintenance(ctx context.Context, m Maintenance) (Maintenance, error)
 	// ListMaintenance returns up to limit windows: the repeating ones, then

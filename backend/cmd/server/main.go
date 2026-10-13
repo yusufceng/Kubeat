@@ -149,7 +149,7 @@ func main() {
 	if cfg.DiscoveryEnabled {
 		client, err := k8s.Connect(k8s.Options{
 			Kubeconfig: cfg.Kubeconfig, Context: cfg.KubeContext, Timeout: cfg.KubeTimeout,
-			Namespaces: splitList(cfg.DiscoveryNamespaces),
+			Namespaces: splitList(cfg.DiscoveryNamespaces), EventCache: cfg.EventCache,
 		})
 		if err != nil {
 			discoveryStatus = err.Error()

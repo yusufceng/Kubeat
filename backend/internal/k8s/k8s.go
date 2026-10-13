@@ -101,7 +101,12 @@ type Client struct {
 	// installation whose service account was given Roles in them rather
 	// than a ClusterRole.
 	only []string
+	eventCacheState
 }
+
+// CacheEvents keeps each namespace's event list for ttl after reading it;
+// zero reads the cluster every time.
+func (c *Client) CacheEvents(ttl time.Duration) { c.eventCache = ttl }
 
 // Restrict limits the client to the given namespaces; none lifts the limit.
 func (c *Client) Restrict(namespaces []string) {
@@ -128,6 +133,9 @@ type Options struct {
 	// Namespaces limits discovery to these namespaces; empty means the
 	// whole cluster, which needs cluster-wide read access.
 	Namespaces []string
+	// EventCache is how long a namespace's event list is reused before it
+	// is read again; zero reads it every time.
+	EventCache time.Duration
 }
 
 // ErrNotConfigured means there is no cluster to connect to: the process is
@@ -167,6 +175,7 @@ func Connect(opts Options) (*Client, error) {
 	}
 	client := &Client{core: core, dynamic: dyn, Mode: mode}
 	client.Restrict(opts.Namespaces)
+	client.CacheEvents(opts.EventCache)
 	return client, nil
 }
 

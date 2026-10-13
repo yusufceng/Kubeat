@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Series, SeriesPoint } from "@/lib/api";
 import { useT } from "@/lib/i18n/client";
@@ -39,13 +40,38 @@ function axis(max: number): { top: number; step: number } {
 
 const ms = (n: number, intl: string) => `${n.toLocaleString(intl, { maximumFractionDigits: n < 10 ? 1 : 0 })} ms`;
 
-export function LatencyChart({ series }: { series: Series }) {
+/** A span of time in milliseconds since the epoch; `to` is null while it is still going on. */
+export type Span = { from: number; to: number | null };
+
+// A press that moves less than this is a click, not a drag; a finger
+// wobbles more than a mouse.
+const CLICK_SLOP = 4;
+const TOUCH_SLOP = 12;
+
+export function LatencyChart({
+  series,
+  monitorId,
+  range,
+  selection,
+  incidents,
+}: {
+  series: Series;
+  monitorId: number;
+  range: number;
+  /** The range selected on the chart, carried in the page's URL. */
+  selection: Span | null;
+  /** The monitor's incidents, so that clicking an outage selects its whole span. */
+  incidents: Span[];
+}) {
   const t = useT();
+  const router = useRouter();
   const wrapper = useRef<HTMLDivElement>(null);
   // Measured on the client; until then a placeholder of the same height is
   // rendered, which also keeps times in the viewer's zone, not the server's.
   const [width, setWidth] = useState<number | null>(null);
   const [active, setActive] = useState<number | null>(null);
+  // A press in progress, in pixels from the wrapper's left edge.
+  const [drag, setDrag] = useState<{ start: number; current: number; slop: number } | null>(null);
 
   useEffect(() => {
     const el = wrapper.current;
@@ -122,29 +148,105 @@ export function LatencyChart({ series }: { series: Series }) {
     );
   }
 
-  const nearest = (clientX: number) => {
-    if (!geometry || !wrapper.current) return null;
-    const px = clientX - wrapper.current.getBoundingClientRect().left;
+  const pixel = (clientX: number) => (wrapper.current ? clientX - wrapper.current.getBoundingClientRect().left : 0);
+  const nearestAt = (px: number) => {
+    if (!geometry) return null;
     let best = 0;
     geometry.centers.forEach((c, i) => {
       if (Math.abs(c - px) < Math.abs(geometry.centers[best] - px)) best = i;
     });
     return best;
   };
+  // The moment under a pixel, kept inside the chart's span.
+  const timeAt = (px: number) => {
+    if (!geometry) return from;
+    const f = Math.min(Math.max((px - LEFT) / geometry.plotWidth, 0), 1);
+    return from + f * (to - from);
+  };
+  // Selections snap to bucket edges, so a drag picks whole buckets.
+  const snapDown = (at: number) => Math.max(from + Math.floor((at - from) / bucket) * bucket, from);
+  const snapUp = (at: number) => Math.min(from + Math.ceil((at - from) / bucket) * bucket, to);
+
+  // The selection lives in the URL, so the page shows what happened in it
+  // and the address can be shared.
+  const navigate = (span: Span | null) => {
+    let href = `/monitors/${monitorId}?range=${range}`;
+    if (span) {
+      href += `&from=${encodeURIComponent(new Date(span.from).toISOString())}`;
+      if (span.to !== null) href += `&to=${encodeURIComponent(new Date(span.to).toISOString())}`;
+    }
+    router.replace(href, { scroll: false });
+  };
+  const select = (span: Span) => {
+    if (span.to !== null && span.to <= span.from) return;
+    if (selection && selection.from === span.from && selection.to === span.to) return;
+    navigate(span);
+  };
+  // A click on a bucket selects it; on a bucket with failures, the incident
+  // that covers it, so one click frames the whole outage.
+  const clickAt = (px: number) => {
+    const i = nearestAt(px);
+    if (i === null) return;
+    const p = points[i];
+    const start = new Date(p.start).getTime();
+    const end = Math.min(start + bucket, to);
+    if (stateOf(p) !== "ok") {
+      const incident = incidents.find((inc) => inc.from < end && (inc.to ?? Infinity) > start);
+      if (incident) {
+        select(incident);
+        return;
+      }
+    }
+    select({ from: start, to: end });
+  };
 
   const point = active !== null ? points[active] : null;
+  // The band drawn over the chart: the press in progress, else the selection.
+  const band: [number, number] | null = drag
+    ? [timeAt(Math.min(drag.start, drag.current)), timeAt(Math.max(drag.start, drag.current))]
+    : selection
+      ? [Math.max(selection.from, from), Math.min(selection.to ?? to, to)]
+      : null;
 
   return (
     <figure>
       <div
         ref={wrapper}
-        className="relative outline-none focus-visible:ring-2 focus-visible:ring-[var(--viz-series)]"
-        style={{ height: HEIGHT }}
+        className="relative cursor-crosshair select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--viz-series)]"
+        // Horizontal drags select; vertical ones still scroll the page.
+        style={{ height: HEIGHT, touchAction: "pan-y" }}
         tabIndex={0}
         role="group"
         aria-label={t("monitorPage.chart.aria")}
-        onPointerMove={(e) => setActive(nearest(e.clientX))}
-        onPointerLeave={() => setActive(null)}
+        onPointerDown={(e) => {
+          if (e.button !== 0 || !geometry || drag) return;
+          // No native text selection while dragging; keep keyboard focus.
+          e.preventDefault();
+          e.currentTarget.focus();
+          const px = pixel(e.clientX);
+          setDrag({ start: px, current: px, slop: e.pointerType === "touch" ? TOUCH_SLOP : CLICK_SLOP });
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const px = pixel(e.clientX);
+          setActive(nearestAt(px));
+          if (drag) setDrag({ ...drag, current: px });
+        }}
+        onPointerUp={(e) => {
+          if (!drag) return;
+          setDrag(null);
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          const { start, current, slop } = drag;
+          if (Math.abs(current - start) < slop) {
+            clickAt(start);
+          } else {
+            select({ from: snapDown(timeAt(Math.min(start, current))), to: snapUp(timeAt(Math.max(start, current))) });
+          }
+        }}
+        onPointerCancel={() => setDrag(null)}
+        onPointerLeave={() => {
+          if (!drag) setActive(null);
+        }}
         onBlur={() => setActive(null)}
         onKeyDown={(e) => {
           if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
@@ -153,8 +255,12 @@ export function LatencyChart({ series }: { series: Series }) {
             setActive((i) =>
               Math.min(Math.max((i ?? (delta > 0 ? -1 : points.length)) + delta, 0), points.length - 1),
             );
+          } else if ((e.key === "Enter" || e.key === " ") && active !== null && geometry) {
+            e.preventDefault();
+            clickAt(geometry.centers[active]);
           } else if (e.key === "Escape") {
-            setActive(null);
+            if (selection) navigate(null);
+            else setActive(null);
           }
         }}
       >
@@ -183,6 +289,31 @@ export function LatencyChart({ series }: { series: Series }) {
                 </text>
               </g>
             ))}
+
+            {band && band[1] > band[0] && (
+              <g aria-hidden>
+                <rect
+                  x={geometry.x(band[0])}
+                  y={TOP}
+                  width={Math.max(geometry.x(band[1]) - geometry.x(band[0]), 1)}
+                  height={STRIP_TOP + STRIP_HEIGHT - TOP}
+                  fill="var(--viz-series)"
+                  opacity={0.12}
+                />
+                {[band[0], band[1]].map((edge) => (
+                  <line
+                    key={edge}
+                    x1={geometry.x(edge)}
+                    x2={geometry.x(edge)}
+                    y1={TOP}
+                    y2={STRIP_TOP + STRIP_HEIGHT}
+                    stroke="var(--viz-series)"
+                    strokeWidth={1}
+                    strokeDasharray="3 3"
+                  />
+                ))}
+              </g>
+            )}
 
             {geometry.segments.map((segment) => {
               const coords = segment.map(
@@ -325,7 +456,7 @@ export function LatencyChart({ series }: { series: Series }) {
         )}
       </div>
 
-      <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-12 text-xs text-muted">
+      <figcaption className="mt-2 flex select-none flex-wrap items-center gap-x-4 gap-y-1 pl-12 text-xs text-muted">
         <span>{t("monitorPage.chart.availability")}</span>
         {(Object.keys(stateStyle) as State[]).map((s) => (
           <span key={s} className="inline-flex items-center gap-1.5">
@@ -337,6 +468,7 @@ export function LatencyChart({ series }: { series: Series }) {
             {t(stateStyle[s].label)}
           </span>
         ))}
+        <span className="basis-full">{t("monitorPage.chart.selectHint")}</span>
       </figcaption>
 
       <details className="mt-3 text-sm">

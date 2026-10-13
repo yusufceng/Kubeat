@@ -93,6 +93,7 @@ func TestLoadDefaults(t *testing.T) {
 		KubeTimeout:      10 * time.Second,
 		EventWindow:      2 * time.Hour,
 		EventLimit:       20,
+		EventCache:       10 * time.Second,
 
 		WorkloadRolloutGrace: 10 * time.Minute,
 		NotifyGroupWait:      30 * time.Second,

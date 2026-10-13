@@ -22,6 +22,8 @@ type fakeWorkloads struct {
 	err       error
 	eventsErr error
 	asked     []string
+	// events is how many events to answer with; one when zero.
+	events int
 }
 
 func (f *fakeWorkloads) Workload(_ context.Context, namespace, source string) (k8s.Workload, error) {
@@ -29,11 +31,18 @@ func (f *fakeWorkloads) Workload(_ context.Context, namespace, source string) (k
 	return f.workload, f.err
 }
 
-func (f *fakeWorkloads) Events(_ context.Context, _ string, pods []string, _ time.Time, _ int) ([]k8s.Event, error) {
+func (f *fakeWorkloads) Events(_ context.Context, _ string, w k8s.Workload, _, _ time.Time, limit int) ([]k8s.Event, error) {
 	if f.eventsErr != nil {
 		return nil, f.eventsErr
 	}
-	return []k8s.Event{{At: time.Now(), Type: "Warning", Reason: "BackOff", Object: "Pod/" + pods[0], Message: "restarting", Count: 3}}, nil
+	var out []k8s.Event
+	for i := range max(f.events, 1) {
+		out = append(out, k8s.Event{At: time.Now().Add(-time.Duration(i) * time.Minute), Type: "Warning", Reason: "BackOff", Object: "Pod/" + w.Pods[0].Name, Message: "restarting", Count: 3})
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 type fakePodMetrics struct {
@@ -48,7 +57,7 @@ func (f *fakePodMetrics) PodUsage(_ context.Context, namespace string, pods []st
 }
 
 // newWorkloadAPI serves the API with one discovered and one manual monitor.
-func newWorkloadAPI(t *testing.T, workloads Workloads, podMetrics PodMetrics) *httptest.Server {
+func newWorkloadAPI(t *testing.T, workloads Workloads, podMetrics PodMetrics) (*httptest.Server, *store.SQLite) {
 	t.Helper()
 	ctx := context.Background()
 	db, err := store.OpenSQLite(ctx, filepath.Join(t.TempDir(), "test.db"), 5*time.Second)
@@ -66,14 +75,14 @@ func newWorkloadAPI(t *testing.T, workloads Workloads, podMetrics PodMetrics) *h
 	}
 
 	srv := httptest.NewServer(NewHandler(Options{
-		Store: db, Token: testToken, Workloads: workloads, PodMetrics: podMetrics, DiscoveryStatus: "no cluster",
+		Store: db, Token: testToken, Workloads: workloads, PodMetrics: podMetrics, DiscoveryStatus: "no cluster", RawRetention: 48 * time.Hour, EventLimit: 2,
 		MaxResults: 100, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))
 	t.Cleanup(func() {
 		srv.Close()
 		db.Close()
 	})
-	return srv
+	return srv, db
 }
 
 func TestWorkloadEndpoint(t *testing.T) {
@@ -85,7 +94,7 @@ func TestWorkloadEndpoint(t *testing.T) {
 	}}}
 	cpu, mem := 0.25, 104857600.0
 	podMetrics := &fakePodMetrics{usage: map[string]prom.Usage{"api-a": {CPUCores: &cpu, MemoryBytes: &mem}}}
-	srv := newWorkloadAPI(t, workloads, podMetrics)
+	srv, _ := newWorkloadAPI(t, workloads, podMetrics)
 
 	var got workloadResponse
 	if code := do(t, "GET", srv.URL+"/api/v1/monitors/1/workload", "", &got); code != http.StatusOK {
@@ -129,7 +138,7 @@ func TestWorkloadEndpoint(t *testing.T) {
 func TestWorkloadUnavailableStates(t *testing.T) {
 	// A monitor entered by hand has no pods to show.
 	workloads := &fakeWorkloads{}
-	srv := newWorkloadAPI(t, workloads, nil)
+	srv, _ := newWorkloadAPI(t, workloads, nil)
 	var got workloadResponse
 	if code := do(t, "GET", srv.URL+"/api/v1/monitors/2/workload", "", &got); code != http.StatusOK || got.Available || got.Reason == "" || got.Pods == nil {
 		t.Errorf("manual monitor: status=%d %+v", code, got)
@@ -163,7 +172,7 @@ func TestWorkloadUnavailableStates(t *testing.T) {
 	}
 
 	// No cluster connection at all.
-	offline := newWorkloadAPI(t, nil, nil)
+	offline, _ := newWorkloadAPI(t, nil, nil)
 	got = workloadResponse{}
 	if do(t, "GET", offline.URL+"/api/v1/monitors/1/workload", "", &got); got.Available || got.Reason == "" {
 		t.Errorf("no cluster: %+v", got)
@@ -175,7 +184,7 @@ func TestWorkloadUnavailableStates(t *testing.T) {
 func TestWorkloadEndpointOfAWorkloadMonitor(t *testing.T) {
 	workloads := &fakeWorkloads{workload: k8s.Workload{Pods: []k8s.Pod{{Name: "web-1", Ready: true, Containers: 1, ReadyContainers: 1, Status: "Running"}}}}
 	metrics := &fakePodMetrics{}
-	srv := newWorkloadAPI(t, workloads, metrics)
+	srv, _ := newWorkloadAPI(t, workloads, metrics)
 
 	var m monitorResponse
 	body := `{"name":"web-pods","type":"workload","target":"shop-demo/deployment/web","namespace":"Mağaza","interval_seconds":30,"timeout_seconds":5,"failure_threshold":3}`

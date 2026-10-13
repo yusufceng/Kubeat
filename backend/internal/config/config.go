@@ -154,6 +154,9 @@ type Config struct {
 	// many.
 	EventWindow time.Duration // UPTIME_EVENT_WINDOW
 	EventLimit  int           // UPTIME_EVENT_LIMIT
+	// EventCache is how long a namespace's event list is reused before the
+	// cluster is asked again; zero asks every time.
+	EventCache time.Duration // UPTIME_EVENT_CACHE
 	// Language the notifications and the first administrator's name are
 	// written in: "en" or "tr".
 	Language string // UPTIME_LANGUAGE
@@ -253,6 +256,7 @@ func Load() (Config, error) {
 		{&cfg.RollupRetention, "UPTIME_ROLLUP_RETENTION", 365 * 24 * time.Hour},
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
 		{&cfg.EventWindow, "UPTIME_EVENT_WINDOW", 2 * time.Hour},
+		{&cfg.EventCache, "UPTIME_EVENT_CACHE", 10 * time.Second},
 		{&cfg.DiscoveryDefaultInterval, "UPTIME_DISCOVERY_DEFAULT_INTERVAL", 30 * time.Second},
 		{&cfg.DiscoveryDefaultTimeout, "UPTIME_DISCOVERY_DEFAULT_TIMEOUT", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
