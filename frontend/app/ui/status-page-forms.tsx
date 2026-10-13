@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmForm } from "@/app/ui/confirm";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { deleteStatusPageAction, saveStatusPageAction } from "@/app/actions";
@@ -184,18 +185,13 @@ export function StatusPageRow({ page, monitors }: { page: StatusPage; monitors: 
             <EditIcon />
             <span className="sr-only">{t("common.edit")}</span>
           </button>
-          <form
-            action={deleteStatusPageAction}
-            onSubmit={(e) => {
-              if (!confirm(t("statusPageRow.delete.confirm", { title: page.title }))) e.preventDefault();
-            }}
-          >
+          <ConfirmForm action={deleteStatusPageAction} question={t("statusPageRow.delete.confirm", { title: page.title })}>
             <input type="hidden" name="id" value={page.id} />
             <button type="submit" className="btn btn-danger" title={t("common.delete")}>
               <TrashIcon />
               <span className="sr-only">{t("common.delete")}</span>
             </button>
-          </form>
+          </ConfirmForm>
         </div>
       </div>
       {editing && (

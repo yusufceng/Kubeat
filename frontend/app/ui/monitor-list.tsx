@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmDialog } from "@/app/ui/confirm";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
@@ -101,13 +102,17 @@ export function MonitorList({
     setBulkError(null);
   }
 
+  // Monitors kept in step with an annotated object cannot be deleted here:
+  // the next sync would bring them back.
+  const deletable = useMemo(() => items.filter((i) => selected.has(i.id) && !i.managed), [items, selected]);
+  const managedChosen = chosen.length - deletable.length;
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   function bulk(action: BulkAction) {
-    if (action === "delete" && !confirm(t.n("monitorsList.list.bulk.confirmDelete", chosen.length))) {
-      return;
-    }
+    const ids = action === "delete" ? deletable.map((i) => i.id) : chosen;
     setBulkError(null);
     startBulk(async () => {
-      const { failed } = await bulkMonitorsAction(chosen, action);
+      const { failed } = await bulkMonitorsAction(ids, action);
       if (failed > 0) setBulkError(t.n("monitorsList.list.bulk.failed", failed));
       else stopSelecting();
     });
@@ -255,10 +260,39 @@ export function MonitorList({
                 type="button"
                 className="btn btn-danger px-2.5 py-1 text-xs"
                 disabled={chosen.length === 0 || working}
-                onClick={() => bulk("delete")}
+                onClick={() => setConfirmingDelete(true)}
               >
                 {t("common.delete")}
               </button>
+              {confirmingDelete && (
+                <ConfirmDialog
+                  title={deletable.length > 0 ? t("confirm.title") : t("monitorsList.list.bulk.onlyManaged.title")}
+                  confirmLabel={deletable.length > 0 ? t.n("monitorsList.list.bulk.deleteCount", deletable.length) : undefined}
+                  onCancel={() => setConfirmingDelete(false)}
+                  onConfirm={() => {
+                    setConfirmingDelete(false);
+                    bulk("delete");
+                  }}
+                >
+                  {deletable.length > 0 && (
+                    <>
+                      <p>{t.n("monitorsList.list.bulk.confirmDelete", deletable.length)}</p>
+                      <ul className="mt-2 max-h-40 overflow-auto rounded-lg bg-sunken px-3 py-2 text-ink">
+                        {deletable.map((i) => (
+                          <li key={i.id} className="truncate">
+                            {i.name}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {managedChosen > 0 && (
+                    <p className={deletable.length > 0 ? "mt-3" : undefined}>
+                      {t.n("monitorsList.list.bulk.managedSkipped", managedChosen)}
+                    </p>
+                  )}
+                </ConfirmDialog>
+              )}
             </div>
             {bulkError && (
               <p role="alert" className="text-xs text-down">

@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmForm } from "@/app/ui/confirm";
 import { useActionState, useState, useTransition } from "react";
 import {
   changePasswordAction,
@@ -168,18 +169,13 @@ export function UserRow({ user, self, known }: { user: User; self: boolean; know
             <span className="sr-only">{t("common.edit")}</span>
           </button>
           {!self && (
-            <form
-              action={deleteUserAction}
-              onSubmit={(e) => {
-                if (!confirm(t("users.row.confirmDelete", { username: user.username }))) e.preventDefault();
-              }}
-            >
+            <ConfirmForm action={deleteUserAction} question={t("users.row.confirmDelete", { username: user.username })}>
               <input type="hidden" name="id" value={user.id} />
               <button type="submit" className="btn btn-danger" title={t("common.delete")}>
                 <TrashIcon />
                 <span className="sr-only">{t("common.delete")}</span>
               </button>
-            </form>
+            </ConfirmForm>
           )}
         </div>
       </div>
@@ -279,18 +275,13 @@ export function GroupRoleRow({ group }: { group: GroupRole }) {
           {group.role !== "admin" && ` · ${group.namespaces.join(", ")}`}
         </div>
       </div>
-      <form
-        action={deleteGroupRoleAction}
-        onSubmit={(e) => {
-          if (!confirm(t("users.group.confirmDelete"))) e.preventDefault();
-        }}
-      >
+      <ConfirmForm action={deleteGroupRoleAction} question={t("users.group.confirmDelete")}>
         <input type="hidden" name="id" value={group.id} />
         <button type="submit" className="btn btn-danger" title={t("common.delete")}>
           <TrashIcon />
           <span className="sr-only">{t("common.delete")}</span>
         </button>
-      </form>
+      </ConfirmForm>
     </li>
   );
 }

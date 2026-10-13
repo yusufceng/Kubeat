@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmForm } from "@/app/ui/confirm";
 import { useActionState, useState, useTransition } from "react";
 import {
   type ChannelTestState,
@@ -250,18 +251,13 @@ export function ChannelRow({ channel, namespaces }: { channel: Channel; namespac
             <EditIcon />
             <span className="sr-only">{t("common.edit")}</span>
           </button>
-          <form
-            action={deleteChannelAction}
-            onSubmit={(e) => {
-              if (!confirm(t("channelRow.delete.confirm", { name: channel.name }))) e.preventDefault();
-            }}
-          >
+          <ConfirmForm action={deleteChannelAction} question={t("channelRow.delete.confirm", { name: channel.name })}>
             <input type="hidden" name="id" value={channel.id} />
             <button type="submit" className="btn btn-danger" title={t("common.delete")}>
               <TrashIcon />
               <span className="sr-only">{t("common.delete")}</span>
             </button>
-          </form>
+          </ConfirmForm>
         </div>
       </div>
       {test && !testing && (

@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmForm } from "@/app/ui/confirm";
 import { useActionState, useState } from "react";
 import {
   createMaintenanceAction,
@@ -113,17 +114,12 @@ export function MaintenanceForm({
  */
 export function DeleteMaintenanceButton({ id, label, confirm: question }: { id: number; label: string; confirm?: string }) {
   return (
-    <form
-      action={deleteMaintenanceAction}
-      onSubmit={(e) => {
-        if (question && !confirm(question)) e.preventDefault();
-      }}
-    >
+    <ConfirmForm action={deleteMaintenanceAction} question={question} confirmLabel={label}>
       <input type="hidden" name="id" value={id} />
       <button type="submit" className={buttonClass}>
         {label}
       </button>
-    </form>
+    </ConfirmForm>
   );
 }
 

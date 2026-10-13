@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmForm } from "@/app/ui/confirm";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { cloneMonitorAction, deleteMonitorAction, setMonitorEnabledAction } from "@/app/actions";
@@ -53,17 +54,12 @@ export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "nam
           <CopyIcon /> {cloning ? t("monitorPage.actions.copying") : t("monitorPage.copy")}
         </button>
         {!monitor.managed && (
-          <form
-            action={deleteMonitorAction}
-            onSubmit={(e) => {
-              if (!confirm(t("monitorPage.actions.confirmDelete", { name: monitor.name }))) e.preventDefault();
-            }}
-          >
+          <ConfirmForm action={deleteMonitorAction} question={t("monitorPage.actions.confirmDelete", { name: monitor.name })}>
             <input type="hidden" name="id" value={monitor.id} />
             <button type="submit" className="btn btn-danger">
               <TrashIcon /> {t("common.delete")}
             </button>
-          </form>
+          </ConfirmForm>
         )}
       </div>
       {monitor.managed && (

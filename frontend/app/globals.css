@@ -159,4 +159,13 @@ body {
   .btn-danger:hover {
     background: color-mix(in srgb, var(--down) 10%, transparent);
   }
+  /* The button that carries out something that cannot be undone. */
+  .btn-danger-solid {
+    border-color: transparent;
+    background: var(--down);
+    color: #fff;
+  }
+  .btn-danger-solid:hover {
+    background: color-mix(in srgb, var(--down) 86%, #000);
+  }
 }

@@ -33,6 +33,8 @@ export type ListItem = {
   uptime: number | null;
   /** The recent checks, oldest first: "1" for a success, "0" for a failure. */
   beats: string;
+  /** Kept in step with an annotated cluster object; it cannot be deleted here. */
+  managed: boolean;
 };
 
 export function toListItem(m: Monitor): ListItem {
@@ -47,6 +49,7 @@ export function toListItem(m: Monitor): ListItem {
     target: m.target,
     state: displayState(m),
     uptime: m.uptime_percent,
+    managed: m.managed,
     beats: m.history
       .toReversed()
       .map((h) => (h.up ? "1" : "0"))

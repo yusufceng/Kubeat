@@ -64,6 +64,13 @@ export const monitorsList = defineMessages(
       "{count} monitor ve tüm kontrol geçmişleri silinsin mi? Bu geri alınamaz.",
     "monitorsList.list.bulk.confirmDelete.other":
       "{count} monitor ve tüm kontrol geçmişleri silinsin mi? Bu geri alınamaz.",
+    "monitorsList.list.bulk.deleteCount.one": "{count} monitor'ü sil",
+    "monitorsList.list.bulk.deleteCount.other": "{count} monitor'ü sil",
+    "monitorsList.list.bulk.onlyManaged.title": "Buradan silinemez",
+    "monitorsList.list.bulk.managedSkipped.one":
+      "{count} monitor annotation ile yönetiliyor ve silinmeyecek. Kaldırmak için cluster'daki nesnesinden kubeat.io/monitor annotation'ını silin.",
+    "monitorsList.list.bulk.managedSkipped.other":
+      "{count} monitor annotation ile yönetiliyor ve silinmeyecek. Kaldırmak için cluster'daki nesnelerinden kubeat.io/monitor annotation'ını silin.",
     "monitorsList.list.bulk.failed.one": "{count} monitor değiştirilemedi.",
     "monitorsList.list.bulk.failed.other": "{count} monitor değiştirilemedi.",
     "monitorsList.list.empty.before": "Henüz monitor yok. Yukarıdaki düğmeyle ekleyin ya da",
@@ -152,6 +159,13 @@ export const monitorsList = defineMessages(
       "Delete {count} monitor and all of its check history? This cannot be undone.",
     "monitorsList.list.bulk.confirmDelete.other":
       "Delete {count} monitors and all of their check history? This cannot be undone.",
+    "monitorsList.list.bulk.deleteCount.one": "Delete {count} monitor",
+    "monitorsList.list.bulk.deleteCount.other": "Delete {count} monitors",
+    "monitorsList.list.bulk.onlyManaged.title": "Cannot be deleted here",
+    "monitorsList.list.bulk.managedSkipped.one":
+      "{count} monitor is managed by an annotation and will not be deleted. To remove it, delete the kubeat.io/monitor annotation from its object in the cluster.",
+    "monitorsList.list.bulk.managedSkipped.other":
+      "{count} monitors are managed by annotations and will not be deleted. To remove them, delete the kubeat.io/monitor annotation from their objects in the cluster.",
     "monitorsList.list.bulk.failed.one": "{count} monitor could not be changed.",
     "monitorsList.list.bulk.failed.other": "{count} monitors could not be changed.",
     "monitorsList.list.empty.before": "No monitors yet. Add one with the button above or",
