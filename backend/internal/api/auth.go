@@ -482,12 +482,31 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	h.signIn(w, r, user, "login")
 }
 
+// auditText writes a fixed audit phrase in the install's language; what it
+// has no translation for stays as it is.
+func (h *handler) auditText(phrase string) string {
+	if h.opts.Language != "tr" {
+		return phrase
+	}
+	if tr, ok := auditTR[phrase]; ok {
+		return tr
+	}
+	return phrase
+}
+
+// The fixed audit phrases in Turkish; keys are the English originals.
+var auditTR = map[string]string{
+	"wrong password":            "parola yanlış",
+	"rejected by the directory": "dizin kabul etmedi",
+	"unknown user":              "bilinmeyen kullanıcı",
+}
+
 // loginFailed counts the failure and answers as for any wrong password:
 // nothing in the answer tells a username apart from a password.
 func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, key, username, why string) {
 	h.opts.Throttle.Fail(key, time.Now().UTC())
 	h.opts.Logger.Info("sign-in refused", "user", username, "reason", why)
-	_ = h.opts.Store.AppendAudit(r.Context(), store.AuditEntry{At: time.Now().UTC(), Username: username, Action: "login_failed", Summary: why})
+	_ = h.opts.Store.AppendAudit(r.Context(), store.AuditEntry{At: time.Now().UTC(), Username: username, Action: "login_failed", Summary: h.auditText(why)})
 	unauthorized(w, "invalid username or password")
 }
 

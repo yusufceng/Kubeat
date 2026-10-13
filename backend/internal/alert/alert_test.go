@@ -376,7 +376,7 @@ func TestWebhookSender(t *testing.T) {
 	b = bodies[1]
 	text, _ = b["text"].(string)
 	incident, _ = b["incident"].(map[string]any)
-	if b["event"] != "up" || !strings.Contains(text, "1m30s") || incident["resolved_at"] != "2026-10-12T12:01:30Z" {
+	if b["event"] != "up" || !strings.Contains(text, "1m 30s") || incident["resolved_at"] != "2026-10-12T12:01:30Z" {
 		t.Errorf("up body = %v", b)
 	}
 
@@ -611,7 +611,7 @@ func TestReminders(t *testing.T) {
 		t.Fatalf("notifications = %v, want [down reminder]", events)
 	}
 	reminder := f.sender.sent[1]
-	if text := Text(reminder); !strings.Contains(text, "hâlâ erişilemiyor") || !strings.Contains(text, "2m30s") {
+	if text := Text(reminder); !strings.Contains(text, "hâlâ erişilemiyor") || !strings.Contains(text, "2 dk 30 sn") {
 		t.Errorf("reminder text = %q (the outage is 2m30s old)", text)
 	}
 

@@ -81,7 +81,7 @@ func TestGroupWaitZeroSendsAtOnce(t *testing.T) {
 func TestGroupedTexts(t *testing.T) {
 	at := time.Date(2026, 10, 13, 3, 0, 0, 0, time.UTC)
 	down := func(name, cause string) Notification {
-		return Notification{Event: EventDown, Monitor: store.Monitor{Name: name, Namespace: "shop"}, Incident: store.Incident{StartedAt: at, Cause: cause}}
+		return Notification{Event: EventDown, Language: LanguageTurkish, Monitor: store.Monitor{Name: name, Namespace: "shop"}, Incident: store.Incident{StartedAt: at, Cause: cause}}
 	}
 	n := Notification{Event: EventDown, Language: LanguageTurkish, Monitor: store.Monitor{Name: "api", Namespace: "shop"}, Group: []Notification{down("api", "refused"), down("db", "timeout")}}
 	if got := Text(n); got != "🔴 shop: 2 monitor erişilemiyor: api (refused), db (timeout)" {
@@ -95,10 +95,10 @@ func TestGroupedTexts(t *testing.T) {
 	}
 
 	up := Notification{Event: EventUp, Language: LanguageTurkish, Monitor: store.Monitor{Name: "a"}, Group: []Notification{
-		{Event: EventUp, Monitor: store.Monitor{Name: "a"}, Incident: store.Incident{StartedAt: at, ResolvedAt: at.Add(90 * time.Second)}},
-		{Event: EventUp, Monitor: store.Monitor{Name: "b"}, Incident: store.Incident{StartedAt: at, ResolvedAt: at.Add(5 * time.Minute)}},
+		{Event: EventUp, Language: LanguageTurkish, Monitor: store.Monitor{Name: "a"}, Incident: store.Incident{StartedAt: at, ResolvedAt: at.Add(90 * time.Second)}},
+		{Event: EventUp, Language: LanguageTurkish, Monitor: store.Monitor{Name: "b"}, Incident: store.Incident{StartedAt: at, ResolvedAt: at.Add(5 * time.Minute)}},
 	}}
-	if got := Text(up); got != "🟢 2 monitor tekrar çalışıyor: a (1m30s), b (5m0s)" {
+	if got := Text(up); got != "🟢 2 monitor tekrar çalışıyor: a (1 dk 30 sn), b (5 dk)" {
 		t.Errorf("up text = %q", got)
 	}
 

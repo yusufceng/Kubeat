@@ -313,6 +313,7 @@ func main() {
 			EmailEnabled:             senders.EmailEnabled(),
 			Discovery:                cluster,
 			Sync:                     sync,
+			Language:                 cfg.Language,
 			Workloads:                workloads,
 			PodMetrics:               podMetrics,
 			EventWindow:              cfg.EventWindow,

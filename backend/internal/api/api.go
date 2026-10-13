@@ -147,6 +147,8 @@ type Options struct {
 	// Sync reports on the monitors kept in step with annotated objects;
 	// nil when that is off.
 	Sync Sync
+	// Language the audit log's fixed texts are written in ("en" or "tr").
+	Language string
 	// Workloads reads the pods behind discovered monitors; nil without a
 	// cluster. PodMetrics adds their resource usage; nil when no metrics
 	// server is configured.

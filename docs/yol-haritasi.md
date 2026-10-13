@@ -108,8 +108,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 
 ## Bilinen sınırlar
 
-- Backend tek replica çalışır; güncelleme sırasında birkaç saniye kontrol
-  yapılmaz.
+- Backend tek replica çalışır; güncelleme sırasında kontroller durur
+  (gerçek OpenShift'te ölçülen boşluk 23–27 sn).
 - Giriş kilidi sayacı backend belleğindedir; yeniden başlatınca sıfırlanır.
   Tek replica olduğu için şimdilik sorun değildir. Kilit kullanıcı adına
   göredir: adını bilen biri bir hesabı `UPTIME_LOGIN_MAX_FAILURES` yanlış

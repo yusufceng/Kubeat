@@ -1,5 +1,10 @@
 package alert
 
+import (
+	"fmt"
+	"time"
+)
+
 // Languages the notifications can be written in.
 const (
 	LanguageEnglish = "en"
@@ -28,6 +33,9 @@ type phrases struct {
 	subjectGroupDown, subjectGroupUp, subjectGroupReminder, subjectGroupCertExpires, subjectGroupCertRenewed string // where, count
 
 	factMonitor, factTarget, factNamespace, factStart, factEnd, factCause string
+
+	// the unit words of a duration: day, hour, minute, second
+	unitDay, unitHour, unitMin, unitSec string
 }
 
 var languages = map[string]phrases{
@@ -57,6 +65,8 @@ var languages = map[string]phrases{
 		subjectGroupCertRenewed: "[Kubeat] %s%d certificates were renewed",
 
 		factMonitor: "Monitor", factTarget: "Target", factNamespace: "Namespace", factStart: "Started", factEnd: "Ended", factCause: "Cause",
+
+		unitDay: "d", unitHour: "h", unitMin: "m", unitSec: "s",
 	},
 	LanguageTurkish: {
 		down:        "🔴 %s erişilemiyor%s. Art arda %d kontrol başarısız. Son hata: %s",
@@ -84,7 +94,44 @@ var languages = map[string]phrases{
 		subjectGroupCertRenewed: "[Kubeat] %s%d sertifika yenilendi",
 
 		factMonitor: "Monitor", factTarget: "Hedef", factNamespace: "Namespace", factStart: "Başlangıç", factEnd: "Bitiş", factCause: "Neden",
+
+		unitDay: "gün", unitHour: "sa", unitMin: "dk", unitSec: "sn",
 	},
+}
+
+// humanDuration writes a duration with the language's unit words, at most
+// two units: "1 sa 15 dk" / "1h 15m", "45 sn" / "45s".
+func humanDuration(d time.Duration, w phrases) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d.Round(time.Second).Seconds())
+	day, hour, minute := 86400, 3600, 60
+	sep, unit := " ", func(n int, u string) string {
+		if w.unitSec == "s" { // English writes 5m, Turkish 5 dk
+			return fmt.Sprintf("%d%s", n, u)
+		}
+		return fmt.Sprintf("%d %s", n, u)
+	}
+	switch {
+	case total >= day:
+		if rest := (total % day) / hour; rest > 0 {
+			return unit(total/day, w.unitDay) + sep + unit(rest, w.unitHour)
+		}
+		return unit(total/day, w.unitDay)
+	case total >= hour:
+		if rest := (total % hour) / minute; rest > 0 {
+			return unit(total/hour, w.unitHour) + sep + unit(rest, w.unitMin)
+		}
+		return unit(total/hour, w.unitHour)
+	case total >= minute:
+		if rest := total % minute; rest > 0 {
+			return unit(total/minute, w.unitMin) + sep + unit(rest, w.unitSec)
+		}
+		return unit(total/minute, w.unitMin)
+	default:
+		return unit(total, w.unitSec)
+	}
 }
 
 // ValidLanguage reports whether notifications can be written in it.

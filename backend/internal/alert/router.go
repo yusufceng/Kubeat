@@ -68,7 +68,11 @@ func Facts(n Notification) []Fact {
 			facts = append(facts, Fact{w.factNamespace, n.Monitor.Namespace})
 		}
 		for _, g := range n.Group {
-			facts = append(facts, Fact{g.Monitor.Name, groupDetail(g)})
+			value := groupDetail(g)
+			if g.Monitor.Target != "" {
+				value += " — " + g.Monitor.Target
+			}
+			facts = append(facts, Fact{g.Monitor.Name, value})
 		}
 		return facts
 	}

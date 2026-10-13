@@ -76,13 +76,14 @@ const maxGroupNamed = 10
 
 // groupDetail is what a grouped message says about one of its monitors.
 func groupDetail(n Notification) string {
+	w := wording(n)
 	switch n.Event {
 	case EventDown:
 		return n.Incident.Cause
 	case EventUp:
-		return n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second).String()
+		return humanDuration(n.Incident.ResolvedAt.Sub(n.Incident.StartedAt), w)
 	case EventReminder:
-		return n.At.Sub(n.Incident.StartedAt).Round(time.Second).String()
+		return humanDuration(n.At.Sub(n.Incident.StartedAt), w)
 	case EventCertExpiring, EventCertRenewed:
 		return n.CertExpiresAt.Format("2006-01-02")
 	}
@@ -145,9 +146,9 @@ func Text(n Notification) string {
 	case EventDown:
 		return fmt.Sprintf(w.down, n.Monitor.Name, target(n.Monitor), n.Monitor.FailureThreshold, n.Incident.Cause)
 	case EventUp:
-		return fmt.Sprintf(w.up, n.Monitor.Name, target(n.Monitor), n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second))
+		return fmt.Sprintf(w.up, n.Monitor.Name, target(n.Monitor), humanDuration(n.Incident.ResolvedAt.Sub(n.Incident.StartedAt), w))
 	case EventReminder:
-		return fmt.Sprintf(w.reminder, n.Monitor.Name, target(n.Monitor), n.At.Sub(n.Incident.StartedAt).Round(time.Second), n.Incident.Cause)
+		return fmt.Sprintf(w.reminder, n.Monitor.Name, target(n.Monitor), humanDuration(n.At.Sub(n.Incident.StartedAt), w), n.Incident.Cause)
 	case EventCertExpiring:
 		days := int(n.CertExpiresAt.Sub(n.Incident.StartedAt).Hours() / 24)
 		when := fmt.Sprintf(w.certDays, days)
