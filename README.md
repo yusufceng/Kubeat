@@ -281,7 +281,11 @@ UPTIME_OIDC_REDIRECT_URL=https://kubeat.apps.example/auth/callback
 ```
 
 - Sağlayıcıda istemci bu redirect URL ile kaydedilir; chart `route.host`
-  ya da `ingress.host` verilmişse adresi kendisi türetir.
+  ya da `ingress.host` verilmişse adresi kendisi türetir. Route'a host
+  vermeyip router'a bıraktıysanız `UPTIME_OIDC_REDIRECT_URL` boş da
+  kalabilir: her giriş, arayüzün o an sunulduğu adresin `/auth/callback`
+  yolunu kullanır (yalnızca HTTPS; sağlayıcı zaten kayıtlı olmayan adresi
+  reddeder). Kayıtlı adresin Route'un gerçek host'u olması yine şarttır.
 - Hesap `preferred_username` (`UPTIME_OIDC_USERNAME_CLAIM`), `name` ve
   `email` claim'lerinden kurulur; gruplar `groups` claim'inden
   (`UPTIME_OIDC_GROUPS_CLAIM`). Okta için kapsamlara `groups` eklenir
@@ -1033,7 +1037,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_OIDC_ISSUER` | – | OpenID Connect sağlayıcısının issuer adresi; boşsa SSO kapalı |
 | `UPTIME_OIDC_CLIENT_ID` | – | Sağlayıcıda kayıtlı istemci kimliği (issuer ile zorunlu) |
 | `UPTIME_OIDC_CLIENT_SECRET` | – | İstemci sırrı; public client için boş |
-| `UPTIME_OIDC_REDIRECT_URL` | – | Sağlayıcının geri döndüğü adres: `https://<kubeat>/auth/callback` (issuer ile zorunlu) |
+| `UPTIME_OIDC_REDIRECT_URL` | – | Sağlayıcının geri döndüğü adres: `https://<kubeat>/auth/callback`; boşsa her giriş, arayüzün o an sunulduğu adresi kullanır |
 | `UPTIME_OIDC_SCOPES` | `openid profile email` | İstenen kapsamlar, boşlukla ayrılmış |
 | `UPTIME_OIDC_USERNAME_CLAIM` | `preferred_username` | Kullanıcı adının okunduğu claim |
 | `UPTIME_OIDC_DISPLAY_NAME_CLAIM` | `name` | Görünen adın okunduğu claim |

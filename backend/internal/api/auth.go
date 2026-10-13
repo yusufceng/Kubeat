@@ -22,7 +22,8 @@ import (
 type OIDC interface {
 	Issuer() string
 	// Start returns the provider URL to send the browser to.
-	Start(ctx context.Context) (string, error)
+	// callersRedirect is used when no redirect URL is configured.
+	Start(ctx context.Context, callersRedirect string) (string, error)
 	// Finish turns what the provider sent back into an identity.
 	Finish(ctx context.Context, state, code string) (oidcauth.Identity, error)
 }
@@ -266,7 +267,7 @@ func (h *handler) oidcStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "OIDC sign-in is not configured")
 		return
 	}
-	url, err := h.opts.OIDC.Start(r.Context())
+	url, err := h.opts.OIDC.Start(r.Context(), r.URL.Query().Get("redirect"))
 	if err != nil {
 		h.opts.Logger.Error("oidc sign-in could not start", "error", err)
 		writeError(w, http.StatusBadGateway, "the identity provider could not be reached; try again later")

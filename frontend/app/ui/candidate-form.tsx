@@ -50,7 +50,10 @@ export function CandidateForm({
   // offered without being selected: they say how many pods are ready, which
   // adds to a check of the service in front of them rather than replacing it.
   const [selected, setSelected] = useState(
-    () => new Set(available.filter((c) => !workloadKinds.includes(c.kind)).map((c) => c.source)),
+    // Workloads complement the service check rather than replace it, and a
+    // service with nothing ready behind it would alarm at once: neither
+    // starts selected.
+    () => new Set(available.filter((c) => !workloadKinds.includes(c.kind) && !c.no_endpoints).map((c) => c.source)),
   );
 
   // Sources that have since been imported no longer count.
@@ -118,7 +121,14 @@ export function CandidateForm({
                     <span className="mr-2 text-xs text-muted">{t(typeLabel(c.type))}</span>
                     <span className="break-all font-mono text-xs">{c.target}</span>
                   </td>
-                  <td className="px-4 py-2 text-xs text-muted">{t(reasonLabels[c.reason])}</td>
+                  <td className="px-4 py-2 text-xs text-muted">
+                    {t(reasonLabels[c.reason])}
+                    {c.no_endpoints && (
+                      <span className="ml-2 rounded bg-warn/12 px-1.5 py-0.5 font-medium text-warn">
+                        {t("discovery.import.noEndpoints")}
+                      </span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap px-4 py-2 text-xs">
                     {monitored ? (
                       <Link href={`/monitors/${c.monitor_id}`} className="hover:underline">

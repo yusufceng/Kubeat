@@ -123,6 +123,11 @@ async function ReadOnlyCandidates({ candidates }: { candidates: Candidate[] }) {
                 <span className="mr-2 text-xs text-muted">{c.kind}</span>
                 {c.name}
                 {c.port > 0 && `:${c.port}`}
+                {c.no_endpoints && (
+                  <span className="ml-2 rounded bg-warn/12 px-1.5 py-0.5 text-xs font-medium text-warn">
+                    {t("discovery.import.noEndpoints")}
+                  </span>
+                )}
               </td>
               <td className="px-4 py-2">
                 <span className="mr-2 text-xs text-muted">{t(typeLabel(c.type))}</span>

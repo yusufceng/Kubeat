@@ -99,7 +99,8 @@ oidc:
   clientSecretSecret:            # optional: a public client uses PKCE alone
     name: ""
     key: client-secret
-  redirectURL: ""                # defaults to https://<route or ingress host>/auth/callback
+  redirectURL: ""                # https://<route or ingress host>/auth/callback; derived from
+                                 # route.host/ingress.host, else from the request at sign-in time
   name: SSO                      # the sign-in button's label
   extraEnv: {}
     # UPTIME_OIDC_SCOPES: "openid profile email groups"

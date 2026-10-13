@@ -75,6 +75,9 @@ type candidateResponse struct {
 	Type      string `json:"type"`
 	Target    string `json:"target"`
 	Reason    string `json:"reason"`
+	// NoEndpoints marks a service whose port routes to nothing ready: a
+	// monitor made from it would open an incident at once.
+	NoEndpoints bool `json:"no_endpoints"`
 	// MonitorID is set when the candidate is already monitored.
 	MonitorID *int64 `json:"monitor_id"`
 }
@@ -125,6 +128,7 @@ func (h *handler) discoveryCandidates(w http.ResponseWriter, r *http.Request) {
 		cr := candidateResponse{
 			Kind: string(c.Kind), Namespace: c.Namespace, Name: c.Name, Port: c.Port,
 			Source: c.Source(), Type: string(c.Type), Target: c.Target, Reason: c.Reason,
+			NoEndpoints: c.NoEndpoints,
 		}
 		if id, ok := bySource[c.Source()]; ok {
 			cr.MonitorID = &id

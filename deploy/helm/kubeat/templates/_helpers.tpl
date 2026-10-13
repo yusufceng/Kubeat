@@ -37,7 +37,5 @@ from the Route or Ingress host.
 https://{{ .Values.route.host }}/auth/callback
 {{- else if and .Values.ingress.enabled .Values.ingress.host -}}
 https://{{ .Values.ingress.host }}/auth/callback
-{{- else -}}
-{{- fail "oidc.redirectURL is required when neither route.host nor ingress.host is set" -}}
 {{- end -}}
 {{- end -}}

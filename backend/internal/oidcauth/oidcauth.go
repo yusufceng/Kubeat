@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -32,7 +33,9 @@ type Config struct {
 	ClientID     string
 	ClientSecret string // empty for a public client; PKCE is always used
 	// RedirectURL is where the provider sends the browser back to: the
-	// frontend's /auth/callback, as registered with the provider.
+	// frontend's /auth/callback, as registered with the provider. Left
+	// empty, each sign-in uses the address the frontend says it is served
+	// at; the provider still only accepts registered ones.
 	RedirectURL string
 	// Scopes are requested in addition to "openid".
 	Scopes []string
@@ -73,8 +76,8 @@ var (
 
 // pending is a sign-in that left for the provider and may come back.
 type pending struct {
-	nonce, verifier string
-	expires         time.Time
+	nonce, verifier, redirect string
+	expires                   time.Time
 }
 
 // Client is an OIDC relying party for one provider.
@@ -94,8 +97,8 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Issuer == "" {
 		return nil, nil
 	}
-	if cfg.ClientID == "" || cfg.RedirectURL == "" {
-		return nil, errors.New("oidc: client id and redirect URL are required")
+	if cfg.ClientID == "" {
+		return nil, errors.New("oidc: a client id is required")
 	}
 	if cfg.UsernameClaim == "" {
 		cfg.UsernameClaim = "preferred_username"
@@ -155,7 +158,7 @@ func (c *Client) discover(ctx context.Context) (*oidc.Provider, error) {
 	return p, nil
 }
 
-func (c *Client) oauthConfig(p *oidc.Provider) oauth2.Config {
+func (c *Client) oauthConfig(p *oidc.Provider, redirect string) oauth2.Config {
 	scopes := []string{oidc.ScopeOpenID}
 	for _, s := range c.cfg.Scopes {
 		if s != "" && s != oidc.ScopeOpenID {
@@ -164,8 +167,27 @@ func (c *Client) oauthConfig(p *oidc.Provider) oauth2.Config {
 	}
 	return oauth2.Config{
 		ClientID: c.cfg.ClientID, ClientSecret: c.cfg.ClientSecret,
-		Endpoint: p.Endpoint(), RedirectURL: c.cfg.RedirectURL, Scopes: scopes,
+		Endpoint: p.Endpoint(), RedirectURL: redirect, Scopes: scopes,
 	}
+}
+
+// resolveRedirect is the redirect of one sign-in: the configured one, or
+// else the caller's, which must be an HTTPS /auth/callback (plain HTTP only
+// on localhost). The provider rejects unregistered ones either way; this
+// only keeps obvious nonsense out of the flow.
+func (c *Client) resolveRedirect(callers string) (string, error) {
+	if c.cfg.RedirectURL != "" {
+		return c.cfg.RedirectURL, nil
+	}
+	u, err := url.Parse(callers)
+	if err != nil || u.Path != "/auth/callback" || u.Host == "" {
+		return "", fmt.Errorf("no redirect URL is configured and %q is not an /auth/callback address", callers)
+	}
+	host := u.Hostname()
+	if u.Scheme != "https" && !(u.Scheme == "http" && (host == "localhost" || host == "127.0.0.1")) {
+		return "", fmt.Errorf("no redirect URL is configured and %q is not HTTPS", callers)
+	}
+	return u.String(), nil
 }
 
 func random() (string, error) {
@@ -177,8 +199,14 @@ func random() (string, error) {
 }
 
 // Start begins a sign-in: it returns the URL to send the browser to and
-// remembers the state the provider will bring back.
-func (c *Client) Start(ctx context.Context) (authURL string, err error) {
+// remembers the state the provider will bring back. callersRedirect is
+// where the frontend says it is served, used when no redirect URL is
+// configured.
+func (c *Client) Start(ctx context.Context, callersRedirect string) (authURL string, err error) {
+	redirect, err := c.resolveRedirect(callersRedirect)
+	if err != nil {
+		return "", err
+	}
 	p, err := c.discover(ctx)
 	if err != nil {
 		return "", err
@@ -200,10 +228,10 @@ func (c *Client) Start(ctx context.Context) (authURL string, err error) {
 			delete(c.pending, s)
 		}
 	}
-	c.pending[state] = pending{nonce: nonce, verifier: verifier, expires: now.Add(c.cfg.StateTTL)}
+	c.pending[state] = pending{nonce: nonce, verifier: verifier, redirect: redirect, expires: now.Add(c.cfg.StateTTL)}
 	c.mu.Unlock()
 
-	conf := c.oauthConfig(p)
+	conf := c.oauthConfig(p, redirect)
 	return conf.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)), nil
 }
 
@@ -222,7 +250,7 @@ func (c *Client) Finish(ctx context.Context, state, code string) (Identity, erro
 	if err != nil {
 		return Identity{}, err
 	}
-	conf := c.oauthConfig(provider)
+	conf := c.oauthConfig(provider, p.redirect)
 	ctx = oidc.ClientContext(ctx, c.client)
 	token, err := conf.Exchange(ctx, code, oauth2.VerifierOption(p.verifier))
 	if err != nil {

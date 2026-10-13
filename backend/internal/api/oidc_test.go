@@ -17,7 +17,7 @@ type fakeOIDC struct {
 
 func (f *fakeOIDC) Issuer() string { return "https://sso.example.com/realms/corp" }
 
-func (f *fakeOIDC) Start(context.Context) (string, error) {
+func (f *fakeOIDC) Start(context.Context, string) (string, error) {
 	return "https://sso.example.com/realms/corp/auth?state=s1", f.err
 }
 

@@ -7,7 +7,8 @@ import { config } from "@/lib/config";
  */
 export async function GET(request: NextRequest) {
   try {
-    const res = await fetch(`${config.backendUrl}/api/v1/auth/oidc/start`, {
+    const callback = new URL("/auth/callback", request.url).toString();
+    const res = await fetch(`${config.backendUrl}/api/v1/auth/oidc/start?redirect=${encodeURIComponent(callback)}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(config.backendTimeoutMs),
     });

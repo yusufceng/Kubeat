@@ -362,8 +362,8 @@ func Load() (Config, error) {
 	if cfg.Language != "en" && cfg.Language != "tr" {
 		return Config{}, fmt.Errorf("UPTIME_LANGUAGE: must be en or tr, got %q", cfg.Language)
 	}
-	if cfg.OIDCIssuer != "" && (cfg.OIDCClientID == "" || cfg.OIDCRedirectURL == "") {
-		return Config{}, fmt.Errorf("UPTIME_OIDC_ISSUER is set: UPTIME_OIDC_CLIENT_ID and UPTIME_OIDC_REDIRECT_URL are required with it")
+	if cfg.OIDCIssuer != "" && cfg.OIDCClientID == "" {
+		return Config{}, fmt.Errorf("UPTIME_OIDC_ISSUER is set: UPTIME_OIDC_CLIENT_ID is required with it")
 	}
 	switch cfg.LDAPDefaultRole {
 	case "", "admin", "editor", "viewer":

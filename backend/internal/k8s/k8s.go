@@ -12,6 +12,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,6 +52,9 @@ type Candidate struct {
 	// Annotations are those of the cluster object, for the ones Kubeat
 	// understands (see the discovery package).
 	Annotations map[string]string
+	// NoEndpoints is set on a Service candidate whose service has no ready
+	// endpoint: a monitor made from it would go straight into an outage.
+	NoEndpoints bool
 	// Type and Target are the check proposed for it.
 	Type   store.MonitorType
 	Target string
@@ -252,6 +256,10 @@ func (c *Client) serviceCandidates(ctx context.Context, namespace string) ([]Can
 	if err != nil {
 		return nil, fmt.Errorf("list pods: %w", err)
 	}
+	ready, err := c.readyEndpoints(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
 
 	var out []Candidate
 	for _, svc := range services.Items {
@@ -268,6 +276,7 @@ func (c *Client) serviceCandidates(ctx context.Context, namespace string) ([]Can
 			cand := Candidate{
 				Kind: KindService, Namespace: svc.Namespace, Name: svc.Name, Port: port.Port, PortName: port.Name,
 				Annotations: svc.Annotations,
+				NoEndpoints: ready[svc.Name] == 0,
 				Type:        store.MonitorTCP,
 				Target:      fmt.Sprintf("%s:%d", host, port.Port),
 				Reason:      ReasonTCPFallback,
@@ -288,6 +297,28 @@ func (c *Client) serviceCandidates(ctx context.Context, namespace string) ([]Can
 		}
 	}
 	return out, nil
+}
+
+// readyEndpoints counts, per service of the namespace, the ready endpoints
+// of its EndpointSlices: what the service would actually route to.
+func (c *Client) readyEndpoints(ctx context.Context, namespace string) (map[string]int, error) {
+	slices, err := c.core.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list endpointslices: %w", err)
+	}
+	ready := make(map[string]int)
+	for _, slice := range slices.Items {
+		name := slice.Labels[discoveryv1.LabelServiceName]
+		if name == "" {
+			continue
+		}
+		for _, ep := range slice.Endpoints {
+			if len(ep.Addresses) > 0 && (ep.Conditions.Ready == nil || *ep.Conditions.Ready) {
+				ready[name]++
+			}
+		}
+	}
+	return ready, nil
 }
 
 // podsFor returns the pods a service selects.

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -339,5 +340,33 @@ func TestRestrictedToNamespaces(t *testing.T) {
 	}
 	if _, err := c.Candidates(context.Background(), "other"); !errors.Is(err, ErrOutOfScope) {
 		t.Errorf("another namespace: err = %v, want ErrOutOfScope", err)
+	}
+}
+
+func TestServiceCandidatesMarkEmptyServices(t *testing.T) {
+	ready, notReady := true, false
+	core := fake.NewSimpleClientset(
+		service("api", map[string]string{"app": "api"}, corev1.ServicePort{Name: "web", Port: 80}),
+		service("empty", map[string]string{"app": "empty"}, corev1.ServicePort{Port: 81}),
+		service("unready", map[string]string{"app": "unready"}, corev1.ServicePort{Port: 82}),
+		&discoveryv1.EndpointSlice{
+			ObjectMeta:  metav1.ObjectMeta{Namespace: "shop", Name: "api-1", Labels: map[string]string{discoveryv1.LabelServiceName: "api"}},
+			AddressType: discoveryv1.AddressTypeIPv4,
+			Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}, Conditions: discoveryv1.EndpointConditions{Ready: &ready}}},
+		},
+		&discoveryv1.EndpointSlice{
+			ObjectMeta:  metav1.ObjectMeta{Namespace: "shop", Name: "unready-1", Labels: map[string]string{discoveryv1.LabelServiceName: "unready"}},
+			AddressType: discoveryv1.AddressTypeIPv4,
+			Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.2"}, Conditions: discoveryv1.EndpointConditions{Ready: &notReady}}},
+		},
+	)
+	got, err := NewClient(core, newDynamic(), "test").Candidates(context.Background(), "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for source, want := range map[string]bool{"service/api:80": false, "service/empty:81": true, "service/unready:82": true} {
+		if c := find(t, got, source); c.NoEndpoints != want {
+			t.Errorf("%s: NoEndpoints = %v, want %v", source, c.NoEndpoints, want)
+		}
 	}
 }

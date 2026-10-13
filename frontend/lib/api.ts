@@ -473,6 +473,8 @@ export type Candidate = {
   type: MonitorType;
   target: string;
   reason: "readiness-probe" | "liveness-probe" | "tcp-fallback" | "route-host" | "ingress-rule" | "workload";
+  /** A service whose port routes to nothing ready; a monitor would fail at once. */
+  no_endpoints: boolean;
   /** Set when the candidate is already monitored. */
   monitor_id: number | null;
 };

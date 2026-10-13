@@ -118,7 +118,7 @@ func newClient(t *testing.T, f *fakeProvider) *Client {
 // will see, as the browser would carry them.
 func begin(t *testing.T, c *Client, f *fakeProvider) string {
 	t.Helper()
-	authURL, err := c.Start(context.Background())
+	authURL, err := c.Start(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestProviderAwayAtStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Start(context.Background()); !errors.Is(err, ErrUnavailable) {
+	if _, err := c.Start(context.Background(), ""); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("err = %v, want ErrUnavailable", err)
 	}
 	if c, err := New(Config{}); c != nil || err != nil {
@@ -226,5 +226,48 @@ func TestSameGroup(t *testing.T) {
 	}
 	if SameGroup("platform-admins", "platform-admins-2") {
 		t.Error("different groups matched")
+	}
+}
+
+func TestRedirectFromTheCaller(t *testing.T) {
+	f := newFakeProvider(t)
+	c, err := New(Config{Issuer: f.srv.URL, ClientID: "kubeat", Scopes: []string{"profile"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Without a configured redirect, the caller's HTTPS /auth/callback is used.
+	authURL, err := c.Start(context.Background(), "https://kubeat.apps.example/auth/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(authURL)
+	if got := u.Query().Get("redirect_uri"); got != "https://kubeat.apps.example/auth/callback" {
+		t.Errorf("redirect_uri = %q", got)
+	}
+	// ...and the exchange sends the same one back.
+	f.nonce = u.Query().Get("nonce")
+	if _, err := c.Finish(context.Background(), u.Query().Get("state"), "good-code"); err != nil {
+		t.Fatal(err)
+	}
+	if f.gotRedirect != "https://kubeat.apps.example/auth/callback" {
+		t.Errorf("token request redirect = %q", f.gotRedirect)
+	}
+	for _, bad := range []string{"", "http://kubeat.apps.example/auth/callback", "https://kubeat.apps.example/elsewhere", "https://x/auth/callback/../admin"} {
+		if _, err := c.Start(context.Background(), bad); err == nil {
+			t.Errorf("caller redirect %q was accepted", bad)
+		}
+	}
+	if _, err := c.Start(context.Background(), "http://localhost:3000/auth/callback"); err != nil {
+		t.Errorf("localhost over http: %v", err)
+	}
+	// A configured redirect wins over whatever the caller says.
+	fixed := newClient(t, f)
+	authURL, err = fixed.Start(context.Background(), "https://evil.example/auth/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ = url.Parse(authURL)
+	if got := u.Query().Get("redirect_uri"); got != "https://kubeat.example/auth/callback" {
+		t.Errorf("configured redirect was not used: %q", got)
 	}
 }
