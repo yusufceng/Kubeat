@@ -301,15 +301,42 @@ type Channel struct {
 	// target: a bot token, a routing key, an access token.
 	Secret string
 	// Namespaces limits the channel to the monitors of these namespaces;
-	// empty means every monitor.
+	// empty means every monitor. Tags narrows that further to monitors
+	// carrying at least one of them; empty means any.
 	Namespaces []string
-	Enabled    bool
-	CreatedAt  time.Time
+	Tags       []string
+	// Events limits what the channel hears about, from ChannelEvents;
+	// empty means everything.
+	Events    []string
+	Enabled   bool
+	CreatedAt time.Time
 }
+
+// ChannelEvents are the kinds of notification a channel can be limited to:
+// an outage opening, an outage ending, the reminders while it lasts, and
+// the certificate warnings.
+var ChannelEvents = []string{"down", "up", "reminder", "cert"}
 
 // Covers reports whether notifications about the monitor go to the channel.
 func (c Channel) Covers(m Monitor) bool {
-	return len(c.Namespaces) == 0 || slices.Contains(c.Namespaces, m.Namespace)
+	if len(c.Namespaces) > 0 && !slices.Contains(c.Namespaces, m.Namespace) {
+		return false
+	}
+	if len(c.Tags) == 0 {
+		return true
+	}
+	for _, tag := range m.Tags {
+		if slices.Contains(c.Tags, tag) {
+			return true
+		}
+	}
+	return false
+}
+
+// Wants reports whether the channel hears about this kind of event (one of
+// ChannelEvents); an empty kind, such as a test, always passes.
+func (c Channel) Wants(kind string) bool {
+	return kind == "" || len(c.Events) == 0 || slices.Contains(c.Events, kind)
 }
 
 // RollupBucket is the size of a stored summary bucket.

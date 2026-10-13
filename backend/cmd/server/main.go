@@ -106,6 +106,7 @@ func main() {
 		Attempts:          cfg.NotifyAttempts,
 		RetryDelay:        cfg.NotifyRetryDelay,
 		SendTimeout:       cfg.NotifyTimeout,
+		GroupWait:         cfg.NotifyGroupWait,
 		Metrics:           meter,
 		Logger:            logger,
 	})

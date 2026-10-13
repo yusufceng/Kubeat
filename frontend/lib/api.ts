@@ -1,4 +1,5 @@
 import "server-only";
+import type { ChannelEvent } from "@/lib/channel-types";
 
 import { config } from "@/lib/config";
 import { sessionToken } from "@/lib/session";
@@ -173,6 +174,10 @@ export type Channel = {
   has_secret: boolean;
   /** The namespaces whose monitors it hears about; empty for all of them. */
   namespaces: string[];
+  /** Narrows that to monitors carrying one of these tags; empty for any. */
+  tags: string[];
+  /** The kinds of event it hears about; empty for all of them. */
+  events: ChannelEvent[];
   enabled: boolean;
   created_at: string;
 };
@@ -185,7 +190,15 @@ export type ChannelSettings = {
   /** Sent as the mask, it keeps the stored secret. */
   secret: string;
   namespaces: string[];
+  tags: string[];
+  events: ChannelEvent[];
 };
+
+/** A channel that hears about a monitor; nothing a reader should not see. */
+export type { ChannelEvent };
+export type MonitorChannel = { id: number; name: string; type: ChannelType; events: ChannelEvent[] };
+
+export const getMonitorChannels = (id: number) => request<MonitorChannel[]>(`/monitors/${id}/channels`);
 
 export type ChannelTest = { delivered: boolean; error?: string };
 

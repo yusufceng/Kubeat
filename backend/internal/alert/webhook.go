@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
@@ -70,8 +71,72 @@ func target(m store.Monitor) string {
 	return " (" + m.Target + ")"
 }
 
+// maxGroupNamed bounds how many monitors a grouped message names.
+const maxGroupNamed = 10
+
+// groupDetail is what a grouped message says about one of its monitors.
+func groupDetail(n Notification) string {
+	switch n.Event {
+	case EventDown:
+		return n.Incident.Cause
+	case EventUp:
+		return n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second).String()
+	case EventReminder:
+		return n.At.Sub(n.Incident.StartedAt).Round(time.Second).String()
+	case EventCertExpiring, EventCertRenewed:
+		return n.CertExpiresAt.Format("2006-01-02")
+	}
+	return ""
+}
+
+// groupList names the monitors of a group with their details, up to
+// maxGroupNamed of them.
+func groupList(n Notification) string {
+	items := make([]string, 0, len(n.Group))
+	for i, g := range n.Group {
+		if i == maxGroupNamed {
+			items = append(items, fmt.Sprintf("ve %d monitor daha", len(n.Group)-maxGroupNamed))
+			break
+		}
+		if detail := groupDetail(g); detail != "" {
+			items = append(items, fmt.Sprintf("%s (%s)", g.Monitor.Name, detail))
+		} else {
+			items = append(items, g.Monitor.Name)
+		}
+	}
+	return strings.Join(items, ", ")
+}
+
+// groupWhere is the namespace prefix of a grouped message.
+func groupWhere(n Notification) string {
+	if n.Monitor.Namespace == "" {
+		return ""
+	}
+	return n.Monitor.Namespace + ": "
+}
+
+func groupText(n Notification) string {
+	count, where, list := len(n.Group), groupWhere(n), groupList(n)
+	switch n.Event {
+	case EventDown:
+		return fmt.Sprintf("🔴 %s%d monitor erişilemiyor: %s", where, count, list)
+	case EventUp:
+		return fmt.Sprintf("🟢 %s%d monitor tekrar çalışıyor: %s", where, count, list)
+	case EventReminder:
+		return fmt.Sprintf("🔴 %s%d monitor hâlâ erişilemiyor: %s", where, count, list)
+	case EventCertExpiring:
+		return fmt.Sprintf("🟡 %s%d sertifikanın süresi bitiyor: %s", where, count, list)
+	case EventCertRenewed:
+		return fmt.Sprintf("🟢 %s%d sertifika yenilendi: %s", where, count, list)
+	}
+	return ""
+}
+
 // Text is the one-line human-readable form of a notification.
 func Text(n Notification) string {
+	if len(n.Group) > 1 {
+		return groupText(n)
+	}
 	switch n.Event {
 	case EventDown:
 		return fmt.Sprintf("🔴 %s erişilemiyor%s. Art arda %d kontrol başarısız. Son hata: %s",

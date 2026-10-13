@@ -5,6 +5,7 @@ package alert
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -35,6 +36,30 @@ type Notification struct {
 	CertExpiresAt time.Time
 	// At is the moment a reminder refers to.
 	At time.Time
+	// Group holds the notifications a grouped one stands for: several
+	// monitors of one namespace with the same event within GroupWait.
+	// Monitor and Incident are then those of the first. Empty for a
+	// notification about one monitor.
+	Group []Notification
+}
+
+// Kind is the channel-facing class of an event (store.ChannelEvents): the
+// two certificate events are one kind, a test is none.
+func (e Event) Kind() string {
+	switch e {
+	case EventDown, EventUp, EventReminder:
+		return string(e)
+	case EventCertExpiring, EventCertRenewed:
+		return "cert"
+	}
+	return ""
+}
+
+// machine says whether a channel type is read by software rather than by
+// people: such channels get every notification on its own, never grouped,
+// so that their consumers keep one record per incident.
+func machine(t store.ChannelType) bool {
+	return t == store.ChannelWebhook || t == store.ChannelPagerDuty
 }
 
 // Store is the part of the persistence layer the engine needs.
@@ -74,6 +99,11 @@ type Options struct {
 	Attempts    int
 	RetryDelay  time.Duration
 	SendTimeout time.Duration
+	// GroupWait is how long a notification waits for others of the same
+	// event in the same namespace, so that an outage of many monitors is
+	// one message to people rather than one per monitor; zero sends each
+	// at once. Channels read by software are never grouped.
+	GroupWait time.Duration
 	// Metrics may be nil.
 	Metrics *metrics.Metrics
 	Logger  *slog.Logger
@@ -295,22 +325,123 @@ func (e *Engine) enqueue(n Notification) {
 	}
 }
 
+// groupKey is what notifications are grouped by: the same event in the
+// same namespace.
+type groupKey struct {
+	event     Event
+	namespace string
+}
+
+// pendingGroup is a group waiting for GroupWait to pass since its first
+// notification.
+type pendingGroup struct {
+	notes []Notification
+	due   time.Time
+}
+
 // Run delivers queued notifications until ctx is cancelled, then delivers
-// what is still queued (without retries) and returns.
+// what is still queued (without retries) and returns. With GroupWait set,
+// notifications are held for that long and delivered together with the
+// others of their group.
 func (e *Engine) Run(ctx context.Context) {
+	groups := make(map[groupKey]*pendingGroup)
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	// rearm sets the timer for the group due first.
+	rearm := func() {
+		timer.Stop()
+		var next time.Time
+		for _, g := range groups {
+			if next.IsZero() || g.due.Before(next) {
+				next = g.due
+			}
+		}
+		if !next.IsZero() {
+			timer.Reset(max(time.Until(next), 0))
+		}
+	}
+	add := func(n Notification) {
+		if e.opts.GroupWait <= 0 || n.Event == EventTest {
+			e.deliver(ctx, n)
+			return
+		}
+		key := groupKey{n.Event, n.Monitor.Namespace}
+		g, ok := groups[key]
+		if !ok {
+			g = &pendingGroup{due: time.Now().Add(e.opts.GroupWait)}
+			groups[key] = g
+		}
+		g.notes = append(g.notes, n)
+	}
+	flushDue := func(now time.Time) {
+		for key, g := range groups {
+			if g.due.After(now) {
+				continue
+			}
+			delete(groups, key)
+			e.deliverGroup(ctx, key.event, g.notes)
+		}
+	}
+
 	for {
 		select {
 		case n := <-e.queue:
-			e.deliver(ctx, n)
+			add(n)
+			rearm()
+		case <-timer.C:
+			flushDue(time.Now())
+			rearm()
 		case <-ctx.Done():
+			timer.Stop()
 			for {
 				select {
 				case n := <-e.queue:
-					e.deliver(ctx, n)
+					add(n)
 				default:
+					// Shutting down: what is waiting goes now.
+					for key, g := range groups {
+						delete(groups, key)
+						e.deliverGroup(ctx, key.event, g.notes)
+					}
 					return
 				}
 			}
+		}
+	}
+}
+
+// deliverGroup sends the notifications of one group: as one message to
+// the channels people read, when more than one of them is for that
+// channel, and one by one to the others.
+func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notification) {
+	if len(notes) == 1 {
+		e.deliver(ctx, notes[0])
+		return
+	}
+	channels, err := e.store.ListChannels(context.WithoutCancel(ctx))
+	if err != nil {
+		e.opts.Logger.Error("list channels failed, notifications lost", "event", event, "count", len(notes), "error", err)
+		return
+	}
+	for _, ch := range channels {
+		if !ch.Enabled || !ch.Wants(event.Kind()) {
+			continue
+		}
+		var mine []Notification
+		for _, n := range notes {
+			if ch.Covers(n.Monitor) {
+				mine = append(mine, n)
+			}
+		}
+		switch {
+		case len(mine) == 0:
+		case len(mine) == 1 || machine(ch.Type):
+			for _, n := range mine {
+				e.send(ctx, ch, n)
+			}
+		default:
+			first := mine[0]
+			e.send(ctx, ch, Notification{Event: event, Monitor: first.Monitor, Incident: first.Incident, CertExpiresAt: first.CertExpiresAt, At: first.At, Group: mine})
 		}
 	}
 }
@@ -323,17 +454,27 @@ func (e *Engine) deliver(ctx context.Context, n Notification) {
 		return
 	}
 	for _, ch := range channels {
-		if !ch.Enabled || !ch.Covers(n.Monitor) {
+		if !ch.Enabled || !ch.Covers(n.Monitor) || !ch.Wants(n.Event.Kind()) {
 			continue
 		}
-		err := e.sendWithRetry(ctx, ch, n)
-		e.opts.Metrics.Notification(string(ch.Type), string(n.Event), err == nil)
-		if err != nil {
-			e.opts.Logger.Error("notification failed", "channel", ch.Name, "event", n.Event, "monitor", n.Monitor.Name, "error", err)
-			continue
-		}
-		e.opts.Logger.Info("notification sent", "channel", ch.Name, "event", n.Event, "monitor", n.Monitor.Name)
+		e.send(ctx, ch, n)
 	}
+}
+
+// send delivers one notification (single or grouped) to one channel, with
+// retries, and records the outcome.
+func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
+	err := e.sendWithRetry(ctx, ch, n)
+	e.opts.Metrics.Notification(string(ch.Type), string(n.Event), err == nil)
+	what := n.Monitor.Name
+	if len(n.Group) > 1 {
+		what = fmt.Sprintf("%d monitors", len(n.Group))
+	}
+	if err != nil {
+		e.opts.Logger.Error("notification failed", "channel", ch.Name, "event", n.Event, "monitor", what, "error", err)
+		return
+	}
+	e.opts.Logger.Info("notification sent", "channel", ch.Name, "event", n.Event, "monitor", what)
 }
 
 func (e *Engine) sendWithRetry(ctx context.Context, ch store.Channel, n Notification) error {

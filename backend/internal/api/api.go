@@ -155,7 +155,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 18
+const Revision = 19
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -187,6 +187,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/monitors/{id}/series", h.monitorSeries)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/uptime", h.monitorUptime)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/workload", h.monitorWorkload)
+	mux.HandleFunc("GET /api/v1/monitors/{id}/channels", h.monitorChannels)
 	mux.HandleFunc("GET /api/v1/discovery", h.discoveryStatus)
 	mux.HandleFunc("GET /api/v1/discovery/namespaces", h.discoveryNamespaces)
 	mux.HandleFunc("GET /api/v1/discovery/candidates", h.discoveryCandidates)

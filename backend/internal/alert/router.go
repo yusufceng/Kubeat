@@ -55,10 +55,21 @@ type Fact struct {
 	Label, Value string
 }
 
-// Facts lists the details of a notification; none for a test.
+// Facts lists the details of a notification; none for a test. A grouped
+// notification lists its monitors instead.
 func Facts(n Notification) []Fact {
 	if n.Event == EventTest {
 		return nil
+	}
+	if len(n.Group) > 1 {
+		var facts []Fact
+		if n.Monitor.Namespace != "" {
+			facts = append(facts, Fact{"Namespace", n.Monitor.Namespace})
+		}
+		for _, g := range n.Group {
+			facts = append(facts, Fact{g.Monitor.Name, groupDetail(g)})
+		}
+		return facts
 	}
 	facts := []Fact{{"Monitor", n.Monitor.Name}}
 	if n.Monitor.Target != "" { // a push monitor has none
@@ -79,6 +90,21 @@ func Facts(n Notification) []Fact {
 
 // Subject is a short line for channels that have one.
 func Subject(n Notification) string {
+	if len(n.Group) > 1 {
+		count, where := len(n.Group), groupWhere(n)
+		switch n.Event {
+		case EventDown:
+			return fmt.Sprintf("[Kubeat] %s%d monitor erişilemiyor", where, count)
+		case EventUp:
+			return fmt.Sprintf("[Kubeat] %s%d monitor tekrar çalışıyor", where, count)
+		case EventReminder:
+			return fmt.Sprintf("[Kubeat] %s%d monitor hâlâ erişilemiyor", where, count)
+		case EventCertExpiring:
+			return fmt.Sprintf("[Kubeat] %s%d sertifikanın süresi bitiyor", where, count)
+		case EventCertRenewed:
+			return fmt.Sprintf("[Kubeat] %s%d sertifika yenilendi", where, count)
+		}
+	}
 	switch n.Event {
 	case EventDown:
 		return fmt.Sprintf("[Kubeat] %s erişilemiyor", n.Monitor.Name)

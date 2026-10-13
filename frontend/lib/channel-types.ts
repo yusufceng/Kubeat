@@ -3,6 +3,16 @@ import type { ChannelType } from "@/lib/api";
 /** One input of a channel's form. */
 type FieldSpec = { label: string; placeholder: string; hint?: string };
 
+/** The kinds of event a channel can be limited to. */
+export type ChannelEvent = "down" | "up" | "reminder" | "cert";
+
+export const channelEventLabels: Record<ChannelEvent, string> = {
+  down: "Kesinti",
+  up: "Düzelme",
+  reminder: "Hatırlatma",
+  cert: "Sertifika",
+};
+
 /** How a channel type is named and what it needs to be told. */
 export type ChannelTypeInfo = {
   label: string;

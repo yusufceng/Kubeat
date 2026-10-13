@@ -316,6 +316,7 @@ eklenmelidir.
 | `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş |
 | `GET` | `/api/v1/monitors/{id}/uptime?windows=24h,168h` | İstenen her dönem için uptime |
 | `GET` | `/api/v1/monitors/{id}/workload` | Monitor'un arkasındaki pod'lar; hazır olma, restart, CPU ve bellek |
+| `GET` | `/api/v1/monitors/{id}/channels` | Monitor'un alarmının gittiği etkin kanallar |
 | `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
 | `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
@@ -852,9 +853,30 @@ Her kanal durdurulabilir, düzenlenebilir ve test edilebilir (`PATCH
 /api/v1/channels/{id}`, `POST .../test`). Başarısız bir test, sağlayıcının
 verdiği yanıtı gösterir.
 
-**Kapsam.** `namespaces` verilen bir kanal yalnızca o namespace'lerdeki
-monitor'ların bildirimlerini alır; boşsa hepsini alır. Böylece her ekibe kendi
-namespace'inin alarmları gider, ortak bir kanal da her şeyi görür.
+**Kapsam.** Üç süzgeç birlikte uygulanır, hepsi isteğe bağlıdır:
+
+- `namespaces`: yalnızca o namespace'lerdeki monitor'lar; boşsa hepsi. Her
+  ekibe kendi namespace'inin alarmları gider, ortak bir kanal her şeyi görür.
+- `tags`: yalnızca bu etiketlerden birini taşıyan monitor'lar; boşsa hepsi.
+  Monitor başına yönlendirme böyle yapılır: PagerDuty kanalına `pager`
+  etiketi verilir, yalnızca `pager` etiketli monitor'lar gece uyandırır.
+- `events`: `down`, `up`, `reminder`, `cert` alt kümesi; boşsa hepsi.
+  PagerDuty için `down` ve `up`, sohbet kanalı için hepsi gibi.
+
+Monitor sayfası, o monitor'un alarmının hangi kanallara gittiğini yazar
+(`GET /api/v1/monitors/{id}/channels`); kapsamı tutan etkin kanal yoksa
+sayfa bunu uyarı olarak gösterir — kimsenin duymayacağı bir monitor
+olmasın.
+
+**Gruplama.** Aynı namespace'te aynı türden olaylar
+`UPTIME_NOTIFY_GROUP_WAIT` (30 sn) içinde art arda açılırsa, insanların
+okuduğu kanallara (Slack, Teams, Discord, Mattermost, Google Chat, Telegram,
+ntfy, Gotify, e-posta) **tek mesaj** gider: "shop: 5 monitor erişilemiyor:
+odeme-api (unexpected status 503), …". Bir namespace'in tamamı düştüğünde
+30 ayrı mesaj yerine bir mesaj okunur; düzelme ve hatırlatmalar da aynı
+şekilde gruplanır. Yazılımın okuduğu kanallar (`webhook`, `pagerduty`)
+hiçbir zaman gruplanmaz: her olay kendi kaydıyla, PagerDuty'de kendi
+alarmıyla gider. `0` gruplamayı kapatır.
 
 **Gizli değerler.** URL'ler API yanıtlarında maskelenir (`https://host/…`),
 `secret` ise hiç dönmez; yalnızca `has_secret` bilgisi verilir. Güncellemede
@@ -942,6 +964,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |
 | `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Gönderilmeyi bekleyebilecek en fazla bildirim sayısı |
+| `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |
 | `UPTIME_DISCOVERY_ENABLED` | `true` | Cluster keşfini açar |
 | `UPTIME_DISCOVERY_SYNC_INTERVAL` | `1m` | `kubeat.io/monitor` annotation'lı nesnelerin ne sıklıkta okunup monitor'larının eşitleneceği; `0` kapalı |
 | `UPTIME_DISCOVERY_DEFAULT_INTERVAL` | `30s` | Annotation'la oluşturulan monitor'un, nesne belirtmediyse kontrol aralığı |

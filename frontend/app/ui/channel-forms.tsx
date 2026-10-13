@@ -9,7 +9,7 @@ import {
   testChannelAction,
 } from "@/app/actions";
 import type { Channel, ChannelType } from "@/lib/api";
-import { channelTypeOrder, channelTypes } from "@/lib/channel-types";
+import { type ChannelEvent, channelEventLabels, channelTypeOrder, channelTypes } from "@/lib/channel-types";
 import { MASKED_VALUE } from "@/lib/constants";
 import { EditIcon, PauseIcon, PlayIcon, TrashIcon } from "@/app/ui/icons";
 
@@ -147,6 +147,40 @@ export function ChannelForm({
         )}
       </fieldset>
 
+      <label className="sm:col-span-3">
+        <span className="mb-1 block text-xs font-medium text-muted">Etiketler (isteğe bağlı)</span>
+        <input
+          name="tags"
+          defaultValue={channel?.tags.join(", ")}
+          placeholder="pager, kritik"
+          className="field"
+        />
+        <span className="mt-1 block text-xs text-muted">
+          Virgülle ayırın. Verilirse yalnızca bu etiketlerden birini taşıyan monitor&apos;lar; monitor başına
+          yönlendirme böyle yapılır.
+        </span>
+      </label>
+      <fieldset className="sm:col-span-3">
+        <legend className="mb-1 text-xs font-medium text-muted">Olaylar</legend>
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+          {(Object.keys(channelEventLabels) as ChannelEvent[]).map((event) => (
+            <label key={event} className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                name="event"
+                value={event}
+                defaultChecked={!channel || channel.events.length === 0 || channel.events.includes(event)}
+                className="h-4 w-4 accent-(--accent)"
+              />
+              {channelEventLabels[event]}
+            </label>
+          ))}
+        </div>
+        <span className="mt-1 block text-xs text-muted">
+          Örneğin PagerDuty yalnızca kesinti ve düzelme, sohbet kanalı hepsi.
+        </span>
+      </fieldset>
+
       <div className="flex flex-wrap items-center gap-3 sm:col-span-6">
         <button type="submit" disabled={pending} className="btn btn-primary">
           {pending ? "Kaydediliyor…" : channel ? "Kaydet" : "Kanalı ekle"}
@@ -186,6 +220,8 @@ export function ChannelRow({ channel, namespaces }: { channel: Channel; namespac
           <div className="mt-0.5 truncate text-xs text-muted">
             {channel.target && <span className="font-mono">{channel.target} · </span>}
             {channel.namespaces.length === 0 ? "tüm monitor'lar" : `yalnızca ${channel.namespaces.join(", ")}`}
+            {channel.tags.length > 0 && ` · etiket: ${channel.tags.join(", ")}`}
+            {channel.events.length > 0 && ` · ${channel.events.map((e) => channelEventLabels[e].toLowerCase()).join(", ")}`}
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">

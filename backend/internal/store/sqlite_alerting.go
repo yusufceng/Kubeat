@@ -124,7 +124,7 @@ func (s *SQLite) ListIncidents(ctx context.Context, monitorID int64, limit int) 
 	return incidents, nil
 }
 
-const channelColumns = "id, name, type, target, secret, namespaces, enabled, created_at"
+const channelColumns = "id, name, type, target, secret, namespaces, enabled, created_at, tags, events"
 
 // scanChannel reads a channel and decrypts its target and secret.
 func (s *SQLite) scanChannel(row rowScanner) (Channel, error) {
@@ -153,15 +153,21 @@ func (s *SQLite) sealChannel(c Channel) (target, secret string, err error) {
 
 func scanRawChannel(row rowScanner) (Channel, error) {
 	var (
-		c          Channel
-		namespaces string
-		createdAt  int64
-		err        error
+		c                        Channel
+		namespaces, tags, events string
+		createdAt                int64
+		err                      error
 	)
-	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Secret, &namespaces, &c.Enabled, &createdAt); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Secret, &namespaces, &c.Enabled, &createdAt, &tags, &events); err != nil {
 		return Channel{}, err
 	}
 	if c.Namespaces, err = decodeNamespaces(namespaces); err != nil {
+		return Channel{}, fmt.Errorf("channel %d: %w", c.ID, err)
+	}
+	if c.Tags, err = decodeNamespaces(tags); err != nil {
+		return Channel{}, fmt.Errorf("channel %d: %w", c.ID, err)
+	}
+	if c.Events, err = decodeNamespaces(events); err != nil {
 		return Channel{}, fmt.Errorf("channel %d: %w", c.ID, err)
 	}
 	c.CreatedAt = time.UnixMilli(createdAt).UTC()
@@ -193,12 +199,18 @@ func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) 
 	if !slices.Contains(ChannelTypes, c.Type) {
 		return Channel{}, fmt.Errorf("create channel: unknown type %q", c.Type)
 	}
-	namespaces, err := encodeNamespaces(c.Namespaces)
+	namespaces, tags, events, err := encodeChannelLists(c)
 	if err != nil {
 		return Channel{}, fmt.Errorf("create channel: %w", err)
 	}
 	if len(c.Namespaces) == 0 {
 		c.Namespaces = nil
+	}
+	if len(c.Tags) == 0 {
+		c.Tags = nil
+	}
+	if len(c.Events) == 0 {
+		c.Events = nil
 	}
 	target, secret, err := s.sealChannel(c)
 	if err != nil {
@@ -206,8 +218,8 @@ func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) 
 	}
 	c.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
 	res, err := s.write.ExecContext(ctx,
-		"INSERT INTO notification_channels (name, type, target, secret, namespaces, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		c.Name, c.Type, target, secret, namespaces, c.Enabled, c.CreatedAt.UnixMilli())
+		"INSERT INTO notification_channels (name, type, target, secret, namespaces, enabled, created_at, tags, events) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		c.Name, c.Type, target, secret, namespaces, c.Enabled, c.CreatedAt.UnixMilli(), tags, events)
 	if isUniqueViolation(err) {
 		return Channel{}, ErrConflict
 	}
@@ -220,8 +232,20 @@ func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) 
 	return c, nil
 }
 
+// encodeChannelLists is the stored form of a channel's scope lists.
+func encodeChannelLists(c Channel) (namespaces, tags, events string, err error) {
+	if namespaces, err = encodeNamespaces(c.Namespaces); err != nil {
+		return "", "", "", err
+	}
+	if tags, err = encodeNamespaces(c.Tags); err != nil {
+		return "", "", "", err
+	}
+	events, err = encodeNamespaces(c.Events)
+	return namespaces, tags, events, err
+}
+
 func (s *SQLite) UpdateChannel(ctx context.Context, c Channel) (Channel, error) {
-	namespaces, err := encodeNamespaces(c.Namespaces)
+	namespaces, tags, events, err := encodeChannelLists(c)
 	if err != nil {
 		return Channel{}, fmt.Errorf("update channel: %w", err)
 	}
@@ -230,8 +254,8 @@ func (s *SQLite) UpdateChannel(ctx context.Context, c Channel) (Channel, error) 
 		return Channel{}, fmt.Errorf("update channel: %w", err)
 	}
 	res, err := s.write.ExecContext(ctx,
-		"UPDATE notification_channels SET name = ?, target = ?, secret = ?, namespaces = ?, enabled = ? WHERE id = ?",
-		c.Name, target, secret, namespaces, c.Enabled, c.ID)
+		"UPDATE notification_channels SET name = ?, target = ?, secret = ?, namespaces = ?, enabled = ?, tags = ?, events = ? WHERE id = ?",
+		c.Name, target, secret, namespaces, c.Enabled, tags, events, c.ID)
 	if isUniqueViolation(err) {
 		return Channel{}, ErrConflict
 	}

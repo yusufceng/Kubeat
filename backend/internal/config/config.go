@@ -79,6 +79,7 @@ type Config struct {
 	CertWarning             time.Duration // UPTIME_CERT_WARNING
 	ReminderInterval        time.Duration // UPTIME_REMINDER_INTERVAL; 0 = off
 	NotifyQueueSize         int           // UPTIME_NOTIFY_QUEUE_SIZE
+	NotifyGroupWait         time.Duration // UPTIME_NOTIFY_GROUP_WAIT; 0 = no grouping
 	NotifyAttempts          int           // UPTIME_NOTIFY_ATTEMPTS
 	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
 	NotifyTimeout           time.Duration // UPTIME_NOTIFY_TIMEOUT
@@ -290,6 +291,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.WorkloadRolloutGrace, err = envDurationOrZero("UPTIME_WORKLOAD_ROLLOUT_GRACE", 10*time.Minute); err != nil {
+		return Config{}, err
+	}
+	if cfg.NotifyGroupWait, err = envDurationOrZero("UPTIME_NOTIFY_GROUP_WAIT", 30*time.Second); err != nil {
 		return Config{}, err
 	}
 	if cfg.DiscoveryDefaultTimeout >= cfg.DiscoveryDefaultInterval {

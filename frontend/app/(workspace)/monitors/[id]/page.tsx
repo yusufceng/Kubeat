@@ -28,6 +28,7 @@ import { LocalTime } from "@/app/ui/local-time";
 import { SilenceForm } from "@/app/ui/maintenance-forms";
 import { KindChip, monitorLabel } from "@/app/ui/monitor-name";
 import { MonitorActions } from "@/app/ui/monitor-settings";
+import { MonitorChannels } from "@/app/ui/monitor-channels";
 import { PodsPanel } from "@/app/ui/pods-panel";
 import { PushUrl } from "@/app/ui/push-url";
 import { displayState, StatusBadge, StatusPill } from "@/app/ui/status";
@@ -198,6 +199,9 @@ async function MonitorDetail({
             </p>
           )}
           {monitor.target && <p className="mt-1.5 break-all font-mono text-sm text-muted">{monitor.target}</p>}
+          <Suspense>
+            <MonitorChannels monitorId={monitor.id} canEdit={me.can_edit} />
+          </Suspense>
         </div>
         {me.can_edit && <MonitorActions monitor={monitor} />}
       </header>

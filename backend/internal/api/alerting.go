@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,8 +83,11 @@ type channelResponse struct {
 	// never leaves the server.
 	HasSecret bool `json:"has_secret"`
 	// Namespaces limits the channel to the monitors of these namespaces;
-	// empty means every monitor.
+	// empty means every monitor. Tags narrows that to monitors carrying one
+	// of them; Events to the kinds of event (down, up, reminder, cert).
 	Namespaces []string  `json:"namespaces"`
+	Tags       []string  `json:"tags"`
+	Events     []string  `json:"events"`
 	Enabled    bool      `json:"enabled"`
 	CreatedAt  time.Time `json:"created_at"`
 }
@@ -106,14 +110,61 @@ func shownTarget(c store.Channel) string {
 }
 
 func toChannelResponse(c store.Channel) channelResponse {
-	namespaces := c.Namespaces
-	if namespaces == nil {
-		namespaces = []string{}
+	orEmpty := func(list []string) []string {
+		if list == nil {
+			return []string{}
+		}
+		return list
 	}
 	return channelResponse{
 		ID: c.ID, Name: c.Name, Type: string(c.Type), Target: shownTarget(c), HasSecret: c.Secret != "",
-		Namespaces: namespaces, Enabled: c.Enabled, CreatedAt: c.CreatedAt,
+		Namespaces: orEmpty(c.Namespaces), Tags: orEmpty(c.Tags), Events: orEmpty(c.Events), Enabled: c.Enabled, CreatedAt: c.CreatedAt,
 	}
+}
+
+// monitorChannelResponse names a channel that hears about a monitor. It
+// carries nothing a reader of the monitor should not see.
+type monitorChannelResponse struct {
+	ID     int64    `json:"id"`
+	Name   string   `json:"name"`
+	Type   string   `json:"type"`
+	Events []string `json:"events"`
+}
+
+// monitorChannels lists the enabled channels whose scope covers the
+// monitor: where its alerts go.
+func (h *handler) monitorChannels(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	m, err := h.opts.Store.GetMonitor(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(m.Namespace)) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	channels, err := h.opts.Store.ListChannels(r.Context())
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	resp := []monitorChannelResponse{}
+	for _, c := range channels {
+		if !c.Enabled || !c.Covers(m) {
+			continue
+		}
+		events := c.Events
+		if events == nil {
+			events = []string{}
+		}
+		resp = append(resp, monitorChannelResponse{ID: c.ID, Name: c.Name, Type: string(c.Type), Events: events})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *handler) listChannels(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +191,35 @@ type createChannelRequest struct {
 	// Secret is the token or key of the types that have one.
 	Secret     string   `json:"secret"`
 	Namespaces []string `json:"namespaces"`
+	// Tags and Events narrow the channel further; both optional.
+	Tags   []string `json:"tags"`
+	Events []string `json:"events"`
+}
+
+// channelEvents validates the kinds of event a channel is limited to.
+func channelEvents(events []string) ([]string, error) {
+	var out []string
+	for _, e := range events {
+		e = strings.TrimSpace(e)
+		if !slices.Contains(store.ChannelEvents, e) {
+			return nil, fmt.Errorf("events: %q is not one of %s", e, strings.Join(store.ChannelEvents, ", "))
+		}
+		if !slices.Contains(out, e) {
+			out = append(out, e)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// channelTags validates the tags a channel is limited to.
+func channelTags(tags []string) ([]string, error) {
+	out, err := cleanTags(tags)
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return slices.Compact(out), nil
 }
 
 var (
@@ -260,9 +340,19 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		forbidden(w)
 		return
 	}
+	tags, err := channelTags(req.Tags)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	events, err := channelEvents(req.Events)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	c, err := h.opts.Store.CreateChannel(r.Context(), store.Channel{
-		Name: req.Name, Type: typ, Target: target, Secret: secret, Namespaces: namespaces, Enabled: true,
+		Name: req.Name, Type: typ, Target: target, Secret: secret, Namespaces: namespaces, Tags: tags, Events: events, Enabled: true,
 	})
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "a channel with this name already exists")
@@ -284,6 +374,8 @@ type updateChannelRequest struct {
 	Target     *string   `json:"target"`
 	Secret     *string   `json:"secret"`
 	Namespaces *[]string `json:"namespaces"`
+	Tags       *[]string `json:"tags"`
+	Events     *[]string `json:"events"`
 	Enabled    *bool     `json:"enabled"`
 }
 
@@ -334,6 +426,18 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		}
 		if !p.CanEditEach(ch.Namespaces) {
 			forbidden(w)
+			return
+		}
+	}
+	if req.Tags != nil {
+		if ch.Tags, err = channelTags(*req.Tags); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if req.Events != nil {
+		if ch.Events, err = channelEvents(*req.Events); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}

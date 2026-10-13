@@ -1,5 +1,6 @@
 "use server";
 
+import { type ChannelEvent, channelEventLabels } from "@/lib/channel-types";
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import {
@@ -220,7 +221,14 @@ export async function saveChannelAction(formData: FormData): Promise<{ error: st
     target: text("target"),
     secret: text("secret"),
     namespaces: formData.getAll("namespace").map(String),
+    tags: text("tags")
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean),
+    events: formData.getAll("event").map(String) as ChannelEvent[],
   };
+  // Every kind ticked means no limit, so a kind added later is heard too.
+  if (settings.events.length === Object.keys(channelEventLabels).length) settings.events = [];
   try {
     if (id) await updateChannel(id, settings);
     else await createChannel({ ...settings, type: text("type") as ChannelType });
