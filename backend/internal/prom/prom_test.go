@@ -237,3 +237,22 @@ func TestTLSWithCAFile(t *testing.T) {
 		t.Errorf("with verification off: %v", err)
 	}
 }
+
+func TestQueriesNameTheirNamespace(t *testing.T) {
+	// A tenancy-enforcing proxy (OpenShift's thanos-querier on 9092) wants
+	// the namespace as a URL parameter on every query.
+	var seen []string
+	fake := &fakeProm{cpu: map[string]float64{"web-1": 1}, memory: map[string]float64{"web-1": 1}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.Query().Get("namespace"))
+		fake.handler(w, r)
+	}))
+	defer srv.Close()
+
+	if _, err := newClient(t, srv, nil).PodUsage(context.Background(), "shop", []string{"web-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen[0] != "shop" || seen[1] != "shop" {
+		t.Errorf("namespace parameters = %v, want shop on both queries", seen)
+	}
+}

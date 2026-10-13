@@ -146,7 +146,10 @@ func main() {
 	)
 	discoveryStatus := "disabled by UPTIME_DISCOVERY_ENABLED"
 	if cfg.DiscoveryEnabled {
-		client, err := k8s.Connect(k8s.Options{Kubeconfig: cfg.Kubeconfig, Context: cfg.KubeContext, Timeout: cfg.KubeTimeout})
+		client, err := k8s.Connect(k8s.Options{
+			Kubeconfig: cfg.Kubeconfig, Context: cfg.KubeContext, Timeout: cfg.KubeTimeout,
+			Namespaces: splitList(cfg.DiscoveryNamespaces),
+		})
 		if err != nil {
 			discoveryStatus = err.Error()
 			logger.Info("cluster discovery unavailable", "reason", err.Error())

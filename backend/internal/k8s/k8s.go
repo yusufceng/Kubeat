@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -92,7 +93,20 @@ type Client struct {
 	dynamic dynamic.Interface
 	// Mode describes how the client connected, e.g. "in-cluster".
 	Mode string
+	// only, when set, limits the client to these namespaces: for an
+	// installation whose service account was given Roles in them rather
+	// than a ClusterRole.
+	only []string
 }
+
+// Restrict limits the client to the given namespaces; none lifts the limit.
+func (c *Client) Restrict(namespaces []string) {
+	c.only = slices.Clone(namespaces)
+	sort.Strings(c.only)
+}
+
+// ErrOutOfScope means a namespace outside the ones the client is limited to.
+var ErrOutOfScope = errors.New("k8s: the namespace is outside the configured discovery namespaces")
 
 // NewClient wraps existing clientsets; used by tests.
 func NewClient(core kubernetes.Interface, dyn dynamic.Interface, mode string) *Client {
@@ -107,6 +121,9 @@ type Options struct {
 	Kubeconfig string
 	Context    string
 	Timeout    time.Duration
+	// Namespaces limits discovery to these namespaces; empty means the
+	// whole cluster, which needs cluster-wide read access.
+	Namespaces []string
 }
 
 // ErrNotConfigured means there is no cluster to connect to: the process is
@@ -144,11 +161,17 @@ func Connect(opts Options) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("k8s: %w", err)
 	}
-	return &Client{core: core, dynamic: dyn, Mode: mode}, nil
+	client := &Client{core: core, dynamic: dyn, Mode: mode}
+	client.Restrict(opts.Namespaces)
+	return client, nil
 }
 
-// Namespaces lists namespace names in alphabetical order.
+// Namespaces lists namespace names in alphabetical order: the ones the
+// client is limited to, or else every namespace of the cluster.
 func (c *Client) Namespaces(ctx context.Context) ([]string, error) {
+	if len(c.only) > 0 {
+		return slices.Clone(c.only), nil
+	}
 	list, err := c.core.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list namespaces: %w", err)
@@ -163,8 +186,30 @@ func (c *Client) Namespaces(ctx context.Context) ([]string, error) {
 
 // Candidates lists everything monitorable in a namespace: service ports,
 // ingress rules, on OpenShift routes, and the workloads themselves. An
-// empty namespace lists the whole cluster.
+// empty namespace lists everything the client may see: the whole cluster,
+// or the namespaces it is limited to.
 func (c *Client) Candidates(ctx context.Context, namespace string) ([]Candidate, error) {
+	if len(c.only) > 0 {
+		if namespace != "" {
+			if !slices.Contains(c.only, namespace) {
+				return nil, fmt.Errorf("%w: %s", ErrOutOfScope, namespace)
+			}
+			return c.candidates(ctx, namespace)
+		}
+		var all []Candidate
+		for _, ns := range c.only {
+			found, err := c.candidates(ctx, ns)
+			if err != nil {
+				return nil, err
+			}
+			all = append(all, found...)
+		}
+		return all, nil
+	}
+	return c.candidates(ctx, namespace)
+}
+
+func (c *Client) candidates(ctx context.Context, namespace string) ([]Candidate, error) {
 	services, err := c.serviceCandidates(ctx, namespace)
 	if err != nil {
 		return nil, err

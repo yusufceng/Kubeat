@@ -146,6 +146,9 @@ type Config struct {
 	Kubeconfig       string        // UPTIME_KUBECONFIG
 	KubeContext      string        // UPTIME_KUBE_CONTEXT
 	KubeTimeout      time.Duration // UPTIME_KUBE_TIMEOUT
+	// DiscoveryNamespaces limits discovery to these namespaces (comma
+	// separated); empty means the whole cluster.
+	DiscoveryNamespaces string // UPTIME_DISCOVERY_NAMESPACES
 	// The cluster events shown with a monitor's pods: how far back and how
 	// many.
 	EventWindow time.Duration // UPTIME_EVENT_WINDOW
@@ -223,8 +226,9 @@ func Load() (Config, error) {
 		TelegramAPIURL:     envString("UPTIME_TELEGRAM_API_URL", "https://api.telegram.org"),
 		PagerDutyEventsURL: envString("UPTIME_PAGERDUTY_EVENTS_URL", "https://events.pagerduty.com/v2/enqueue"),
 
-		Kubeconfig:  envString("UPTIME_KUBECONFIG", ""),
-		KubeContext: envString("UPTIME_KUBE_CONTEXT", ""),
+		Kubeconfig:          envString("UPTIME_KUBECONFIG", ""),
+		KubeContext:         envString("UPTIME_KUBE_CONTEXT", ""),
+		DiscoveryNamespaces: envString("UPTIME_DISCOVERY_NAMESPACES", ""),
 	}
 
 	durations := []struct {

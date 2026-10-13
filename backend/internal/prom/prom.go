@@ -103,7 +103,28 @@ type tokenTransport struct {
 	tokenFile string
 }
 
+// namespaceKey carries the namespace a query is about to the transport.
+type namespaceKey struct{}
+
+// withNamespace adds the namespace to the request as a URL parameter. A
+// plain Prometheus ignores it; a tenancy-enforcing proxy in front of one
+// (OpenShift's thanos-querier on port 9092) requires it and answers only
+// about that namespace, which lets a service account without cluster-wide
+// monitoring access read its own namespaces.
+func withNamespace(req *http.Request) *http.Request {
+	namespace, _ := req.Context().Value(namespaceKey{}).(string)
+	if namespace == "" {
+		return req
+	}
+	req = req.Clone(req.Context())
+	q := req.URL.Query()
+	q.Set("namespace", namespace)
+	req.URL.RawQuery = q.Encode()
+	return req
+}
+
 func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = withNamespace(req)
 	if t.tokenFile == "" {
 		return t.base.RoundTrip(req)
 	}
@@ -144,7 +165,7 @@ func (c *Client) PodUsage(ctx context.Context, namespace string, pods []string) 
 		placeholderWindow, fmt.Sprintf("%ds", int(c.opts.RateWindow.Seconds())),
 	)
 
-	ctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
+	ctx, cancel := context.WithTimeout(context.WithValue(ctx, namespaceKey{}, namespace), c.opts.Timeout)
 	defer cancel()
 
 	usage := make(map[string]Usage, len(pods))

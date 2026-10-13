@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -307,5 +308,36 @@ func TestCandidatesCarryAnnotationsAcrossNamespaces(t *testing.T) {
 	}
 	if db := find(t, got, "service/db:5432"); db.Namespace != "billing" || len(db.Annotations) != 0 {
 		t.Errorf("db = %+v", db)
+	}
+}
+
+func TestRestrictedToNamespaces(t *testing.T) {
+	billing := &corev1.Service{ObjectMeta: objMeta("billing", "db", nil), Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 5432}}}}
+	other := &corev1.Service{ObjectMeta: objMeta("other", "x", nil), Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 1}}}}
+	core := fake.NewSimpleClientset(service("api", nil, corev1.ServicePort{Port: 80}), billing, other)
+	// Listing namespaces or anything cluster-wide would be forbidden to a
+	// service account that only has Roles: fail the test if it is tried.
+	core.PrependReactor("list", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == "" {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: action.GetResource().Resource}, "", nil)
+		}
+		return false, nil, nil
+	})
+	c := NewClient(core, newDynamic(), "test")
+	c.Restrict([]string{"shop", "billing"})
+
+	namespaces, err := c.Namespaces(context.Background())
+	if err != nil || len(namespaces) != 2 || namespaces[0] != "billing" || namespaces[1] != "shop" {
+		t.Fatalf("Namespaces = %v, %v", namespaces, err)
+	}
+	all, err := c.Candidates(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || find(t, all, "service/db:5432").Namespace != "billing" || find(t, all, "service/api:80").Namespace != "shop" {
+		t.Errorf("Candidates(all) = %+v, want the two listed namespaces", all)
+	}
+	if _, err := c.Candidates(context.Background(), "other"); !errors.Is(err, ErrOutOfScope) {
+		t.Errorf("another namespace: err = %v, want ErrOutOfScope", err)
 	}
 }

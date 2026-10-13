@@ -122,16 +122,16 @@ func TestPerMonitorMetrics(t *testing.T) {
 	apiLabels := "{monitor=shop/api}{monitor_namespace=shop}{type=http}"
 	dbLabels := "{monitor=db}{monitor_namespace=}{type=tcp}"
 	want := map[string]float64{
-		"kubeat_monitor_scrape_success":                                     1,
-		"kubeat_monitors{state=enabled}":                                    3,
-		"kubeat_monitors{state=paused}":                                     1,
-		"kubeat_monitor_up" + apiLabels:                                     1,
-		"kubeat_monitor_response_seconds" + apiLabels:                       0.25,
-		"kubeat_monitor_last_check_timestamp_seconds" + apiLabels:           1_800_000_000,
-		"kubeat_monitor_cert_expiry_timestamp_seconds" + apiLabels:          float64(expiry.Unix()),
-		"kubeat_monitor_incident_open" + apiLabels:                          0,
-		"kubeat_monitor_up" + dbLabels:                                      0,
-		"kubeat_monitor_incident_open" + dbLabels:                           1,
+		"kubeat_monitor_scrape_success":                                             1,
+		"kubeat_monitors{state=enabled}":                                            3,
+		"kubeat_monitors{state=paused}":                                             1,
+		"kubeat_monitor_up" + apiLabels:                                             1,
+		"kubeat_monitor_response_seconds" + apiLabels:                               0.25,
+		"kubeat_monitor_last_check_timestamp_seconds" + apiLabels:                   1_800_000_000,
+		"kubeat_monitor_cert_expiry_timestamp_seconds" + apiLabels:                  float64(expiry.Unix()),
+		"kubeat_monitor_incident_open" + apiLabels:                                  0,
+		"kubeat_monitor_up" + dbLabels:                                              0,
+		"kubeat_monitor_incident_open" + dbLabels:                                   1,
 		"kubeat_monitor_incident_open{monitor=fresh}{monitor_namespace=}{type=tcp}": 0,
 	}
 	for key, value := range want {

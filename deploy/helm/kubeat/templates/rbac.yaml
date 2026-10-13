@@ -1,4 +1,27 @@
-{{- if .Values.discovery.enabled }}
+{{- define "kubeat.discoveryRules" -}}
+- apiGroups: [""]
+  resources: ["services", "pods"]
+  verbs: ["get", "list"]
+# The events shown next to a monitor's pods.
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["list"]
+# Workload monitors read how many pods of a workload are ready.
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list"]
+# Monitors that check each pod read the service's endpoints.
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["list"]
+- apiGroups: ["route.openshift.io"]
+  resources: ["routes"]
+  verbs: ["get", "list"]
+{{- end }}
+{{- if and .Values.discovery.enabled (not .Values.discovery.namespaces) }}
 # Read-only access used to discover what can be monitored and to check
 # workloads. Cluster-wide so that any namespace can be browsed.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -9,26 +32,9 @@ metadata:
     {{- include "kubeat.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["namespaces", "services", "pods"]
+    resources: ["namespaces"]
     verbs: ["get", "list"]
-  # The events shown next to a monitor's pods.
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["list"]
-  # Workload monitors read how many pods of a workload are ready.
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "list"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
-    verbs: ["get", "list"]
-  # Monitors that check each pod read the service's endpoints.
-  - apiGroups: ["discovery.k8s.io"]
-    resources: ["endpointslices"]
-    verbs: ["list"]
-  - apiGroups: ["route.openshift.io"]
-    resources: ["routes"]
-    verbs: ["get", "list"]
+  {{- include "kubeat.discoveryRules" . | nindent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -44,6 +50,44 @@ subjects:
   - kind: ServiceAccount
     name: {{ .Release.Name }}
     namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if and .Values.discovery.enabled .Values.discovery.namespaces }}
+# The same read-only access, in the listed namespaces only: for an
+# installation by someone who administers those namespaces but not the
+# cluster. Nothing cluster-wide is created.
+{{- range $ns := .Values.discovery.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $.Release.Name }}-discovery
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kubeat.labels" $ | nindent 4 }}
+rules:
+  {{- include "kubeat.discoveryRules" $ | nindent 2 }}
+  # What OpenShift's namespace-scoped metrics endpoint (thanos-querier on
+  # port 9092) asks of a caller, for the pods' CPU and memory.
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $.Release.Name }}-discovery
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kubeat.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $.Release.Name }}-discovery
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Release.Name }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
 {{- end }}
 {{- if .Values.prometheus.openshiftMonitoringView }}
 ---

@@ -198,6 +198,11 @@ smtp:
 # (read-only, cluster-wide) so monitors can be created from what is running.
 discovery:
   enabled: true
+  # Limits discovery to these namespaces and grants read access there with
+  # Roles instead of a ClusterRole, so that someone who administers the
+  # namespaces but not the cluster can install Kubeat. Empty means the
+  # whole cluster.
+  namespaces: []
   # How often objects annotated kubeat.io/monitor=true are read and their
   # monitors created, updated or removed; "0" turns that off.
   syncInterval: 1m

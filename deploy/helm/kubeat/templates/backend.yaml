@@ -147,6 +147,10 @@ spec:
               value: {{ .Values.language | quote }}
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
+            {{- with .Values.discovery.namespaces }}
+            - name: UPTIME_DISCOVERY_NAMESPACES
+              value: {{ join "," . | quote }}
+            {{- end }}
             - name: UPTIME_DISCOVERY_SYNC_INTERVAL
               value: {{ .Values.discovery.syncInterval | quote }}
             {{- if .Values.backup.enabled }}

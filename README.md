@@ -493,7 +493,12 @@ server) sertifika süresi de izlenir ve sertifika alarmı onlar için de çalı�
 
 Ayarı yoktur. Yetkisiz ICMP soketi kullanılır; ek bir capability gerekmez ama
 çekirdeğin buna izin vermesi gerekir (`net.ipv4.ping_group_range`). İzin
-yoksa kontrol, nedenini söyleyen bir hatayla başarısız olur.
+yoksa kontrol, nedenini söyleyen bir hatayla başarısız olur. OpenShift'te
+(RHCOS) ek ayar gerekmez.
+
+Hedef bir pod IP'si ya da cluster dışı bir adres olmalıdır: bir Service'in
+ClusterIP'si sanal bir adrestir ve ICMP'ye yanıt vermez, `servis.namespace.svc`
+adına ping "no reply" verir. Service için `http` ya da `tcp` kullanın.
 
 ### `dns`
 
@@ -811,6 +816,33 @@ Cluster dışında çalışırken keşif için hem `UPTIME_KUBECONFIG` hem
 `UPTIME_KUBE_CONTEXT` verilmelidir; kubeconfig'in o anki bağlamı bilerek
 kullanılmaz.
 
+### Cluster-admin olmadan: namespace'le sınırlı keşif
+
+Varsayılan kurulum keşif için bir ClusterRole oluşturur; bunu yalnızca
+cluster yöneticisi kurabilir. Yalnızca kendi namespace'lerini yöneten bir
+ekip Kubeat'i şöyle kurar:
+
+```
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat -n ekibim \
+  --set route.enabled=true \
+  --set 'discovery.namespaces={ekibim,ekibim-test}' \
+  --set prometheus.url=https://thanos-querier.openshift-monitoring.svc:9092 \
+  --set prometheus.tokenFile=/var/run/secrets/kubernetes.io/serviceaccount/token \
+  --set prometheus.caFile=/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+```
+
+`discovery.namespaces` verilince chart cluster çapında hiçbir şey
+oluşturmaz: sayılan her namespace'e salt okunur bir Role ve RoleBinding
+koyar, backend de yalnızca o namespace'leri görür (`UPTIME_DISCOVERY_NAMESPACES`).
+Keşif, annotation eşitlemesi, pod bazlı kontrol, workload monitor'lar ve
+olaylar bu namespace'lerde aynen çalışır.
+
+Pod CPU/belleği için Thanos Querier'ın **9092** portu kullanılır: bu uç
+her sorguda bir namespace ister ve yalnızca o namespace'i yanıtlar; Role'deki
+`metrics.k8s.io/pods` izni yeterlidir, `cluster-monitoring-view` gerekmez.
+(Cluster çapında kurulumda 9091 portu ve `prometheus.openshiftMonitoringView`
+kullanılır.) Bu kurulum gerçek OpenShift 4.21'de doğrulandı.
+
 ### Annotation ile sürekli keşif
 
 Keşif sayfasından içe aktarmak tek seferliktir. Ekiplerin Kubeat'e hiç
@@ -1040,6 +1072,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_LANGUAGE` | `en` | Bildirim metinlerinin ve ilk yönetici hesabının görünen adının dili: `en` ya da `tr` |
 | `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |
 | `UPTIME_DISCOVERY_ENABLED` | `true` | Cluster keşfini açar |
+| `UPTIME_DISCOVERY_NAMESPACES` | – | Keşfi virgülle ayrılmış bu namespace'lerle sınırlar; boşsa tüm cluster (cluster çapında okuma yetkisi ister) |
 | `UPTIME_DISCOVERY_SYNC_INTERVAL` | `1m` | `kubeat.io/monitor` annotation'lı nesnelerin ne sıklıkta okunup monitor'larının eşitleneceği; `0` kapalı |
 | `UPTIME_DISCOVERY_DEFAULT_INTERVAL` | `30s` | Annotation'la oluşturulan monitor'un, nesne belirtmediyse kontrol aralığı |
 | `UPTIME_DISCOVERY_DEFAULT_TIMEOUT` | `5s` | Annotation'la oluşturulan monitor'un, nesne belirtmediyse zaman aşımı |

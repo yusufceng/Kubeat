@@ -34,6 +34,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 23 | SSO: OpenID Connect ile giriş (PKCE), gruplardan rol | Tamamlandı |
 | 24 | Yayım: sürüm etiketiyle GHCR'ye çok mimarili imajlar ve OCI chart; gerçek cluster kurulumunun ön koşulu | Tamamlandı |
 | 25 | İki dil: arayüz (tarayıcıya göre, değiştirilebilir) ve bildirimler İngilizce/Türkçe | Tamamlandı |
+| 26 | Namespace'le sınırlı keşif: cluster-admin olmadan kurulum (Role), Thanos'un namespace ucu | Tamamlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
@@ -68,28 +69,42 @@ kısıtlarına uygun imajlar, `/metrics` ve heartbeat ile kendi kendini izleme.
 
 ## OpenShift
 
-Gerçek bir OpenShift'te hiç çalıştırılmadı. 2026-10-12'den beri minikube
-üzerinde bir benzetim var (`make minikube-openshift-sim`, ayrıntısı
-README'de): Route ve ServiceMonitor CRD'leri, token ve TLS isteyen bir
-thanos-querier taklidi, `cluster-monitoring-view`, kısıtlı Pod Security
-Standard ve rastgele UID.
+2026-10-13'te gerçek bir OpenShift'te doğrulandı: Red Hat Developer Sandbox
+(ROSA üzerinde OpenShift 4.21.30, Kubernetes 1.34), cluster-admin olmadan,
+tek bir namespace'e kurulumla. Ondan önce yalnızca minikube üzerindeki
+benzetim vardı (`make minikube-openshift-sim`).
 
-Benzetimle doğrulandı:
+Gerçek cluster'da doğrulananlar:
 
-- Kısıtlı güvenlik bağlamı: rastgele UID, GID 0, salt okunur kök dosya
-  sistemi, tüm capability'ler düşük; backend, frontend, ping ve DNS çalıştı
-- Route keşfi ve Route üzerinden pod çözümleme (gerçek API sunucusu, CRD ile)
-- Chart'ın Route ve ServiceMonitor şablonlarının kabulü
-- Servis hesabı token'ı ve service CA ile metrik okuma; chart'ın
-  `cluster-monitoring-view` bağlaması
+- `restricted-v2` SCC: rastgele UID (1010760000), GID 0, SCC'nin atadığı
+  fsGroup ile PVC'ye yazma, salt okunur kök dosya sistemi
+- Router'ın Route'u taşıması ve host ataması; edge TLS, HTTP→HTTPS
+  yönlendirme, oturum çerezinin `Secure` gelmesi
+- GHCR'den imaj çekme ve cluster'ın iç registry'sinden imaj çekme
+- HTTP (Service ve Route üzerinden), TLS'li TCP, DNS ve ping kontrolleri;
+  ping RHCOS'ta ek ayar gerektirmeden çalışıyor
+- Namespace'le sınırlı keşif (ClusterRole olmadan): Route, Service ve
+  workload adayları, annotation eşitlemesi
+- Pod bazlı kontrol: dondurulan pod Ready kalırken adıyla yakalandı
+- Workload monitor ve rolling update sırasında sessiz kalması
+- Pod paneli: pod'lar, node'lar, cluster olayları
+- Pod CPU/belleği: Thanos Querier'ın namespace ucu (9092), servis hesabı
+  token'ı ve pod'a kendiliğinden gelen service CA ile
+- User workload monitoring'in ServiceMonitor'ü toplaması ve PrometheusRule
+  ile `KubeatMonitorDown` alarmının firing olması
 
-Hâlâ gerçek OpenShift gerektirenler:
+Gerçek cluster'ın gösterdiği ve düzeltilen: OpenShift `namespace` etiketini
+zorla scrape edilen namespace yapıyor (`honorLabels` etkisiz); monitor'un
+namespace'i artık `monitor_namespace` etiketinde.
 
-- Router'ın Route'u taşıması ve host ataması
-- SCC admission'ın UID/fsGroup atamasıyla volume izinleri
-- Service CA'nın pod'a kendiliğinden gelmesi (`service-ca.crt`)
-- Thanos Querier'ın gerçek yetki kuralı
-- İç registry, pull secret, OAuth proxy ile arayüz koruması
+Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
+
+- Cluster çapında keşif (ClusterRole) ve `cluster-monitoring-view` ile
+  Thanos'un 9091 ucu
+- NetworkPolicy'nin backend'i gerçekten yalıtması (Sandbox'ın kendi
+  "aynı namespace'e izin ver" kuralı sonucu gizliyor)
+- Alarmın Alertmanager alıcısına (e-posta, Slack) kadar gitmesi
+- OIDC/LDAP girişinin kurumsal bir sağlayıcıyla denenmesi
 
 ## Bilinen sınırlar
 
@@ -116,6 +131,7 @@ Hâlâ gerçek OpenShift gerektirenler:
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.
-- Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır. Kısıtlı
-  güvenlik bağlamındaki pod'dan minikube'da çalıştı; RHCOS'ta CRI-O bu izni
-  varsayılan olarak verir, ama denenmedi.
+- Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır; minikube'da
+  ve gerçek RHCOS'ta ek ayar gerektirmeden çalıştı. Bir Service adına ping
+  atılamaz: ClusterIP sanal bir adrestir ve ICMP'ye yanıt vermez; pod IP'si
+  ya da cluster dışı bir adres verilmelidir.
