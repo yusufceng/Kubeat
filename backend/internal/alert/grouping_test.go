@@ -83,7 +83,7 @@ func TestGroupedTexts(t *testing.T) {
 	down := func(name, cause string) Notification {
 		return Notification{Event: EventDown, Monitor: store.Monitor{Name: name, Namespace: "shop"}, Incident: store.Incident{StartedAt: at, Cause: cause}}
 	}
-	n := Notification{Event: EventDown, Monitor: store.Monitor{Name: "api", Namespace: "shop"}, Group: []Notification{down("api", "refused"), down("db", "timeout")}}
+	n := Notification{Event: EventDown, Language: LanguageTurkish, Monitor: store.Monitor{Name: "api", Namespace: "shop"}, Group: []Notification{down("api", "refused"), down("db", "timeout")}}
 	if got := Text(n); got != "🔴 shop: 2 monitor erişilemiyor: api (refused), db (timeout)" {
 		t.Errorf("text = %q", got)
 	}
@@ -94,7 +94,7 @@ func TestGroupedTexts(t *testing.T) {
 		t.Errorf("facts = %+v", facts)
 	}
 
-	up := Notification{Event: EventUp, Monitor: store.Monitor{Name: "a"}, Group: []Notification{
+	up := Notification{Event: EventUp, Language: LanguageTurkish, Monitor: store.Monitor{Name: "a"}, Group: []Notification{
 		{Event: EventUp, Monitor: store.Monitor{Name: "a"}, Incident: store.Incident{StartedAt: at, ResolvedAt: at.Add(90 * time.Second)}},
 		{Event: EventUp, Monitor: store.Monitor{Name: "b"}, Incident: store.Incident{StartedAt: at, ResolvedAt: at.Add(5 * time.Minute)}},
 	}}
@@ -107,7 +107,7 @@ func TestGroupedTexts(t *testing.T) {
 	for i := 0; i < 13; i++ {
 		many = append(many, down(string(rune('a'+i)), "x"))
 	}
-	if got := Text(Notification{Event: EventDown, Monitor: store.Monitor{Namespace: "shop"}, Group: many}); !strings.HasSuffix(got, ", ve 3 monitor daha") {
+	if got := Text(Notification{Event: EventDown, Language: LanguageTurkish, Monitor: store.Monitor{Namespace: "shop"}, Group: many}); !strings.HasSuffix(got, ", ve 3 monitor daha") {
 		t.Errorf("long group text = %q", got)
 	}
 }
@@ -134,5 +134,27 @@ func TestChannelScopeAndEvents(t *testing.T) {
 		if got := ch.Wants(event.Kind()); got != want {
 			t.Errorf("Wants(%s) = %v, want %v", event, got, want)
 		}
+	}
+}
+
+func TestEnglishTexts(t *testing.T) {
+	at := time.Date(2026, 10, 13, 3, 0, 0, 0, time.UTC)
+	n := Notification{Event: EventDown, Monitor: store.Monitor{Name: "api", Target: "http://api/", FailureThreshold: 2},
+		Incident: store.Incident{StartedAt: at, Cause: "refused"}}
+	if got := Text(n); got != "🔴 api is down (http://api/). 2 checks in a row failed. Last error: refused" {
+		t.Errorf("english by default: %q", got)
+	}
+	if got := Subject(n); got != "[Kubeat] api is down" {
+		t.Errorf("subject = %q", got)
+	}
+	if facts := Facts(n); facts[1].Label != "Target" || facts[len(facts)-1].Label != "Cause" {
+		t.Errorf("facts = %+v", facts)
+	}
+	grouped := Notification{Event: EventDown, Monitor: store.Monitor{Namespace: "shop"}, Group: []Notification{n, n}}
+	if got := Text(grouped); got != "🔴 shop: 2 monitors are down: api (refused), api (refused)" {
+		t.Errorf("grouped = %q", got)
+	}
+	if got := Text(Notification{Event: EventTest, Language: "xx"}); got != "Kubeat test notification: this channel works." {
+		t.Errorf("unknown language falls back to English: %q", got)
 	}
 }

@@ -33,6 +33,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 22 | Alarm yönlendirme: kanalda etiket ve olay süzgeci, namespace başına gruplama, monitor sayfasında "alarm nereye gider"; workload monitor'da rollout toleransı | Tamamlandı |
 | 23 | SSO: OpenID Connect ile giriş (PKCE), gruplardan rol | Tamamlandı |
 | 24 | Yayım: sürüm etiketiyle GHCR'ye çok mimarili imajlar ve OCI chart; gerçek cluster kurulumunun ön koşulu | Tamamlandı |
+| 25 | İki dil: arayüz (tarayıcıya göre, değiştirilebilir) ve bildirimler İngilizce/Türkçe | Tamamlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 

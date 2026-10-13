@@ -3,6 +3,11 @@
 # imagePullSecrets (the names of Secrets in the release namespace).
 imagePullSecrets: []
 
+# The language of notifications and of the first administrator's name
+# (backend), and the UI language for visitors whose browser asks for none
+# we have (frontend): "en" or "tr". Visitors can switch the UI themselves.
+language: en
+
 backend:
   image:
     repository: ghcr.io/yusufceng/kubeat-backend

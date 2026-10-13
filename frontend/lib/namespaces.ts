@@ -1,7 +1,8 @@
 /** Path segment standing for "monitors without a namespace"; no Kubernetes name can be this. */
 export const MANUAL_SLUG = "_";
 
-export const MANUAL_LABEL = "Elle eklenenler";
+/** The message key of the name of that group ("Elle eklenenler" / "Added manually"); show it with t(). */
+export const MANUAL_LABEL = "namespace.manual";
 
 export function namespaceHref(namespace: string): string {
   return `/namespaces/${namespace === "" ? MANUAL_SLUG : encodeURIComponent(namespace)}`;

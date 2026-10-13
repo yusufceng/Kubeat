@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
+import { getT } from "@/lib/i18n/server";
 import { manualGroups, workspaceMonitors } from "@/lib/workspace";
 import { MonitorForm } from "@/app/ui/monitor-form";
 import { ReadOnlyNotice } from "@/app/ui/read-only-notice";
@@ -16,26 +17,27 @@ async function NewMonitor() {
   return <MonitorForm defaults={config.newMonitor} groups={groups} />;
 }
 
-export default function Page() {
+export default async function Page() {
+  const t = await getT();
   return (
     <>
       <header>
         <p className="mb-1.5 text-sm text-muted">
           <Link href="/" className="hover:text-ink">
-            Genel bakış
+            {t("monitorForm.breadcrumb.overview")}
           </Link>{" "}
-          / Yeni monitor
+          / {t("monitorForm.new.title")}
         </p>
-        <h1 className="text-2xl font-semibold tracking-tight">Yeni monitor</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("monitorForm.new.title")}</h1>
         <p className="mt-1 text-sm text-muted">
-          Cluster&apos;daki servisleri tek tek girmek yerine{" "}
+          {t("monitorForm.new.discoveryLead")}{" "}
           <Link href="/discovery" className="text-accent underline">
-            keşifle topluca ekleyebilirsiniz
+            {t("monitorForm.new.discoveryLink")}
           </Link>
           .
         </p>
       </header>
-      <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
+      <Suspense fallback={<p className="text-sm text-muted">{t("common.loading")}</p>}>
         <NewMonitor />
       </Suspense>
     </>

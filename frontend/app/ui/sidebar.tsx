@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
+import { getT } from "@/lib/i18n/server";
 import { toListItem, workspaceMonitors } from "@/lib/workspace";
 import { BackendError } from "@/app/ui/backend-error";
 import { MonitorList } from "@/app/ui/monitor-list";
@@ -10,13 +11,14 @@ export async function Sidebar() {
   // The list settings come from the running server's environment.
   await connection();
   const me = await currentUser();
+  const t = await getT();
   let items;
   try {
     items = (await workspaceMonitors()).map(toListItem);
   } catch (err) {
     return (
       <div className="p-3">
-        <BackendError what="Monitor listesi" err={err} />
+        <BackendError what={t("monitorsList.sidebar.what")} err={err} />
       </div>
     );
   }

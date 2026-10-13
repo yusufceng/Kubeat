@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Fragment, Suspense } from "react";
 import {
   ApiError,
   type Candidate,
@@ -12,7 +12,16 @@ import { config } from "@/lib/config";
 import { LocalTime } from "@/app/ui/local-time";
 import { currentUser } from "@/lib/auth";
 import { CandidateForm } from "@/app/ui/candidate-form";
+import { getT } from "@/lib/i18n/server";
 import { typeLabel } from "@/lib/monitor-types";
+
+/** The message with the given nodes in place of its {name} placeholders, so markup can sit inside a sentence. */
+function withNodes(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode[] {
+  return text.split(/(\{\w+\})/).map((part, i) => {
+    const name = part.slice(1, -1);
+    return part.startsWith("{") && name in nodes ? <Fragment key={i}>{nodes[name]}</Fragment> : part;
+  });
+}
 
 function Notice({ children }: { children: React.ReactNode }) {
   return (
@@ -22,54 +31,58 @@ function Notice({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ClusterError({ err }: { err: unknown }) {
-  if (!(err instanceof ApiError)) return <BackendError what="Cluster içeriği" />;
+async function ClusterError({ err }: { err: unknown }) {
+  const t = await getT();
+  if (!(err instanceof ApiError)) return <BackendError what={t("discovery.what")} />;
   return (
     <p
       role="alert"
       className="rounded-lg border border-down/40 bg-down/8 p-4 text-sm text-down"
     >
-      Cluster&apos;dan okunamadı: <span className="font-mono text-xs">{err.message}</span>
+      {t("discovery.clusterError")} <span className="font-mono text-xs">{err.message}</span>
     </p>
   );
 }
 
 /** How the monitors asked for with annotations are doing. */
-function SyncCard({ sync }: { sync: DiscoveryStatus["sync"] }) {
+async function SyncCard({ sync }: { sync: DiscoveryStatus["sync"] }) {
+  const t = await getT();
+  const snippet = (text: string) => <code className="rounded bg-sunken px-1">{text}</code>;
   return (
-    <section className="card p-5 text-sm" aria-label="Annotation ile keşif">
-      <h2 className="font-semibold">Annotation ile keşif</h2>
+    <section className="card p-5 text-sm" aria-label={t("discovery.sync.title")}>
+      <h2 className="font-semibold">{t("discovery.sync.title")}</h2>
       <p className="mt-1 text-muted">
-        Bir Service, Ingress, Route, Deployment, StatefulSet ya da DaemonSet&apos;e{" "}
-        <code className="rounded bg-sunken px-1">kubeat.io/monitor: &quot;true&quot;</code> annotation&apos;ı
-        eklenince izlenir; kaldırılınca ya da nesne silinince monitor da kaldırılır. İsteğe bağlı:{" "}
-        <code className="rounded bg-sunken px-1">kubeat.io/interval</code>,{" "}
-        <code className="rounded bg-sunken px-1">kubeat.io/timeout</code>,{" "}
-        <code className="rounded bg-sunken px-1">kubeat.io/failure-threshold</code>; Service için{" "}
-        <code className="rounded bg-sunken px-1">kubeat.io/port</code> ve{" "}
-        <code className="rounded bg-sunken px-1">kubeat.io/path</code>.
+        {withNodes(t("discovery.sync.intro"), {
+          monitor: snippet('kubeat.io/monitor: "true"'),
+          interval: snippet("kubeat.io/interval"),
+          timeout: snippet("kubeat.io/timeout"),
+          threshold: snippet("kubeat.io/failure-threshold"),
+          port: snippet("kubeat.io/port"),
+          path: snippet("kubeat.io/path"),
+        })}
       </p>
       {sync === null ? (
         <p className="mt-3 text-xs text-muted">
-          Kapalı: <code>UPTIME_DISCOVERY_SYNC_INTERVAL</code> sıfır.
+          {withNodes(t("discovery.sync.off"), { variable: <code>UPTIME_DISCOVERY_SYNC_INTERVAL</code> })}
         </p>
       ) : (
         <>
           <p className="mt-3 text-xs text-muted">
             {sync.last_run_at.startsWith("0001") ? (
-              "Henüz çalışmadı."
+              t("discovery.sync.notYet")
             ) : (
               <>
-                Son tarama <LocalTime iso={sync.last_run_at} /> · her {sync.interval_seconds} sn · {sync.managed}{" "}
-                monitor annotation ile yönetiliyor
+                {t("discovery.sync.lastScan")} <LocalTime iso={sync.last_run_at} /> ·{" "}
+                {t("discovery.sync.every", { interval: t("format.seconds", { count: sync.interval_seconds }) })} ·{" "}
+                {t.n("discovery.sync.managed", sync.managed)}
                 {sync.created + sync.updated + sync.removed > 0 &&
-                  ` · son taramada ${sync.created} eklendi, ${sync.updated} güncellendi, ${sync.removed} kaldırıldı`}
+                  ` · ${t("discovery.sync.changes", { created: sync.created, updated: sync.updated, removed: sync.removed })}`}
               </>
             )}
           </p>
           {sync.error && (
             <p role="alert" className="mt-2 text-xs text-down">
-              Cluster okunamadı, hiçbir şey değiştirilmedi: <span className="font-mono">{sync.error}</span>
+              {t("discovery.sync.readError")} <span className="font-mono">{sync.error}</span>
             </p>
           )}
           {sync.skipped.length > 0 && (
@@ -91,15 +104,16 @@ function SyncCard({ sync }: { sync: DiscoveryStatus["sync"] }) {
 }
 
 /** The candidates of a namespace for a viewer, who may not import them. */
-function ReadOnlyCandidates({ candidates }: { candidates: Candidate[] }) {
+async function ReadOnlyCandidates({ candidates }: { candidates: Candidate[] }) {
+  const t = await getT();
   return (
     <div className="card overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="border-b border-line text-xs text-muted">
           <tr>
-            <th className="px-4 py-2 font-medium">Nesne</th>
-            <th className="px-4 py-2 font-medium">Önerilen kontrol</th>
-            <th className="px-4 py-2 font-medium">Durum</th>
+            <th className="px-4 py-2 font-medium">{t("discovery.candidates.object")}</th>
+            <th className="px-4 py-2 font-medium">{t("discovery.candidates.check")}</th>
+            <th className="px-4 py-2 font-medium">{t("discovery.candidates.status")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
@@ -111,11 +125,11 @@ function ReadOnlyCandidates({ candidates }: { candidates: Candidate[] }) {
                 {c.port > 0 && `:${c.port}`}
               </td>
               <td className="px-4 py-2">
-                <span className="mr-2 text-xs text-muted">{typeLabel(c.type)}</span>
+                <span className="mr-2 text-xs text-muted">{t(typeLabel(c.type))}</span>
                 <span className="break-all font-mono text-xs">{c.target}</span>
               </td>
               <td className="whitespace-nowrap px-4 py-2 text-xs text-muted">
-                {c.monitor_id !== null ? "İzleniyor" : "İzlenmiyor; eklemek için bir editöre başvurun"}
+                {c.monitor_id !== null ? t("discovery.candidates.monitored") : t("discovery.candidates.notMonitoredViewer")}
               </td>
             </tr>
           ))}
@@ -133,6 +147,7 @@ async function Discovery({
   const param = (await searchParams).namespace;
   const namespace = typeof param === "string" ? param : "";
   const me = await currentUser();
+  const t = await getT();
 
   let status: DiscoveryStatus;
   let namespaces: string[] = [];
@@ -148,7 +163,7 @@ async function Discovery({
   if (!status.enabled) {
     return (
       <Notice>
-        Keşif kullanılamıyor: backend bir cluster&apos;a bağlı değil.
+        {t("discovery.unavailable")}
         <span className="mt-2 block font-mono text-xs">{status.detail}</span>
       </Notice>
     );
@@ -169,14 +184,14 @@ async function Discovery({
       <SyncCard sync={status.sync} />
       <form method="get" className="flex flex-wrap items-end gap-3">
         <label>
-          <span className="mb-1 block text-xs font-medium text-muted">Namespace</span>
+          <span className="mb-1 block text-xs font-medium text-muted">{t("discovery.namespace")}</span>
           <select
             name="namespace"
             defaultValue={namespace}
             className="field w-auto min-w-64"
           >
             <option value="" disabled>
-              Seçin…
+              {t("discovery.namespace.choose")}
             </option>
             {namespaces.map((ns) => (
               <option key={ns} value={ns}>
@@ -189,16 +204,17 @@ async function Discovery({
           type="submit"
           className="btn"
         >
-          Tara
+          {t("discovery.scan")}
         </button>
       </form>
 
-      {!namespace && <Notice>Taranacak namespace&apos;i seçin.</Notice>}
+      {!namespace && <Notice>{t("discovery.chooseNamespace")}</Notice>}
       {candidatesError !== null && <ClusterError err={candidatesError} />}
       {candidates?.length === 0 && (
         <Notice>
-          <span className="font-medium">{namespace}</span> içinde izlenebilecek Service, Ingress ya
-          da Route bulunamadı.
+          {withNodes(t("discovery.candidates.none"), {
+            namespace: <span className="font-medium">{namespace}</span>,
+          })}
         </Notice>
       )}
       {candidates && candidates.length > 0 && (
@@ -213,18 +229,15 @@ async function Discovery({
   );
 }
 
-export default function Page({ searchParams }: PageProps<"/discovery">) {
+export default async function Page({ searchParams }: PageProps<"/discovery">) {
+  const t = await getT();
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6 sm:px-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Keşif</h1>
-        <p className="mt-1 text-sm text-muted">
-          Bir namespace&apos;teki Service, Ingress ve Route&apos;ları bulur. Bir Service&apos;in
-          arkasındaki pod HTTP probe tanımlıyorsa aynı yol kontrol edilir; yoksa yalnızca porta
-          bağlanılır.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("nav.discovery")}</h1>
+        <p className="mt-1 text-sm text-muted">{t("discovery.intro")}</p>
       </div>
-      <Suspense fallback={<p className="text-sm text-muted">Cluster okunuyor…</p>}>
+      <Suspense fallback={<p className="text-sm text-muted">{t("common.readingCluster")}</p>}>
         <Discovery searchParams={searchParams} />
       </Suspense>
     </main>

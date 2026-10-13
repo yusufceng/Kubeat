@@ -1,6 +1,9 @@
 import type { MonitorType } from "@/lib/api";
 
-/** How a monitor type is presented and what its target looks like. */
+/**
+ * How a monitor type is presented and what its target looks like. Every
+ * text here is a message key: show it with t().
+ */
 export type TypeInfo = {
   label: string;
   /** One line under the type selector. */
@@ -11,59 +14,59 @@ export type TypeInfo = {
 
 export const monitorTypes: Record<MonitorType, TypeInfo> = {
   http: {
-    label: "HTTP(S)",
-    summary: "Bir adrese istek atar; durum kodunu, gövdeyi ve sertifikayı denetler.",
-    target: { label: "URL", placeholder: "https://api.example.com/healthz" },
+    label: "monitorType.http",
+    summary: "monitorType.http.summary",
+    target: { label: "monitorType.http.target.label", placeholder: "monitorType.http.target.placeholder" },
   },
   tcp: {
-    label: "TCP port",
-    summary: "Bir porta bağlanır; istenirse TLS el sıkışması da yapar.",
-    target: { label: "Adres", placeholder: "postgres.shop.svc:5432" },
+    label: "monitorType.tcp",
+    summary: "monitorType.tcp.summary",
+    target: { label: "monitorType.tcp.target.label", placeholder: "monitorType.tcp.target.placeholder" },
   },
   ping: {
-    label: "Ping",
-    summary: "ICMP echo gönderir ve gidiş-dönüş süresini ölçer.",
-    target: { label: "Sunucu", placeholder: "10.0.0.1 ya da node-1.example.com" },
+    label: "monitorType.ping",
+    summary: "monitorType.ping.summary",
+    target: { label: "monitorType.ping.target.label", placeholder: "monitorType.ping.target.placeholder" },
   },
   dns: {
-    label: "DNS",
-    summary: "Bir adı çözer; kaydın varlığını ve değerini denetler.",
-    target: { label: "Alan adı", placeholder: "api.shop.svc.cluster.local" },
+    label: "monitorType.dns",
+    summary: "monitorType.dns.summary",
+    target: { label: "monitorType.dns.target.label", placeholder: "monitorType.dns.target.placeholder" },
   },
   push: {
-    label: "Push",
-    summary: "İzlenen iş kendisi rapor verir; rapor gelmezse alarm üretilir.",
+    label: "monitorType.push",
+    summary: "monitorType.push.summary",
     target: null,
   },
   grpc: {
-    label: "gRPC",
-    summary: "gRPC sağlık protokolüyle servisin SERVING olup olmadığını sorar.",
-    target: { label: "Adres", placeholder: "cart.shop.svc:9090" },
+    label: "monitorType.grpc",
+    summary: "monitorType.grpc.summary",
+    target: { label: "monitorType.grpc.target.label", placeholder: "monitorType.grpc.target.placeholder" },
   },
   postgres: {
-    label: "PostgreSQL",
-    summary: "Sunucuya giriş yapıp bir sorgu çalıştırır.",
-    target: { label: "Adres", placeholder: "orders-db.shop.svc:5432" },
+    label: "monitorType.postgres",
+    summary: "monitorType.postgres.summary",
+    target: { label: "monitorType.postgres.target.label", placeholder: "monitorType.postgres.target.placeholder" },
   },
   mysql: {
-    label: "MySQL / MariaDB",
-    summary: "Sunucuya giriş yapıp bir sorgu çalıştırır.",
-    target: { label: "Adres", placeholder: "legacy-db.shop.svc:3306" },
+    label: "monitorType.mysql",
+    summary: "monitorType.mysql.summary",
+    target: { label: "monitorType.mysql.target.label", placeholder: "monitorType.mysql.target.placeholder" },
   },
   redis: {
-    label: "Redis",
-    summary: "Sunucuya bağlanır, gerekiyorsa giriş yapar ve PING gönderir.",
-    target: { label: "Adres", placeholder: "cache.shop.svc:6379" },
+    label: "monitorType.redis",
+    summary: "monitorType.redis.summary",
+    target: { label: "monitorType.redis.target.label", placeholder: "monitorType.redis.target.placeholder" },
   },
   workload: {
-    label: "Kubernetes workload",
-    summary: "Bir Deployment, StatefulSet ya da DaemonSet'in hazır pod sayısına bakar; servisi olmayan işler için de çalışır.",
-    target: { label: "Workload (namespace/tür/ad)", placeholder: "shop/deployment/web" },
+    label: "monitorType.workload",
+    summary: "monitorType.workload.summary",
+    target: { label: "monitorType.workload.target.label", placeholder: "monitorType.workload.target.placeholder" },
   },
   websocket: {
-    label: "WebSocket",
-    summary: "Bağlantının WebSocket'e yükseltilebildiğini denetler.",
-    target: { label: "URL", placeholder: "wss://live.example.com/socket" },
+    label: "monitorType.websocket",
+    summary: "monitorType.websocket.summary",
+    target: { label: "monitorType.websocket.target.label", placeholder: "monitorType.websocket.target.placeholder" },
   },
 };
 
@@ -87,6 +90,7 @@ export function isDatabaseType(type: MonitorType): boolean {
   return type === "postgres" || type === "mysql" || type === "redis";
 }
 
+/** The message key of the type's name ("monitorType.http"); show it with t(). */
 export function typeLabel(type: MonitorType): string {
   return monitorTypes[type]?.label ?? type;
 }

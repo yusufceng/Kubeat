@@ -4,42 +4,43 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { PulseIcon } from "@/app/ui/icons";
+import { useT } from "@/lib/i18n/client";
 
 const links = [
   {
     href: "/",
-    label: "Panel",
+    label: "nav.overview",
     match: (p: string) =>
       p === "/" || p.startsWith("/monitors") || p.startsWith("/namespaces"),
   },
   {
     href: "/discovery",
-    label: "Keşif",
+    label: "nav.discovery",
     match: (p: string) => p.startsWith("/discovery"),
   },
   {
     href: "/incidents",
-    label: "Olaylar",
+    label: "nav.incidents",
     match: (p: string) => p.startsWith("/incidents"),
   },
   {
     href: "/maintenance",
-    label: "Bakım",
+    label: "nav.maintenance",
     match: (p: string) => p.startsWith("/maintenance"),
   },
   {
     href: "/reports",
-    label: "Raporlar",
+    label: "nav.reports",
     match: (p: string) => p.startsWith("/reports"),
   },
   {
     href: "/channels",
-    label: "Bildirimler",
+    label: "nav.channels",
     match: (p: string) => p.startsWith("/channels"),
   },
   {
     href: "/status-pages",
-    label: "Durum sayfaları",
+    label: "nav.statusPages",
     match: (p: string) => p.startsWith("/status-pages"),
   },
 ];
@@ -65,6 +66,7 @@ function ActiveNav({ children, tail }: { children?: React.ReactNode; tail?: Reac
  * tail comes after the links (what only some users have).
  */
 function NavBar({ pathname, children, tail }: { pathname: string | null; children?: React.ReactNode; tail?: React.ReactNode }) {
+  const t = useT();
   // The sign-in pages and the public status pages show the name only: their
   // visitors can reach nothing else.
   const bare = pathname === "/login" || pathname === "/setup" || (pathname?.startsWith("/status/") ?? false);
@@ -92,7 +94,7 @@ function NavBar({ pathname, children, tail }: { pathname: string | null; childre
                     active ? "bg-sunken font-medium text-ink" : "text-muted hover:text-ink"
                   }`}
                 >
-                  {link.label}
+                  {t(link.label)}
                 </Link>
               </li>
             );

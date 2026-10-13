@@ -84,6 +84,7 @@ func newFixture(t *testing.T, failureThreshold, recoveryThreshold int) *fixture 
 		Attempts:          3,
 		RetryDelay:        time.Millisecond,
 		SendTimeout:       time.Second,
+		Language:          LanguageTurkish,
 		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	return &fixture{t: t, db: db, engine: engine, sender: sender, monitor: m,
@@ -487,7 +488,7 @@ func TestCertificateWarning(t *testing.T) {
 
 func TestCertificateTextForImminentAndPastExpiry(t *testing.T) {
 	start := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
-	n := Notification{Event: EventCertExpiring, Monitor: store.Monitor{Name: "api"}, Incident: store.Incident{StartedAt: start}}
+	n := Notification{Event: EventCertExpiring, Language: LanguageTurkish, Monitor: store.Monitor{Name: "api"}, Incident: store.Incident{StartedAt: start}}
 
 	n.CertExpiresAt = start.Add(5 * time.Hour)
 	if text := Text(n); !strings.Contains(text, "24 saat içinde") {

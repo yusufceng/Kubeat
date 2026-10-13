@@ -26,6 +26,8 @@ function durationList(value: string | undefined, fallback: string): number[] {
 
 export const config = {
   backendUrl: process.env.BACKEND_URL ?? "http://localhost:8080",
+  /** The language for visitors whose browser asks for none we have: "en" or "tr". */
+  defaultLocale: (process.env.DEFAULT_LOCALE === "tr" ? "tr" : "en") as "en" | "tr",
   /**
    * The address shown to jobs inside the cluster for their push reports;
    * the backend's, unless that is not how other namespaces reach it.

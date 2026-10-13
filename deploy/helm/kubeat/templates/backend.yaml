@@ -143,6 +143,8 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            - name: UPTIME_LANGUAGE
+              value: {{ .Values.language | quote }}
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
             - name: UPTIME_DISCOVERY_SYNC_INTERVAL

@@ -23,8 +23,9 @@ import (
 
 func sampleDown() Notification {
 	return Notification{
-		Event:   EventDown,
-		Monitor: store.Monitor{ID: 7, Name: "ödeme-api", Namespace: "shop", Type: store.MonitorHTTP, Target: "https://pay.example.com/healthz", FailureThreshold: 3},
+		Event:    EventDown,
+		Language: LanguageTurkish,
+		Monitor:  store.Monitor{ID: 7, Name: "ödeme-api", Namespace: "shop", Type: store.MonitorHTTP, Target: "https://pay.example.com/healthz", FailureThreshold: 3},
 		Incident: store.Incident{ID: 4, Kind: store.IncidentDown,
 			StartedAt: time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC), Cause: "unexpected status 503"},
 	}

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useT } from "@/lib/i18n/client";
 import { useMounted } from "@/lib/use-mounted";
 import { CopyIcon } from "@/app/ui/icons";
 
 function CopyRow({ label, value }: { label: string; value: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <div>
@@ -22,7 +24,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
             setTimeout(() => setCopied(false), 1500);
           }}
         >
-          <CopyIcon /> {copied ? "Kopyalandı" : "Kopyala"}
+          <CopyIcon /> {copied ? t("monitorPage.copied") : t("monitorPage.copy")}
         </button>
       </div>
     </div>
@@ -35,26 +37,28 @@ function CopyRow({ label, value }: { label: string; value: string }) {
  * backend's service accepts the same path.
  */
 export function PushUrl({ token, internalBase }: { token: string; internalBase: string }) {
+  const t = useT();
   const mounted = useMounted();
   const path = `/api/push/${token}`;
   const external = `${mounted ? window.location.origin : ""}${path}`;
 
   return (
-    <section aria-label="Rapor adresi" className="card flex flex-col gap-4 p-5">
+    <section aria-label={t("monitorPage.pushUrl.title")} className="card flex flex-col gap-4 p-5">
       <div>
-        <h2 className="text-sm font-semibold">Rapor adresi</h2>
-        <p className="mt-0.5 text-xs text-muted">
-          İzlenen iş her çalıştığında bu adrese bir istek atmalı. Adresteki anahtar bu monitor&apos;un
-          sırrıdır; başka bir kimlik bilgisi gerekmez.
-        </p>
+        <h2 className="text-sm font-semibold">{t("monitorPage.pushUrl.title")}</h2>
+        <p className="mt-0.5 text-xs text-muted">{t("monitorPage.pushUrl.intro")}</p>
       </div>
-      <CopyRow label="Bu adresten" value={external} />
-      <CopyRow label="Cluster içinden" value={`${internalBase}${path}`} />
-      <CopyRow label="Örnek: işin sonunda" value={`curl -fsS "${external}?status=up&msg=tamam"`} />
+      <CopyRow label={t("monitorPage.pushUrl.external")} value={external} />
+      <CopyRow label={t("monitorPage.pushUrl.internal")} value={`${internalBase}${path}`} />
+      <CopyRow
+        label={t("monitorPage.pushUrl.example")}
+        value={`curl -fsS "${external}?status=up&msg=${t("monitorPage.pushUrl.exampleMessage")}"`}
+      />
       <p className="text-xs text-muted">
-        İsteğe bağlı parametreler: <code className="font-mono">status=up|down</code> (iş kendi hatasını
-        bildirebilir), <code className="font-mono">msg=</code> kısa bir not,{" "}
-        <code className="font-mono">ping=</code> işin süresi (ms).
+        {t("monitorPage.pushUrl.params.intro")} <code className="font-mono">status=up|down</code>{" "}
+        {t("monitorPage.pushUrl.params.status")} <code className="font-mono">msg=</code>{" "}
+        {t("monitorPage.pushUrl.params.msg")} <code className="font-mono">ping=</code>{" "}
+        {t("monitorPage.pushUrl.params.ping")}
       </p>
     </section>
   );

@@ -87,6 +87,7 @@ func TestLoadDefaults(t *testing.T) {
 		OIDCGroupsClaim:      "groups",
 		OIDCName:             "SSO",
 		OIDCTimeout:          10 * time.Second,
+		Language:             "en",
 
 		DiscoveryEnabled: true,
 		KubeTimeout:      10 * time.Second,

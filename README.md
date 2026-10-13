@@ -304,6 +304,11 @@ UPTIME_OIDC_REDIRECT_URL=https://kubeat.apps.example/auth/callback
 Arayüz bir çalışma alanıdır: solda tüm monitor'ların listesi, sağda genel
 bakış ya da açılan monitor.
 
+Arayüz İngilizce ve Türkçe'dir: tarayıcının istediği dil kullanılır, üst
+çubuktaki düğme değiştirir ve seçim bir çerezde kalır; ikisi de yoksa
+`DEFAULT_LOCALE` geçerlidir. Bildirim metinlerinin dili backend'de ayrıdır
+(`UPTIME_LANGUAGE`); chart'ta ikisini birden `language` değeri ayarlar.
+
 - **Liste**: namespace'e ya da gruba göre toplanır; ada, adrese, gruba ya da
   etikete göre aranır; duruma (sorunlu, çalışıyor, pasif), tipe ve etikete göre
   süzülür. Her satırda durum, 24 saatlik uptime ve son kontroller görünür.
@@ -1031,6 +1036,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |
 | `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Gönderilmeyi bekleyebilecek en fazla bildirim sayısı |
+| `UPTIME_LANGUAGE` | `en` | Bildirim metinlerinin ve ilk yönetici hesabının görünen adının dili: `en` ya da `tr` |
 | `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |
 | `UPTIME_DISCOVERY_ENABLED` | `true` | Cluster keşfini açar |
 | `UPTIME_DISCOVERY_SYNC_INTERVAL` | `1m` | `kubeat.io/monitor` annotation'lı nesnelerin ne sıklıkta okunup monitor'larının eşitleneceği; `0` kapalı |
@@ -1067,6 +1073,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_PAGERDUTY_EVENTS_URL` | `https://events.pagerduty.com/v2/enqueue` | PagerDuty Events API v2 adresi |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
+| `DEFAULT_LOCALE` | `en` | Tarayıcısı bizde olan bir dil istemeyen ziyaretçinin arayüz dili: `en` ya da `tr` |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `STATUS_PAGE_REFRESH_MS` | `30000` | Açık bir durum sayfasının yenilenme aralığı (ms) |
 | `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar monitor listesinde tüm namespace'ler açık gelir; üzerinde yalnızca sorunlu olanlar açılır |

@@ -61,62 +61,64 @@ func Facts(n Notification) []Fact {
 	if n.Event == EventTest {
 		return nil
 	}
+	w := wording(n)
 	if len(n.Group) > 1 {
 		var facts []Fact
 		if n.Monitor.Namespace != "" {
-			facts = append(facts, Fact{"Namespace", n.Monitor.Namespace})
+			facts = append(facts, Fact{w.factNamespace, n.Monitor.Namespace})
 		}
 		for _, g := range n.Group {
 			facts = append(facts, Fact{g.Monitor.Name, groupDetail(g)})
 		}
 		return facts
 	}
-	facts := []Fact{{"Monitor", n.Monitor.Name}}
+	facts := []Fact{{w.factMonitor, n.Monitor.Name}}
 	if n.Monitor.Target != "" { // a push monitor has none
-		facts = append(facts, Fact{"Hedef", n.Monitor.Target})
+		facts = append(facts, Fact{w.factTarget, n.Monitor.Target})
 	}
 	if n.Monitor.Namespace != "" {
-		facts = append(facts, Fact{"Namespace", n.Monitor.Namespace})
+		facts = append(facts, Fact{w.factNamespace, n.Monitor.Namespace})
 	}
-	facts = append(facts, Fact{"Başlangıç", n.Incident.StartedAt.UTC().Format(time.RFC3339)})
+	facts = append(facts, Fact{w.factStart, n.Incident.StartedAt.UTC().Format(time.RFC3339)})
 	if !n.Incident.Open() {
-		facts = append(facts, Fact{"Bitiş", n.Incident.ResolvedAt.UTC().Format(time.RFC3339)})
+		facts = append(facts, Fact{w.factEnd, n.Incident.ResolvedAt.UTC().Format(time.RFC3339)})
 	}
 	if n.Incident.Cause != "" {
-		facts = append(facts, Fact{"Neden", n.Incident.Cause})
+		facts = append(facts, Fact{w.factCause, n.Incident.Cause})
 	}
 	return facts
 }
 
 // Subject is a short line for channels that have one.
 func Subject(n Notification) string {
+	w := wording(n)
 	if len(n.Group) > 1 {
 		count, where := len(n.Group), groupWhere(n)
 		switch n.Event {
 		case EventDown:
-			return fmt.Sprintf("[Kubeat] %s%d monitor erişilemiyor", where, count)
+			return fmt.Sprintf(w.subjectGroupDown, where, count)
 		case EventUp:
-			return fmt.Sprintf("[Kubeat] %s%d monitor tekrar çalışıyor", where, count)
+			return fmt.Sprintf(w.subjectGroupUp, where, count)
 		case EventReminder:
-			return fmt.Sprintf("[Kubeat] %s%d monitor hâlâ erişilemiyor", where, count)
+			return fmt.Sprintf(w.subjectGroupReminder, where, count)
 		case EventCertExpiring:
-			return fmt.Sprintf("[Kubeat] %s%d sertifikanın süresi bitiyor", where, count)
+			return fmt.Sprintf(w.subjectGroupCertExpires, where, count)
 		case EventCertRenewed:
-			return fmt.Sprintf("[Kubeat] %s%d sertifika yenilendi", where, count)
+			return fmt.Sprintf(w.subjectGroupCertRenewed, where, count)
 		}
 	}
 	switch n.Event {
 	case EventDown:
-		return fmt.Sprintf("[Kubeat] %s erişilemiyor", n.Monitor.Name)
+		return fmt.Sprintf(w.subjectDown, n.Monitor.Name)
 	case EventUp:
-		return fmt.Sprintf("[Kubeat] %s tekrar çalışıyor", n.Monitor.Name)
+		return fmt.Sprintf(w.subjectUp, n.Monitor.Name)
 	case EventReminder:
-		return fmt.Sprintf("[Kubeat] %s hâlâ erişilemiyor", n.Monitor.Name)
+		return fmt.Sprintf(w.subjectReminder, n.Monitor.Name)
 	case EventCertExpiring:
-		return fmt.Sprintf("[Kubeat] %s sertifikasının süresi bitiyor", n.Monitor.Name)
+		return fmt.Sprintf(w.subjectCertExpires, n.Monitor.Name)
 	case EventCertRenewed:
-		return fmt.Sprintf("[Kubeat] %s sertifikası yenilendi", n.Monitor.Name)
+		return fmt.Sprintf(w.subjectCertRenewed, n.Monitor.Name)
 	default:
-		return "[Kubeat] Test bildirimi"
+		return w.subjectTest
 	}
 }

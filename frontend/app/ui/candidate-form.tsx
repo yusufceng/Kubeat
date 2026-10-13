@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { importCandidatesAction, type ImportState } from "@/app/actions";
 import type { Candidate } from "@/lib/api";
+import { useT } from "@/lib/i18n/client";
 import { typeLabel } from "@/lib/monitor-types";
 
 const kindLabels: Record<Candidate["kind"], string> = {
@@ -17,13 +18,14 @@ const kindLabels: Record<Candidate["kind"], string> = {
 
 const workloadKinds: Candidate["kind"][] = ["deployment", "statefulset", "daemonset"];
 
+/** Message keys of why a check was suggested; show them with t(). */
 const reasonLabels: Record<Candidate["reason"], string> = {
-  "readiness-probe": "Readiness probe'undan",
-  "liveness-probe": "Liveness probe'undan",
-  "tcp-fallback": "HTTP ya da gRPC probe yok, port bağlantısı",
-  "route-host": "Route adresi",
-  "ingress-rule": "Ingress kuralı",
-  workload: "Hazır pod sayısı",
+  "readiness-probe": "discovery.reason.readinessProbe",
+  "liveness-probe": "discovery.reason.livenessProbe",
+  "tcp-fallback": "discovery.reason.tcpFallback",
+  "route-host": "discovery.reason.routeHost",
+  "ingress-rule": "discovery.reason.ingressRule",
+  workload: "discovery.reason.workload",
 };
 
 const inputClass = "field";
@@ -38,6 +40,7 @@ export function CandidateForm({
   /** What the imported monitors start with; the same as a monitor made by hand. */
   defaults: { interval: number; timeout: number; failureThreshold: number };
 }) {
+  const t = useT();
   const [state, action, pending] = useActionState<ImportState, FormData>(
     importCandidatesAction,
     null,
@@ -71,7 +74,7 @@ export function CandidateForm({
               <th className="w-10 px-4 py-2">
                 <input
                   type="checkbox"
-                  aria-label="Tümünü seç"
+                  aria-label={t("discovery.import.selectAll")}
                   checked={allChosen}
                   disabled={available.length === 0}
                   onChange={() =>
@@ -79,10 +82,10 @@ export function CandidateForm({
                   }
                 />
               </th>
-              <th className="px-4 py-2 font-medium">Kaynak</th>
-              <th className="px-4 py-2 font-medium">Önerilen kontrol</th>
-              <th className="px-4 py-2 font-medium">Dayanak</th>
-              <th className="px-4 py-2 font-medium">Durum</th>
+              <th className="px-4 py-2 font-medium">{t("discovery.import.source")}</th>
+              <th className="px-4 py-2 font-medium">{t("discovery.candidates.check")}</th>
+              <th className="px-4 py-2 font-medium">{t("discovery.import.basis")}</th>
+              <th className="px-4 py-2 font-medium">{t("discovery.candidates.status")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -112,17 +115,17 @@ export function CandidateForm({
                     </span>
                   </td>
                   <td className="px-4 py-2">
-                    <span className="mr-2 text-xs text-muted">{typeLabel(c.type)}</span>
+                    <span className="mr-2 text-xs text-muted">{t(typeLabel(c.type))}</span>
                     <span className="break-all font-mono text-xs">{c.target}</span>
                   </td>
-                  <td className="px-4 py-2 text-xs text-muted">{reasonLabels[c.reason]}</td>
+                  <td className="px-4 py-2 text-xs text-muted">{t(reasonLabels[c.reason])}</td>
                   <td className="whitespace-nowrap px-4 py-2 text-xs">
                     {monitored ? (
                       <Link href={`/monitors/${c.monitor_id}`} className="hover:underline">
-                        İzleniyor →
+                        {t("discovery.import.monitoredLink")}
                       </Link>
                     ) : (
-                      "İzlenmiyor"
+                      t("discovery.import.notMonitored")
                     )}
                   </td>
                 </tr>
@@ -134,7 +137,7 @@ export function CandidateForm({
 
       <div className="grid gap-4 sm:grid-cols-6">
         <label className="sm:col-span-1">
-          <span className="mb-1 block text-xs font-medium text-muted">Kontrol aralığı (sn)</span>
+          <span className="mb-1 block text-xs font-medium text-muted">{t("discovery.import.interval")}</span>
           <input
             name="interval_seconds"
             type="number"
@@ -145,7 +148,7 @@ export function CandidateForm({
           />
         </label>
         <label className="sm:col-span-1">
-          <span className="mb-1 block text-xs font-medium text-muted">Zaman aşımı (sn)</span>
+          <span className="mb-1 block text-xs font-medium text-muted">{t("discovery.import.timeout")}</span>
           <input
             name="timeout_seconds"
             type="number"
@@ -156,7 +159,7 @@ export function CandidateForm({
           />
         </label>
         <label className="sm:col-span-1">
-          <span className="mb-1 block text-xs font-medium text-muted">Alarm eşiği</span>
+          <span className="mb-1 block text-xs font-medium text-muted">{t("discovery.import.threshold")}</span>
           <input
             name="failure_threshold"
             type="number"
@@ -172,7 +175,7 @@ export function CandidateForm({
             disabled={pending || chosen.length === 0}
             className="w-full btn btn-primary"
           >
-            {pending ? "Ekleniyor…" : `Seçilen ${chosen.length} hedefi izlemeye al`}
+            {pending ? t("discovery.import.adding") : t.n("discovery.import.submit", chosen.length)}
           </button>
         </div>
       </div>
@@ -185,7 +188,7 @@ export function CandidateForm({
           }`}
         >
           {state.error ??
-            `${state.created} monitor eklendi${state.skipped > 0 ? `, ${state.skipped} hedef atlandı` : ""}.`}
+            `${t.n("discovery.import.created", state.created)}${state.skipped > 0 ? `, ${t.n("discovery.import.skipped", state.skipped)}` : ""}.`}
         </p>
       )}
     </form>

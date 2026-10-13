@@ -5,24 +5,26 @@ import { useState, useTransition } from "react";
 import { saveMonitorAction } from "@/app/actions";
 import type { DnsRecordType, HttpMethod, JsonOperator, Monitor, MonitorType } from "@/lib/api";
 import { MASKED_VALUE } from "@/lib/constants";
+import { useT } from "@/lib/i18n/client";
 import { isDatabaseType, monitorTypeOrder, monitorTypes } from "@/lib/monitor-types";
 
 const httpMethods: HttpMethod[] = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+// The labels are message keys; shown with t().
 const jsonOperators: { value: JsonOperator; label: string }[] = [
-  { value: "==", label: "eşittir" },
-  { value: "!=", label: "eşit değildir" },
-  { value: ">", label: "büyüktür" },
-  { value: ">=", label: "büyük ya da eşittir" },
-  { value: "<", label: "küçüktür" },
-  { value: "<=", label: "küçük ya da eşittir" },
-  { value: "contains", label: "içerir" },
+  { value: "==", label: "monitorForm.jsonOperator.eq" },
+  { value: "!=", label: "monitorForm.jsonOperator.ne" },
+  { value: ">", label: "monitorForm.jsonOperator.gt" },
+  { value: ">=", label: "monitorForm.jsonOperator.ge" },
+  { value: "<", label: "monitorForm.jsonOperator.lt" },
+  { value: "<=", label: "monitorForm.jsonOperator.le" },
+  { value: "contains", label: "monitorForm.jsonOperator.contains" },
 ];
 const dnsRecordTypes: DnsRecordType[] = ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SRV", "PTR"];
 const contentTypes = [
-  { value: "application/json", label: "JSON" },
-  { value: "application/x-www-form-urlencoded", label: "Form" },
-  { value: "application/xml", label: "XML" },
-  { value: "text/plain", label: "Düz metin" },
+  { value: "application/json", label: "monitorForm.contentType.json" },
+  { value: "application/x-www-form-urlencoded", label: "monitorForm.contentType.form" },
+  { value: "application/xml", label: "monitorForm.contentType.xml" },
+  { value: "text/plain", label: "monitorForm.contentType.text" },
 ];
 
 export type MonitorDefaults = { interval: number; timeout: number; failureThreshold: number };
@@ -103,6 +105,7 @@ export function MonitorForm({
   /** The groups that exist, offered as suggestions. */
   groups: string[];
 }) {
+  const t = useT();
   const [type, setType] = useState<MonitorType>(monitor?.type ?? "http");
   const [auth, setAuth] = useState(monitor?.http?.auth ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +119,8 @@ export function MonitorForm({
   const managed = monitor?.managed ?? false;
   // Only a service port has pods to check one by one.
   const fromService = (monitor?.source ?? "").startsWith("service/") && (type === "http" || type === "tcp");
+  /** A field's label with "(optional)" after it. */
+  const optional = (key: string) => `${t(key)} ${t("common.optional")}`;
 
   // Submitted by hand instead of through the form's action: React resets a
   // form after its action, which would throw away a rejected form's values.
@@ -134,70 +139,72 @@ export function MonitorForm({
       {monitor && <input type="hidden" name="id" value={monitor.id} />}
       <input type="hidden" name="type" value={type} />
 
-      <Section title="Genel">
+      <Section title={t("monitorForm.general.title")}>
         {monitor ? (
-          <Field label="Tip" span={2}>
-            <input defaultValue={info.label} disabled className="field" />
+          <Field label={t("monitorForm.general.type")} span={2}>
+            <input defaultValue={t(info.label)} disabled className="field" />
           </Field>
         ) : (
-          <Field label="Tip" span={2} hint={info.summary}>
+          <Field label={t("monitorForm.general.type")} span={2} hint={t(info.summary)}>
             <select value={type} onChange={(e) => setType(e.target.value as MonitorType)} className="field">
-              {monitorTypeOrder.map((t) => (
-                <option key={t} value={t}>
-                  {monitorTypes[t].label}
+              {monitorTypeOrder.map((mt) => (
+                <option key={mt} value={mt}>
+                  {t(monitorTypes[mt].label)}
                 </option>
               ))}
             </select>
           </Field>
         )}
         {discovered ? (
-          <Field label="Ad" span={4} hint="Keşfedilen monitor'lar adını cluster'daki nesneden alır.">
+          <Field label={t("monitorForm.general.name")} span={4} hint={t("monitorForm.general.name.discoveredHint")}>
             <input defaultValue={monitor?.name} disabled className="field" />
           </Field>
         ) : (
-          <Field label="Ad" span={4}>
-            <input name="name" required defaultValue={monitor?.name} placeholder="odeme-api" className="field" />
+          <Field label={t("monitorForm.general.name")} span={4}>
+            <input
+              name="name"
+              required
+              defaultValue={monitor?.name}
+              placeholder={t("monitorForm.general.name.placeholder")}
+              className="field"
+            />
           </Field>
         )}
         {info.target ? (
-          <Field label={info.target.label} span={6}>
+          <Field label={t(info.target.label)} span={6}>
             <input
               name="target"
               required
               readOnly={managed}
               defaultValue={monitor?.target}
-              placeholder={info.target.placeholder}
+              placeholder={t(info.target.placeholder)}
               className="field font-mono"
             />
           </Field>
         ) : (
-          <p className="rounded-lg bg-sunken p-3 text-sm text-muted sm:col-span-6">
-            Push monitor&apos;unda kontrol edilecek bir adres yoktur. Kaydettikten sonra monitor sayfasında
-            bir rapor adresi görünür; izlenen iş (CronJob, yedekleme betiği) her çalıştığında o adrese bir
-            istek atar. Beklenen sürede rapor gelmezse alarm üretilir.
-          </p>
+          <p className="rounded-lg bg-sunken p-3 text-sm text-muted sm:col-span-6">{t("monitorForm.general.pushNote")}</p>
         )}
-        <Field label="Açıklama (isteğe bağlı)" span={6}>
+        <Field label={optional("monitorForm.general.description")} span={6}>
           <input
             name="description"
             defaultValue={monitor?.description}
             maxLength={500}
-            placeholder="Neyi izliyor, kime ait?"
+            placeholder={t("monitorForm.general.description.placeholder")}
             className="field"
           />
         </Field>
         {discovered ? (
-          <Field label="Namespace" span={3} hint="Keşfedilen monitor nesnesinin namespace'inde kalır.">
+          <Field label={t("monitorForm.general.namespace")} span={3} hint={t("monitorForm.general.namespace.discoveredHint")}>
             <input defaultValue={monitor?.namespace} disabled className="field" />
           </Field>
         ) : (
-          <Field label="Grup (isteğe bağlı)" span={3} hint="Listede bu ad altında toplanır; bildirim kanalları gruba göre sınırlanabilir.">
+          <Field label={optional("monitorForm.general.group")} span={3} hint={t("monitorForm.general.group.hint")}>
             <input
               name="group"
               list="monitor-groups"
               defaultValue={monitor?.namespace}
               maxLength={63}
-              placeholder="Ödeme sistemleri"
+              placeholder={t("monitorForm.general.group.placeholder")}
               className="field"
             />
             <datalist id="monitor-groups">
@@ -207,22 +214,30 @@ export function MonitorForm({
             </datalist>
           </Field>
         )}
-        <Field label="Etiketler (isteğe bağlı)" span={3} hint="Virgülle ayırın. Listede etikete göre süzebilirsiniz.">
-          <input name="tags" defaultValue={monitor?.tags.join(", ")} placeholder="prod, kritik" className="field" />
+        <Field label={optional("monitorForm.general.tags")} span={3} hint={t("monitorForm.general.tags.hint")}>
+          <input
+            name="tags"
+            defaultValue={monitor?.tags.join(", ")}
+            placeholder={t("monitorForm.general.tags.placeholder")}
+            className="field"
+          />
         </Field>
       </Section>
 
       <Section
-        title="Zamanlama ve alarm"
+        title={t("monitorForm.timing.title")}
         hint={
           managed
-            ? "Bu monitor nesnesindeki kubeat.io/* annotation'larını izler; hedef, aralık, zaman aşımı ve eşik oradan değiştirilir."
+            ? t("monitorForm.timing.managedHint")
             : type === "push"
-              ? "Raporun ne sıklıkta beklendiği ve ne kadar gecikmenin hoş görüleceği."
-              : "Ne sıklıkta kontrol edileceği ve kaç hatadan sonra kesinti sayılacağı."
+              ? t("monitorForm.timing.pushHint")
+              : t("monitorForm.timing.hint")
         }
       >
-        <Field label={type === "push" ? "Rapor aralığı (sn)" : "Kontrol aralığı (sn)"} span={type === "push" ? 2 : 1}>
+        <Field
+          label={type === "push" ? t("monitorForm.timing.reportInterval") : t("monitorForm.timing.interval")}
+          span={type === "push" ? 2 : 1}
+        >
           <input
             name="interval_seconds"
             type="number"
@@ -233,7 +248,10 @@ export function MonitorForm({
             className="field"
           />
         </Field>
-        <Field label={type === "push" ? "Gecikme payı (sn)" : "Zaman aşımı (sn)"} span={type === "push" ? 2 : 1}>
+        <Field
+          label={type === "push" ? t("monitorForm.timing.gracePeriod") : t("monitorForm.timing.timeout")}
+          span={type === "push" ? 2 : 1}
+        >
           <input
             name="timeout_seconds"
             type="number"
@@ -244,11 +262,7 @@ export function MonitorForm({
             className="field"
           />
         </Field>
-        <Field
-          label="Alarm eşiği"
-          span={2}
-          hint="Art arda bu kadar başarısız kontrol kesinti sayılır ve bildirim gider."
-        >
+        <Field label={t("monitorForm.timing.threshold")} span={2} hint={t("monitorForm.timing.threshold.hint")}>
           <input
             name="failure_threshold"
             type="number"
@@ -260,11 +274,7 @@ export function MonitorForm({
           />
         </Field>
         {type !== "push" && (
-          <Field
-            label="Tekrar aralığı (sn)"
-            span={2}
-            hint="Hata sonrası, kesinti kesinleşene kadar kontrolün ne kadar sonra tekrarlanacağı. 0: normal aralık."
-          >
+          <Field label={t("monitorForm.timing.retryInterval")} span={2} hint={t("monitorForm.timing.retryInterval.hint")}>
             <input
               name="retry_interval_seconds"
               type="number"
@@ -278,23 +288,27 @@ export function MonitorForm({
 
       {type === "http" && (
         <>
-          <Section title="İstek">
-            <Field label="Metot" span={2}>
+          <Section title={t("monitorForm.request.title")}>
+            <Field label={t("monitorForm.request.method")} span={2}>
               <select name="http_method" defaultValue={http?.method ?? "GET"} className="field">
                 {httpMethods.map((m) => (
                   <option key={m}>{m}</option>
                 ))}
               </select>
             </Field>
-            <Field label="Kabul edilen durum kodları" span={2} hint="Kodlar ve aralıklar: 200-299,401">
+            <Field
+              label={t("monitorForm.request.expectedStatus")}
+              span={2}
+              hint={t("monitorForm.request.expectedStatus.hint")}
+            >
               <input
                 name="http_expected_status"
                 defaultValue={http?.expected_status ?? "200-399"}
-                placeholder="200-399"
+                placeholder={t("monitorForm.request.expectedStatus.placeholder")}
                 className="field font-mono"
               />
             </Field>
-            <Field label="İzlenecek yönlendirme" span={2} hint="0: ilk yanıt değerlendirilir.">
+            <Field label={t("monitorForm.request.maxRedirects")} span={2} hint={t("monitorForm.request.maxRedirects.hint")}>
               <input
                 name="http_max_redirects"
                 type="number"
@@ -304,23 +318,23 @@ export function MonitorForm({
                 className="field"
               />
             </Field>
-            <Field label="Kimlik doğrulama" span={2}>
+            <Field label={t("monitorForm.request.auth")} span={2}>
               <select name="http_auth" value={auth} onChange={(e) => setAuth(e.target.value as typeof auth)} className="field">
-                <option value="">Yok</option>
-                <option value="basic">Basic (kullanıcı ve parola)</option>
-                <option value="bearer">Bearer token</option>
+                <option value="">{t("monitorForm.request.auth.none")}</option>
+                <option value="basic">{t("monitorForm.request.auth.basic")}</option>
+                <option value="bearer">{t("monitorForm.request.auth.bearer")}</option>
               </select>
             </Field>
             {auth === "basic" && (
-              <Field label="Kullanıcı" span={2}>
+              <Field label={t("monitorForm.request.user")} span={2}>
                 <input name="http_auth_user" defaultValue={http?.auth_user} autoComplete="off" className="field" />
               </Field>
             )}
             {auth !== "" && (
               <Field
-                label={auth === "basic" ? "Parola" : "Token"}
+                label={auth === "basic" ? t("monitorForm.request.password") : t("monitorForm.request.token")}
                 span={auth === "basic" ? 2 : 4}
-                hint={http?.auth_secret ? "Kayıtlı değer gösterilmez; değiştirmezseniz korunur." : undefined}
+                hint={http?.auth_secret ? t("monitorForm.secret.keptHint") : undefined}
               >
                 <input
                   name="http_auth_secret"
@@ -333,9 +347,9 @@ export function MonitorForm({
               </Field>
             )}
             <Field
-              label="Header'lar (satır başına bir tane, “Ad: değer”)"
+              label={t("monitorForm.request.headers")}
               span={6}
-              hint={`Kayıtlı değerler ${MASKED_VALUE} olarak gösterilir; satırı öyle bırakırsanız değer korunur.`}
+              hint={t("monitorForm.request.headers.hint", { mask: MASKED_VALUE })}
             >
               <textarea
                 name="http_headers"
@@ -343,124 +357,144 @@ export function MonitorForm({
                 defaultValue={Object.entries(http?.headers ?? {})
                   .map(([name, value]) => `${name}: ${value}`)
                   .join("\n")}
-                placeholder="X-Tenant: shop"
+                placeholder={t("monitorForm.request.headers.placeholder")}
                 className="field font-mono"
               />
             </Field>
-            <Field label="Gövde (isteğe bağlı)" span={4}>
+            <Field label={optional("monitorForm.request.body")} span={4}>
               <textarea
                 name="http_body"
                 rows={3}
                 defaultValue={http?.body}
-                placeholder='{"deep": true}'
+                placeholder={t("monitorForm.request.body.placeholder")}
                 className="field font-mono"
               />
             </Field>
-            <Field label="Gövde tipi" span={2}>
+            <Field label={t("monitorForm.request.contentType")} span={2}>
               <select name="http_content_type" defaultValue={http?.content_type || "application/json"} className="field">
                 {contentTypes.map((c) => (
                   <option key={c.value} value={c.value}>
-                    {c.label}
+                    {t(c.label)}
                   </option>
                 ))}
               </select>
             </Field>
             <Check
               name="tls_skip_verify"
-              label="TLS sertifikasını doğrulama"
-              hint="Özel CA kullanan hedefler için. Sertifikanın bitiş tarihi yine izlenir."
+              label={t("monitorForm.tls.skipVerify")}
+              hint={t("monitorForm.tls.skipVerify.hint")}
               defaultChecked={http?.tls_skip_verify}
             />
           </Section>
 
-          <Section title="Yanıtta aranacaklar" hint="Boş bırakılırsa yalnızca durum koduna bakılır.">
-            <Field label="Metin" span={4}>
-              <input name="http_keyword" defaultValue={http?.keyword} placeholder='"status":"ok"' className="field font-mono" />
+          <Section title={t("monitorForm.response.title")} hint={t("monitorForm.response.hint")}>
+            <Field label={t("monitorForm.response.keyword")} span={4}>
+              <input
+                name="http_keyword"
+                defaultValue={http?.keyword}
+                placeholder={t("monitorForm.response.keyword.placeholder")}
+                className="field font-mono"
+              />
             </Field>
-            <Field label="Koşul" span={2}>
+            <Field label={t("monitorForm.response.condition")} span={2}>
               <select name="http_invert_keyword" defaultValue={http?.invert_keyword ? "on" : ""} className="field">
-                <option value="">gövdede bulunmalı</option>
-                <option value="on">gövdede bulunmamalı</option>
+                <option value="">{t("monitorForm.response.condition.present")}</option>
+                <option value="on">{t("monitorForm.response.condition.absent")}</option>
               </select>
             </Field>
-            <Field label="JSON yolu" span={2} hint="Örnek: status, checks[0].state">
-              <input name="http_json_path" defaultValue={http?.json_path} placeholder="status" className="field font-mono" />
+            <Field label={t("monitorForm.response.jsonPath")} span={2} hint={t("monitorForm.response.jsonPath.hint")}>
+              <input
+                name="http_json_path"
+                defaultValue={http?.json_path}
+                placeholder={t("monitorForm.response.jsonPath.placeholder")}
+                className="field font-mono"
+              />
             </Field>
-            <Field label="Karşılaştırma" span={2}>
+            <Field label={t("monitorForm.response.operator")} span={2}>
               <select name="http_json_operator" defaultValue={http?.json_operator || "=="} className="field">
                 {jsonOperators.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {t(o.label)}
                   </option>
                 ))}
               </select>
             </Field>
-            <Field label="Beklenen değer" span={2}>
-              <input name="http_json_expected" defaultValue={http?.json_expected} placeholder="ok" className="field font-mono" />
+            <Field label={t("monitorForm.response.expected")} span={2}>
+              <input
+                name="http_json_expected"
+                defaultValue={http?.json_expected}
+                placeholder={t("monitorForm.response.expected.placeholder")}
+                className="field font-mono"
+              />
             </Field>
           </Section>
         </>
       )}
 
       {type === "tcp" && (
-        <Section title="TCP ayarları">
+        <Section title={t("monitorForm.tcp.title")}>
           <Check
             name="tcp_tls"
-            label="TLS el sıkışması yap"
-            hint="Bağlantıdan sonra TLS kurulur; sertifikanın bitiş tarihi izlenir ve süresi yaklaşınca uyarı üretilir."
+            label={t("monitorForm.tcp.tls")}
+            hint={t("monitorForm.tcp.tls.hint")}
             defaultChecked={monitor?.tcp?.tls}
           />
-          <Check name="tls_skip_verify" label="TLS sertifikasını doğrulama" defaultChecked={monitor?.tcp?.tls_skip_verify} />
+          <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.tcp?.tls_skip_verify} />
         </Section>
       )}
 
       {type === "dns" && (
-        <Section title="DNS ayarları">
-          <Field label="Kayıt tipi" span={2}>
+        <Section title={t("monitorForm.dns.title")}>
+          <Field label={t("monitorForm.dns.recordType")} span={2}>
             <select name="dns_record_type" defaultValue={monitor?.dns?.record_type ?? "A"} className="field">
-              {dnsRecordTypes.map((t) => (
-                <option key={t}>{t}</option>
+              {dnsRecordTypes.map((rt) => (
+                <option key={rt}>{rt}</option>
               ))}
             </select>
           </Field>
-          <Field label="Çözümleyici (isteğe bağlı)" span={4} hint="Boşsa Kubeat'in çalıştığı ortamın DNS'i kullanılır.">
+          <Field label={optional("monitorForm.dns.resolver")} span={4} hint={t("monitorForm.dns.resolver.hint")}>
             <input
               name="dns_resolver"
               defaultValue={monitor?.dns?.resolver}
-              placeholder="10.96.0.10 ya da ns1.example.com:53"
+              placeholder={t("monitorForm.dns.resolver.placeholder")}
               className="field font-mono"
             />
           </Field>
-          <Field
-            label="Beklenen değer (isteğe bağlı)"
-            span={6}
-            hint="Bulunan kayıtlardan en az biri bu metni içermelidir."
-          >
-            <input name="dns_expected" defaultValue={monitor?.dns?.expected} placeholder="10.0.0.5" className="field font-mono" />
+          <Field label={optional("monitorForm.dns.expected")} span={6} hint={t("monitorForm.dns.expected.hint")}>
+            <input
+              name="dns_expected"
+              defaultValue={monitor?.dns?.expected}
+              placeholder={t("monitorForm.dns.expected.placeholder")}
+              className="field font-mono"
+            />
           </Field>
         </Section>
       )}
 
       {type === "grpc" && (
-        <Section title="gRPC ayarları">
-          <Field label="Servis adı (isteğe bağlı)" span={6} hint="Boşsa sunucunun genel durumu sorulur.">
-            <input name="grpc_service" defaultValue={monitor?.grpc?.service} placeholder="shop.Cart" className="field font-mono" />
+        <Section title={t("monitorForm.grpc.title")}>
+          <Field label={optional("monitorForm.grpc.service")} span={6} hint={t("monitorForm.grpc.service.hint")}>
+            <input
+              name="grpc_service"
+              defaultValue={monitor?.grpc?.service}
+              placeholder={t("monitorForm.grpc.service.placeholder")}
+              className="field font-mono"
+            />
           </Field>
-          <Check name="grpc_tls" label="TLS kullan" defaultChecked={monitor?.grpc?.tls} />
-          <Check name="tls_skip_verify" label="TLS sertifikasını doğrulama" defaultChecked={monitor?.grpc?.tls_skip_verify} />
+          <Check name="grpc_tls" label={t("monitorForm.tls.use")} defaultChecked={monitor?.grpc?.tls} />
+          <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.grpc?.tls_skip_verify} />
         </Section>
       )}
 
       {isDatabaseType(type) && (
         <Section
-          title="Giriş bilgileri"
-          hint={
-            type === "redis"
-              ? "Sunucu parola istemiyorsa boş bırakın. Kullanıcı adı yalnızca ACL kullanan sunucular içindir."
-              : "Yalnızca okuma yetkisi olan bir kullanıcı yeterlidir."
-          }
+          title={t("monitorForm.credentials.title")}
+          hint={type === "redis" ? t("monitorForm.credentials.redisHint") : t("monitorForm.credentials.hint")}
         >
-          <Field label={type === "redis" ? "Kullanıcı (isteğe bağlı)" : "Kullanıcı"} span={3}>
+          <Field
+            label={type === "redis" ? optional("monitorForm.credentials.user") : t("monitorForm.credentials.user")}
+            span={3}
+          >
             <input
               name="db_username"
               required={type !== "redis"}
@@ -470,9 +504,9 @@ export function MonitorForm({
             />
           </Field>
           <Field
-            label="Parola"
+            label={t("monitorForm.credentials.password")}
             span={3}
-            hint={monitor?.database?.password ? "Kayıtlı değer gösterilmez; değiştirmezseniz korunur." : undefined}
+            hint={monitor?.database?.password ? t("monitorForm.secret.keptHint") : undefined}
           >
             <input
               name="db_password"
@@ -485,10 +519,15 @@ export function MonitorForm({
           </Field>
           {type !== "redis" && (
             <>
-              <Field label="Veritabanı (isteğe bağlı)" span={2}>
-                <input name="db_database" defaultValue={monitor?.database?.database} placeholder="orders" className="field font-mono" />
+              <Field label={optional("monitorForm.credentials.database")} span={2}>
+                <input
+                  name="db_database"
+                  defaultValue={monitor?.database?.database}
+                  placeholder={t("monitorForm.credentials.database.placeholder")}
+                  className="field font-mono"
+                />
               </Field>
-              <Field label="Sorgu" span={4} hint="Giriş yaptıktan sonra çalıştırılır; hata verirse kontrol başarısızdır.">
+              <Field label={t("monitorForm.credentials.query")} span={4} hint={t("monitorForm.credentials.query.hint")}>
                 <input
                   name="db_query"
                   defaultValue={monitor?.database?.query || "SELECT 1"}
@@ -498,21 +537,14 @@ export function MonitorForm({
               </Field>
             </>
           )}
-          <Check name="db_tls" label="TLS kullan" defaultChecked={monitor?.database?.tls} />
-          <Check name="tls_skip_verify" label="TLS sertifikasını doğrulama" defaultChecked={monitor?.database?.tls_skip_verify} />
+          <Check name="db_tls" label={t("monitorForm.tls.use")} defaultChecked={monitor?.database?.tls} />
+          <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.database?.tls_skip_verify} />
         </Section>
       )}
 
       {type === "workload" && (
-        <Section
-          title="Workload ayarları"
-          hint="Tür deployment, statefulset ya da daemonset olabilir. Kubeat cluster'a bağlı olmalıdır; pod'lara ağ erişimi gerekmez."
-        >
-          <Field
-            label="En az hazır pod"
-            span={3}
-            hint="0: workload'un olması gereken tüm pod'ları hazır olmalı. Örneğin 3 kopyalı bir serviste 2 yazarsanız tek pod'un düşmesi alarm üretmez."
-          >
+        <Section title={t("monitorForm.workload.title")} hint={t("monitorForm.workload.hint")}>
+          <Field label={t("monitorForm.workload.minReady")} span={3} hint={t("monitorForm.workload.minReady.hint")}>
             <input
               name="workload_min_ready"
               type="number"
@@ -525,42 +557,42 @@ export function MonitorForm({
       )}
 
       {type === "websocket" && (
-        <Section title="WebSocket ayarları">
-          <Field label="Alt protokol (isteğe bağlı)" span={6} hint="Verilirse sunucunun onu kabul etmesi gerekir.">
+        <Section title={t("monitorForm.websocket.title")}>
+          <Field
+            label={optional("monitorForm.websocket.subprotocol")}
+            span={6}
+            hint={t("monitorForm.websocket.subprotocol.hint")}
+          >
             <input
               name="ws_subprotocol"
               defaultValue={monitor?.websocket?.subprotocol}
-              placeholder="graphql-ws"
+              placeholder={t("monitorForm.websocket.subprotocol.placeholder")}
               className="field font-mono"
             />
           </Field>
           <Check
             name="tls_skip_verify"
-            label="TLS sertifikasını doğrulama"
+            label={t("monitorForm.tls.skipVerify")}
             defaultChecked={monitor?.websocket?.tls_skip_verify}
           />
         </Section>
       )}
 
       {type !== "push" && (
-        <Section title="Gelişmiş">
+        <Section title={t("monitorForm.advanced.title")}>
           {fromService && (
             <Check
               name="each_pod"
-              label="Her pod'u ayrı kontrol et"
-              hint={
-                managed
-                  ? "Nesnedeki kubeat.io/each-pod annotation'ından gelir."
-                  : "Service adresi yerine arkasındaki hazır pod'ların her birine aynı kontrol yapılır; biri cevap vermezse kesinti sayılır ve adı yazılır."
-              }
+              label={t("monitorForm.advanced.eachPod")}
+              hint={managed ? t("monitorForm.advanced.eachPod.managedHint") : t("monitorForm.advanced.eachPod.hint")}
               defaultChecked={monitor?.each_pod}
               disabled={managed}
             />
           )}
           <Check
             name="inverted"
-            label="Ters mod"
-            hint="Sonucu tersine çevirir: hedef başarısız olduğu sürece monitor çalışıyor sayılır. Erişilmemesi gereken şeyler için."
+            label={t("monitorForm.advanced.inverted")}
+            hint={t("monitorForm.advanced.inverted.hint")}
             defaultChecked={monitor?.inverted}
           />
         </Section>
@@ -568,10 +600,10 @@ export function MonitorForm({
 
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" disabled={pending} className="btn btn-primary px-5">
-          {pending ? "Kaydediliyor…" : monitor ? "Kaydet" : "Monitor'u oluştur"}
+          {pending ? t("common.saving") : monitor ? t("common.save") : t("monitorForm.create")}
         </button>
         <Link href={monitor ? `/monitors/${monitor.id}` : "/"} className="btn">
-          Vazgeç
+          {t("common.cancel")}
         </Link>
         {error && (
           <p role="alert" className="text-sm text-down">

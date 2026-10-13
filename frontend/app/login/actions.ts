@@ -2,6 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { ApiError, login, logout, setup } from "@/lib/api";
+import { getT } from "@/lib/i18n/server";
+import type { T } from "@/lib/i18n/translate";
 import { clearSessionCookie, sessionToken, setSessionCookie } from "@/lib/session";
 
 export type LoginState = { error: string | null };
@@ -12,32 +14,33 @@ function safeNext(value: FormDataEntryValue | null): string {
   return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
 }
 
-function refusal(err: unknown): string {
+function refusal(err: unknown, t: T): string {
   if (err instanceof ApiError) {
     switch (err.status) {
       case 401:
-        return "Kullanıcı adı ya da parola hatalı.";
+        return t("login.refusal.credentials");
       case 403:
-        return err.message.includes("disabled") ? "Bu hesap devre dışı bırakılmış." : "Dizin hesabınızın burada bir rolü yok; bir yöneticiye başvurun.";
+        return err.message.includes("disabled") ? t("login.refusal.disabled") : t("login.refusal.noRole");
       case 429:
-        return "Çok fazla hatalı deneme yapıldı. Biraz sonra tekrar deneyin.";
+        return t("login.refusal.tooMany");
       case 502:
-        return "Dizin sunucusuna ulaşılamadı. Biraz sonra tekrar deneyin.";
+        return t("login.refusal.directory");
       case 409:
-        return "Zaten bir hesap var; giriş yapın.";
+        return t("login.refusal.exists");
       case 400:
-        return `Geçersiz değer: ${err.message}`;
+        return t("login.refusal.invalid", { message: err.message });
     }
   }
-  return "Backend'e ulaşılamadı. Biraz sonra tekrar deneyin.";
+  return t("login.refusal.backend");
 }
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
+  const t = await getT();
   let session;
   try {
     session = await login(String(formData.get("username") ?? "").trim(), String(formData.get("password") ?? ""));
   } catch (err) {
-    return { error: refusal(err) };
+    return { error: refusal(err, t) };
   }
   await setSessionCookie(session.token, session.expires_at);
   redirect(safeNext(formData.get("next")));
@@ -45,9 +48,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 
 /** Creates the first administrator and signs them in. */
 export async function setupAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
+  const t = await getT();
   const password = String(formData.get("password") ?? "");
   if (password !== String(formData.get("password_again") ?? "")) {
-    return { error: "Parolalar birbirini tutmuyor." };
+    return { error: t("setup.passwordMismatch") };
   }
   let session;
   try {
@@ -57,7 +61,7 @@ export async function setupAction(_prev: LoginState, formData: FormData): Promis
       password,
     });
   } catch (err) {
-    return { error: refusal(err) };
+    return { error: refusal(err, t) };
   }
   await setSessionCookie(session.token, session.expires_at);
   redirect("/");

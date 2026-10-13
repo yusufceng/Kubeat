@@ -17,6 +17,8 @@ import {
 import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { duration, milliseconds, uptime } from "@/lib/format";
+import { getT } from "@/lib/i18n/server";
+import type { T } from "@/lib/i18n/translate";
 import { typeLabel } from "@/lib/monitor-types";
 import { MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
 import { BackendError } from "@/app/ui/backend-error";
@@ -36,53 +38,95 @@ import { Tag } from "@/app/ui/tag";
 import { TimeAgo } from "@/app/ui/time-ago";
 
 /** The settings of the check, as label and value pairs. */
-function checkSettings(m: Monitor): [string, React.ReactNode][] {
+function checkSettings(m: Monitor, t: T): [string, React.ReactNode][] {
   const rows: [string, React.ReactNode][] = [
-    ["Tip", typeLabel(m.type)],
-    [m.type === "push" ? "Rapor aralığı" : "Kontrol aralığı", duration(m.interval_seconds)],
-    [m.type === "push" ? "Gecikme payı" : "Zaman aşımı", duration(m.timeout_seconds)],
-    ["Alarm eşiği", `art arda ${m.failure_threshold} hata`],
+    [t("monitorPage.settings.type"), t(typeLabel(m.type))],
+    [
+      t(m.type === "push" ? "monitorPage.settings.reportInterval" : "monitorPage.settings.checkInterval"),
+      duration(m.interval_seconds, t),
+    ],
+    [t(m.type === "push" ? "monitorPage.settings.grace" : "monitorPage.settings.timeout"), duration(m.timeout_seconds, t)],
+    [t("monitorPage.settings.threshold"), t.n("monitorPage.settings.threshold.value", m.failure_threshold)],
   ];
-  if (m.retry_interval_seconds > 0) rows.push(["Tekrar aralığı", duration(m.retry_interval_seconds)]);
-  if (m.inverted) rows.push(["Ters mod", "hedef başarısızken çalışıyor sayılır"]);
+  if (m.retry_interval_seconds > 0) {
+    rows.push([t("monitorPage.settings.retryInterval"), duration(m.retry_interval_seconds, t)]);
+  }
+  if (m.inverted) rows.push([t("monitorPage.settings.inverted"), t("monitorPage.settings.inverted.value")]);
 
-  const tls = (skip: boolean) => (skip ? "doğrulanmıyor" : "doğrulanıyor");
+  const tls = (skip: boolean) => t(skip ? "monitorPage.settings.tls.unverified" : "monitorPage.settings.tls.verified");
   if (m.http) {
     const h = m.http;
-    rows.push(["Metot", h.method], ["Kabul edilen kodlar", h.expected_status]);
-    rows.push(["Yönlendirme", h.max_redirects === 0 ? "izlenmez" : `en çok ${h.max_redirects}`]);
-    if (h.auth) rows.push(["Kimlik doğrulama", h.auth === "basic" ? `Basic (${h.auth_user})` : "Bearer token"]);
-    if (h.keyword) rows.push([h.invert_keyword ? "Bulunmaması gereken metin" : "Aranan metin", `“${h.keyword}”`]);
-    if (h.json_path) rows.push(["JSON koşulu", `${h.json_path} ${h.json_operator} ${h.json_expected}`]);
+    rows.push([t("monitorPage.settings.method"), h.method], [t("monitorPage.settings.expectedStatus"), h.expected_status]);
+    rows.push([
+      t("monitorPage.settings.redirects"),
+      h.max_redirects === 0
+        ? t("monitorPage.settings.redirects.none")
+        : t("monitorPage.settings.redirects.max", { count: h.max_redirects }),
+    ]);
+    if (h.auth) {
+      rows.push([t("monitorPage.settings.auth"), h.auth === "basic" ? `Basic (${h.auth_user})` : "Bearer token"]);
+    }
+    if (h.keyword) {
+      rows.push([
+        t(h.invert_keyword ? "monitorPage.settings.keyword.absent" : "monitorPage.settings.keyword.present"),
+        `“${h.keyword}”`,
+      ]);
+    }
+    if (h.json_path) {
+      rows.push([t("monitorPage.settings.jsonCondition"), `${h.json_path} ${h.json_operator} ${h.json_expected}`]);
+    }
     const headers = Object.keys(h.headers);
-    if (headers.length > 0) rows.push(["Header'lar", headers.join(", ")]);
-    if (h.body) rows.push(["Gövde", `${h.body.length} karakter, ${h.content_type || "tipi belirtilmemiş"}`]);
-    if (h.tls_skip_verify) rows.push(["TLS sertifikası", tls(true)]);
+    if (headers.length > 0) rows.push([t("monitorPage.settings.headers"), headers.join(", ")]);
+    if (h.body) {
+      rows.push([
+        t("monitorPage.settings.body"),
+        t.n("monitorPage.settings.body.value", h.body.length, {
+          type: h.content_type || t("monitorPage.settings.body.noType"),
+        }),
+      ]);
+    }
+    if (h.tls_skip_verify) rows.push([t("monitorPage.settings.tlsCert"), tls(true)]);
   }
-  if (m.tcp?.tls) rows.push(["TLS", `el sıkışması yapılır, sertifika ${tls(m.tcp.tls_skip_verify)}`]);
+  if (m.tcp?.tls) rows.push(["TLS", t("monitorPage.settings.tcpTls", { verified: tls(m.tcp.tls_skip_verify) })]);
   if (m.dns) {
-    rows.push(["Kayıt tipi", m.dns.record_type]);
-    rows.push(["Çözümleyici", m.dns.resolver || "ortamın DNS'i"]);
-    if (m.dns.expected) rows.push(["Beklenen değer", m.dns.expected]);
+    rows.push([t("monitorPage.settings.recordType"), m.dns.record_type]);
+    rows.push([t("monitorPage.settings.resolver"), m.dns.resolver || t("monitorPage.settings.resolver.default")]);
+    if (m.dns.expected) rows.push([t("monitorPage.settings.expected"), m.dns.expected]);
   }
   if (m.grpc) {
-    rows.push(["Servis", m.grpc.service || "sunucunun geneli"]);
-    rows.push(["TLS", m.grpc.tls ? `açık, sertifika ${tls(m.grpc.tls_skip_verify)}` : "kapalı"]);
+    rows.push([t("monitorPage.settings.service"), m.grpc.service || t("monitorPage.settings.service.whole")]);
+    rows.push([
+      "TLS",
+      m.grpc.tls
+        ? t("monitorPage.settings.tlsOn", { verified: tls(m.grpc.tls_skip_verify) })
+        : t("monitorPage.settings.tlsOff"),
+    ]);
   }
   if (m.database) {
     const d = m.database;
-    if (d.username) rows.push(["Kullanıcı", d.username]);
-    rows.push(["Parola", d.password ? "kayıtlı" : "yok"]);
-    if (d.database) rows.push(["Veritabanı", d.database]);
-    if (d.query) rows.push(["Sorgu", d.query]);
-    rows.push(["TLS", d.tls ? `açık, sertifika ${tls(d.tls_skip_verify)}` : "kapalı"]);
+    if (d.username) rows.push([t("monitorPage.settings.user"), d.username]);
+    rows.push([
+      t("monitorPage.settings.password"),
+      t(d.password ? "monitorPage.settings.password.set" : "monitorPage.settings.password.none"),
+    ]);
+    if (d.database) rows.push([t("monitorPage.settings.database"), d.database]);
+    if (d.query) rows.push([t("monitorPage.settings.query"), d.query]);
+    rows.push([
+      "TLS",
+      d.tls ? t("monitorPage.settings.tlsOn", { verified: tls(d.tls_skip_verify) }) : t("monitorPage.settings.tlsOff"),
+    ]);
   }
   if (m.workload) {
-    rows.push(["Hazır olması gereken", m.workload.min_ready > 0 ? `en az ${m.workload.min_ready} pod` : "tüm pod'lar"]);
+    rows.push([
+      t("monitorPage.settings.minReady"),
+      m.workload.min_ready > 0
+        ? t.n("monitorPage.settings.minReady.atLeast", m.workload.min_ready)
+        : t("monitorPage.settings.minReady.all"),
+    ]);
   }
   if (m.websocket) {
-    if (m.websocket.subprotocol) rows.push(["Alt protokol", m.websocket.subprotocol]);
-    if (m.websocket.tls_skip_verify) rows.push(["TLS sertifikası", tls(true)]);
+    if (m.websocket.subprotocol) rows.push([t("monitorPage.settings.subprotocol"), m.websocket.subprotocol]);
+    if (m.websocket.tls_skip_verify) rows.push([t("monitorPage.settings.tlsCert"), tls(true)]);
   }
   return rows;
 }
@@ -125,6 +169,7 @@ async function MonitorDetail({
   const range = config.chartRanges.includes(requested) ? requested : config.chartRanges[0];
 
   const me = await currentUser();
+  const t = await getT();
   let monitor: Monitor;
   let results: CheckResult[];
   let incidents: Incident[];
@@ -140,7 +185,7 @@ async function MonitorDetail({
     ]);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
-    return <BackendError what="Monitor durumu" err={err} />;
+    return <BackendError what={t("monitorPage.what")} err={err} />;
   }
 
   const label = monitorLabel(monitor);
@@ -157,6 +202,8 @@ async function MonitorDetail({
         ),
       }
     : null;
+  // The date is a component, so the sentence is split around its placeholder.
+  const maintenance = t("monitorPage.maintenance").split("{until}");
 
   return (
     <>
@@ -164,23 +211,23 @@ async function MonitorDetail({
         <div className="min-w-0">
           <p className="mb-1.5 flex flex-wrap items-center gap-2 text-sm text-muted">
             <Link href="/" className="hover:text-ink">
-              Genel bakış
+              {t("monitorPage.breadcrumb.overview")}
             </Link>
             <span aria-hidden>/</span>
             <Link href={namespaceHref(monitor.namespace)} className="hover:text-ink">
-              {monitor.namespace || MANUAL_LABEL}
+              {monitor.namespace || t(MANUAL_LABEL)}
             </Link>
             {label.kind && <KindChip kind={label.kind} />}
-            <KindChip kind={typeLabel(monitor.type)} />
+            <KindChip kind={t(typeLabel(monitor.type))} />
             {monitor.each_pod && (
-              <span className="rounded bg-sunken px-1.5 py-0.5 text-xs" title="Her hazır pod ayrı kontrol edilir">
-                her pod
+              <span className="rounded bg-sunken px-1.5 py-0.5 text-xs" title={t("monitorPage.eachPod.title")}>
+                {t("monitorPage.eachPod")}
               </span>
             )}
             {monitor.managed && (
               <span
                 className="rounded bg-sunken px-1.5 py-0.5 text-xs"
-                title="kubeat.io/monitor annotation'ı ile oluşturuldu; hedefi ve zamanlaması nesnedeki annotation'lardan gelir"
+                title={t("monitorPage.managed.title")}
               >
                 annotation
               </span>
@@ -188,7 +235,7 @@ async function MonitorDetail({
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight">{label.name}</h1>
-            <StatusPill state={state} />
+            <StatusPill state={state} t={t} />
           </div>
           {monitor.description && <p className="mt-1.5 text-sm text-muted">{monitor.description}</p>}
           {monitor.tags.length > 0 && (
@@ -206,7 +253,7 @@ async function MonitorDetail({
         {me.can_edit && <MonitorActions monitor={monitor} />}
       </header>
 
-      <section aria-label="Son kontroller" className="card p-5">
+      <section aria-label={t("monitorPage.recentChecks")} className="card p-5">
         <HeartbeatBar
           results={results.map((r) => ({
             t: new Date(r.checked_at).getTime(),
@@ -218,16 +265,16 @@ async function MonitorDetail({
         />
         <p className="mt-3 flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-muted">
           <span>
-            {monitor.type === "push" ? "Rapor beklenen aralık" : "Kontrol aralığı"}:{" "}
-            {duration(monitor.interval_seconds)}
+            {t(monitor.type === "push" ? "monitorPage.interval.push" : "monitorPage.interval.check")}:{" "}
+            {duration(monitor.interval_seconds, t)}
           </span>
           <span>
             {last ? (
               <>
-                Son kontrol <TimeAgo iso={last.checked_at} />
+                {t("monitorPage.lastCheck")} <TimeAgo iso={last.checked_at} />
               </>
             ) : (
-              "Henüz kontrol yapılmadı"
+              t("monitorPage.noChecksYet")
             )}
           </span>
         </p>
@@ -239,28 +286,27 @@ async function MonitorDetail({
         )}
       </section>
 
-      {!monitor.enabled && (
-        <Notice tone="muted">Bu monitor durduruldu; kontrol yapılmıyor ve alarm üretilmiyor.</Notice>
-      )}
+      {!monitor.enabled && <Notice tone="muted">{t("monitorPage.paused")}</Notice>}
       {monitor.open_incident && (
         <Notice tone="down">
-          <span className="font-semibold">Kesinti devam ediyor:</span>{" "}
+          <span className="font-semibold">{t("monitorPage.openIncident")}</span>{" "}
           <LiveDuration since={monitor.open_incident.started_at} />
         </Notice>
       )}
       {monitor.cert_warning && (
         <Notice tone="warn">
-          Bu hedefin TLS sertifikasının süresi dolmak üzere
-          {cert && cert.daysLeft >= 0 && `: ${cert.daysLeft} gün kaldı`}.
+          {t("monitorPage.certWarning")}
+          {cert && cert.daysLeft >= 0 && `: ${t.n("monitorPage.certWarning.daysLeft", cert.daysLeft)}`}.
         </Notice>
       )}
       {monitor.enabled &&
         (monitor.maintenance_until ? (
           <Notice tone="muted">
-            Bakımda: <LocalTime iso={monitor.maintenance_until} seconds={false} /> tarihine kadar yeni olay
-            açılmaz ve bildirim gitmez.{" "}
+            {maintenance[0]}
+            <LocalTime iso={monitor.maintenance_until} seconds={false} />
+            {maintenance[1]}{" "}
             <Link href="/maintenance" className="underline">
-              Bakım pencereleri
+              {t("monitorPage.maintenance.windows")}
             </Link>
           </Notice>
         ) : (
@@ -269,28 +315,28 @@ async function MonitorDetail({
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <Stat
-          label={monitor.type === "push" ? "Bildirilen süre" : "Yanıt"}
-          value={last?.up ? milliseconds(last.latency_ms) : "–"}
-          hint="son kontrol"
+          label={t(monitor.type === "push" ? "monitorPage.stat.reported" : "monitorPage.stat.response")}
+          value={last?.up ? milliseconds(last.latency_ms, t) : "–"}
+          hint={t("monitorPage.stat.lastCheck")}
         />
         <Stat
-          label="Ort. yanıt"
-          value={monitor.uptime_percent ? milliseconds(monitor.avg_latency_ms) : "–"}
-          hint={`son ${duration(monitor.window_seconds)}`}
+          label={t("monitorPage.stat.avgResponse")}
+          value={monitor.uptime_percent ? milliseconds(monitor.avg_latency_ms, t) : "–"}
+          hint={t("monitorPage.stat.last", { duration: duration(monitor.window_seconds, t) })}
         />
         {windows.map((w) => (
           <Stat
             key={w.window_seconds}
-            label="Uptime"
-            value={uptime(w.uptime_percent)}
-            hint={`son ${duration(w.window_seconds)}`}
+            label={t("monitorPage.stat.uptime")}
+            value={uptime(w.uptime_percent, t)}
+            hint={t("monitorPage.stat.last", { duration: duration(w.window_seconds, t) })}
             tone={w.uptime_percent !== null && w.uptime_percent < 99 ? "text-warn" : undefined}
           />
         ))}
         {cert && (
           <Stat
-            label="Sertifika"
-            value={cert.daysLeft < 0 ? "Doldu" : `${cert.daysLeft} gün`}
+            label={t("monitorPage.stat.cert")}
+            value={cert.daysLeft < 0 ? t("monitorPage.stat.certExpired") : t.n("format.days", cert.daysLeft)}
             hint={<LocalTime iso={cert.expiresAt} seconds={false} />}
             tone={cert.daysLeft < 0 ? "text-down" : monitor.cert_warning ? "text-warn" : undefined}
           />
@@ -301,8 +347,8 @@ async function MonitorDetail({
 
       <section className="card p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">Yanıt süresi (ms)</h2>
-          <nav aria-label="Grafik aralığı" className="flex gap-1 rounded-lg bg-sunken p-0.5 text-xs">
+          <h2 className="text-sm font-semibold">{t("monitorPage.chart.title")}</h2>
+          <nav aria-label={t("monitorPage.chart.range")} className="flex gap-1 rounded-lg bg-sunken p-0.5 text-xs">
             {config.chartRanges
               .toSorted((a, b) => a - b)
               .map((r) => (
@@ -315,49 +361,49 @@ async function MonitorDetail({
                     r === range ? "bg-panel font-semibold shadow-sm" : "text-muted hover:text-ink"
                   }`}
                 >
-                  {duration(r)}
+                  {duration(r, t)}
                 </Link>
               ))}
           </nav>
         </div>
         <LatencyChart series={series} />
         <p className="mt-3 text-xs text-muted">
-          Her nokta {duration(series.bucket_seconds)} içindeki başarılı kontrollerin ortalamasıdır.
+          {t("monitorPage.chart.caption", { duration: duration(series.bucket_seconds, t) })}
         </p>
       </section>
 
       {(monitor.source || monitor.type === "workload") && (
         <section>
-          <h2 className="mb-2 text-sm font-semibold">Pod&apos;lar</h2>
+          <h2 className="mb-2 text-sm font-semibold">{t("monitorPage.pods.title")}</h2>
           {/* Its own boundary: a slow cluster must not hold back the page. */}
-          <Suspense fallback={<p className="text-sm text-muted">Cluster okunuyor…</p>}>
+          <Suspense fallback={<p className="text-sm text-muted">{t("common.readingCluster")}</p>}>
             <PodsPanel monitorId={monitor.id} />
           </Suspense>
         </section>
       )}
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold">Olaylar</h2>
+        <h2 className="mb-2 text-sm font-semibold">{t("nav.incidents")}</h2>
         {incidents.length === 0 ? (
-          <p className="card p-5 text-sm text-muted">Bu monitor için olay kaydı yok.</p>
+          <p className="card p-5 text-sm text-muted">{t("monitorPage.incidents.empty")}</p>
         ) : (
           <IncidentTable incidents={incidents} showMonitor={false} />
         )}
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold">Kontrol geçmişi</h2>
+        <h2 className="mb-2 text-sm font-semibold">{t("monitorPage.history.title")}</h2>
         {results.length === 0 ? (
-          <p className="card p-5 text-sm text-muted">Henüz kontrol yapılmadı.</p>
+          <p className="card p-5 text-sm text-muted">{t("monitorPage.history.empty")}</p>
         ) : (
           <div className="card overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line text-xs text-muted">
                 <tr>
-                  <th className="px-4 py-2 font-medium">Zaman</th>
-                  <th className="px-4 py-2 font-medium">Sonuç</th>
-                  <th className="px-4 py-2 text-right font-medium">Süre</th>
-                  <th className="px-4 py-2 font-medium">Ayrıntı</th>
+                  <th className="px-4 py-2 font-medium">{t("monitorPage.history.time")}</th>
+                  <th className="px-4 py-2 font-medium">{t("monitorPage.history.result")}</th>
+                  <th className="px-4 py-2 text-right font-medium">{t("monitorPage.history.duration")}</th>
+                  <th className="px-4 py-2 font-medium">{t("monitorPage.history.detail")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -367,7 +413,7 @@ async function MonitorDetail({
                       <LocalTime iso={r.checked_at} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-2">
-                      <StatusBadge state={r.up ? "up" : "down"} />
+                      <StatusBadge state={r.up ? "up" : "down"} t={t} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums">{r.latency_ms} ms</td>
                     <td className="px-4 py-2 font-mono text-xs text-muted">
@@ -383,15 +429,15 @@ async function MonitorDetail({
 
       <section className="card p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">Kontrol ayarları</h2>
+          <h2 className="text-sm font-semibold">{t("monitorPage.settings.title")}</h2>
           {me.can_edit && (
             <Link href={`/monitors/${monitor.id}/edit`} className="text-xs text-muted hover:text-ink">
-              Düzenle →
+              {t("common.edit")} →
             </Link>
           )}
         </div>
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          {checkSettings(monitor).map(([name, value]) => (
+          {checkSettings(monitor, t).map(([name, value]) => (
             <div key={name} className="flex justify-between gap-4 border-b border-line/60 pb-2">
               <dt className="text-muted">{name}</dt>
               <dd className="min-w-0 break-words text-right font-medium">{value}</dd>
@@ -403,9 +449,10 @@ async function MonitorDetail({
   );
 }
 
-export default function Page({ params, searchParams }: PageProps<"/monitors/[id]">) {
+export default async function Page({ params, searchParams }: PageProps<"/monitors/[id]">) {
+  const t = await getT();
   return (
-    <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
+    <Suspense fallback={<p className="text-sm text-muted">{t("common.loading")}</p>}>
       <MonitorDetail params={params} searchParams={searchParams} />
     </Suspense>
   );

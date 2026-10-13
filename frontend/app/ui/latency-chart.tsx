@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Series, SeriesPoint } from "@/lib/api";
+import { useT } from "@/lib/i18n/client";
 
 // Layout, in CSS pixels.
 const HEIGHT = 236;
@@ -23,9 +24,9 @@ function stateOf(p: SeriesPoint): State {
 const stateStyle: Record<State, { color: string; height: number; label: string }> = {
   // Problems are taller as well as differently colored, so the strip does
   // not rely on hue alone.
-  ok: { color: "var(--viz-good)", height: 4, label: "Sorunsuz" },
-  partial: { color: "var(--viz-warning)", height: STRIP_HEIGHT, label: "Kısmi hata" },
-  down: { color: "var(--viz-critical)", height: STRIP_HEIGHT, label: "Kesinti" },
+  ok: { color: "var(--viz-good)", height: 4, label: "monitorPage.chart.state.ok" },
+  partial: { color: "var(--viz-warning)", height: STRIP_HEIGHT, label: "monitorPage.chart.state.partial" },
+  down: { color: "var(--viz-critical)", height: STRIP_HEIGHT, label: "monitorPage.chart.state.down" },
 };
 
 /** A round upper bound and tick step for an axis that starts at zero. */
@@ -36,9 +37,10 @@ function axis(max: number): { top: number; step: number } {
   return { top: Math.ceil(Math.max(max, 1) / step) * step, step };
 }
 
-const ms = (n: number) => `${n.toLocaleString("tr-TR", { maximumFractionDigits: n < 10 ? 1 : 0 })} ms`;
+const ms = (n: number, intl: string) => `${n.toLocaleString(intl, { maximumFractionDigits: n < 10 ? 1 : 0 })} ms`;
 
 export function LatencyChart({ series }: { series: Series }) {
+  const t = useT();
   const wrapper = useRef<HTMLDivElement>(null);
   // Measured on the client; until then a placeholder of the same height is
   // rendered, which also keeps times in the viewer's zone, not the server's.
@@ -97,9 +99,9 @@ export function LatencyChart({ series }: { series: Series }) {
     return { plotWidth, x, y, centers, segments, yTicks, xTicks, barWidth };
   }, [width, points, from, to, bucket]);
 
-  const timeLabel = (t: number) =>
-    new Date(t).toLocaleString(
-      "tr-TR",
+  const timeLabel = (at: number) =>
+    new Date(at).toLocaleString(
+      t.intl,
       longRange
         ? { day: "numeric", month: "short" }
         : { hour: "2-digit", minute: "2-digit" },
@@ -107,15 +109,15 @@ export function LatencyChart({ series }: { series: Series }) {
   const bucketLabel = (p: SeriesPoint) => {
     const start = new Date(p.start);
     const end = new Date(Math.min(start.getTime() + bucket, to));
-    const day = start.toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
-    const time = (d: Date) => d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+    const day = start.toLocaleDateString(t.intl, { day: "numeric", month: "short" });
+    const time = (d: Date) => d.toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit" });
     return `${day} ${time(start)} – ${time(end)}`;
   };
 
   if (points.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-line p-8 text-center text-sm text-muted">
-        Bu aralıkta kontrol sonucu yok.
+        {t("monitorPage.chart.empty")}
       </p>
     );
   }
@@ -140,7 +142,7 @@ export function LatencyChart({ series }: { series: Series }) {
         style={{ height: HEIGHT }}
         tabIndex={0}
         role="group"
-        aria-label="Yanıt süresi grafiği. Sol ve sağ ok tuşlarıyla noktalar arasında gezinin."
+        aria-label={t("monitorPage.chart.aria")}
         onPointerMove={(e) => setActive(nearest(e.clientX))}
         onPointerLeave={() => setActive(null)}
         onBlur={() => setActive(null)}
@@ -177,7 +179,7 @@ export function LatencyChart({ series }: { series: Series }) {
                   fill="var(--viz-muted)"
                   style={{ fontVariantNumeric: "tabular-nums" }}
                 >
-                  {v.toLocaleString("tr-TR")}
+                  {v.toLocaleString(t.intl)}
                 </text>
               </g>
             ))}
@@ -295,13 +297,13 @@ export function LatencyChart({ series }: { series: Series }) {
             <div className="mt-1 flex items-center gap-2">
               <span className="h-0.5 w-3 rounded bg-[var(--viz-series)]" aria-hidden />
               <span className="text-sm font-semibold">
-                {point.avg_latency_ms !== null ? ms(point.avg_latency_ms) : "Yanıt yok"}
+                {point.avg_latency_ms !== null ? ms(point.avg_latency_ms, t.intl) : t("monitorPage.chart.noResponse")}
               </span>
-              <span className="text-muted">ortalama</span>
+              <span className="text-muted">{t("monitorPage.chart.average")}</span>
             </div>
             {point.max_latency_ms !== null && (
               <div className="mt-0.5 text-muted">
-                en yüksek <span className="text-foreground">{ms(point.max_latency_ms)}</span>
+                {t("monitorPage.chart.max")} <span className="text-foreground">{ms(point.max_latency_ms, t.intl)}</span>
               </div>
             )}
             <div className="mt-1 flex items-center gap-2 border-t border-line pt-1">
@@ -311,11 +313,11 @@ export function LatencyChart({ series }: { series: Series }) {
                 aria-hidden
               />
               <span>
-                <span className="font-semibold">{stateStyle[stateOf(point)].label}</span>
+                <span className="font-semibold">{t(stateStyle[stateOf(point)].label)}</span>
                 <span className="text-muted">
                   {" · "}
-                  {point.checks} kontrol
-                  {point.checks > point.up_checks && `, ${point.checks - point.up_checks} başarısız`}
+                  {t.n("monitorPage.chart.checks", point.checks)}
+                  {point.checks > point.up_checks && `, ${t("monitorPage.chart.failed", { count: point.checks - point.up_checks })}`}
                 </span>
               </span>
             </div>
@@ -324,7 +326,7 @@ export function LatencyChart({ series }: { series: Series }) {
       </div>
 
       <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 pl-12 text-xs text-muted">
-        <span>Erişilebilirlik:</span>
+        <span>{t("monitorPage.chart.availability")}</span>
         {(Object.keys(stateStyle) as State[]).map((s) => (
           <span key={s} className="inline-flex items-center gap-1.5">
             <span
@@ -332,22 +334,22 @@ export function LatencyChart({ series }: { series: Series }) {
               style={{ background: stateStyle[s].color, height: stateStyle[s].height }}
               aria-hidden
             />
-            {stateStyle[s].label}
+            {t(stateStyle[s].label)}
           </span>
         ))}
       </figcaption>
 
       <details className="mt-3 text-sm">
-        <summary className="cursor-pointer text-xs text-muted">Tablo olarak göster</summary>
+        <summary className="cursor-pointer text-xs text-muted">{t("monitorPage.chart.showTable")}</summary>
         <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-line">
           <table className="w-full text-left text-xs">
             <thead className="sticky top-0 border-b border-line bg-background text-muted">
               <tr>
-                <th className="px-3 py-2 font-medium">Aralık</th>
-                <th className="px-3 py-2 text-right font-medium">Ort. yanıt</th>
-                <th className="px-3 py-2 text-right font-medium">En yüksek</th>
-                <th className="px-3 py-2 text-right font-medium">Kontrol</th>
-                <th className="px-3 py-2 text-right font-medium">Başarısız</th>
+                <th className="px-3 py-2 font-medium">{t("monitorPage.chart.table.bucket")}</th>
+                <th className="px-3 py-2 text-right font-medium">{t("monitorPage.chart.table.avg")}</th>
+                <th className="px-3 py-2 text-right font-medium">{t("monitorPage.chart.table.max")}</th>
+                <th className="px-3 py-2 text-right font-medium">{t("monitorPage.chart.table.checks")}</th>
+                <th className="px-3 py-2 text-right font-medium">{t("monitorPage.chart.table.failed")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line tabular-nums">
@@ -356,10 +358,10 @@ export function LatencyChart({ series }: { series: Series }) {
                   <tr key={p.start}>
                     <td className="px-3 py-1.5">{bucketLabel(p)}</td>
                     <td className="px-3 py-1.5 text-right">
-                      {p.avg_latency_ms !== null ? ms(p.avg_latency_ms) : "–"}
+                      {p.avg_latency_ms !== null ? ms(p.avg_latency_ms, t.intl) : "–"}
                     </td>
                     <td className="px-3 py-1.5 text-right">
-                      {p.max_latency_ms !== null ? ms(p.max_latency_ms) : "–"}
+                      {p.max_latency_ms !== null ? ms(p.max_latency_ms, t.intl) : "–"}
                     </td>
                     <td className="px-3 py-1.5 text-right">{p.checks}</td>
                     <td className="px-3 py-1.5 text-right">{p.checks - p.up_checks}</td>

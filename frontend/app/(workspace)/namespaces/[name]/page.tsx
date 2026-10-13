@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import type { Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
+import { getT } from "@/lib/i18n/server";
 import { MANUAL_LABEL, namespaceFromSlug } from "@/lib/namespaces";
 import { countStates, isProblem, workspaceMonitors } from "@/lib/workspace";
 import { BackendError } from "@/app/ui/backend-error";
@@ -10,13 +11,14 @@ import { MonitorTable } from "@/app/ui/monitor-table";
 import { displayState } from "@/app/ui/status";
 
 async function Namespace({ params }: { params: Promise<{ name: string }> }) {
+  const t = await getT();
   const namespace = namespaceFromSlug((await params).name);
 
   let monitors: Monitor[];
   try {
     monitors = (await workspaceMonitors()).filter((m) => m.namespace === namespace);
   } catch (err) {
-    return <BackendError what="Monitor durumları" err={err} />;
+    return <BackendError what={t("monitorsList.namespace.what")} err={err} />;
   }
   if (monitors.length === 0) notFound();
 
@@ -31,16 +33,20 @@ async function Namespace({ params }: { params: Promise<{ name: string }> }) {
       <header>
         <p className="mb-1.5 text-sm text-muted">
           <Link href="/" className="hover:text-ink">
-            Genel bakış
+            {t("monitorsList.overview.title")}
           </Link>{" "}
-          / {namespace ? "Namespace" : "Grup"}
+          / {namespace ? t("monitorsList.namespace.kind.namespace") : t("monitorsList.namespace.kind.group")}
         </p>
-        <h1 className="text-2xl font-semibold tracking-tight">{namespace || MANUAL_LABEL}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{namespace || t(MANUAL_LABEL)}</h1>
         <p className="mt-1 text-sm text-muted">
-          {counts.up}/{counts.total} çalışıyor
-          {bad > 0 && <span className="font-semibold text-down"> · {bad} erişilemiyor</span>}
-          {counts.verifying > 0 && <span className="text-warn"> · {counts.verifying} doğrulanıyor</span>}
-          {counts.maintenance > 0 && <span className="text-maint"> · {counts.maintenance} bakımda</span>}
+          {t("monitorsList.namespace.up", { up: counts.up, total: counts.total })}
+          {bad > 0 && <span className="font-semibold text-down"> · {t("monitorsList.namespace.down", { count: bad })}</span>}
+          {counts.verifying > 0 && (
+            <span className="text-warn"> · {t("monitorsList.namespace.verifying", { count: counts.verifying })}</span>
+          )}
+          {counts.maintenance > 0 && (
+            <span className="text-maint"> · {t("monitorsList.namespace.maintenance", { count: counts.maintenance })}</span>
+          )}
         </p>
       </header>
       <MonitorTable monitors={ordered} slots={config.listBeats} />
@@ -48,9 +54,10 @@ async function Namespace({ params }: { params: Promise<{ name: string }> }) {
   );
 }
 
-export default function Page({ params }: PageProps<"/namespaces/[name]">) {
+export default async function Page({ params }: PageProps<"/namespaces/[name]">) {
+  const t = await getT();
   return (
-    <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
+    <Suspense fallback={<p className="text-sm text-muted">{t("common.loading")}</p>}>
       <Namespace params={params} />
     </Suspense>
   );

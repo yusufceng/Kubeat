@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getMonitorChannels, type MonitorChannel } from "@/lib/api";
 import { channelEventLabels, channelTypes } from "@/lib/channel-types";
+import { getT } from "@/lib/i18n/server";
 
 /**
  * Where a monitor's alerts go, so that a monitor nobody would hear about
@@ -13,15 +14,16 @@ export async function MonitorChannels({ monitorId, canEdit }: { monitorId: numbe
   } catch {
     return null; // the page itself reports a backend that is away
   }
+  const t = await getT();
   if (channels.length === 0) {
     return (
       <p className="mt-1.5 text-sm text-warn">
-        Bu monitor için etkin bildirim kanalı yok: kesintisini kimse duymaz.
+        {t("monitorPage.channels.none")}
         {canEdit && (
           <>
             {" "}
             <Link href="/channels" className="underline">
-              Kanal ekleyin
+              {t("monitorPage.channels.add")}
             </Link>
             .
           </>
@@ -30,15 +32,15 @@ export async function MonitorChannels({ monitorId, canEdit }: { monitorId: numbe
     );
   }
   const describe = (c: MonitorChannel) =>
-    c.events.length === 0 ? "" : ` (${c.events.map((e) => channelEventLabels[e].toLowerCase()).join(", ")})`;
+    c.events.length === 0 ? "" : ` (${c.events.map((e) => t(channelEventLabels[e]).toLowerCase()).join(", ")})`;
   return (
     <p className="mt-1.5 text-sm text-muted">
-      Bildirim:{" "}
+      {t("monitorPage.channels.label")}{" "}
       {channels.map((c, i) => (
         <span key={c.id}>
           {i > 0 && ", "}
           <span className="text-ink">{c.name}</span>
-          <span className="text-xs"> {channelTypes[c.type]?.label ?? c.type}</span>
+          <span className="text-xs"> {t(channelTypes[c.type]?.label ?? c.type)}</span>
           {describe(c)}
         </span>
       ))}

@@ -124,6 +124,7 @@ func main() {
 		RetryDelay:        cfg.NotifyRetryDelay,
 		SendTimeout:       cfg.NotifyTimeout,
 		GroupWait:         cfg.NotifyGroupWait,
+		Language:          cfg.Language,
 		Metrics:           meter,
 		Logger:            logger,
 	})
@@ -410,7 +411,11 @@ func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, lo
 		return err
 	}
 	if n == 0 {
-		if _, err := db.CreateUser(ctx, store.User{Username: "admin", DisplayName: "Yönetici", Source: store.UserLocal, PasswordHash: hash, Role: store.RoleAdmin, Enabled: true}); err != nil {
+		displayName := "Administrator"
+		if cfg.Language == "tr" {
+			displayName = "Yönetici"
+		}
+		if _, err := db.CreateUser(ctx, store.User{Username: "admin", DisplayName: displayName, Source: store.UserLocal, PasswordHash: hash, Role: store.RoleAdmin, Enabled: true}); err != nil {
 			return err
 		}
 		logger.Info("administrator account created from UPTIME_ADMIN_PASSWORD", "user", "admin")

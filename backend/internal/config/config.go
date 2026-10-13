@@ -150,6 +150,9 @@ type Config struct {
 	// many.
 	EventWindow time.Duration // UPTIME_EVENT_WINDOW
 	EventLimit  int           // UPTIME_EVENT_LIMIT
+	// Language the notifications and the first administrator's name are
+	// written in: "en" or "tr".
+	Language string // UPTIME_LANGUAGE
 	// WorkloadRolloutGrace is how long a workload monitor puts up with
 	// missing pods while a rollout is in progress; zero means not at all.
 	WorkloadRolloutGrace time.Duration // UPTIME_WORKLOAD_ROLLOUT_GRACE
@@ -165,8 +168,9 @@ type Config struct {
 // defaults for unset variables. Durations use Go syntax, e.g. "5s" or "1m30s".
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:   envString("UPTIME_ADDR", ":8080"),
-		DBPath: envString("UPTIME_DB_PATH", "uptime.db"),
+		Addr:     envString("UPTIME_ADDR", ":8080"),
+		Language: envString("UPTIME_LANGUAGE", "en"),
+		DBPath:   envString("UPTIME_DB_PATH", "uptime.db"),
 
 		APIToken:  envString("UPTIME_API_TOKEN", ""),
 		SecretKey: envString("UPTIME_SECRET_KEY", ""),
@@ -350,6 +354,9 @@ func Load() (Config, error) {
 	}
 	if cfg.OIDCInsecureSkipVerify, err = envBool("UPTIME_OIDC_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err
+	}
+	if cfg.Language != "en" && cfg.Language != "tr" {
+		return Config{}, fmt.Errorf("UPTIME_LANGUAGE: must be en or tr, got %q", cfg.Language)
 	}
 	if cfg.OIDCIssuer != "" && (cfg.OIDCClientID == "" || cfg.OIDCRedirectURL == "") {
 		return Config{}, fmt.Errorf("UPTIME_OIDC_ISSUER is set: UPTIME_OIDC_CLIENT_ID and UPTIME_OIDC_REDIRECT_URL are required with it")

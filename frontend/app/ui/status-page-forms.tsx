@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { deleteStatusPageAction, saveStatusPageAction } from "@/app/actions";
 import type { StatusPage } from "@/lib/api";
+import { useT } from "@/lib/i18n/client";
 import { MANUAL_LABEL } from "@/lib/namespaces";
 import { EditIcon, TrashIcon } from "@/app/ui/icons";
 
@@ -24,6 +25,7 @@ export function StatusPageForm({
   /** Called after a successful save. */
   onDone?: () => void;
 }) {
+  const t = useT();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const chosen = new Map(page?.monitors.map((m) => [m.monitor_id, m.display_name]));
@@ -53,50 +55,50 @@ export function StatusPageForm({
     <form onSubmit={submit} className="grid gap-4 sm:grid-cols-6">
       {page && <input type="hidden" name="id" value={page.id} />}
       <label className="sm:col-span-3">
-        <span className="mb-1 block text-xs font-medium text-muted">Başlık</span>
-        <input name="title" required maxLength={100} defaultValue={page?.title} placeholder="Mağaza servisleri" className="field" />
+        <span className="mb-1 block text-xs font-medium text-muted">{t("statusPageForm.title.label")}</span>
+        <input name="title" required maxLength={100} defaultValue={page?.title} placeholder={t("statusPageForm.title.placeholder")} className="field" />
       </label>
       <label className="sm:col-span-3">
-        <span className="mb-1 block text-xs font-medium text-muted">Adres</span>
+        <span className="mb-1 block text-xs font-medium text-muted">{t("statusPageForm.slug.label")}</span>
         <span className="flex items-center gap-1.5">
           <span className="font-mono text-sm text-muted">/status/</span>
           <input
             name="slug"
             required
             pattern="[a-z0-9]([a-z0-9\-]*[a-z0-9])?"
-            title="Küçük harf, rakam ve tire"
+            title={t("statusPageForm.slug.title")}
             defaultValue={page?.slug}
-            placeholder="magaza"
+            placeholder={t("statusPageForm.slug.placeholder")}
             className="field font-mono"
           />
         </span>
       </label>
       <label className="sm:col-span-6">
-        <span className="mb-1 block text-xs font-medium text-muted">Açıklama (isteğe bağlı)</span>
-        <input name="description" defaultValue={page?.description} placeholder="Müşterilerin kullandığı servislerin durumu" className="field" />
+        <span className="mb-1 block text-xs font-medium text-muted">{t("statusPageForm.description.label")}</span>
+        <input name="description" defaultValue={page?.description} placeholder={t("statusPageForm.description.placeholder")} className="field" />
       </label>
       <label className="sm:col-span-6">
-        <span className="mb-1 block text-xs font-medium text-muted">Duyuru (isteğe bağlı)</span>
+        <span className="mb-1 block text-xs font-medium text-muted">{t("statusPageForm.announcement.label")}</span>
         <textarea
           name="announcement"
           rows={2}
           defaultValue={page?.announcement}
-          placeholder="Cumartesi 02:00-04:00 arasında planlı bakım yapılacaktır."
+          placeholder={t("statusPageForm.announcement.placeholder")}
           className="field"
         />
-        <span className="mt-1 block text-xs text-muted">Sayfanın en üstünde gösterilir; kaldırmak için boşaltın.</span>
+        <span className="mt-1 block text-xs text-muted">{t("statusPageForm.announcement.hint")}</span>
       </label>
 
       <fieldset className="sm:col-span-6">
-        <legend className="mb-1 text-xs font-medium text-muted">Gösterilecek monitor&apos;lar</legend>
+        <legend className="mb-1 text-xs font-medium text-muted">{t("statusPageForm.monitors.legend")}</legend>
         {monitors.length === 0 ? (
-          <p className="text-sm text-muted">Henüz monitor yok.</p>
+          <p className="text-sm text-muted">{t("statusPageForm.monitors.empty")}</p>
         ) : (
           <div className="max-h-80 overflow-y-auto rounded-lg border border-line bg-panel">
             {[...groups.entries()].map(([namespace, group]) => (
               <div key={namespace}>
                 <div className="sticky top-0 border-b border-line bg-sunken px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
-                  {namespace || MANUAL_LABEL}
+                  {namespace || t(MANUAL_LABEL)}
                 </div>
                 {group.map((m) => (
                   <div key={m.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line/60 px-3 py-2 last:border-b-0">
@@ -114,8 +116,8 @@ export function StatusPageForm({
                       name={`name_${m.id}`}
                       defaultValue={chosen.get(m.id)}
                       maxLength={100}
-                      aria-label={`${m.label} için sayfada görünen ad`}
-                      placeholder="Sayfada görünen ad (isteğe bağlı)"
+                      aria-label={t("statusPageForm.monitors.displayName.aria", { label: m.label })}
+                      placeholder={t("statusPageForm.monitors.displayName.placeholder")}
                       className="field w-full py-1 text-xs sm:w-64"
                     />
                   </div>
@@ -124,23 +126,21 @@ export function StatusPageForm({
             ))}
           </div>
         )}
-        <p className="mt-1 text-xs text-muted">
-          Sayfa yalnızca adı, durumu ve uptime geçmişini gösterir; adresler ve hata ayrıntıları gösterilmez.
-        </p>
+        <p className="mt-1 text-xs text-muted">{t("statusPageForm.monitors.hint")}</p>
       </fieldset>
 
       <label className="flex items-center gap-2 text-sm sm:col-span-6">
         <input type="checkbox" name="published" defaultChecked={page?.published ?? true} className="h-4 w-4 accent-(--accent)" />
-        Yayında (işaretli değilse sayfa açılmaz)
+        {t("statusPageForm.published.label")}
       </label>
 
       <div className="flex flex-wrap items-center gap-3 sm:col-span-6">
         <button type="submit" disabled={pending} className="btn btn-primary">
-          {pending ? "Kaydediliyor…" : page ? "Kaydet" : "Sayfayı oluştur"}
+          {pending ? t("common.saving") : page ? t("common.save") : t("statusPageForm.create")}
         </button>
         {page && (
           <button type="button" onClick={onDone} className="btn">
-            Vazgeç
+            {t("common.cancel")}
           </button>
         )}
         {error && (
@@ -155,6 +155,7 @@ export function StatusPageForm({
 
 /** One status page in the list. */
 export function StatusPageRow({ page, monitors }: { page: StatusPage; monitors: PageMonitorOption[] }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const labels = new Map(monitors.map((m) => [m.id, m.label]));
 
@@ -165,34 +166,34 @@ export function StatusPageRow({ page, monitors }: { page: StatusPage; monitors: 
           <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
             {page.title}
             <span className={`rounded px-1.5 py-0.5 text-xs font-normal ${page.published ? "bg-up/12 text-up" : "bg-sunken text-muted"}`}>
-              {page.published ? "Yayında" : "Taslak"}
+              {page.published ? t("statusPageRow.published") : t("statusPageRow.draft")}
             </span>
           </div>
           <div className="mt-0.5 text-xs text-muted">
-            <span className="font-mono">/status/{page.slug}</span> · {page.monitors.length} monitor
-            {page.announcement && " · duyuru var"}
+            <span className="font-mono">/status/{page.slug}</span> · {t.n("statusPageRow.monitors", page.monitors.length)}
+            {page.announcement && ` · ${t("statusPageRow.hasAnnouncement")}`}
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {page.published && (
             <Link href={`/status/${page.slug}`} target="_blank" className="btn">
-              Sayfayı aç
+              {t("statusPageRow.open")}
             </Link>
           )}
-          <button type="button" onClick={() => setEditing((v) => !v)} aria-expanded={editing} className="btn" title="Düzenle">
+          <button type="button" onClick={() => setEditing((v) => !v)} aria-expanded={editing} className="btn" title={t("common.edit")}>
             <EditIcon />
-            <span className="sr-only">Düzenle</span>
+            <span className="sr-only">{t("common.edit")}</span>
           </button>
           <form
             action={deleteStatusPageAction}
             onSubmit={(e) => {
-              if (!confirm(`"${page.title}" durum sayfası silinsin mi? Monitor'lar silinmez.`)) e.preventDefault();
+              if (!confirm(t("statusPageRow.delete.confirm", { title: page.title }))) e.preventDefault();
             }}
           >
             <input type="hidden" name="id" value={page.id} />
-            <button type="submit" className="btn btn-danger" title="Sil">
+            <button type="submit" className="btn btn-danger" title={t("common.delete")}>
               <TrashIcon />
-              <span className="sr-only">Sil</span>
+              <span className="sr-only">{t("common.delete")}</span>
             </button>
           </form>
         </div>
@@ -202,7 +203,7 @@ export function StatusPageRow({ page, monitors }: { page: StatusPage; monitors: 
           <StatusPageForm page={page} monitors={monitors} onDone={() => setEditing(false)} />
           {page.published && page.monitors.length > 0 && (
             <details className="text-xs text-muted">
-              <summary className="cursor-pointer font-medium">Rozet adresleri (README ya da wiki için)</summary>
+              <summary className="cursor-pointer font-medium">{t("statusPageRow.badges.summary")}</summary>
               <ul className="mt-2 flex flex-col gap-1 font-mono">
                 {page.monitors.map((m) => (
                   <li key={m.monitor_id}>

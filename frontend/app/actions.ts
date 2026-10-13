@@ -1,6 +1,10 @@
 "use server";
 
 import { type ChannelEvent, channelEventLabels } from "@/lib/channel-types";
+import { cookies } from "next/headers";
+import { getT, LOCALE_COOKIE } from "@/lib/i18n/server";
+import { type Locale, locales } from "@/lib/i18n/messages";
+import type { T } from "@/lib/i18n/translate";
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import {
@@ -38,12 +42,12 @@ import {
 } from "@/lib/api";
 
 /** Parses "Name: value" lines; returns a message for a line it cannot read. */
-function parseHeaders(text: string): Record<string, string> | string {
+function parseHeaders(text: string, t: T): Record<string, string> | string {
   const headers: Record<string, string> = {};
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     const colon = line.indexOf(":");
-    if (colon <= 0) return `Header satırı "Ad: değer" biçiminde olmalı: ${line.trim()}`;
+    if (colon <= 0) return t("monitorForm.actions.headerLine", { line: line.trim() });
     headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
   }
   return headers;
@@ -84,7 +88,7 @@ export async function saveMonitorAction(formData: FormData): Promise<{ error: st
 
   switch (type) {
     case "http": {
-      const headers = parseHeaders(String(formData.get("http_headers") ?? ""));
+      const headers = parseHeaders(String(formData.get("http_headers") ?? ""), await getT());
       if (typeof headers === "string") return { error: headers };
       const auth = text("http_auth") as HttpOptions["auth"];
       const jsonPath = text("http_json_path");
@@ -154,7 +158,7 @@ export async function saveMonitorAction(formData: FormData): Promise<{ error: st
       ? await updateMonitor(id, settings)
       : await createMonitor({ ...settings, type } as NewMonitor);
   } catch (err) {
-    return { error: describe(err) };
+    return { error: await describe(err) };
   }
   refresh(); // the monitor list shows the change at once
   redirect(`/monitors/${saved.id}`);
@@ -169,7 +173,7 @@ export async function cloneMonitorAction(id: number, name: string): Promise<{ er
   try {
     copy = await cloneMonitor(id, name);
   } catch (err) {
-    return { error: describe(err) };
+    return { error: await describe(err) };
   }
   refresh();
   redirect(`/monitors/${copy.id}/edit`);
@@ -233,7 +237,7 @@ export async function saveChannelAction(formData: FormData): Promise<{ error: st
     if (id) await updateChannel(id, settings);
     else await createChannel({ ...settings, type: text("type") as ChannelType });
   } catch (err) {
-    return { error: describe(err) };
+    return { error: await describe(err) };
   }
   refresh();
 }
@@ -257,6 +261,7 @@ export async function deleteChannelAction(formData: FormData): Promise<void> {
  * was wrong, or nothing when it was saved.
  */
 export async function saveStatusPageAction(formData: FormData): Promise<{ error: string } | undefined> {
+  const t = await getT();
   const text = (name: string) => String(formData.get(name) ?? "").trim();
   const id = Number(formData.get("id") ?? 0);
   const settings: StatusPageSettings = {
@@ -275,8 +280,8 @@ export async function saveStatusPageAction(formData: FormData): Promise<{ error:
     if (id) await updateStatusPage(id, settings);
     else await createStatusPage(settings);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 409) return { error: "Bu adres başka bir durum sayfasında kullanılıyor." };
-    return { error: describe(err) };
+    if (err instanceof ApiError && err.status === 409) return { error: t("monitorForm.actions.slugTaken") };
+    return { error: await describe(err) };
   }
   refresh();
 }
@@ -301,7 +306,7 @@ export async function testChannelAction(
     const result = await testChannel(Number(formData.get("id")));
     return { delivered: result.delivered, error: result.error ?? null };
   } catch (err) {
-    return { delivered: false, error: describe(err) };
+    return { delivered: false, error: await describe(err) };
   }
 }
 
@@ -327,7 +332,7 @@ export async function createMaintenanceAction(
       ...(scope.startsWith("mon:") && { monitor_id: Number(scope.slice(4)) }),
     });
   } catch (err) {
-    return { error: describe(err), created: false };
+    return { error: await describe(err), created: false };
   }
   refresh();
   return { error: null, created: true };
@@ -351,7 +356,7 @@ export async function importCandidatesAction(
 ): Promise<ImportState> {
   const sources = formData.getAll("source").map(String);
   if (sources.length === 0) {
-    return { created: 0, skipped: 0, error: "En az bir hedef seçin." };
+    return { created: 0, skipped: 0, error: (await getT())("monitorForm.actions.noTargets") };
   }
   try {
     const result = await importCandidates({
@@ -364,20 +369,24 @@ export async function importCandidatesAction(
     refresh();
     return { created: result.created.length, skipped: result.skipped.length, error: null };
   } catch (err) {
-    return { created: 0, skipped: 0, error: describe(err) };
+    return { created: 0, skipped: 0, error: await describe(err) };
   }
 }
 
-function describe(err: unknown): string {
+async function describe(err: unknown): Promise<string> {
+  const t = await getT();
   if (err instanceof ApiError) {
-    if (err.status === 409) return "Bu isim zaten kullanılıyor.";
-    if (err.status === 400) return `Geçersiz değer: ${err.message}`;
-    if (err.status === 502) return `Cluster'a erişilemedi: ${err.message}`;
-    if (err.status === 403) return err.message.startsWith("you may") ? "Bu işlem için yetkiniz yok." : `Yetki yok: ${err.message}`;
-    if (err.status === 404) return "Bulunamadı ya da bu kayda erişim yetkiniz yok.";
-    if (err.status === 401) return "Oturumunuz sona erdi; yeniden giriş yapın.";
+    if (err.status === 409) return t("monitorForm.actions.error.conflict");
+    if (err.status === 400) return t("monitorForm.actions.error.invalid", { message: err.message });
+    if (err.status === 502) return t("monitorForm.actions.error.cluster", { message: err.message });
+    if (err.status === 403)
+      return err.message.startsWith("you may")
+        ? t("monitorForm.actions.error.forbidden")
+        : t("monitorForm.actions.error.forbiddenDetail", { message: err.message });
+    if (err.status === 404) return t("monitorForm.actions.error.notFound");
+    if (err.status === 401) return t("monitorForm.actions.error.sessionExpired");
   }
-  return "Backend'e ulaşılamadı. Biraz sonra tekrar deneyin.";
+  return t("monitorForm.actions.error.backend");
 }
 
 /** "shop, billing" -> ["shop", "billing"]; "*" stays as it is. */
@@ -402,7 +411,7 @@ export async function createUserAction(formData: FormData): Promise<Outcome> {
       namespaces: namespaceList(text("namespaces")),
     });
   } catch (err) {
-    return { error: describe(err) };
+    return { error: await describe(err) };
   }
   refresh();
 }
@@ -424,7 +433,7 @@ export async function updateUserAction(formData: FormData): Promise<Outcome> {
   try {
     await updateUser(Number(formData.get("id")), changes);
   } catch (err) {
-    return { error: describe(err) };
+    return { error: await describe(err) };
   }
   refresh();
 }
@@ -443,7 +452,7 @@ export async function createGroupRoleAction(formData: FormData): Promise<Outcome
   try {
     await createGroupRole({ group_dn: text("group_dn"), role: text("role") as Role, namespaces: namespaceList(text("namespaces")) });
   } catch (err) {
-    return { error: describe(err) };
+    return { error: await describe(err) };
   }
   refresh();
 }
@@ -459,11 +468,18 @@ export async function deleteGroupRoleAction(formData: FormData): Promise<void> {
 
 export async function changePasswordAction(_prev: Outcome, formData: FormData): Promise<Outcome> {
   const next = String(formData.get("new_password") ?? "");
-  if (next !== String(formData.get("new_password_again") ?? "")) return { error: "Yeni parolalar birbirini tutmuyor." };
+  if (next !== String(formData.get("new_password_again") ?? "")) return { error: (await getT())("monitorForm.actions.passwordMismatch") };
   try {
     await changePassword(String(formData.get("current_password") ?? ""), next);
   } catch (err) {
-    return { error: describe(err) };
+    return { error: await describe(err) };
   }
   return { error: "" }; // saved
+}
+
+/** Keeps the chosen language in a cookie for a year and re-renders in it. */
+export async function setLocaleAction(locale: Locale): Promise<void> {
+  if (!locales.includes(locale)) return;
+  (await cookies()).set(LOCALE_COOKIE, locale, { path: "/", sameSite: "lax", maxAge: 365 * 24 * 3600 });
+  refresh();
 }

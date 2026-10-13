@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Monitor } from "@/lib/api";
 import { duration, uptime } from "@/lib/format";
+import { getT } from "@/lib/i18n/server";
 import { typeLabel } from "@/lib/monitor-types";
 import { HeartbeatBar } from "@/app/ui/heartbeat-bar";
 import { LiveDuration } from "@/app/ui/live-duration";
@@ -13,8 +14,9 @@ import { TimeAgo } from "@/app/ui/time-ago";
  * must have been listed with their history; slots is how much of it a row
  * draws.
  */
-export function MonitorTable({ monitors, slots }: { monitors: Monitor[]; slots: number }) {
-  const window = monitors.length > 0 ? duration(monitors[0].window_seconds) : "";
+export async function MonitorTable({ monitors, slots }: { monitors: Monitor[]; slots: number }) {
+  const t = await getT();
+  const window = monitors.length > 0 ? duration(monitors[0].window_seconds, t) : "";
 
   return (
     <div className="card overflow-x-auto">
@@ -29,12 +31,12 @@ export function MonitorTable({ monitors, slots }: { monitors: Monitor[]; slots: 
         </colgroup>
         <thead className="border-b border-line text-xs text-muted">
           <tr>
-            <th className="px-4 py-3 font-medium">Monitor</th>
-            <th className="px-4 py-3 font-medium">Durum</th>
-            <th className="px-4 py-3 font-medium">Son kontroller</th>
-            <th className="px-4 py-3 text-right font-medium">Uptime ({window})</th>
-            <th className="px-4 py-3 text-right font-medium">Ort. yanıt</th>
-            <th className="px-4 py-3 text-right font-medium">Son kontrol</th>
+            <th className="px-4 py-3 font-medium">{t("monitorsList.table.monitor")}</th>
+            <th className="px-4 py-3 font-medium">{t("monitorsList.table.state")}</th>
+            <th className="px-4 py-3 font-medium">{t("monitorsList.table.recentChecks")}</th>
+            <th className="px-4 py-3 text-right font-medium">{t("monitorsList.table.uptime", { window })}</th>
+            <th className="px-4 py-3 text-right font-medium">{t("monitorsList.overview.tile.avgLatency")}</th>
+            <th className="px-4 py-3 text-right font-medium">{t("monitorsList.table.lastCheck")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
@@ -44,7 +46,7 @@ export function MonitorTable({ monitors, slots }: { monitors: Monitor[]; slots: 
               <tr key={m.id} className="hover:bg-sunken/50">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
-                    <KindChip kind={label.kind ?? typeLabel(m.type)} />
+                    <KindChip kind={label.kind ?? t(typeLabel(m.type))} />
                     <Link href={`/monitors/${m.id}`} className="truncate font-medium hover:underline">
                       {label.name}
                     </Link>
@@ -54,26 +56,26 @@ export function MonitorTable({ monitors, slots }: { monitors: Monitor[]; slots: 
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3">
-                  <StatusBadge state={displayState(m)} />
+                  <StatusBadge state={displayState(m)} t={t} />
                   {m.open_incident && (
                     <div className="mt-0.5 text-xs text-muted">
                       <LiveDuration since={m.open_incident.started_at} />
                     </div>
                   )}
-                  {m.cert_warning && <div className="mt-0.5 text-xs text-warn">Sertifika süresi doluyor</div>}
+                  {m.cert_warning && <div className="mt-0.5 text-xs text-warn">{t("monitorsList.table.certExpiring")}</div>}
                 </td>
                 <td className="px-4 py-3">
                   <div className="[&>div]:h-5 [&>div]:gap-[2px]">
                     <HeartbeatBar results={m.history} slots={slots} />
                   </div>
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">{uptime(m.uptime_percent)}</td>
+                <td className="px-4 py-3 text-right tabular-nums">{uptime(m.uptime_percent, t)}</td>
                 <td className="px-4 py-3 text-right tabular-nums">
                   {/* The average covers successful checks; without any there is none. */}
-                  {m.uptime_percent ? `${m.avg_latency_ms} ms` : "–"}
+                  {m.uptime_percent ? `${m.avg_latency_ms} ms` : t("common.none")}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-right text-muted">
-                  {m.last_result ? <TimeAgo iso={m.last_result.checked_at} /> : "–"}
+                  {m.last_result ? <TimeAgo iso={m.last_result.checked_at} /> : t("common.none")}
                 </td>
               </tr>
             );

@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { DisplayIcon, MoonIcon, SunIcon } from "@/app/ui/icons";
+import { useT } from "@/lib/i18n/client";
 
 /** localStorage key of the viewer's choice; absent means "follow the system". */
 export const THEME_KEY = "kubeat-theme";
@@ -65,12 +66,14 @@ function choose(choice: Choice) {
 }
 
 const order: Choice[] = ["system", "light", "dark"];
-const labels: Record<Choice, string> = { system: "Sistem", light: "Açık", dark: "Koyu" };
+/** The message key of each choice's name. */
+const labels: Record<Choice, string> = { system: "theme.system", light: "theme.light", dark: "theme.dark" };
 const icons = { system: DisplayIcon, light: SunIcon, dark: MoonIcon };
 
 /** Cycles the theme: follow the system, light, dark. */
 export function ThemeToggle() {
   const choice = useSyncExternalStore<Choice>(subscribe, read, () => "system");
+  const t = useT();
   const Icon = icons[choice];
   const next = order[(order.indexOf(choice) + 1) % order.length];
 
@@ -78,8 +81,8 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={() => choose(next)}
-      title={`Tema: ${labels[choice]}. Değiştirmek için tıklayın (${labels[next]}).`}
-      aria-label={`Tema: ${labels[choice]}`}
+      title={t("theme.switchHint", { theme: t(labels[choice]), next: t(labels[next]) })}
+      aria-label={t("theme.label", { theme: t(labels[choice]) })}
       className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-sunken hover:text-ink"
     >
       <Icon />

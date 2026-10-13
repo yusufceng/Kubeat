@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { type BulkAction, bulkMonitorsAction } from "@/app/actions";
 import type { MonitorType } from "@/lib/api";
+import { useT } from "@/lib/i18n/client";
+import type { T } from "@/lib/i18n/translate";
 import { monitorTypeOrder, typeLabel } from "@/lib/monitor-types";
 import { compareNamespaces, MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
 import type { ListItem } from "@/lib/workspace";
@@ -30,18 +32,18 @@ function matchesState(item: ListItem, filter: StateFilter): boolean {
 }
 
 /** Problems first, then by name. */
-function byUrgency(a: ListItem, b: ListItem): number {
+function byUrgency(a: ListItem, b: ListItem, locale: string): number {
   const rank = (i: ListItem) => (problemStates.includes(i.state) ? 0 : 1);
-  return rank(a) - rank(b) || a.name.localeCompare(b.name, "tr");
+  return rank(a) - rank(b) || a.name.localeCompare(b.name, locale);
 }
 
 /** What the pill of a row says: the uptime, or why there is none. */
-function pillText(item: ListItem): string {
-  if (item.state === "paused") return "Durdu";
-  if (item.uptime === null) return "–";
+function pillText(item: ListItem, t: T): string {
+  if (item.state === "paused") return t("monitorsList.list.pill.paused");
+  if (item.uptime === null) return t("common.none");
   // Floor so that 99.96% is not shown as a perfect 100%.
   const floored = Math.floor(item.uptime * 10) / 10;
-  return `%${floored.toLocaleString("tr-TR", { maximumFractionDigits: 1 })}`;
+  return t("format.percent", { value: floored.toLocaleString(t.intl, { maximumFractionDigits: 1 }) });
 }
 
 /**
@@ -63,6 +65,7 @@ export function MonitorList({
   /** Whether the viewer may create and change monitors. */
   canEdit: boolean;
 }) {
+  const t = useT();
   const pathname = usePathname();
   const activeId = Number(/^\/monitors\/(\d+)/.exec(pathname)?.[1] ?? 0);
 
@@ -99,16 +102,13 @@ export function MonitorList({
   }
 
   function bulk(action: BulkAction) {
-    if (
-      action === "delete" &&
-      !confirm(`${chosen.length} monitor ve tüm kontrol geçmişleri silinsin mi? Bu geri alınamaz.`)
-    ) {
+    if (action === "delete" && !confirm(t.n("monitorsList.list.bulk.confirmDelete", chosen.length))) {
       return;
     }
     setBulkError(null);
     startBulk(async () => {
       const { failed } = await bulkMonitorsAction(chosen, action);
-      if (failed > 0) setBulkError(`${failed} monitor değiştirilemedi.`);
+      if (failed > 0) setBulkError(t.n("monitorsList.list.bulk.failed", failed));
       else stopSelecting();
     });
   }
@@ -130,7 +130,7 @@ export function MonitorList({
   // A tag that no monitor has any more cannot be filtered on.
   const tag = tagsInUse.includes(tagFilter) ? tagFilter : "";
 
-  const needle = query.trim().toLocaleLowerCase("tr");
+  const needle = query.trim().toLocaleLowerCase(t.intl);
   const filtering = needle !== "" || stateFilter !== "all" || typeFilter !== "" || tag !== "";
   const groups = useMemo(() => {
     const shown = items.filter(
@@ -139,7 +139,7 @@ export function MonitorList({
         (typeFilter === "" || i.type === typeFilter) &&
         (tag === "" || i.tags.includes(tag)) &&
         (needle === "" ||
-          `${i.name} ${i.target} ${i.namespace} ${i.tags.join(" ")}`.toLocaleLowerCase("tr").includes(needle)),
+          `${i.name} ${i.target} ${i.namespace} ${i.tags.join(" ")}`.toLocaleLowerCase(t.intl).includes(needle)),
     );
     const byNamespace = new Map<string, ListItem[]>();
     for (const item of shown) {
@@ -147,14 +147,14 @@ export function MonitorList({
     }
     return [...byNamespace.entries()]
       .sort(([a], [b]) => compareNamespaces(a, b))
-      .map(([namespace, group]) => ({ namespace, items: group.sort(byUrgency) }));
-  }, [items, needle, stateFilter, typeFilter, tag]);
+      .map(([namespace, group]) => ({ namespace, items: group.sort((a, b) => byUrgency(a, b, t.intl)) }));
+  }, [items, needle, stateFilter, typeFilter, tag, t]);
 
   const filters: { key: StateFilter; label: string }[] = [
-    { key: "all", label: "Tümü" },
-    { key: "problem", label: "Sorunlu" },
-    { key: "up", label: "Çalışıyor" },
-    { key: "idle", label: "Pasif" },
+    { key: "all", label: t("common.all") },
+    { key: "problem", label: t("monitorsList.state.problem") },
+    { key: "up", label: t("monitorState.up") },
+    { key: "idle", label: t("monitorsList.state.idle") },
   ];
 
   return (
@@ -162,17 +162,17 @@ export function MonitorList({
       <div className="flex flex-col gap-3 border-b border-line p-3">
         {canEdit && (
           <Link href="/monitors/new" className="btn btn-primary w-full">
-            <PlusIcon /> Yeni monitor
+            <PlusIcon /> {t("monitorsList.list.newMonitor")}
           </Link>
         )}
         <label className="relative block">
-          <span className="sr-only">Monitor ara</span>
+          <span className="sr-only">{t("monitorsList.list.search.label")}</span>
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ad, adres, grup ya da etiket ara"
+            placeholder={t("monitorsList.list.search.placeholder")}
             className="field pl-9"
           />
         </label>
@@ -198,27 +198,27 @@ export function MonitorList({
         <div className="flex flex-wrap items-center gap-1.5">
           {typesInUse.length > 1 && (
             <select
-              aria-label="Tipe göre süz"
+              aria-label={t("monitorsList.list.typeFilter.label")}
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as MonitorType | "")}
               className="rounded-full border-0 bg-sunken px-2 py-1 text-xs text-muted outline-none"
             >
-              <option value="">Tüm tipler</option>
-              {typesInUse.map((t) => (
-                <option key={t} value={t}>
-                  {typeLabel(t)}
+              <option value="">{t("monitorsList.list.typeFilter.all")}</option>
+              {typesInUse.map((type) => (
+                <option key={type} value={type}>
+                  {t(typeLabel(type))}
                 </option>
               ))}
             </select>
           )}
           {tagsInUse.length > 0 && (
             <select
-              aria-label="Etikete göre süz"
+              aria-label={t("monitorsList.list.tagFilter.label")}
               value={tag}
               onChange={(e) => setTagFilter(e.target.value)}
               className="max-w-[9rem] rounded-full border-0 bg-sunken px-2 py-1 text-xs text-muted outline-none"
             >
-              <option value="">Tüm etiketler</option>
+              <option value="">{t("monitorsList.list.tagFilter.all")}</option>
               {tagsInUse.map((t) => (
                 <option key={t} value={t}>
                   {t}
@@ -235,21 +235,21 @@ export function MonitorList({
                 selecting ? "bg-ink text-bg" : "bg-sunken text-muted hover:text-ink"
               }`}
             >
-              {selecting ? "Seçimi bırak" : "Seç"}
+              {selecting ? t("monitorsList.list.select.stop") : t("monitorsList.list.select.start")}
             </button>
           )}
         </div>
         {selecting && (
-          <div className="flex flex-col gap-2 rounded-lg bg-sunken p-2.5" role="group" aria-label="Toplu işlem">
+          <div className="flex flex-col gap-2 rounded-lg bg-sunken p-2.5" role="group" aria-label={t("monitorsList.list.bulk.label")}>
             <p className="text-xs text-muted">
-              {chosen.length === 0 ? "İşlem yapılacak monitor'ları işaretleyin." : `${chosen.length} monitor seçildi.`}
+              {chosen.length === 0 ? t("monitorsList.list.bulk.hint") : t.n("monitorsList.list.bulk.selected", chosen.length)}
             </p>
             <div className="flex flex-wrap gap-1.5">
               <button type="button" className="btn px-2.5 py-1 text-xs" disabled={chosen.length === 0 || working} onClick={() => bulk("pause")}>
-                Durdur
+                {t("monitorsList.list.bulk.pause")}
               </button>
               <button type="button" className="btn px-2.5 py-1 text-xs" disabled={chosen.length === 0 || working} onClick={() => bulk("resume")}>
-                Devam ettir
+                {t("monitorsList.list.bulk.resume")}
               </button>
               <button
                 type="button"
@@ -257,7 +257,7 @@ export function MonitorList({
                 disabled={chosen.length === 0 || working}
                 onClick={() => bulk("delete")}
               >
-                Sil
+                {t("common.delete")}
               </button>
             </div>
             {bulkError && (
@@ -274,19 +274,19 @@ export function MonitorList({
           <p className="p-4 text-center text-sm text-muted">
             {canEdit ? (
               <>
-                Henüz monitor yok. Yukarıdaki düğmeyle ekleyin ya da{" "}
+                {t("monitorsList.list.empty.before")}{" "}
                 <Link href="/discovery" className="text-accent underline">
-                  cluster&apos;dan keşfedin
+                  {t("monitorsList.list.empty.link")}
                 </Link>
                 .
               </>
             ) : (
-              "Görebildiğiniz bir monitor yok."
+              t("monitorsList.list.empty.viewer")
             )}
           </p>
         )}
         {items.length > 0 && groups.length === 0 && (
-          <p className="p-4 text-center text-sm text-muted">Bu süzgece uyan monitor yok.</p>
+          <p className="p-4 text-center text-sm text-muted">{t("monitorsList.list.empty.filtered")}</p>
         )}
         {groups.map(({ namespace, items: group }) => {
           const problems = group.filter((i) => problemStates.includes(i.state)).length;
@@ -294,7 +294,7 @@ export function MonitorList({
           const open =
             filtering || (toggled[namespace] ?? (openByDefault || problems > 0 || group.some((i) => i.id === activeId)));
           return (
-            <section key={namespace} aria-label={namespace || MANUAL_LABEL} className="mb-1">
+            <section key={namespace} aria-label={namespace || t(MANUAL_LABEL)} className="mb-1">
               <div className="flex items-center gap-1 rounded-lg px-1 py-1 text-xs text-muted">
                 <button
                   type="button"
@@ -307,12 +307,12 @@ export function MonitorList({
                     height={12}
                     className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
                   />
-                  <span className="truncate">{namespace || MANUAL_LABEL}</span>
+                  <span className="truncate">{namespace || t(MANUAL_LABEL)}</span>
                 </button>
                 {selecting && (
                   <input
                     type="checkbox"
-                    aria-label={`${namespace || MANUAL_LABEL} grubunun tümünü seç`}
+                    aria-label={t("monitorsList.list.group.selectAll", { group: namespace || t(MANUAL_LABEL) })}
                     checked={group.every((i) => selected.has(i.id))}
                     onChange={(e) => toggle(group.map((i) => i.id), e.target.checked)}
                     className="h-3.5 w-3.5 accent-(--accent)"
@@ -325,7 +325,7 @@ export function MonitorList({
                 )}
                 <Link
                   href={namespaceHref(namespace)}
-                  title="Namespace sayfası"
+                  title={t("monitorsList.list.group.page")}
                   className="rounded-md px-1.5 py-0.5 tabular-nums hover:bg-sunken hover:text-ink"
                 >
                   {group.length}
@@ -367,19 +367,20 @@ function Row({
   picked: boolean | null;
   onPick: (on: boolean) => void;
 }) {
+  const t = useT();
   const style = stateStyles[item.state];
   const content = (
     <>
       <span
-        title={style.label}
+        title={t(style.label)}
         className={`w-14 shrink-0 rounded-full py-0.5 text-center text-xs font-semibold tabular-nums ${style.soft}`}
       >
-        {pillText(item)}
+        {pillText(item, t)}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{item.name}</span>
         <span className="block truncate text-xs text-muted">
-          {item.kind ?? typeLabel(item.type)}
+          {item.kind ?? t(typeLabel(item.type))}
           {item.tags.length > 0 && ` · ${item.tags.join(", ")}`}
           {item.target && ` · ${item.target}`}
         </span>
@@ -397,7 +398,7 @@ function Row({
             type="checkbox"
             checked={picked}
             onChange={(e) => onPick(e.target.checked)}
-            aria-label={`${item.name} monitor'unu seç`}
+            aria-label={t("monitorsList.list.row.select", { name: item.name })}
             className="h-4 w-4 shrink-0 accent-(--accent)"
           />
           {content}
@@ -420,12 +421,13 @@ function Row({
 
 /** The recent checks as small bars, oldest on the left. */
 function Beats({ beats, slots }: { beats: string; slots: number }) {
+  const t = useT();
   const shown = beats.slice(-slots);
   const failed = shown.split("0").length - 1;
   return (
     <span
       role="img"
-      aria-label={`Son ${shown.length} kontrolün ${failed} tanesi başarısız`}
+      aria-label={t("monitorsList.list.beats.label", { count: shown.length, failed })}
       className="hidden h-4 shrink-0 items-stretch gap-px sm:flex"
     >
       {Array.from({ length: slots - shown.length }, (_, i) => (

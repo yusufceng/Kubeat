@@ -1,19 +1,23 @@
 import type { ChannelType } from "@/lib/api";
 
-/** One input of a channel's form. */
+/** One input of a channel's form; every text is a message key, shown with t(). */
 type FieldSpec = { label: string; placeholder: string; hint?: string };
 
 /** The kinds of event a channel can be limited to. */
 export type ChannelEvent = "down" | "up" | "reminder" | "cert";
 
+/** The message key of each event's name; show it with t(). */
 export const channelEventLabels: Record<ChannelEvent, string> = {
-  down: "Kesinti",
-  up: "Düzelme",
-  reminder: "Hatırlatma",
-  cert: "Sertifika",
+  down: "channelEvent.down",
+  up: "channelEvent.up",
+  reminder: "channelEvent.reminder",
+  cert: "channelEvent.cert",
 };
 
-/** How a channel type is named and what it needs to be told. */
+/**
+ * How a channel type is named and what it needs to be told. Every text
+ * here is a message key: show it with t().
+ */
 export type ChannelTypeInfo = {
   label: string;
   /** Where to get what the form asks for. */
@@ -26,79 +30,126 @@ export type ChannelTypeInfo = {
 
 export const channelTypes: Record<ChannelType, ChannelTypeInfo> = {
   slack: {
-    label: "Slack",
-    summary: "Slack'te bir uygulamaya \"Incoming Webhooks\" ekleyip kanal için bir adres oluşturun.",
-    target: { label: "Incoming webhook URL", placeholder: "https://hooks.slack.com/services/...", inputType: "url" },
+    label: "channelType.slack",
+    summary: "channelType.slack.summary",
+    target: {
+      label: "channelType.slack.target.label",
+      placeholder: "channelType.slack.target.placeholder",
+      inputType: "url",
+    },
     secret: null,
   },
   teams: {
-    label: "Microsoft Teams",
-    summary: "Kanalda \"Workflows\" ile \"Post to a channel when a webhook request is received\" akışını kurun.",
-    target: { label: "Workflow webhook URL", placeholder: "https://...", inputType: "url" },
+    label: "channelType.teams",
+    summary: "channelType.teams.summary",
+    target: {
+      label: "channelType.teams.target.label",
+      placeholder: "channelType.teams.target.placeholder",
+      inputType: "url",
+    },
     secret: null,
   },
   telegram: {
-    label: "Telegram",
-    summary: "BotFather ile bir bot oluşturun, botu sohbete ekleyin ve sohbetin kimliğini girin.",
+    label: "channelType.telegram",
+    summary: "channelType.telegram.summary",
     target: {
-      label: "Sohbet kimliği",
-      placeholder: "-1001234567890",
+      label: "channelType.telegram.target.label",
+      placeholder: "channelType.telegram.target.placeholder",
       inputType: "text",
-      hint: "Grup kimlikleri eksi ile başlar; herkese açık kanallar için @kanaladi.",
+      hint: "channelType.telegram.target.hint",
     },
-    secret: { label: "Bot token", placeholder: "123456789:AA...", required: true },
+    secret: {
+      label: "channelType.telegram.secret.label",
+      placeholder: "channelType.telegram.secret.placeholder",
+      required: true,
+    },
   },
   discord: {
-    label: "Discord",
-    summary: "Kanal ayarlarında Entegrasyonlar > Webhook'lar altından bir webhook oluşturun.",
-    target: { label: "Webhook URL", placeholder: "https://discord.com/api/webhooks/...", inputType: "url" },
+    label: "channelType.discord",
+    summary: "channelType.discord.summary",
+    target: {
+      label: "channelType.discord.target.label",
+      placeholder: "channelType.discord.target.placeholder",
+      inputType: "url",
+    },
     secret: null,
   },
   mattermost: {
-    label: "Mattermost",
-    summary: "Entegrasyonlar > Incoming Webhooks altından bir webhook oluşturun.",
-    target: { label: "Incoming webhook URL", placeholder: "https://mattermost.ornek.com/hooks/...", inputType: "url" },
+    label: "channelType.mattermost",
+    summary: "channelType.mattermost.summary",
+    target: {
+      label: "channelType.mattermost.target.label",
+      placeholder: "channelType.mattermost.target.placeholder",
+      inputType: "url",
+    },
     secret: null,
   },
   googlechat: {
-    label: "Google Chat",
-    summary: "Alanın \"Uygulamalar ve entegrasyonlar\" bölümünden bir webhook ekleyin.",
-    target: { label: "Webhook URL", placeholder: "https://chat.googleapis.com/v1/spaces/...", inputType: "url" },
+    label: "channelType.googlechat",
+    summary: "channelType.googlechat.summary",
+    target: {
+      label: "channelType.googlechat.target.label",
+      placeholder: "channelType.googlechat.target.placeholder",
+      inputType: "url",
+    },
     secret: null,
   },
   pagerduty: {
-    label: "PagerDuty",
-    summary:
-      "Servise bir \"Events API v2\" entegrasyonu ekleyin. Kesinti bir alarm açar, düzelince aynı alarm kapanır.",
+    label: "channelType.pagerduty",
+    summary: "channelType.pagerduty.summary",
     target: null,
-    secret: { label: "Integration key", placeholder: "32 karakterlik anahtar", required: true },
+    secret: {
+      label: "channelType.pagerduty.secret.label",
+      placeholder: "channelType.pagerduty.secret.placeholder",
+      required: true,
+    },
   },
   ntfy: {
-    label: "ntfy",
-    summary: "ntfy.sh ya da kendi ntfy sunucunuzdaki bir konuya yayınlar.",
-    target: { label: "Konu adresi", placeholder: "https://ntfy.sh/kubeat-alarm", inputType: "url" },
-    secret: { label: "Erişim token'ı (isteğe bağlı)", placeholder: "tk_...", required: false },
+    label: "channelType.ntfy",
+    summary: "channelType.ntfy.summary",
+    target: {
+      label: "channelType.ntfy.target.label",
+      placeholder: "channelType.ntfy.target.placeholder",
+      inputType: "url",
+    },
+    secret: {
+      label: "channelType.ntfy.secret.label",
+      placeholder: "channelType.ntfy.secret.placeholder",
+      required: false,
+    },
   },
   gotify: {
-    label: "Gotify",
-    summary: "Gotify sunucusunda bir uygulama oluşturup token'ını girin.",
-    target: { label: "Sunucu adresi", placeholder: "https://gotify.ornek.com", inputType: "url" },
-    secret: { label: "Uygulama token'ı", placeholder: "A1b2C3...", required: true },
+    label: "channelType.gotify",
+    summary: "channelType.gotify.summary",
+    target: {
+      label: "channelType.gotify.target.label",
+      placeholder: "channelType.gotify.target.placeholder",
+      inputType: "url",
+    },
+    secret: {
+      label: "channelType.gotify.secret.label",
+      placeholder: "channelType.gotify.secret.placeholder",
+      required: true,
+    },
   },
   email: {
-    label: "E-posta",
-    summary: "Backend'de tanımlı SMTP sunucusu üzerinden gönderilir.",
+    label: "channelType.email",
+    summary: "channelType.email.summary",
     target: {
-      label: "Alıcı adresleri (virgülle ayırın)",
-      placeholder: "ops@ornek.com, nobetci@ornek.com",
+      label: "channelType.email.target.label",
+      placeholder: "channelType.email.target.placeholder",
       inputType: "text",
     },
     secret: null,
   },
   webhook: {
-    label: "Webhook (JSON)",
-    summary: "Olayı yapılandırılmış JSON olarak herhangi bir adrese gönderir.",
-    target: { label: "Webhook URL", placeholder: "https://ornek.com/hook", inputType: "url" },
+    label: "channelType.webhook",
+    summary: "channelType.webhook.summary",
+    target: {
+      label: "channelType.webhook.target.label",
+      placeholder: "channelType.webhook.target.placeholder",
+      inputType: "url",
+    },
     secret: null,
   },
 };

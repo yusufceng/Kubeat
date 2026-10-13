@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getProviders, type Providers } from "@/lib/api";
+import { getT } from "@/lib/i18n/server";
 import { LoginForm } from "@/app/login/login-form";
 
 /** What went wrong on the way back from the identity provider. */
 const oidcMessages: Record<string, string> = {
-  norole: "Kimlik sağlayıcı sizi tanıdı ama burada bir rolünüz yok; bir yöneticiye başvurun.",
-  unavailable: "Kimlik sağlayıcıya ulaşılamadı. Biraz sonra tekrar deneyin.",
-  refused: "Kimlik sağlayıcı girişi tamamlamadı; tekrar deneyin.",
+  norole: "login.oidc.norole",
+  unavailable: "login.oidc.unavailable",
+  refused: "login.oidc.refused",
 };
 
 async function Form({
@@ -16,6 +17,7 @@ async function Form({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const t = await getT();
   let providers: Providers | null = null;
   try {
     providers = await getProviders();
@@ -33,20 +35,20 @@ async function Form({
     <>
       {params.expired !== undefined && (
         <p role="status" className="rounded-lg bg-sunken px-3 py-2 text-sm text-muted">
-          Oturumunuz sona erdi; yeniden giriş yapın.
+          {t("login.expired")}
         </p>
       )}
       {oidcProblem && (
         <p role="alert" className="rounded-lg border border-down/40 bg-down/8 px-3 py-2 text-sm text-down">
-          {oidcProblem}
+          {t(oidcProblem)}
         </p>
       )}
       {oidc && (
         <>
           <a href="/auth/oidc" className="btn btn-primary justify-center">
-            {oidc.name} ile giriş yap
+            {t("login.oidc.signIn", { name: oidc.name })}
           </a>
-          <p className="text-center text-xs text-muted">ya da hesapla</p>
+          <p className="text-center text-xs text-muted">{t("login.orAccount")}</p>
         </>
       )}
       <LoginForm next={typeof next === "string" ? next : "/"} ldap={ldap} />
@@ -54,15 +56,16 @@ async function Form({
   );
 }
 
-export default function Page({ searchParams }: PageProps<"/login">) {
+export default async function Page({ searchParams }: PageProps<"/login">) {
+  const t = await getT();
   return (
     <main className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center px-4 py-16">
       <div className="card flex flex-col gap-6 p-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Giriş</h1>
-          <p className="mt-1 text-sm text-muted">Devam etmek için hesabınızla giriş yapın.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("login.title")}</h1>
+          <p className="mt-1 text-sm text-muted">{t("login.subtitle")}</p>
         </div>
-        <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
+        <Suspense fallback={<p className="text-sm text-muted">{t("common.loading")}</p>}>
           <Form searchParams={searchParams} />
         </Suspense>
       </div>

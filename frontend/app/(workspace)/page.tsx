@@ -3,6 +3,8 @@ import { Suspense } from "react";
 import { type Incident, listIncidents, type Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
 import { duration, milliseconds, span, uptime } from "@/lib/format";
+import { getT } from "@/lib/i18n/server";
+import type { T } from "@/lib/i18n/translate";
 import { compareNamespaces, MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
 import { currentUser } from "@/lib/auth";
 import { countStates, type StateCounts, workspaceMonitors } from "@/lib/workspace";
@@ -25,7 +27,7 @@ type Event = {
 };
 
 /** The beginnings and endings of the incidents, newest first. */
-function events(incidents: Incident[], limit: number): Event[] {
+function events(incidents: Incident[], limit: number, t: T): Event[] {
   const out: Event[] = [];
   for (const i of incidents) {
     const cert = i.kind === "cert";
@@ -35,19 +37,19 @@ function events(incidents: Incident[], limit: number): Event[] {
       monitorId: i.monitor_id,
       monitorName: i.monitor_name,
       state: cert ? "verifying" : "down",
-      label: cert ? "Sertifika uyarısı" : "Erişilemiyor",
+      label: cert ? t("monitorsList.overview.event.certWarning") : t("monitorState.down"),
       message: i.cause,
     });
     if (i.resolved_at) {
-      const length = span(new Date(i.resolved_at).getTime() - new Date(i.started_at).getTime());
+      const length = span(new Date(i.resolved_at).getTime() - new Date(i.started_at).getTime(), t);
       out.push({
         key: `${i.id}-end`,
         at: i.resolved_at,
         monitorId: i.monitor_id,
         monitorName: i.monitor_name,
         state: "up",
-        label: cert ? "Sertifika yenilendi" : "Düzeldi",
-        message: cert ? "" : `Kesinti ${length} sürdü`,
+        label: cert ? t("monitorsList.overview.event.certRenewed") : t("monitorsList.overview.event.recovered"),
+        message: cert ? "" : t("monitorsList.overview.event.outageLasted", { length }),
       });
     }
   }
@@ -135,40 +137,36 @@ function Tile({
 }
 
 async function Overview() {
+  const t = await getT();
   const me = await currentUser();
   let monitors: Monitor[];
   let incidents: Incident[];
   try {
     [monitors, incidents] = await Promise.all([workspaceMonitors(), listIncidents(config.incidentsLimit)]);
   } catch (err) {
-    return <BackendError what="Genel bakış" err={err} />;
+    return <BackendError what={t("monitorsList.overview.what")} err={err} />;
   }
 
   if (monitors.length === 0) {
     return (
       <div className="card flex flex-col items-center gap-4 p-10 text-center">
         <h2 className="text-lg font-semibold">
-          {me.can_edit ? "Henüz izlenen bir şey yok" : "Görebildiğiniz bir monitor yok"}
+          {me.can_edit ? t("monitorsList.overview.empty.title") : t("monitorsList.overview.empty.viewerTitle")}
         </h2>
         {me.can_edit ? (
           <>
-            <p className="max-w-md text-sm text-muted">
-              Cluster&apos;daki Service, Ingress ve Route&apos;ları keşfederek başlayın ya da bir adresi elle
-              ekleyin: HTTP, TCP, ping, DNS, gRPC, WebSocket ya da kendi rapor veren bir iş.
-            </p>
+            <p className="max-w-md text-sm text-muted">{t("monitorsList.overview.empty.body")}</p>
             <div className="flex flex-wrap justify-center gap-2">
               <Link href="/discovery" className="btn btn-primary">
-                Cluster&apos;dan keşfet
+                {t("monitorsList.overview.empty.discover")}
               </Link>
               <Link href="/monitors/new" className="btn">
-                <PlusIcon /> Elle ekle
+                <PlusIcon /> {t("monitorsList.overview.empty.addManually")}
               </Link>
             </div>
           </>
         ) : (
-          <p className="max-w-md text-sm text-muted">
-            Hesabınızın kapsamındaki namespace&apos;lerde monitor yok. Bir yönetici kapsamınızı genişletebilir.
-          </p>
+          <p className="max-w-md text-sm text-muted">{t("monitorsList.overview.empty.viewerBody")}</p>
         )}
       </div>
     );
@@ -178,7 +176,7 @@ async function Overview() {
   const failing = counts.down + counts.recovering;
   const fleet = fleetStats(monitors);
   const open = incidents.filter((i) => !i.resolved_at && i.kind === "down");
-  const recent = events(incidents, config.overviewEvents);
+  const recent = events(incidents, config.overviewEvents, t);
   const certs = certificates(monitors, config.overviewCertificates);
   const namespaces = byNamespace(monitors);
   const zero = (n: number, tone: string) => (n > 0 ? tone : "text-muted");
@@ -193,39 +191,40 @@ async function Overview() {
       >
         <p className="text-lg font-semibold">
           {failing > 0
-            ? `${failing} monitor erişilemiyor`
+            ? t.n("monitorsList.overview.status.failing", failing)
             : counts.verifying > 0
-              ? `${counts.verifying} monitor doğrulanıyor`
-              : "Tüm sistemler çalışıyor"}
+              ? t.n("monitorsList.overview.status.verifying", counts.verifying)
+              : t("monitorsList.overview.status.allUp")}
         </p>
         <p className="text-sm text-muted">
-          {counts.total} monitor · {namespaces.length} grup
-          {fleet.uptime !== null && ` · son ${duration(fleet.window)} uptime ${uptime(fleet.uptime)}`}
+          {t.n("monitorsList.overview.status.monitors", counts.total)} · {t.n("monitorsList.overview.status.groups", namespaces.length)}
+          {fleet.uptime !== null &&
+            ` · ${t("monitorsList.overview.status.uptime", { window: duration(fleet.window, t), uptime: uptime(fleet.uptime, t) })}`}
         </p>
       </div>
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-        <Tile label="Çalışıyor" value={counts.up} tone={zero(counts.up, "text-up")} />
-        <Tile label="Erişilemiyor" value={failing} tone={zero(failing, "text-down")} />
-        <Tile label="Doğrulanıyor" value={counts.verifying} tone={zero(counts.verifying, "text-warn")} />
-        <Tile label="Bakımda" value={counts.maintenance} tone={zero(counts.maintenance, "text-maint")} />
+        <Tile label={t("monitorState.up")} value={counts.up} tone={zero(counts.up, "text-up")} />
+        <Tile label={t("monitorState.down")} value={failing} tone={zero(failing, "text-down")} />
+        <Tile label={t("monitorState.verifying")} value={counts.verifying} tone={zero(counts.verifying, "text-warn")} />
+        <Tile label={t("monitorState.maintenance")} value={counts.maintenance} tone={zero(counts.maintenance, "text-maint")} />
         <Tile
-          label="Pasif"
+          label={t("monitorsList.state.idle")}
           value={counts.paused + counts.pending}
           tone="text-muted"
-          hint={counts.pending > 0 ? `${counts.pending} ilk kontrolü bekliyor` : undefined}
+          hint={counts.pending > 0 ? t.n("monitorsList.overview.tile.pending", counts.pending) : undefined}
         />
         <Tile
-          label="Ort. yanıt"
-          value={fleet.avgLatency === null ? "–" : milliseconds(fleet.avgLatency)}
-          hint={`son ${duration(fleet.window)}`}
+          label={t("monitorsList.overview.tile.avgLatency")}
+          value={fleet.avgLatency === null ? t("common.none") : milliseconds(fleet.avgLatency, t)}
+          hint={t("monitorsList.overview.tile.window", { window: duration(fleet.window, t) })}
         />
       </dl>
 
       {open.length > 0 && (
-        <section aria-label="Devam eden kesintiler" className="card overflow-hidden border-down/40">
+        <section aria-label={t("monitorsList.overview.open.label")} className="card overflow-hidden border-down/40">
           <h2 className="border-b border-line bg-down/8 px-4 py-2.5 text-sm font-semibold text-down">
-            Devam eden kesintiler ({open.length})
+            {t("monitorsList.overview.open.title", { count: open.length })}
           </h2>
           <ul className="divide-y divide-line">
             {open.map((i) => (
@@ -244,23 +243,21 @@ async function Overview() {
       )}
 
       <div className="grid gap-5 xl:grid-cols-5">
-        <section aria-label="Son olaylar" className="card overflow-hidden xl:col-span-3">
+        <section aria-label={t("monitorsList.overview.recent.title")} className="card overflow-hidden xl:col-span-3">
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-            <h2 className="text-sm font-semibold">Son olaylar</h2>
+            <h2 className="text-sm font-semibold">{t("monitorsList.overview.recent.title")}</h2>
             <Link href="/incidents" className="text-xs text-muted hover:text-ink">
-              Tümü →
+              {t("common.all")} →
             </Link>
           </div>
           {recent.length === 0 ? (
-            <p className="p-6 text-center text-sm text-muted">
-              Kayıtlı olay yok. Bir monitor alarm eşiği kadar art arda başarısız olursa burada görünür.
-            </p>
+            <p className="p-6 text-center text-sm text-muted">{t("monitorsList.overview.recent.empty")}</p>
           ) : (
             <ul className="divide-y divide-line">
               {recent.map((e) => (
                 <li key={e.key} className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm">
                   <span className="row-span-2 pt-0.5">
-                    <StatusBadge state={e.state} />
+                    <StatusBadge state={e.state} t={t} />
                   </span>
                   <span className="flex flex-wrap items-baseline justify-between gap-x-3">
                     <Link href={`/monitors/${e.monitorId}`} className="font-medium hover:underline">
@@ -281,8 +278,8 @@ async function Overview() {
         </section>
 
         <div className="flex flex-col gap-5 xl:col-span-2">
-          <section aria-label="Gruplar" className="card overflow-hidden">
-            <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold">Namespace&apos;ler ve gruplar</h2>
+          <section aria-label={t("monitorsList.overview.groups.label")} className="card overflow-hidden">
+            <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold">{t("monitorsList.overview.groups.title")}</h2>
             <ul className="divide-y divide-line">
               {namespaces.map(([namespace, group]) => {
                 const c = countStates(group);
@@ -291,9 +288,9 @@ async function Overview() {
                   <li key={namespace}>
                     <Link href={namespaceHref(namespace)} className="block px-4 py-2.5 hover:bg-sunken/60">
                       <span className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
-                        <span className="truncate font-medium">{namespace || MANUAL_LABEL}</span>
+                        <span className="truncate font-medium">{namespace || t(MANUAL_LABEL)}</span>
                         <span className="whitespace-nowrap text-xs tabular-nums text-muted">
-                          {bad > 0 && <span className="font-semibold text-down">{bad} sorunlu · </span>}
+                          {bad > 0 && <span className="font-semibold text-down">{t("monitorsList.overview.groups.failing", { count: bad })} · </span>}
                           {c.up}/{c.total}
                         </span>
                       </span>
@@ -306,9 +303,9 @@ async function Overview() {
           </section>
 
           {certs.length > 0 && (
-            <section aria-label="Sertifikalar" className="card overflow-hidden">
+            <section aria-label={t("monitorsList.overview.certs.label")} className="card overflow-hidden">
               <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold">
-                Süresi en yakın sertifikalar
+                {t("monitorsList.overview.certs.title")}
               </h2>
               <ul className="divide-y divide-line">
                 {certs.map(({ monitor, expiresAt, days }) => (
@@ -322,7 +319,7 @@ async function Overview() {
                       }`}
                       title={expiresAt}
                     >
-                      {days < 0 ? "süresi doldu" : `${days} gün`}
+                      {days < 0 ? t("monitorsList.overview.certs.expired") : t.n("format.days", days)}
                     </span>
                   </li>
                 ))}
@@ -339,23 +336,25 @@ async function Overview() {
 async function NewMonitorButton() {
   const me = await currentUser();
   if (!me.can_edit) return null;
+  const t = await getT();
   return (
     <Link href="/monitors/new" className="btn lg:hidden">
-      <PlusIcon /> Yeni monitor
+      <PlusIcon /> {t("monitorsList.list.newMonitor")}
     </Link>
   );
 }
 
-export default function Home() {
+export default async function Home() {
+  const t = await getT();
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Genel bakış</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("monitorsList.overview.title")}</h1>
         <Suspense>
           <NewMonitorButton />
         </Suspense>
       </div>
-      <Suspense fallback={<p className="text-sm text-muted">Yükleniyor…</p>}>
+      <Suspense fallback={<p className="text-sm text-muted">{t("common.loading")}</p>}>
         <Overview />
       </Suspense>
     </>

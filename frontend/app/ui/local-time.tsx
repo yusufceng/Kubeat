@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n/client";
 import { useMounted } from "@/lib/use-mounted";
 
 /**
@@ -9,10 +10,11 @@ import { useMounted } from "@/lib/use-mounted";
  */
 export function LocalTime({ iso, seconds = true }: { iso: string; seconds?: boolean }) {
   const mounted = useMounted();
+  const t = useT();
 
   const date = new Date(iso);
   const text = mounted
-    ? date.toLocaleString("tr-TR", {
+    ? date.toLocaleString(t.intl, {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",

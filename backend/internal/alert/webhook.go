@@ -92,10 +92,11 @@ func groupDetail(n Notification) string {
 // groupList names the monitors of a group with their details, up to
 // maxGroupNamed of them.
 func groupList(n Notification) string {
+	w := wording(n)
 	items := make([]string, 0, len(n.Group))
 	for i, g := range n.Group {
 		if i == maxGroupNamed {
-			items = append(items, fmt.Sprintf("ve %d monitor daha", len(n.Group)-maxGroupNamed))
+			items = append(items, fmt.Sprintf(w.groupMore, len(n.Group)-maxGroupNamed))
 			break
 		}
 		if detail := groupDetail(g); detail != "" {
@@ -116,53 +117,51 @@ func groupWhere(n Notification) string {
 }
 
 func groupText(n Notification) string {
+	w := wording(n)
 	count, where, list := len(n.Group), groupWhere(n), groupList(n)
 	switch n.Event {
 	case EventDown:
-		return fmt.Sprintf("🔴 %s%d monitor erişilemiyor: %s", where, count, list)
+		return fmt.Sprintf(w.groupDown, where, count, list)
 	case EventUp:
-		return fmt.Sprintf("🟢 %s%d monitor tekrar çalışıyor: %s", where, count, list)
+		return fmt.Sprintf(w.groupUp, where, count, list)
 	case EventReminder:
-		return fmt.Sprintf("🔴 %s%d monitor hâlâ erişilemiyor: %s", where, count, list)
+		return fmt.Sprintf(w.groupReminder, where, count, list)
 	case EventCertExpiring:
-		return fmt.Sprintf("🟡 %s%d sertifikanın süresi bitiyor: %s", where, count, list)
+		return fmt.Sprintf(w.groupCertExpires, where, count, list)
 	case EventCertRenewed:
-		return fmt.Sprintf("🟢 %s%d sertifika yenilendi: %s", where, count, list)
+		return fmt.Sprintf(w.groupCertRenewed, where, count, list)
 	}
 	return ""
 }
 
-// Text is the one-line human-readable form of a notification.
+// Text is the one-line human-readable form of a notification, in its
+// language.
 func Text(n Notification) string {
 	if len(n.Group) > 1 {
 		return groupText(n)
 	}
+	w := wording(n)
 	switch n.Event {
 	case EventDown:
-		return fmt.Sprintf("🔴 %s erişilemiyor%s. Art arda %d kontrol başarısız. Son hata: %s",
-			n.Monitor.Name, target(n.Monitor), n.Monitor.FailureThreshold, n.Incident.Cause)
+		return fmt.Sprintf(w.down, n.Monitor.Name, target(n.Monitor), n.Monitor.FailureThreshold, n.Incident.Cause)
 	case EventUp:
-		return fmt.Sprintf("🟢 %s tekrar çalışıyor%s. Kesinti süresi: %s",
-			n.Monitor.Name, target(n.Monitor), n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second))
+		return fmt.Sprintf(w.up, n.Monitor.Name, target(n.Monitor), n.Incident.ResolvedAt.Sub(n.Incident.StartedAt).Round(time.Second))
 	case EventReminder:
-		return fmt.Sprintf("🔴 %s hâlâ erişilemiyor%s. Kesinti süresi: %s. Son hata: %s",
-			n.Monitor.Name, target(n.Monitor), n.At.Sub(n.Incident.StartedAt).Round(time.Second), n.Incident.Cause)
+		return fmt.Sprintf(w.reminder, n.Monitor.Name, target(n.Monitor), n.At.Sub(n.Incident.StartedAt).Round(time.Second), n.Incident.Cause)
 	case EventCertExpiring:
 		days := int(n.CertExpiresAt.Sub(n.Incident.StartedAt).Hours() / 24)
-		when := fmt.Sprintf("%d gün sonra", days)
+		when := fmt.Sprintf(w.certDays, days)
 		switch {
 		case n.CertExpiresAt.Before(n.Incident.StartedAt):
-			when = "süresi doldu"
+			when = w.certExpired
 		case days == 0:
-			when = "24 saat içinde"
+			when = w.certToday
 		}
-		return fmt.Sprintf("🟡 %s sertifikasının süresi bitiyor: %s (%s)%s",
-			n.Monitor.Name, when, n.CertExpiresAt.Format("2006-01-02"), target(n.Monitor))
+		return fmt.Sprintf(w.certExpires, n.Monitor.Name, when, n.CertExpiresAt.Format("2006-01-02"), target(n.Monitor))
 	case EventCertRenewed:
-		return fmt.Sprintf("🟢 %s sertifikası yenilendi; yeni bitiş tarihi %s%s",
-			n.Monitor.Name, n.CertExpiresAt.Format("2006-01-02"), target(n.Monitor))
+		return fmt.Sprintf(w.certRenewed, n.Monitor.Name, n.CertExpiresAt.Format("2006-01-02"), target(n.Monitor))
 	default:
-		return "Kubeat test bildirimi: bu kanal çalışıyor."
+		return w.test
 	}
 }
 

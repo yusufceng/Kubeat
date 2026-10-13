@@ -1,13 +1,14 @@
 import Link from "next/link";
+import { getT } from "@/lib/i18n/server";
 
 /** What a viewer sees in place of a form they may not submit. */
-export function ReadOnlyNotice() {
+export async function ReadOnlyNotice() {
+  const t = await getT();
   return (
     <p className="rounded-lg border border-line bg-sunken p-4 text-sm">
-      Hesabınız izleyici: monitor ekleyemez ve değiştiremezsiniz. Bunun için namespace&apos;inizin editörüne
-      ya da bir yöneticiye başvurun.{" "}
+      {t("readOnly.notice")}{" "}
       <Link href="/" className="underline">
-        Genel bakışa dön
+        {t("readOnly.back")}
       </Link>
       .
     </p>
