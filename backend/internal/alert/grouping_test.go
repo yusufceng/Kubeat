@@ -195,3 +195,54 @@ func TestMachineChannelsDoNotWaitForTheGroup(t *testing.T) {
 		t.Errorf("after the flush: delivered to %q, want ops,chat", got)
 	}
 }
+
+func TestAStaleReminderIsDroppedBeforeItGoesOut(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops" is a webhook; add a channel people read
+	f.engine.opts.GroupWait = 50 * time.Millisecond
+	ctx := context.Background()
+	if _, err := f.db.CreateChannel(ctx, store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	api := store.Monitor{ID: 1, Name: "api", Namespace: "shop"}
+	db := store.Monitor{ID: 2, Name: "db", Namespace: "shop"}
+	incident := store.Incident{ID: 1, StartedAt: f.clock, Cause: "refused"}
+
+	// Two monitors are reminded about; one of them recovers before the
+	// reminders have gone out.
+	f.engine.enqueue(Notification{Event: EventReminder, Monitor: api, Incident: incident, At: f.clock})
+	f.engine.enqueue(Notification{Event: EventReminder, Monitor: db, Incident: incident, At: f.clock})
+	f.engine.enqueue(Notification{Event: EventUp, Monitor: api, Incident: incident})
+	f.flush()
+
+	f.sender.mu.Lock()
+	defer f.sender.mu.Unlock()
+	var human []string
+	for i, n := range f.sender.sent {
+		if f.sender.channels[i] != "chat" {
+			continue
+		}
+		names := []string{}
+		for _, g := range n.Group {
+			names = append(names, g.Monitor.Name)
+		}
+		if len(names) == 0 {
+			names = []string{n.Monitor.Name}
+		}
+		human = append(human, string(n.Event)+"["+strings.Join(names, " ")+"]")
+	}
+	// The chat channel hears that db is still down and that api is back;
+	// it is not told afterwards that api is still down.
+	if got := strings.Join(human, ","); got != "reminder[db],up[api]" {
+		t.Errorf("human channel got %q, want reminder[db],up[api]", got)
+	}
+	// The webhook, which never waits, still has every event.
+	var machine []string
+	for i, n := range f.sender.sent {
+		if f.sender.channels[i] == "ops" {
+			machine = append(machine, string(n.Event)+":"+n.Monitor.Name)
+		}
+	}
+	if got := strings.Join(machine, ","); got != "reminder:api,reminder:db,up:api" {
+		t.Errorf("webhook got %q, want every event", got)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
@@ -356,6 +357,41 @@ type pendingGroup struct {
 	seq   int // the order the groups began in
 }
 
+// monitorKey identifies the monitor a notification is about.
+func monitorKey(n Notification) string {
+	if n.Monitor.ID != 0 {
+		return strconv.FormatInt(n.Monitor.ID, 10)
+	}
+	return n.Monitor.Name
+}
+
+// dropStaleReminders removes the reminders still waiting about the monitor
+// that n is about: by the time the group goes out they would say an outage
+// is still going on after the message that it ended, or repeat a reminder
+// that a newer one supersedes. Only reminders are dropped — an outage and
+// its recovery are both told, however briefly it lasted.
+func dropStaleReminders(groups map[groupKey]*pendingGroup, n Notification) {
+	if n.Event == EventTest {
+		return
+	}
+	key := monitorKey(n)
+	for gk, g := range groups {
+		if gk.event != EventReminder {
+			continue
+		}
+		kept := g.notes[:0]
+		for _, pending := range g.notes {
+			if monitorKey(pending) != key {
+				kept = append(kept, pending)
+			}
+		}
+		g.notes = kept
+		if len(g.notes) == 0 {
+			delete(groups, gk)
+		}
+	}
+}
+
 // takeDue removes the groups due by now (all of them with everything set)
 // and returns them in the order they began, so that notifications leave in
 // the order they arose rather than in the map's.
@@ -401,6 +437,7 @@ func (e *Engine) Run(ctx context.Context) {
 		// The channels software reads get it now: a page must not sit out
 		// the wait that exists only to spare human readers.
 		e.deliverTo(ctx, n, func(ch store.Channel) bool { return machine(ch.Type) })
+		dropStaleReminders(groups, n)
 		key := groupKey{n.Event, n.Monitor.Namespace}
 		g, ok := groups[key]
 		if !ok {

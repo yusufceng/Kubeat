@@ -976,6 +976,12 @@ hiçbir zaman gruplanmaz ve **beklemez**: olay açıldığı anda, kendi kaydıy
 giderler; nöbetçiyi çağıran sayfa gruplama beklemesine takılmaz. `0`
 gruplamayı kapatır.
 
+Bekleme sırasında bir monitor hakkında daha yeni bir haber gelirse (düzeldi,
+yeniden düştü ya da yeni bir hatırlatma), o monitor'un kuyrukta bekleyen
+**hatırlatması düşer**: "hâlâ erişilemiyor" mesajı, "tekrar çalışıyor"
+mesajından sonra ulaşmaz. Kesinti ve düzelme mesajları hiçbir zaman
+düşmez — kesinti ne kadar kısa sürerse sürsün ikisi de iletilir.
+
 **Biçim.** Her sağlayıcı kendi zengin biçimini alır: Slack ve Mattermost
 renk şeridi, başlık ve alanlar içeren bir attachment; Teams renkli bir
 Adaptive Card ve "Kubeat'te aç" düğmesi; Discord renkli bir embed; Google
@@ -1151,3 +1157,7 @@ Süreler Go biçimindedir (`500ms`, `5s`, `1m30s`).
 ## Katkı
 
 Branch stratejisi ve commit kuralları: [CONTRIBUTING.md](CONTRIBUTING.md)
+
+## Lisans
+
+[Apache License 2.0](LICENSE). Katkılar aynı lisansla kabul edilir.
