@@ -43,6 +43,9 @@ backend:
 
 frontend:
   replicas: 1
+  # Any frontend setting (REFRESH_INTERVAL_MS, HISTORY_LIMIT, ...; the
+  # README lists them) the chart has no value for.
+  extraEnv: {}
   image:
     repository: ghcr.io/yusufceng/kubeat-frontend
     tag: ""

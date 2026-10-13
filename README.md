@@ -57,9 +57,12 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
 - İmajlar UBI tabanlıdır; container'lar root olmadan, rastgele bir UID ile ve
   salt okunur kök dosya sistemiyle çalışabilir.
 - OpenShift'te `podSecurityContext` boş bırakılır ve `route.enabled=true`
-  verilir. Chart henüz bir OpenShift cluster'ında denenmedi.
-- Ayarlar `backend.env` ve `frontend.env` altında ortam değişkeni olarak
-  verilir; bkz. [values.yaml](deploy/helm/kubeat/values.yaml).
+  verilir; gerçek bir OpenShift 4.21'de doğrulandı.
+- Chart'ın ayrı değeri olmayan her ayar `backend.extraEnv` ve
+  `frontend.extraEnv` altında ortam değişkeni olarak verilir — alarm
+  davranışı da böyle ayarlanır (`UPTIME_REMINDER_INTERVAL`,
+  `UPTIME_NOTIFY_GROUP_WAIT`, `UPTIME_RECOVERY_THRESHOLD`, ...); bkz.
+  [values.yaml](deploy/helm/kubeat/values.yaml).
 
 ### OpenShift
 
@@ -965,8 +968,9 @@ ntfy, Gotify, e-posta) **tek mesaj** gider: "shop: 5 monitor erişilemiyor:
 odeme-api (unexpected status 503), …". Bir namespace'in tamamı düştüğünde
 30 ayrı mesaj yerine bir mesaj okunur; düzelme ve hatırlatmalar da aynı
 şekilde gruplanır. Yazılımın okuduğu kanallar (`webhook`, `pagerduty`)
-hiçbir zaman gruplanmaz: her olay kendi kaydıyla, PagerDuty'de kendi
-alarmıyla gider. `0` gruplamayı kapatır.
+hiçbir zaman gruplanmaz ve **beklemez**: olay açıldığı anda, kendi kaydıyla
+giderler; nöbetçiyi çağıran sayfa gruplama beklemesine takılmaz. `0`
+gruplamayı kapatır.
 
 **Gizli değerler.** URL'ler API yanıtlarında maskelenir (`https://host/…`),
 `secret` ise hiç dönmez; yalnızca `has_secret` bilgisi verilir. Güncellemede
