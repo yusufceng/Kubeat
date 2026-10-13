@@ -621,6 +621,29 @@ export type ClusterEvent = {
 
 export const getWorkload = (id: number) => request<Workload>(`/monitors/${id}/workload`);
 
+/** One slot of the check-history grid; slots without checks are left out. */
+export type GridCell = {
+  start: string;
+  checks: number;
+  failed: number;
+  /** null when no check succeeded */
+  avg_latency_ms: number | null;
+  /** The error most of the slot's failed checks gave. */
+  error?: string;
+};
+
+/** A monitor's check history as slots of time, with the range's most frequent errors. */
+export type CheckGrid = {
+  range_seconds: number;
+  bucket_seconds: number;
+  from: string;
+  to: string;
+  cells: GridCell[];
+  errors: { error: string; count: number; first_at: string; last_at: string }[];
+};
+
+export const getGrid = (id: number, hours: number) => request<CheckGrid>(`/monitors/${id}/grid?range=${hours}h`);
+
 /** What happened to a monitor between two moments: the chart's selection or an incident's span. */
 export type MonitorWindow = {
   from: string;

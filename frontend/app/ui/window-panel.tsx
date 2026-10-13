@@ -48,7 +48,7 @@ export async function WindowPanel({
   const warnings = window.events.filter((e) => e.type === "Warning").length;
 
   return (
-    <section className="card p-5" aria-label={t("monitorPage.window.title")}>
+    <section id="selected-range" className="card scroll-mt-4 p-5" aria-label={t("monitorPage.window.title")}>
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-sm font-semibold">
           {t("monitorPage.window.title")}{" "}

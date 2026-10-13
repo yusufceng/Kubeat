@@ -381,6 +381,7 @@ eklenmelidir.
 | `GET` | `/api/v1/monitors/{id}/uptime?windows=24h,168h` | İstenen her dönem için uptime |
 | `GET` | `/api/v1/monitors/{id}/workload` | Monitor'un arkasındaki pod'lar; hazır olma, restart, CPU ve bellek |
 | `GET` | `/api/v1/monitors/{id}/window?from=&to=` | İki an arasında olanlar: kontrol özeti, başarısız kontroller, kesişen olaylar, cluster olayları |
+| `GET` | `/api/v1/monitors/{id}/grid?range=24h` | Kontrol geçmişi zaman dilimlerine bölünmüş: dilim başına kontrol, başarısız, ortalama yanıt, en sık hata; aralığın en sık hataları |
 | `GET` | `/api/v1/monitors/{id}/channels` | Monitor'un alarmının gittiği etkin kanallar |
 | `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
 | `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
@@ -667,6 +668,25 @@ Pod'ların o anki durumu kaydedilmez; panel bunu söyler ve canlı duruma
 yönlendirir. Bir namespace'in olay listesi `UPTIME_EVENT_CACHE` (10 sn)
 boyunca yeniden okunmaz; aynı sayfanın iki paneli ve ardışık yenilemeler
 cluster'a tek istek yapar.
+
+### Kontrol geçmişi ızgarası
+
+Monitor sayfasındaki **Kontrol geçmişi**, uzun bir tablo yerine takvim
+benzeri bir ızgaradır (`GET /api/v1/monitors/{id}/grid?range=24h`): her
+hücre bir zaman dilimidir ve içindeki kontrollerin sonucuna göre boyanır —
+sorunsuz, kısmi hata (ne kadar çoğu başarısızsa o kadar koyu), kesinti,
+kontrol yok. **24 sa** görünümünde sütunlar saat, satırlar saatin
+dilimleridir (5 dakika; kontrol aralığı daha uzunsa ona göre 10–60 dakika);
+**7 gün** görünümünde satırlar gün, sütunlar günün saatleridir. Böylece
+"her saat başı düşüyor" gibi desenler bir satır ya da sütun olarak görünür.
+
+Bir hücrenin üzerine gelince o dilimin kontrol sayısı, kaçının başarısız
+olduğu, ortalama yanıt süresi ve başarısızlıkların en sık verdiği **hata
+metni** çıkar; tıklamak bunu ızgaranın altına sabitler ve "Bu dilimi
+incele" bağlantısı o aralığı grafikte seçer. Izgaranın yanında aralıktaki
+en sık beş hata, kaç kez ve ne zaman görüldükleriyle listelenir. Son
+kontrollerin tek tek dökümü "tablo olarak göster" altında durur. Izgara ham
+sonuçlardan hesaplanır, yani `UPTIME_RETENTION` kadar geriye gider.
 
 ### Raporlar
 

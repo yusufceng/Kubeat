@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import {
   ApiError,
   type CheckResult,
+  getGrid,
   getMonitor,
   getSeries,
   getUptime,
@@ -37,6 +38,25 @@ import { displayState, StatusBadge, StatusPill } from "@/app/ui/status";
 import { Tag } from "@/app/ui/tag";
 import { TimeAgo } from "@/app/ui/time-ago";
 import { WindowPanel } from "@/app/ui/window-panel";
+import { CheckGrid } from "@/app/ui/check-grid";
+
+/** The spans the check-history grid offers: a day of short slots, a week of hours. */
+const historyRanges = [
+  { key: "24h", hours: 24 },
+  { key: "7d", hours: 168 },
+];
+
+/** The grid of the check history; read on its own so the page does not wait for it. */
+async function HistoryGrid({ monitorId, hours, inspectBase }: { monitorId: number; hours: number; inspectBase: string }) {
+  const t = await getT();
+  let grid;
+  try {
+    grid = await getGrid(monitorId, hours);
+  } catch {
+    return <p className="text-sm text-muted">{t("monitorPage.history.gridError")}</p>;
+  }
+  return <CheckGrid grid={grid} inspectBase={inspectBase} />;
+}
 
 /** A query value as a moment, or null when it is not one. */
 function moment(v: string | string[] | undefined): Date | null {
@@ -190,6 +210,7 @@ async function MonitorDetail({
       ? { from: selectedFrom.getTime(), to: selectedTo?.getTime() ?? null }
       : null;
   // Only the offered ranges are accepted; anything else falls back to the default.
+  const history = historyRanges.find((h) => h.key === query.history) ?? historyRanges[0];
   const requested = Number(query.range);
   let range = config.chartRanges.includes(requested) ? requested : config.chartRanges[0];
 
@@ -461,39 +482,67 @@ async function MonitorDetail({
         )}
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold">{t("monitorPage.history.title")}</h2>
+      <section className="card p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">{t("monitorPage.history.title")}</h2>
+          <nav aria-label={t("monitorPage.history.range")} className="flex gap-1 rounded-lg bg-sunken p-0.5 text-xs">
+            {historyRanges.map((h) => (
+              <Link
+                key={h.key}
+                href={`/monitors/${monitor.id}?range=${range}&history=${h.key}${selectionQuery(selection)}`}
+                scroll={false}
+                aria-current={h.key === history.key ? "true" : undefined}
+                className={`rounded-md px-2.5 py-1 ${
+                  h.key === history.key ? "bg-panel font-semibold shadow-sm" : "text-muted hover:text-ink"
+                }`}
+              >
+                {duration(h.hours * 3600, t)}
+              </Link>
+            ))}
+          </nav>
+        </div>
         {results.length === 0 ? (
-          <p className="card p-5 text-sm text-muted">{t("monitorPage.history.empty")}</p>
+          <p className="text-sm text-muted">{t("monitorPage.history.empty")}</p>
         ) : (
-          <div className="card overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-line text-xs text-muted">
-                <tr>
-                  <th className="px-4 py-2 font-medium">{t("monitorPage.history.time")}</th>
-                  <th className="px-4 py-2 font-medium">{t("monitorPage.history.result")}</th>
-                  <th className="px-4 py-2 text-right font-medium">{t("monitorPage.history.duration")}</th>
-                  <th className="px-4 py-2 font-medium">{t("monitorPage.history.detail")}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {results.slice(0, config.resultsLimit).map((r) => (
-                  <tr key={r.checked_at}>
-                    <td className="whitespace-nowrap px-4 py-2 tabular-nums">
-                      <LocalTime iso={r.checked_at} />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2">
-                      <StatusBadge state={r.up ? "up" : "down"} t={t} />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums">{r.latency_ms} ms</td>
-                    <td className="px-4 py-2 font-mono text-xs text-muted">
-                      {[r.status_code && `HTTP ${r.status_code}`, r.error ?? r.detail].filter(Boolean).join(" · ")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Its own boundary: the grid must not hold back the page. */}
+            <Suspense fallback={<div className="h-52 rounded-lg bg-sunken/60" aria-hidden />}>
+              <HistoryGrid monitorId={monitor.id} hours={history.hours} inspectBase={`/monitors/${monitor.id}?history=${history.key}`} />
+            </Suspense>
+            <details className="mt-4 text-sm">
+              <summary className="cursor-pointer text-xs text-muted">
+                {t("monitorPage.history.showTable", { count: Math.min(results.length, config.resultsLimit) })}
+              </summary>
+              <div className="mt-2 overflow-x-auto rounded-lg border border-line">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-line text-xs text-muted">
+                    <tr>
+                      <th className="px-4 py-2 font-medium">{t("monitorPage.history.time")}</th>
+                      <th className="px-4 py-2 font-medium">{t("monitorPage.history.result")}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t("monitorPage.history.duration")}</th>
+                      <th className="px-4 py-2 font-medium">{t("monitorPage.history.detail")}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {results.slice(0, config.resultsLimit).map((r) => (
+                      <tr key={r.checked_at}>
+                        <td className="whitespace-nowrap px-4 py-2 tabular-nums">
+                          <LocalTime iso={r.checked_at} />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2">
+                          <StatusBadge state={r.up ? "up" : "down"} t={t} />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums">{r.latency_ms} ms</td>
+                        <td className="px-4 py-2 font-mono text-xs text-muted">
+                          {[r.status_code && `HTTP ${r.status_code}`, r.error ?? r.detail].filter(Boolean).join(" · ")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </>
         )}
       </section>
 

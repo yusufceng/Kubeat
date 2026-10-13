@@ -78,3 +78,111 @@ func (s *SQLite) ListIncidentsBetween(ctx context.Context, monitorID int64, from
 	}
 	return out, nil
 }
+
+// GridCell counts a monitor's checks in one bucket of time.
+type GridCell struct {
+	Start      time.Time
+	Checks     int
+	Failed     int
+	AvgLatency time.Duration // over the successful checks; zero without any
+	// Error is the most frequent error of the failed checks; empty when
+	// none failed or they said nothing.
+	Error string
+}
+
+// GridError is one error text and how often and when it was seen.
+type GridError struct {
+	Error       string
+	Count       int
+	First, Last time.Time
+}
+
+// CheckGrid counts the checks of a monitor from `from` to `to` in buckets
+// aligned to the epoch, leaving empty buckets out, and names the most
+// frequent error of each.
+func (s *SQLite) CheckGrid(ctx context.Context, monitorID int64, from, to time.Time, bucket time.Duration) ([]GridCell, error) {
+	ms := bucket.Milliseconds()
+	if ms <= 0 {
+		return nil, fmt.Errorf("check grid: bucket %s is too small", bucket)
+	}
+	rows, err := s.read.QueryContext(ctx,
+		`SELECT (checked_at / ?1) * ?1 AS b, COUNT(*), SUM(CASE WHEN up THEN 0 ELSE 1 END),
+		        COALESCE(AVG(CASE WHEN up THEN latency_ms END), 0)
+		 FROM check_results WHERE monitor_id = ?2 AND checked_at >= ?3 AND checked_at < ?4
+		 GROUP BY b ORDER BY b`, ms, monitorID, from.UnixMilli(), to.UnixMilli())
+	if err != nil {
+		return nil, fmt.Errorf("check grid: %w", err)
+	}
+	defer rows.Close()
+	var cells []GridCell
+	index := make(map[int64]int)
+	for rows.Next() {
+		var (
+			start int64
+			c     GridCell
+			avg   float64
+		)
+		if err := rows.Scan(&start, &c.Checks, &c.Failed, &avg); err != nil {
+			return nil, fmt.Errorf("check grid: %w", err)
+		}
+		c.Start = time.UnixMilli(start).UTC()
+		c.AvgLatency = time.Duration(avg * float64(time.Millisecond))
+		index[start] = len(cells)
+		cells = append(cells, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("check grid: %w", err)
+	}
+
+	// The most frequent error per bucket: the first row of each bucket.
+	errs, err := s.read.QueryContext(ctx,
+		`SELECT (checked_at / ?1) * ?1 AS b, COALESCE(error, ''), COUNT(*) AS n
+		 FROM check_results WHERE monitor_id = ?2 AND checked_at >= ?3 AND checked_at < ?4 AND NOT up
+		 GROUP BY b, error ORDER BY b, n DESC`, ms, monitorID, from.UnixMilli(), to.UnixMilli())
+	if err != nil {
+		return nil, fmt.Errorf("check grid: %w", err)
+	}
+	defer errs.Close()
+	seen := make(map[int64]bool)
+	for errs.Next() {
+		var (
+			start int64
+			text  string
+			n     int
+		)
+		if err := errs.Scan(&start, &text, &n); err != nil {
+			return nil, fmt.Errorf("check grid: %w", err)
+		}
+		if i, ok := index[start]; ok && !seen[start] {
+			cells[i].Error, seen[start] = text, true
+		}
+	}
+	return cells, errs.Err()
+}
+
+// TopErrors returns the most frequent errors of a monitor's failed checks
+// in the window, most frequent first, at most limit.
+func (s *SQLite) TopErrors(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]GridError, error) {
+	rows, err := s.read.QueryContext(ctx,
+		`SELECT COALESCE(error, ''), COUNT(*) AS n, MIN(checked_at), MAX(checked_at)
+		 FROM check_results WHERE monitor_id = ? AND checked_at >= ? AND checked_at < ? AND NOT up
+		 GROUP BY error ORDER BY n DESC, MAX(checked_at) DESC LIMIT ?`,
+		monitorID, from.UnixMilli(), to.UnixMilli(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("top errors: %w", err)
+	}
+	defer rows.Close()
+	var out []GridError
+	for rows.Next() {
+		var (
+			e           GridError
+			first, last int64
+		)
+		if err := rows.Scan(&e.Error, &e.Count, &first, &last); err != nil {
+			return nil, fmt.Errorf("top errors: %w", err)
+		}
+		e.First, e.Last = time.UnixMilli(first).UTC(), time.UnixMilli(last).UTC()
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
