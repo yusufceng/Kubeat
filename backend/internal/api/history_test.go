@@ -62,6 +62,57 @@ func seedHistory(t *testing.T, db *store.SQLite, now time.Time) {
 	}
 }
 
+func TestMonitorSeriesOfATimeframe(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	do(t, "POST", base, validMonitor, nil)
+	now := time.Now().UTC()
+	// A check every 30 s over the last 40 minutes.
+	var results []store.CheckResult
+	for i := range 80 {
+		results = append(results, store.CheckResult{MonitorID: 1, CheckedAt: now.Add(-time.Duration(i) * 30 * time.Second), Up: i%10 != 0, Latency: 20 * time.Millisecond})
+	}
+	if err := db.InsertCheckResults(context.Background(), results); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ten minutes of it, twenty minutes ago: fine buckets, only that span.
+	from, to := now.Add(-30*time.Minute), now.Add(-20*time.Minute)
+	var zoomed seriesResponse
+	url := base + "/1/series?from=" + from.Format(time.RFC3339) + "&to=" + to.Format(time.RFC3339)
+	if code := do(t, "GET", url, "", &zoomed); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if zoomed.BucketSeconds != 5 || zoomed.RangeSeconds < 595 || zoomed.RangeSeconds > 600 || len(zoomed.Points) < 19 || len(zoomed.Points) > 21 {
+		t.Fatalf("zoomed = bucket %d, range %d, %d points", zoomed.BucketSeconds, zoomed.RangeSeconds, len(zoomed.Points))
+	}
+	for _, p := range zoomed.Points {
+		if p.Start.Before(from.Add(-5*time.Second)) || !p.Start.Before(to) {
+			t.Errorf("point at %s lies outside %s – %s", p.Start, from, to)
+		}
+	}
+	if zoomed.To.After(to.Add(time.Second)) {
+		t.Errorf("series ends at %s, want %s", zoomed.To, to)
+	}
+
+	// An end in the future is now; an end before the start is refused.
+	var open seriesResponse
+	if code := do(t, "GET", base+"/1/series?from="+from.Format(time.RFC3339)+"&to="+now.Add(time.Hour).Format(time.RFC3339), "", &open); code != http.StatusOK || open.To.After(time.Now()) {
+		t.Errorf("future end: status %d, to %s", code, open.To)
+	}
+	var problem errorBody
+	for _, q := range []string{"from=yesterday", "from=" + to.Format(time.RFC3339) + "&to=" + from.Format(time.RFC3339)} {
+		if code := do(t, "GET", base+"/1/series?"+q, "", &problem); code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", q, code)
+		}
+	}
+	// A timeframe reaching past the raw retention (48h here) reads the hourly summaries.
+	var old seriesResponse
+	if code := do(t, "GET", base+"/1/series?from="+now.Add(-72*time.Hour).Format(time.RFC3339)+"&to="+now.Add(-70*time.Hour).Format(time.RFC3339), "", &old); code != http.StatusOK || old.BucketSeconds != 3600 {
+		t.Errorf("old timeframe: status %d, bucket %d, want hourly buckets", code, old.BucketSeconds)
+	}
+}
+
 func TestMonitorSeries(t *testing.T) {
 	srv, db := newTestAPI(t)
 	base := srv.URL + "/api/v1/monitors"

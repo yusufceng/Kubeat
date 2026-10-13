@@ -84,37 +84,74 @@ type seriesPoint struct {
 	MaxLatencyMS *int64   `json:"max_latency_ms"`
 }
 
-// monitorSeries returns the monitor's history over ?range=, in round buckets
-// sized so that there are about SeriesPoints of them. Empty buckets are left out.
+// monitorSeries returns the monitor's history in round buckets sized so
+// that there are about SeriesPoints of them; empty buckets are left out.
+// The span is the last ?range=, or the timeframe ?from=&to= (RFC 3339; to
+// defaults to now), which is what zooming into the chart asks for.
 func (h *handler) monitorSeries(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
-	span, err := h.historyDuration("range", r.URL.Query().Get("range"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	now := time.Now().UTC()
+	var (
+		span     time.Duration
+		from, to time.Time
+		err      error
+	)
+	if q := r.URL.Query(); q.Get("from") != "" {
+		if from, err = time.Parse(time.RFC3339, q.Get("from")); err != nil {
+			writeError(w, http.StatusBadRequest, "from must be an RFC 3339 time")
+			return
+		}
+		to = now
+		if v := q.Get("to"); v != "" {
+			if to, err = time.Parse(time.RFC3339, v); err != nil {
+				writeError(w, http.StatusBadRequest, "to must be an RFC 3339 time")
+				return
+			}
+		}
+		from, to = from.UTC(), to.UTC()
+		if to.After(now) {
+			to = now
+		}
+		// History older than the retention does not exist.
+		if oldest := now.Add(-h.opts.HistoryRetention); from.Before(oldest) {
+			from = oldest
+		}
+		if !to.After(from) {
+			writeError(w, http.StatusBadRequest, "to must be after from")
+			return
+		}
+		span = to.Sub(from)
+	} else {
+		if span, err = h.historyDuration("range", r.URL.Query().Get("range")); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		from, to = now.Add(-span), now
 	}
 	if !h.monitorExists(w, r, id) {
 		return
 	}
 
-	now := time.Now().UTC()
 	bucket := bucketFor(span, h.opts.SeriesPoints)
 	source := store.SeriesRaw
 	// Raw results are exact but only reach back RawRetention; hourly
 	// summaries cover the rest and are enough once buckets are that coarse.
-	if span > h.opts.RawRetention || bucket >= store.RollupBucket {
+	if from.Before(now.Add(-h.opts.RawRetention)) || bucket >= store.RollupBucket {
 		source = store.SeriesRollup
+		if bucket < store.RollupBucket {
+			bucket = store.RollupBucket
+		}
 		if rem := bucket % store.RollupBucket; rem != 0 {
 			bucket += store.RollupBucket - rem
 		}
 	}
-	from := now.Add(-span).Truncate(bucket)
+	from = from.Truncate(bucket)
 
-	points, err := h.opts.Store.Series(r.Context(), id, source, from, now, bucket)
+	points, err := h.opts.Store.Series(r.Context(), id, source, from, to, bucket)
 	if err != nil {
 		h.internalError(w, r, err)
 		return
@@ -123,7 +160,7 @@ func (h *handler) monitorSeries(w http.ResponseWriter, r *http.Request) {
 		RangeSeconds:  int(span / time.Second),
 		BucketSeconds: int(bucket / time.Second),
 		From:          from,
-		To:            now,
+		To:            to,
 		Points:        make([]seriesPoint, 0, len(points)),
 	}
 	for _, p := range points {

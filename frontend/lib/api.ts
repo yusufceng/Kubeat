@@ -534,6 +534,10 @@ export type UptimeWindow = {
 export const getSeries = (id: number, rangeSeconds: number) =>
   request<Series>(`/monitors/${id}/series?range=${rangeSeconds}s`);
 
+/** The series of a timeframe; an end that is absent or in the future means now. */
+export const getSeriesBetween = (id: number, from: string, to?: string) =>
+  request<Series>(`/monitors/${id}/series?from=${encodeURIComponent(from)}${to ? `&to=${encodeURIComponent(to)}` : ""}`);
+
 export const getUptime = (id: number, windowsSeconds: number[]) =>
   request<UptimeWindow[]>(
     `/monitors/${id}/uptime?windows=${windowsSeconds.map((s) => `${s}s`).join(",")}`,

@@ -7,6 +7,7 @@ import {
   getGrid,
   getMonitor,
   getSeries,
+  getSeriesBetween,
   getUptime,
   type Incident,
   listIncidents,
@@ -39,6 +40,11 @@ import { Tag } from "@/app/ui/tag";
 import { TimeAgo } from "@/app/ui/time-ago";
 import { WindowPanel } from "@/app/ui/window-panel";
 import { CheckGrid } from "@/app/ui/check-grid";
+
+// How much of a timeframe's length the zoomed chart shows on each side of
+// it, and the least it shows.
+const ZOOM_MARGIN = 0.25;
+const ZOOM_MARGIN_MIN_MS = 60_000;
 
 /** The spans the check-history grid offers: a day of short slots, a week of hours. */
 const historyRanges = [
@@ -212,7 +218,7 @@ async function MonitorDetail({
   // Only the offered ranges are accepted; anything else falls back to the default.
   const history = historyRanges.find((h) => h.key === query.history) ?? historyRanges[0];
   const requested = Number(query.range);
-  let range = config.chartRanges.includes(requested) ? requested : config.chartRanges[0];
+  const range = config.chartRanges.includes(requested) ? requested : config.chartRanges[0];
 
   const me = await currentUser();
   const t = await getT();
@@ -222,12 +228,14 @@ async function MonitorDetail({
   let windows: UptimeWindow[];
   let series: Series;
   try {
-    [monitor, results, incidents, windows, series] = await Promise.all([
+    let ranged: Series | null;
+    [monitor, results, incidents, windows, ranged] = await Promise.all([
       getMonitor(id),
       listResults(id, Math.max(config.historyLimit, config.resultsLimit)),
       listIncidents(config.incidentsLimit, id),
       getUptime(id, config.uptimeWindows),
-      getSeries(id, range),
+      // A timeframe has its own series, read below once its end is known.
+      selection ? null : getSeries(id, range),
     ]);
     // A link to an outage that has since ended ("down" messages carry no
     // end) is framed on the incident, not on everything since.
@@ -236,16 +244,19 @@ async function MonitorDetail({
       const ended = incidents.find((i) => i.kind === "down" && new Date(i.started_at).getTime() === from && i.resolved_at);
       if (ended?.resolved_at) selection = { from, to: new Date(ended.resolved_at).getTime() };
     }
-    // A selection without a range (a notification's link) gets the
-    // shortest range that still reaches it; the series' end is "now".
-    if (selection && !config.chartRanges.includes(requested)) {
-      const ranges = config.chartRanges.toSorted((a, b) => a - b);
-      const age = new Date(series.to).getTime() - selection.from;
-      const needed = ranges.find((r) => r * 1000 >= age) ?? ranges[ranges.length - 1];
-      if (needed !== range) {
-        range = needed;
-        series = await getSeries(id, range);
-      }
+    if (selection) {
+      // The chart zooms into the timeframe with a margin on each side, so
+      // that what led up to it and what followed are in view; an end past
+      // now is cut to now by the backend, which is what an open one gets.
+      const margin =
+        selection.to === null ? ZOOM_MARGIN_MIN_MS : Math.max((selection.to - selection.from) * ZOOM_MARGIN, ZOOM_MARGIN_MIN_MS);
+      series = await getSeriesBetween(
+        id,
+        new Date(selection.from - margin).toISOString(),
+        selection.to === null ? undefined : new Date(selection.to + margin).toISOString(),
+      );
+    } else {
+      series = ranged!;
     }
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
@@ -418,11 +429,12 @@ async function MonitorDetail({
               .map((r) => (
                 <Link
                   key={r}
-                  href={`/monitors/${monitor.id}?range=${r}${selectionQuery(selection)}`}
+                  // Choosing a range leaves the zoomed timeframe.
+                  href={`/monitors/${monitor.id}?range=${r}&history=${history.key}`}
                   scroll={false}
-                  aria-current={r === range ? "true" : undefined}
+                  aria-current={r === range && !selection ? "true" : undefined}
                   className={`rounded-md px-2.5 py-1 ${
-                    r === range ? "bg-panel font-semibold shadow-sm" : "text-muted hover:text-ink"
+                    r === range && !selection ? "bg-panel font-semibold shadow-sm" : "text-muted hover:text-ink"
                   }`}
                 >
                   {duration(r, t)}
@@ -430,10 +442,21 @@ async function MonitorDetail({
               ))}
           </nav>
         </div>
+        {selection && (
+          <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-sunken px-3 py-2 text-xs">
+            <span className="text-muted">{t("monitorPage.chart.zoomed")}</span>
+            <span className="font-medium tabular-nums">
+              <LocalTime iso={new Date(selection.from).toISOString()} /> –{" "}
+              {selection.to === null ? t("monitorPage.chart.zoomed.now") : <LocalTime iso={new Date(selection.to).toISOString()} />}
+            </span>
+            <Link href={`/monitors/${monitor.id}?range=${range}&history=${history.key}`} scroll={false} className="ml-auto font-medium underline hover:text-ink">
+              {t("monitorPage.chart.zoomOut", { duration: duration(range, t) })}
+            </Link>
+          </p>
+        )}
         <LatencyChart
           series={series}
-          monitorId={monitor.id}
-          range={range}
+          baseHref={`/monitors/${monitor.id}?range=${range}&history=${history.key}`}
           selection={selection}
           // Only outages: a click on a failing bucket must not pick an open
           // certificate incident that covers it too.
@@ -455,7 +478,7 @@ async function MonitorDetail({
             monitorId={monitor.id}
             from={new Date(selection.from).toISOString()}
             to={new Date(Math.min(selection.to ?? Infinity, new Date(series.to).getTime())).toISOString()}
-            clearHref={`/monitors/${monitor.id}?range=${range}`}
+            clearHref={`/monitors/${monitor.id}?range=${range}&history=${history.key}`}
             failuresShown={config.resultsLimit}
             beforeChart={selection.from < new Date(series.from).getTime()}
             hasPods={Boolean(monitor.source) || monitor.type === "workload"}

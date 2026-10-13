@@ -377,7 +377,7 @@ eklenmelidir.
 | `POST` | `/api/v1/monitors/{id}/clone` | Monitor'un `{"name"}` adıyla bir kopyasını oluşturur; gizli değerler de kopyalanır |
 | `GET`, `POST` | `/api/push/{token}?status=up&msg=...&ping=...` | Push monitor'unun raporu; API anahtarı gerekmez |
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
-| `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş |
+| `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş; `range` yerine `from=&to=` ile belirli bir aralık |
 | `GET` | `/api/v1/monitors/{id}/uptime?windows=24h,168h` | İstenen her dönem için uptime |
 | `GET` | `/api/v1/monitors/{id}/workload` | Monitor'un arkasındaki pod'lar; hazır olma, restart, CPU ve bellek |
 | `GET` | `/api/v1/monitors/{id}/window?from=&to=` | İki an arasında olanlar: kontrol özeti, başarısız kontroller, kesişen olaylar, cluster olayları |
@@ -645,11 +645,19 @@ söylemez.
 
 ### Kesinti anına gitmek
 
-Grafikte **sürükleyerek** bir aralık seçilir; erişilebilirlik şeridindeki
-kırmızı ya da sarı bir bloğa **tıklamak** o kesintinin tamamını seçer.
-Seçim adrese yazılır (`/monitors/7?from=…&to=…`), yani paylaşılabilir;
-bildirimlerdeki "Kubeat'te aç" bağlantısı da doğrudan kesintinin aralığına
-açılır. Seçilince grafiğin altında **Seçilen aralık** paneli
+Grafikte **sürükleyerek** bir aralık işaretlenir. İşaretin üstünde saat
+aralığı ve süresiyle küçük bir araç çubuğu çıkar; iki kenarındaki
+tutamaçlardan sürükleyerek aralık ayarlanır, **Yakınlaştır** uygular, ✕ ya
+da Escape bırakır. Erişilebilirlik şeridindeki kırmızı ya da sarı bir bloğa
+**tıklamak** o kesintinin tamamını işaretler.
+
+Yakınlaştırınca grafik o aralığı, iki yanında birer pay bırakarak gösterir
+(öncesi ve sonrası görünsün diye) ve daha ince dilimlere geçer; içinde
+yeniden sürükleyerek daha da yakınlaşılır. Tarayıcının geri düğmesi bir
+adım uzaklaştırır, grafiğin üstündeki bağlantı son 24 saat gibi hazır
+görünüme döner. Aralık adrese yazılır (`/monitors/7?from=…&to=…`), yani
+paylaşılabilir; bildirimlerdeki "Kubeat'te aç" bağlantısı da doğrudan
+kesintinin aralığına açılır. Grafiğin altında **Seçilen aralık** paneli
 (`GET /api/v1/monitors/{id}/window?from=&to=`) belirir:
 
 - o aralıktaki kontrol sayısı, kaçının başarısız olduğu, ortalama ve en

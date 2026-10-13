@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Series, SeriesPoint } from "@/lib/api";
+import { duration } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 
 // Layout, in CSS pixels.
@@ -47,18 +48,21 @@ export type Span = { from: number; to: number | null };
 // wobbles more than a mouse.
 const CLICK_SLOP = 4;
 const TOUCH_SLOP = 12;
+// How close to an edge of the marked span a press grabs it, and half the
+// room its toolbar needs, in pixels.
+const EDGE_GRIP = 7;
+const TOOLBAR_HALF = 170;
 
 export function LatencyChart({
   series,
-  monitorId,
-  range,
+  baseHref,
   selection,
   incidents,
 }: {
   series: Series;
-  monitorId: number;
-  range: number;
-  /** The range selected on the chart, carried in the page's URL. */
+  /** The page's address with its query; a timeframe's from and to are added to it. */
+  baseHref: string;
+  /** The timeframe the chart is zoomed into, carried in the page's URL. */
   selection: Span | null;
   /** The monitor's incidents, so that clicking an outage selects its whole span. */
   incidents: Span[];
@@ -69,9 +73,16 @@ export function LatencyChart({
   // Measured on the client; until then a placeholder of the same height is
   // rendered, which also keeps times in the viewer's zone, not the server's.
   const [width, setWidth] = useState<number | null>(null);
-  const [active, setActive] = useState<number | null>(null);
-  // A press in progress, in pixels from the wrapper's left edge.
-  const [drag, setDrag] = useState<{ start: number; current: number; slop: number } | null>(null);
+  const [hovered, setActive] = useState<number | null>(null);
+  // What the pointer is doing: drawing a new span (pixels from the
+  // wrapper's left edge) or dragging one edge of the drawn one.
+  const [gesture, setGesture] = useState<
+    { kind: "new"; start: number; current: number; slop: number } | { kind: "edge"; edge: "from" | "to" } | null
+  >(null);
+  // A span marked on the chart and not yet applied: it can still be
+  // adjusted by its edges, zoomed into, or dropped.
+  const [draft, setDraft] = useState<{ from: number; to: number } | null>(null);
+  const [overEdge, setOverEdge] = useState(false);
 
   useEffect(() => {
     const el = wrapper.current;
@@ -82,6 +93,8 @@ export function LatencyChart({
   }, []);
 
   const { points } = series;
+  // The point in hand; a series that changed under it (a zoom) lets go.
+  const active = hovered !== null && hovered < points.length ? hovered : null;
   const from = new Date(series.from).getTime();
   const to = new Date(series.to).getTime();
   const bucket = series.bucket_seconds * 1000;
@@ -163,103 +176,140 @@ export function LatencyChart({
     const f = Math.min(Math.max((px - LEFT) / geometry.plotWidth, 0), 1);
     return from + f * (to - from);
   };
-  // Selections snap to bucket edges, so a drag picks whole buckets.
+  // Spans snap to bucket edges, so a drag picks whole buckets.
   const snapDown = (at: number) => Math.max(from + Math.floor((at - from) / bucket) * bucket, from);
   const snapUp = (at: number) => Math.min(from + Math.ceil((at - from) / bucket) * bucket, to);
+  const snap = (at: number) => Math.min(Math.max(from + Math.round((at - from) / bucket) * bucket, from), to);
 
-  // The selection lives in the URL, so the page shows what happened in it
-  // and the address can be shared.
-  const navigate = (span: Span | null) => {
-    let href = `/monitors/${monitorId}?range=${range}`;
-    if (span) {
-      href += `&from=${encodeURIComponent(new Date(span.from).toISOString())}`;
-      if (span.to !== null) href += `&to=${encodeURIComponent(new Date(span.to).toISOString())}`;
-    }
-    router.replace(href, { scroll: false });
+  // Which edge of the drawn span a pixel is on, if any.
+  const edgeAt = (px: number): "from" | "to" | null => {
+    if (!geometry || !draft) return null;
+    if (Math.abs(px - geometry.x(Math.max(draft.from, from))) <= EDGE_GRIP) return "from";
+    if (Math.abs(px - geometry.x(Math.min(draft.to, to))) <= EDGE_GRIP) return "to";
+    return null;
   };
-  const select = (span: Span) => {
-    if (span.to !== null && span.to <= span.from) return;
-    if (selection && selection.from === span.from && selection.to === span.to) return;
-    navigate(span);
+
+  // Zooming puts the timeframe in the URL: the page then shows the chart
+  // and what happened for it, and the address can be shared. It is pushed,
+  // so the browser's back button zooms out again.
+  const zoom = (span: { from: number; to: number }) => {
+    setDraft(null);
+    router.push(
+      `${baseHref}&from=${encodeURIComponent(new Date(span.from).toISOString())}&to=${encodeURIComponent(new Date(span.to).toISOString())}`,
+      { scroll: false },
+    );
   };
-  // A click on a bucket selects it; on a bucket with failures, the incident
-  // that covers it, so one click frames the whole outage.
+  // A click marks the bucket under it; on a bucket with failures, the
+  // incident that covers it, so one click frames the whole outage. A click
+  // on what is already marked lets go of it.
   const clickAt = (px: number) => {
     const i = nearestAt(px);
     if (i === null) return;
     const p = points[i];
     const start = new Date(p.start).getTime();
     const end = Math.min(start + bucket, to);
-    if (stateOf(p) !== "ok") {
-      const incident = incidents.find((inc) => inc.from < end && (inc.to ?? Infinity) > start);
-      if (incident) {
-        select(incident);
-        return;
-      }
+    if (draft && start >= draft.from && end <= draft.to) {
+      setDraft(null);
+      return;
     }
-    select({ from: start, to: end });
+    const incident = stateOf(p) !== "ok" ? incidents.find((inc) => inc.from < end && (inc.to ?? Infinity) > start) : undefined;
+    setDraft(incident ? { from: incident.from, to: incident.to ?? to } : { from: start, to: end });
   };
 
   const point = active !== null ? points[active] : null;
-  // The band drawn over the chart: the press in progress, else the selection.
-  const band: [number, number] | null = drag
-    ? [timeAt(Math.min(drag.start, drag.current)), timeAt(Math.max(drag.start, drag.current))]
-    : selection
-      ? [Math.max(selection.from, from), Math.min(selection.to ?? to, to)]
-      : null;
+  // The band being drawn right now, else the one drawn and waiting.
+  const marked: [number, number] | null =
+    gesture?.kind === "new" && Math.abs(gesture.current - gesture.start) >= gesture.slop
+      ? [snapDown(timeAt(Math.min(gesture.start, gesture.current))), snapUp(timeAt(Math.max(gesture.start, gesture.current)))]
+      : draft
+        ? [draft.from, draft.to]
+        : null;
+  // The timeframe the page is zoomed into, as a quiet band inside its margins.
+  const applied: [number, number] | null = selection ? [Math.max(selection.from, from), Math.min(selection.to ?? to, to)] : null;
+
+  const clock = (at: number) => new Date(at).toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit", ...(bucket < 60_000 && { second: "2-digit" }) });
+  const day = (at: number) => new Date(at).toLocaleDateString(t.intl, { day: "numeric", month: "short" });
+  const spanLabel = ([a, b]: [number, number]) =>
+    `${day(a)} ${clock(a)} – ${day(a) === day(b) ? "" : day(b) + " "}${clock(b)} · ${duration(Math.round((b - a) / 1000), t)}`;
 
   return (
     <figure>
       <div
         ref={wrapper}
-        className="relative cursor-crosshair select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--viz-series)]"
+        className="relative select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--viz-series)]"
         // Horizontal drags select; vertical ones still scroll the page.
-        style={{ height: HEIGHT, touchAction: "pan-y" }}
+        style={{ height: HEIGHT, touchAction: "pan-y", cursor: overEdge || gesture?.kind === "edge" ? "ew-resize" : "crosshair" }}
         tabIndex={0}
         role="group"
         aria-label={t("monitorPage.chart.aria")}
         onPointerDown={(e) => {
-          if (e.button !== 0 || !geometry || drag) return;
+          if (e.button !== 0 || !geometry || gesture) return;
+          // The toolbar's buttons are not part of the plot.
+          if ((e.target as HTMLElement).closest("[data-selection-toolbar]")) return;
           // No native text selection while dragging; keep keyboard focus.
           e.preventDefault();
           e.currentTarget.focus();
           const px = pixel(e.clientX);
-          setDrag({ start: px, current: px, slop: e.pointerType === "touch" ? TOUCH_SLOP : CLICK_SLOP });
+          const edge = edgeAt(px);
+          setGesture(
+            edge
+              ? { kind: "edge", edge }
+              : { kind: "new", start: px, current: px, slop: e.pointerType === "touch" ? TOUCH_SLOP : CLICK_SLOP },
+          );
           e.currentTarget.setPointerCapture(e.pointerId);
         }}
         onPointerMove={(e) => {
           const px = pixel(e.clientX);
           setActive(nearestAt(px));
-          if (drag) setDrag({ ...drag, current: px });
+          setOverEdge(edgeAt(px) !== null);
+          if (gesture?.kind === "new") {
+            setGesture({ ...gesture, current: px });
+          } else if (gesture?.kind === "edge" && draft) {
+            // An edge stops one bucket short of the other.
+            const at = snap(timeAt(px));
+            setDraft(
+              gesture.edge === "from"
+                ? { from: Math.min(at, draft.to - bucket), to: draft.to }
+                : { from: draft.from, to: Math.max(at, draft.from + bucket) },
+            );
+          }
         }}
         onPointerUp={(e) => {
-          if (!drag) return;
-          setDrag(null);
+          if (!gesture) return;
+          setGesture(null);
           e.currentTarget.releasePointerCapture(e.pointerId);
-          const { start, current, slop } = drag;
+          if (gesture.kind !== "new") return;
+          const { start, current, slop } = gesture;
           if (Math.abs(current - start) < slop) {
             clickAt(start);
           } else {
-            select({ from: snapDown(timeAt(Math.min(start, current))), to: snapUp(timeAt(Math.max(start, current))) });
+            const span = { from: snapDown(timeAt(Math.min(start, current))), to: snapUp(timeAt(Math.max(start, current))) };
+            if (span.to > span.from) setDraft(span);
           }
         }}
-        onPointerCancel={() => setDrag(null)}
+        onPointerCancel={() => setGesture(null)}
         onPointerLeave={() => {
-          if (!drag) setActive(null);
+          if (!gesture) setActive(null);
         }}
-        onBlur={() => setActive(null)}
+        onBlur={(e) => {
+          // Focus moving to the toolbar's buttons stays inside.
+          if (!e.currentTarget.contains(e.relatedTarget)) setActive(null);
+        }}
         onKeyDown={(e) => {
+          if ((e.target as HTMLElement).closest("[data-selection-toolbar]")) return;
           if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
             e.preventDefault();
             const delta = e.key === "ArrowRight" ? 1 : -1;
             setActive((i) =>
               Math.min(Math.max((i ?? (delta > 0 ? -1 : points.length)) + delta, 0), points.length - 1),
             );
-          } else if ((e.key === "Enter" || e.key === " ") && active !== null && geometry) {
+          } else if ((e.key === "Enter" || e.key === " ") && geometry && (draft || active !== null)) {
             e.preventDefault();
-            clickAt(geometry.centers[active]);
+            // Enter marks the point in hand; once something is marked it zooms in.
+            if (draft) zoom(draft);
+            else clickAt(geometry.centers[active!]);
           } else if (e.key === "Escape") {
-            if (selection) navigate(null);
+            if (draft) setDraft(null);
             else setActive(null);
           }
         }}
@@ -290,17 +340,17 @@ export function LatencyChart({
               </g>
             ))}
 
-            {band && band[1] > band[0] && (
-              <g aria-hidden>
+            {applied && applied[1] > applied[0] && (
+              <g>
                 <rect
-                  x={geometry.x(band[0])}
+                  x={geometry.x(applied[0])}
                   y={TOP}
-                  width={Math.max(geometry.x(band[1]) - geometry.x(band[0]), 1)}
+                  width={Math.max(geometry.x(applied[1]) - geometry.x(applied[0]), 1)}
                   height={STRIP_TOP + STRIP_HEIGHT - TOP}
                   fill="var(--viz-series)"
-                  opacity={0.12}
+                  opacity={0.08}
                 />
-                {[band[0], band[1]].map((edge) => (
+                {applied.map((edge) => (
                   <line
                     key={edge}
                     x1={geometry.x(edge)}
@@ -311,6 +361,42 @@ export function LatencyChart({
                     strokeWidth={1}
                     strokeDasharray="3 3"
                   />
+                ))}
+              </g>
+            )}
+
+            {marked && marked[1] > marked[0] && (
+              <g>
+                <rect
+                  x={geometry.x(Math.max(marked[0], from))}
+                  y={TOP}
+                  width={Math.max(geometry.x(Math.min(marked[1], to)) - geometry.x(Math.max(marked[0], from)), 1)}
+                  height={STRIP_TOP + STRIP_HEIGHT - TOP}
+                  fill="var(--viz-series)"
+                  opacity={0.2}
+                />
+                {[Math.max(marked[0], from), Math.min(marked[1], to)].map((edge) => (
+                  <g key={edge}>
+                    <line
+                      x1={geometry.x(edge)}
+                      x2={geometry.x(edge)}
+                      y1={TOP}
+                      y2={STRIP_TOP + STRIP_HEIGHT}
+                      stroke="var(--viz-series)"
+                      strokeWidth={2}
+                    />
+                    {/* The grip an edge is dragged by. */}
+                    <rect
+                      x={geometry.x(edge) - 3}
+                      y={TOP + PLOT_HEIGHT / 2 - 14}
+                      width={6}
+                      height={28}
+                      rx={3}
+                      fill="var(--viz-series)"
+                      stroke="var(--background)"
+                      strokeWidth={1}
+                    />
+                  </g>
                 ))}
               </g>
             )}
@@ -411,11 +497,46 @@ export function LatencyChart({
           </svg>
         )}
 
-        {geometry && point && active !== null && (
+        {geometry && marked && marked[1] > marked[0] && (
+          <div
+            data-selection-toolbar
+            className="absolute z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-lg border border-line bg-panel py-1 pl-3 pr-1 text-xs shadow-lg"
+            style={{
+              top: 2,
+              // Centred on the span, kept inside the chart.
+              left: Math.min(
+                Math.max((geometry.x(Math.max(marked[0], from)) + geometry.x(Math.min(marked[1], to))) / 2, TOOLBAR_HALF),
+                Math.max(width! - TOOLBAR_HALF, TOOLBAR_HALF),
+              ),
+              cursor: "default",
+            }}
+          >
+            <span className="tabular-nums">{spanLabel(marked)}</span>
+            {draft && !gesture && (
+              <>
+                <button type="button" className="btn btn-primary px-2.5 py-1 text-xs" onClick={() => zoom(draft)}>
+                  {t("monitorPage.chart.zoom")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md px-1.5 py-1 text-muted hover:bg-sunken hover:text-ink"
+                  aria-label={t("monitorPage.chart.dropSelection")}
+                  title={t("monitorPage.chart.dropSelection")}
+                  onClick={() => setDraft(null)}
+                >
+                  ✕
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {geometry && point && active !== null && !gesture && (
           <div
             role="status"
-            className="pointer-events-none absolute top-2 z-10 rounded-lg border border-line bg-panel px-3 py-2 text-xs shadow-md"
+            className="pointer-events-none absolute z-10 rounded-lg border border-line bg-panel px-3 py-2 text-xs shadow-md"
             style={{
+              top: marked ? 44 : 8,
               width: TOOLTIP_WIDTH,
               // Beside the crosshair, on whichever side has room.
               left:
