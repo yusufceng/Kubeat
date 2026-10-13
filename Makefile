@@ -53,6 +53,7 @@ minikube-deploy: images
 	minikube image load kubeat-backend:$(VERSION) kubeat-frontend:$(VERSION)
 	helm --kube-context $(KUBE_CONTEXT) upgrade --install kubeat $(CHART) \
 		--namespace $(NAMESPACE) --create-namespace \
+		--set backend.image.repository=kubeat-backend --set frontend.image.repository=kubeat-frontend \
 		--set backend.image.tag=$(VERSION) --set frontend.image.tag=$(VERSION) \
 		$(MINIKUBE_SECURITY) $(HELM_ARGS) --wait
 
@@ -77,3 +78,11 @@ minikube-demo:
 # Minikube kurulumunun yönetici parolasını yazdırır.
 minikube-password:
 	@kubectl --context $(KUBE_CONTEXT) -n $(NAMESPACE) get secret kubeat-admin -o jsonpath='{.data.password}' | base64 -d; echo
+
+# Sürümü etiketler ve iter; GitHub Actions imajları ghcr.io'ya, chart'ı
+# oci://ghcr.io/yusufceng/charts'a yayımlar (.github/workflows/release.yml).
+release:
+	@test "$$(git branch --show-current)" = main || (echo "release main'den yapılır"; exit 1)
+	@test -z "$$(git status --porcelain)" || (echo "çalışma ağacı temiz değil"; exit 1)
+	git tag -a v$(VERSION) -m "Kubeat $(VERSION)"
+	git -c http.sslVerify=true push origin v$(VERSION)

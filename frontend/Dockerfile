@@ -1,4 +1,6 @@
-FROM node:24-slim AS build
+# The bundle is plain JavaScript, so it is built once on the builder's
+# platform and copied into the runtime image of each target.
+FROM --platform=$BUILDPLATFORM node:24-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci

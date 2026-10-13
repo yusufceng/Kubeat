@@ -25,7 +25,21 @@ make test
 
 ## Cluster'a kurulum
 
-Chart [deploy/helm/kubeat](deploy/helm/kubeat) altındadır. Minikube için:
+Her sürüm etiketi (`v0.28.0` gibi) imajları `ghcr.io/yusufceng/kubeat-backend`
+ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
+`oci://ghcr.io/yusufceng/charts/kubeat` olarak yayımlar
+([.github/workflows/release.yml](.github/workflows/release.yml)). Herhangi bir
+cluster'a kurulum:
+
+```
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.28.0 \
+  -n kubeat --create-namespace
+```
+
+İmajları kendi registry'nize aynalıyorsanız `backend.image.repository`,
+`frontend.image.repository` ve gerekirse `imagePullSecrets` değerlerini
+verin. Chart kaynaktan da kurulabilir: [deploy/helm/kubeat](deploy/helm/kubeat).
+Minikube için (imajlar yerelde derlenir, registry gerekmez):
 
 ```
 minikube start --keep-context   # kubectl'in mevcut bağlamını değiştirmez
@@ -53,7 +67,8 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat deploy/helm/kubeat -n kubeat --create-namespace \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.28.0 \
+  -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
   --set prometheus.url=https://thanos-querier.openshift-monitoring.svc:9091 \

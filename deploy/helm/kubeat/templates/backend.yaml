@@ -54,6 +54,10 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       serviceAccountName: {{ .Release.Name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       automountServiceAccountToken: {{ or .Values.discovery.enabled (ne .Values.prometheus.tokenFile "") }}
       {{- with .Values.podSecurityContext }}
       securityContext:

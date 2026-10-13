@@ -1,6 +1,11 @@
+# Images are published to ghcr.io on every release tag; a private registry
+# mirror goes in the repositories below, and its credentials in
+# imagePullSecrets (the names of Secrets in the release namespace).
+imagePullSecrets: []
+
 backend:
   image:
-    repository: kubeat-backend
+    repository: ghcr.io/yusufceng/kubeat-backend
     tag: ""            # defaults to the chart's appVersion
     pullPolicy: IfNotPresent
   # Extra settings as environment variables; see the README for the list.
@@ -25,7 +30,7 @@ backend:
 frontend:
   replicas: 1
   image:
-    repository: kubeat-frontend
+    repository: ghcr.io/yusufceng/kubeat-frontend
     tag: ""
     pullPolicy: IfNotPresent
   # BACKEND_URL is set by the chart.
