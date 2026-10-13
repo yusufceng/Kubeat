@@ -158,3 +158,40 @@ func TestEnglishTexts(t *testing.T) {
 		t.Errorf("unknown language falls back to English: %q", got)
 	}
 }
+
+func TestMachineChannelsDoNotWaitForTheGroup(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops" is a webhook with no scope
+	f.engine.opts.GroupWait = 5 * time.Second
+	ctx := context.Background()
+	if _, err := f.db.CreateChannel(ctx, store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	runCtx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.engine.Run(runCtx); close(done) }()
+	f.engine.enqueue(Notification{Event: EventDown, Monitor: store.Monitor{Name: "api", Namespace: "shop"}, Incident: store.Incident{StartedAt: f.clock, Cause: "refused"}})
+
+	// Well before the wait has passed, the webhook has it and the chat
+	// channel does not.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		f.sender.mu.Lock()
+		got := strings.Join(f.sender.channels, ",")
+		f.sender.mu.Unlock()
+		if got == "ops" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("before the wait: delivered to %q, want ops only", got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stop()
+	<-done // shutdown flushes the group to the human channels
+	f.sender.mu.Lock()
+	defer f.sender.mu.Unlock()
+	if got := strings.Join(f.sender.channels, ","); got != "ops,chat" {
+		t.Errorf("after the flush: delivered to %q, want ops,chat", got)
+	}
+}

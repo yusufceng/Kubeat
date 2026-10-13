@@ -108,7 +108,8 @@ type Options struct {
 	// GroupWait is how long a notification waits for others of the same
 	// event in the same namespace, so that an outage of many monitors is
 	// one message to people rather than one per monitor; zero sends each
-	// at once. Channels read by software are never grouped.
+	// at once. Channels read by software (webhook, PagerDuty) are never
+	// grouped and never wait: they get every notification at once.
 	GroupWait time.Duration
 	// Metrics may be nil.
 	Metrics *metrics.Metrics
@@ -387,9 +388,12 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 	add := func(n Notification) {
 		if e.opts.GroupWait <= 0 || n.Event == EventTest {
-			e.deliver(ctx, n)
+			e.deliverTo(ctx, n, nil)
 			return
 		}
+		// The channels software reads get it now: a page must not sit out
+		// the wait that exists only to spare human readers.
+		e.deliverTo(ctx, n, func(ch store.Channel) bool { return machine(ch.Type) })
 		key := groupKey{n.Event, n.Monitor.Namespace}
 		g, ok := groups[key]
 		if !ok {
@@ -429,12 +433,12 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
-// deliverGroup sends the notifications of one group: as one message to
-// the channels people read, when more than one of them is for that
-// channel, and one by one to the others.
+// deliverGroup sends the notifications of one group to the channels
+// people read, as one message where more than one is for that channel.
+// The machine channels got each notification when it arose.
 func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notification) {
 	if len(notes) == 1 {
-		e.deliver(ctx, notes[0])
+		e.deliverTo(ctx, notes[0], func(ch store.Channel) bool { return !machine(ch.Type) })
 		return
 	}
 	channels, err := e.store.ListChannels(context.WithoutCancel(ctx))
@@ -443,7 +447,7 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 		return
 	}
 	for _, ch := range channels {
-		if !ch.Enabled || !ch.Wants(event.Kind()) {
+		if !ch.Enabled || machine(ch.Type) || !ch.Wants(event.Kind()) {
 			continue
 		}
 		var mine []Notification
@@ -454,10 +458,8 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 		}
 		switch {
 		case len(mine) == 0:
-		case len(mine) == 1 || machine(ch.Type):
-			for _, n := range mine {
-				e.send(ctx, ch, n)
-			}
+		case len(mine) == 1:
+			e.send(ctx, ch, mine[0])
 		default:
 			first := mine[0]
 			e.send(ctx, ch, Notification{Event: event, Monitor: first.Monitor, Incident: first.Incident, CertExpiresAt: first.CertExpiresAt, At: first.At, Language: first.Language, Group: mine})
@@ -465,7 +467,9 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 	}
 }
 
-func (e *Engine) deliver(ctx context.Context, n Notification) {
+// deliverTo sends one notification to every enabled channel whose scope
+// covers it and that include accepts; nil includes them all.
+func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(store.Channel) bool) {
 	// Reads and sends must still work while shutting down.
 	channels, err := e.store.ListChannels(context.WithoutCancel(ctx))
 	if err != nil {
@@ -473,7 +477,7 @@ func (e *Engine) deliver(ctx context.Context, n Notification) {
 		return
 	}
 	for _, ch := range channels {
-		if !ch.Enabled || !ch.Covers(n.Monitor) || !ch.Wants(n.Event.Kind()) {
+		if !ch.Enabled || !ch.Covers(n.Monitor) || !ch.Wants(n.Event.Kind()) || (include != nil && !include(ch)) {
 			continue
 		}
 		e.send(ctx, ch, n)

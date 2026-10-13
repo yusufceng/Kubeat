@@ -681,7 +681,7 @@ func TestDeliveryFollowsTheChannelScope(t *testing.T) {
 		f.sender.mu.Lock()
 		f.sender.channels = nil
 		f.sender.mu.Unlock()
-		f.engine.deliver(ctx, Notification{Event: EventDown, Monitor: store.Monitor{Name: "m", Namespace: namespace}})
+		f.engine.deliverTo(ctx, Notification{Event: EventDown, Monitor: store.Monitor{Name: "m", Namespace: namespace}}, nil)
 		f.sender.mu.Lock()
 		defer f.sender.mu.Unlock()
 		return strings.Join(f.sender.channels, ",")

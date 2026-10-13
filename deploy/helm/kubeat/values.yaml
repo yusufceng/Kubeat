@@ -27,6 +27,15 @@ backend:
   persistence:
     size: 2Gi
     storageClass: ""   # empty uses the cluster default
+  # Any UPTIME_* setting the chart has no value for (the README lists them
+  # all). Do not repeat variables the chart itself sets.
+  extraEnv: {}
+    # UPTIME_REMINDER_INTERVAL: 15m    # announce an ongoing outage again
+    # UPTIME_NOTIFY_GROUP_WAIT: 30s    # "0" turns grouping off
+    # UPTIME_RECOVERY_THRESHOLD: "1"
+    # UPTIME_DEFAULT_FAILURE_THRESHOLD: "3"
+    # UPTIME_CERT_WARNING: 336h
+    # UPTIME_WORKLOAD_ROLLOUT_GRACE: 10m
   # Extra volumes for the backend, e.g. a CA bundle for the metrics server or
   # for checks of targets signed by an internal CA.
   extraVolumes: []

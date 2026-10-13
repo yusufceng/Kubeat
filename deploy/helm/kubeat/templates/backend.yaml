@@ -221,7 +221,7 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
-            {{- range $name, $value := .Values.backend.env }}
+            {{- range $name, $value := .Values.backend.extraEnv }}
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}

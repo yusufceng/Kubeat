@@ -43,7 +43,7 @@ spec:
               value: "http://{{ .Release.Name }}-backend.{{ .Release.Namespace }}.svc:8080"
             - name: SESSION_TTL_HOURS
               value: {{ .Values.auth.sessionTtlHours | quote }}
-            {{- range $name, $value := .Values.frontend.env }}
+            {{- range $name, $value := .Values.frontend.extraEnv }}
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}
