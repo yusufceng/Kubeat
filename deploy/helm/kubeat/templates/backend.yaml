@@ -147,6 +147,10 @@ spec:
             {{- end }}
             - name: UPTIME_LANGUAGE
               value: {{ .Values.language | quote }}
+            {{- with include "kubeat.publicURL" $ }}
+            - name: UPTIME_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
             {{- with .Values.discovery.namespaces }}

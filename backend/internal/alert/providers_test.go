@@ -64,8 +64,13 @@ func TestDiscordSender(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := seen()[0]
-	if got.Path != "/api/webhooks/1/abc" || len(got.Body) != 1 || got.Body["content"] != Text(n) || got.Header.Get("User-Agent") != "kubeat/test" {
+	embed := got.Body["embeds"].([]any)[0].(map[string]any)
+	if got.Path != "/api/webhooks/1/abc" || embed["description"] != Text(n) || embed["title"] != "ödeme-api" ||
+		embed["color"].(float64) == 0 || got.Header.Get("User-Agent") != "kubeat/test" {
 		t.Errorf("request = %+v", got)
+	}
+	if fields := embed["fields"].([]any); len(fields) != 5 || fields[0].(map[string]any)["name"] != "Monitor" {
+		t.Errorf("embed fields = %v", fields)
 	}
 
 	// A message longer than Discord takes is cut, not refused.
@@ -73,8 +78,9 @@ func TestDiscordSender(t *testing.T) {
 	if err := sender.Send(context.Background(), store.Channel{Target: srv.URL}, n); err != nil {
 		t.Fatal(err)
 	}
-	if content := seen()[1].Body["content"].(string); len(content) > discordLimit+3 || !strings.HasSuffix(content, "…") {
-		t.Errorf("long content: %d bytes, ends %q", len(content), content[len(content)-6:])
+	description := seen()[1].Body["embeds"].([]any)[0].(map[string]any)["description"].(string)
+	if len(description) > discordLimit+3 || !strings.HasSuffix(description, "…") {
+		t.Errorf("long description: %d bytes, ends %q", len(description), description[len(description)-6:])
 	}
 }
 
@@ -87,8 +93,21 @@ func TestTelegramSender(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := seen()[0]
-	if got.Path != "/bot123:abc/sendMessage" || got.Body["chat_id"] != "-1001234" || got.Body["text"] != Text(n) {
+	text, _ := got.Body["text"].(string)
+	if got.Path != "/bot123:abc/sendMessage" || got.Body["chat_id"] != "-1001234" || got.Body["parse_mode"] != "HTML" ||
+		!strings.HasPrefix(text, "<b>🔴 ödeme-api</b>\n") || !strings.Contains(text, "Hedef: https://pay.example.com/healthz") {
 		t.Errorf("request = %+v", got)
+	}
+
+	// What came from a monitor is escaped, so a name cannot add markup.
+	sharp := sampleDown()
+	sharp.Monitor.Name = "<b>evil</b> & co"
+	if err := sender.Send(context.Background(), ch, sharp); err != nil {
+		t.Fatal(err)
+	}
+	escaped := seen()[1].Body["text"].(string)
+	if strings.Contains(escaped, "<b>evil") || !strings.Contains(escaped, "&lt;b&gt;evil&lt;/b&gt; &amp; co") {
+		t.Errorf("a monitor name was not escaped: %q", escaped)
 	}
 
 	// A refusal carries Telegram's own explanation, and never the token.
@@ -199,8 +218,12 @@ func TestGotifySender(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := seen()[0]
+	message, _ := got.Body["message"].(string)
+	extras, _ := got.Body["extras"].(map[string]any)
+	display, _ := extras["client::display"].(map[string]any)
 	if got.Path != "/gotify/message" || got.Header.Get("X-Gotify-Key") != "AppT0ken" || got.Body["title"] != "[Kubeat] ödeme-api erişilemiyor" ||
-		got.Body["message"] != Text(sampleDown()) || got.Body["priority"] != float64(8) {
+		!strings.HasPrefix(message, Text(sampleDown())) || !strings.Contains(message, "- **Hedef:**") ||
+		display["contentType"] != "text/markdown" || got.Body["priority"] != float64(8) {
 		t.Errorf("request = %+v", got)
 	}
 
@@ -232,7 +255,10 @@ func TestRouterKnowsEveryType(t *testing.T) {
 		if err := router.Send(context.Background(), store.Channel{Type: typ, Target: srv.URL}, n); err != nil {
 			t.Fatal(err)
 		}
-		if body := seen()[before].Body; len(body) != 1 || body["text"] != Text(n) {
+		// Mattermost reads Slack's attachments, Google Chat its own card.
+		body := seen()[before].Body
+		rich := body["attachments"] != nil || body["cardsV2"] != nil
+		if body["text"] != Text(n) || !rich {
 			t.Errorf("%s body = %+v", typ, body)
 		}
 	}

@@ -125,6 +125,7 @@ func main() {
 		SendTimeout:       cfg.NotifyTimeout,
 		GroupWait:         cfg.NotifyGroupWait,
 		Language:          cfg.Language,
+		PublicURL:         cfg.PublicURL,
 		Metrics:           meter,
 		Logger:            logger,
 	})

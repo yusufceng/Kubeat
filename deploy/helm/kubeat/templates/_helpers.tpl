@@ -30,6 +30,20 @@ seccompProfile:
 The URL the identity provider sends the browser back to: as given, or made
 from the Route or Ingress host.
 */}}
+{{/*
+Where users reach Kubeat, for the links in notifications: as given, or
+made from the Route or Ingress host.
+*/}}
+{{- define "kubeat.publicURL" -}}
+{{- if .Values.publicURL -}}
+{{ .Values.publicURL }}
+{{- else if and .Values.route.enabled .Values.route.host -}}
+https://{{ .Values.route.host }}
+{{- else if and .Values.ingress.enabled .Values.ingress.host -}}
+https://{{ .Values.ingress.host }}
+{{- end -}}
+{{- end -}}
+
 {{- define "kubeat.oidcRedirectURL" -}}
 {{- if .Values.oidc.redirectURL -}}
 {{ .Values.oidc.redirectURL }}

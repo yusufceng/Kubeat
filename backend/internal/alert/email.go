@@ -90,6 +90,9 @@ func buildMessage(from string, to []string, n Notification, now time.Time) []byt
 			fmt.Fprintf(&body, "%s: %s\r\n", f.Label, f.Value)
 		}
 	}
+	if link := URL(n); link != "" {
+		fmt.Fprintf(&body, "\r\n%s: %s\r\n", wording(n).openInKubeat, link)
+	}
 
 	var msg bytes.Buffer
 	header := func(name, value string) { fmt.Fprintf(&msg, "%s: %s\r\n", name, value) }

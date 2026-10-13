@@ -18,7 +18,7 @@ type Router struct {
 // NewRouter returns a Router for every channel type.
 func NewRouter(client *http.Client, userAgent string, smtp SMTPConfig, endpoints Endpoints) *Router {
 	email := &EmailSender{SMTP: smtp}
-	// Mattermost and Google Chat read a message from "text", like Slack.
+	// Mattermost reads Slack's format, Google Chat its own cards.
 	text := &SlackSender{Client: client, UserAgent: userAgent}
 	return &Router{
 		email: email,
@@ -26,7 +26,7 @@ func NewRouter(client *http.Client, userAgent string, smtp SMTPConfig, endpoints
 			store.ChannelWebhook:    &WebhookSender{Client: client, UserAgent: userAgent},
 			store.ChannelSlack:      text,
 			store.ChannelMattermost: text,
-			store.ChannelGoogleChat: text,
+			store.ChannelGoogleChat: &GoogleChatSender{Client: client, UserAgent: userAgent},
 			store.ChannelTeams:      &TeamsSender{Client: client, UserAgent: userAgent},
 			store.ChannelEmail:      email,
 			store.ChannelDiscord:    &DiscordSender{Client: client, UserAgent: userAgent},

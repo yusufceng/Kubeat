@@ -38,8 +38,11 @@ type Notification struct {
 	// At is the moment a reminder refers to.
 	At time.Time
 	// Language is what the texts are written in (LanguageEnglish or
-	// LanguageTurkish); the engine sets it from its options.
-	Language string
+	// LanguageTurkish); the engine sets it from its options. PublicURL is
+	// where Kubeat is reached from outside, so a message can link to what
+	// it is about; empty leaves the links out.
+	Language  string
+	PublicURL string
 	// Group holds the notifications a grouped one stands for: several
 	// monitors of one namespace with the same event within GroupWait.
 	// Monitor and Incident are then those of the first. Empty for a
@@ -106,6 +109,9 @@ type Options struct {
 	SendTimeout time.Duration
 	// Language the notifications are written in; English when empty.
 	Language string
+	// PublicURL is Kubeat's address as its users reach it, for the links
+	// in notifications; empty leaves them out.
+	PublicURL string
 	// GroupWait is how long a notification waits for others of the same
 	// event in the same namespace, so that an outage of many monitors is
 	// one message to people rather than one per monitor; zero sends each
@@ -324,7 +330,7 @@ func (e *Engine) streak(ctx context.Context, monitorID int64, n int, up bool) ([
 }
 
 func (e *Engine) enqueue(n Notification) {
-	n.Language = e.opts.Language
+	n.Language, n.PublicURL = e.opts.Language, e.opts.PublicURL
 	select {
 	case e.queue <- n:
 	default:
@@ -463,7 +469,8 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 			e.send(ctx, ch, mine[0])
 		default:
 			first := mine[0]
-			e.send(ctx, ch, Notification{Event: event, Monitor: first.Monitor, Incident: first.Incident, CertExpiresAt: first.CertExpiresAt, At: first.At, Language: first.Language, Group: mine})
+			e.send(ctx, ch, Notification{Event: event, Monitor: first.Monitor, Incident: first.Incident, CertExpiresAt: first.CertExpiresAt,
+				At: first.At, Language: first.Language, PublicURL: first.PublicURL, Group: mine})
 		}
 	}
 }
@@ -531,6 +538,9 @@ func (e *Engine) sendWithRetry(ctx context.Context, ch store.Channel, n Notifica
 func (e *Engine) SendOnce(ctx context.Context, ch store.Channel, n Notification) error {
 	if n.Language == "" {
 		n.Language = e.opts.Language
+	}
+	if n.PublicURL == "" {
+		n.PublicURL = e.opts.PublicURL
 	}
 	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.opts.SendTimeout)
 	defer cancel()

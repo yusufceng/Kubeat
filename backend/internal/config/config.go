@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -156,6 +157,9 @@ type Config struct {
 	// Language the notifications and the first administrator's name are
 	// written in: "en" or "tr".
 	Language string // UPTIME_LANGUAGE
+	// PublicURL is where users reach Kubeat, used for the links in
+	// notifications: "https://kubeat.apps.example". Empty leaves them out.
+	PublicURL string // UPTIME_PUBLIC_URL
 	// WorkloadRolloutGrace is how long a workload monitor puts up with
 	// missing pods while a rollout is in progress; zero means not at all.
 	WorkloadRolloutGrace time.Duration // UPTIME_WORKLOAD_ROLLOUT_GRACE
@@ -171,9 +175,10 @@ type Config struct {
 // defaults for unset variables. Durations use Go syntax, e.g. "5s" or "1m30s".
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:     envString("UPTIME_ADDR", ":8080"),
-		Language: envString("UPTIME_LANGUAGE", "en"),
-		DBPath:   envString("UPTIME_DB_PATH", "uptime.db"),
+		Addr:      envString("UPTIME_ADDR", ":8080"),
+		Language:  envString("UPTIME_LANGUAGE", "en"),
+		PublicURL: strings.TrimSuffix(envString("UPTIME_PUBLIC_URL", ""), "/"),
+		DBPath:    envString("UPTIME_DB_PATH", "uptime.db"),
 
 		APIToken:  envString("UPTIME_API_TOKEN", ""),
 		SecretKey: envString("UPTIME_SECRET_KEY", ""),

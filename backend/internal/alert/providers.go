@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -52,9 +54,53 @@ type DiscordSender struct {
 // discordLimit is the longest message Discord accepts.
 const discordLimit = 2000
 
+// What Discord accepts in an embed.
+const (
+	discordTitleLimit = 256
+	discordFieldLimit = 1024
+	discordFields     = 25
+)
+
+type discordEmbed struct {
+	Title       string              `json:"title,omitempty"`
+	URL         string              `json:"url,omitempty"`
+	Description string              `json:"description,omitempty"`
+	Color       int                 `json:"color"`
+	Fields      []discordEmbedField `json:"fields,omitempty"`
+	Footer      *discordFooter      `json:"footer,omitempty"`
+	Timestamp   string              `json:"timestamp,omitempty"`
+}
+
+type discordEmbedField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline"`
+}
+
+type discordFooter struct {
+	Text string `json:"text"`
+}
+
+func newDiscordBody(n Notification, now time.Time) map[string]any {
+	embed := discordEmbed{
+		Title:       truncate(subject(n), discordTitleLimit-1),
+		URL:         URL(n),
+		Description: truncate(Text(n), discordLimit-1),
+		Color:       ColorInt(n),
+		Footer:      &discordFooter{Text: "Kubeat"},
+		Timestamp:   now.UTC().Format(time.RFC3339),
+	}
+	for _, f := range Facts(n) {
+		if len(embed.Fields) == discordFields {
+			break
+		}
+		embed.Fields = append(embed.Fields, discordEmbedField{Name: f.Label, Value: truncate(f.Value, discordFieldLimit-1), Inline: shortValue(f.Value)})
+	}
+	return map[string]any{"embeds": []discordEmbed{embed}}
+}
+
 func (s *DiscordSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
-	status, answer, err := post(ctx, s.Client, s.UserAgent, ch.Target, nil,
-		map[string]string{"content": truncate(Text(n), discordLimit-1)})
+	status, answer, err := post(ctx, s.Client, s.UserAgent, ch.Target, nil, newDiscordBody(n, time.Now()))
 	if err != nil {
 		return err
 	}
@@ -73,7 +119,8 @@ func (s *TelegramSender) Send(ctx context.Context, ch store.Channel, n Notificat
 	target := strings.TrimSuffix(s.BaseURL, "/") + "/bot" + ch.Secret + "/sendMessage"
 	status, answer, err := post(ctx, s.Client, s.UserAgent, target, nil, map[string]any{
 		"chat_id":                  ch.Target,
-		"text":                     Text(n),
+		"text":                     telegramText(n),
+		"parse_mode":               "HTML",
 		"disable_web_page_preview": true,
 	})
 	if err != nil {
@@ -87,6 +134,22 @@ func (s *TelegramSender) Send(ctx context.Context, ch store.Channel, n Notificat
 		answer = []byte(reply.Description)
 	}
 	return accepted("Telegram", status, answer)
+}
+
+// telegramText is the message as Telegram's limited HTML: the subject in
+// bold, the text, the details, and the link back. Everything that came
+// from a monitor or a target is escaped, so a name with "<" is text.
+func telegramText(n Notification) string {
+	esc := html.EscapeString
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>%s %s</b>\n%s", Emoji(n), esc(subject(n)), esc(Text(n)))
+	for _, f := range Facts(n) {
+		fmt.Fprintf(&b, "\n%s: %s", esc(f.Label), esc(f.Value))
+	}
+	if link := URL(n); link != "" {
+		fmt.Fprintf(&b, "\n\n<a href=\"%s\">%s</a>", esc(link), esc(wording(n).openInKubeat))
+	}
+	return b.String()
 }
 
 // PagerDutySender raises and resolves alerts through the Events API v2. The
@@ -104,6 +167,10 @@ type pagerDutyEvent struct {
 	EventAction string            `json:"event_action"`
 	DedupKey    string            `json:"dedup_key"`
 	Payload     *pagerDutyPayload `json:"payload,omitempty"`
+	// Client and ClientURL name what raised the alert and where to look at
+	// it; PagerDuty shows them on the incident.
+	Client    string `json:"client,omitempty"`
+	ClientURL string `json:"client_url,omitempty"`
 }
 
 type pagerDutyPayload struct {
@@ -123,6 +190,8 @@ func (s *PagerDutySender) Send(ctx context.Context, ch store.Channel, n Notifica
 		RoutingKey:  ch.Secret,
 		EventAction: "trigger",
 		DedupKey:    fmt.Sprintf("kubeat-incident-%d", n.Incident.ID),
+		Client:      "Kubeat",
+		ClientURL:   URL(n),
 	}
 	switch n.Event {
 	case EventUp, EventCertRenewed:
@@ -211,6 +280,10 @@ func (s *NtfySender) Send(ctx context.Context, ch store.Channel, n Notification)
 	// Published as JSON to the server's root: a title with non-ASCII
 	// letters cannot travel in a header.
 	message := map[string]any{"topic": topic, "title": Subject(n), "message": Text(n), "priority": 3}
+	if link := URL(n); link != "" {
+		message["click"] = link
+		message["actions"] = []map[string]string{{"action": "view", "label": wording(n).openInKubeat, "url": link}}
+	}
 	switch n.Event {
 	case EventDown, EventReminder:
 		message["priority"], message["tags"] = 5, []string{"rotating_light"}
@@ -242,11 +315,29 @@ func (s *GotifySender) Send(ctx context.Context, ch store.Channel, n Notificatio
 	if n.Event == EventDown || n.Event == EventReminder {
 		priority = 8
 	}
+	message := map[string]any{"title": Subject(n), "message": gotifyMarkdown(n), "priority": priority,
+		"extras": map[string]any{"client::display": map[string]string{"contentType": "text/markdown"}}}
+	if link := URL(n); link != "" {
+		message["extras"].(map[string]any)["client::notification"] = map[string]any{"click": map[string]string{"url": link}}
+	}
 	status, answer, err := post(ctx, s.Client, s.UserAgent, strings.TrimSuffix(ch.Target, "/")+"/message",
-		map[string]string{"X-Gotify-Key": ch.Secret},
-		map[string]any{"title": Subject(n), "message": Text(n), "priority": priority})
+		map[string]string{"X-Gotify-Key": ch.Secret}, message)
 	if err != nil {
 		return err
 	}
 	return accepted("Gotify", status, answer)
+}
+
+// gotifyMarkdown is the message as Gotify renders markdown: the text, the
+// details as a list, and the link back.
+func gotifyMarkdown(n Notification) string {
+	var b strings.Builder
+	b.WriteString(Text(n))
+	for _, f := range Facts(n) {
+		fmt.Fprintf(&b, "\n- **%s:** %s", f.Label, f.Value)
+	}
+	if link := URL(n); link != "" {
+		fmt.Fprintf(&b, "\n\n[%s](%s)", wording(n).openInKubeat, link)
+	}
+	return b.String()
 }

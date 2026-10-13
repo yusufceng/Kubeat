@@ -976,6 +976,16 @@ hiçbir zaman gruplanmaz ve **beklemez**: olay açıldığı anda, kendi kaydıy
 giderler; nöbetçiyi çağıran sayfa gruplama beklemesine takılmaz. `0`
 gruplamayı kapatır.
 
+**Biçim.** Her sağlayıcı kendi zengin biçimini alır: Slack ve Mattermost
+renk şeridi, başlık ve alanlar içeren bir attachment; Teams renkli bir
+Adaptive Card ve "Kubeat'te aç" düğmesi; Discord renkli bir embed; Google
+Chat bir card; Telegram kalın başlıklı HTML; Gotify markdown; ntfy
+tıklanabilir bir eylem; PagerDuty olayda `client_url`; webhook gövdesinde
+`url` alanı; e-posta son satırında bağlantı. Bağlantı tek monitor'da
+monitor sayfasına, gruplanmış mesajda namespace sayfasına gider ve
+`UPTIME_PUBLIC_URL` (chart'ta `publicURL`, Route/Ingress host'undan
+türetilir) ayarlı değilse hiç konmaz.
+
 **Gizli değerler.** URL'ler API yanıtlarında maskelenir (`https://host/…`),
 `secret` ise hiç dönmez; yalnızca `has_secret` bilgisi verilir. Güncellemede
 maskelenmiş adres ya da `********` gönderilirse kayıtlı değer korunur. Hata
@@ -1077,6 +1087,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |
 | `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Gönderilmeyi bekleyebilecek en fazla bildirim sayısı |
+| `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz |
 | `UPTIME_LANGUAGE` | `en` | Bildirim metinlerinin ve ilk yönetici hesabının görünen adının dili: `en` ya da `tr` |
 | `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |
 | `UPTIME_DISCOVERY_ENABLED` | `true` | Cluster keşfini açar |

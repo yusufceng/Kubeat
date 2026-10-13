@@ -8,6 +8,11 @@ imagePullSecrets: []
 # we have (frontend): "en" or "tr". Visitors can switch the UI themselves.
 language: en
 
+# Where users reach Kubeat, for the links in notifications. Derived from
+# route.host or ingress.host when they are set; a message carries no link
+# while none of them is known.
+publicURL: ""   # https://kubeat.apps.example
+
 backend:
   image:
     repository: ghcr.io/yusufceng/kubeat-backend

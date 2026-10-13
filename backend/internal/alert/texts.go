@@ -36,6 +36,10 @@ type phrases struct {
 
 	// the unit words of a duration: day, hour, minute, second
 	unitDay, unitHour, unitMin, unitSec string
+
+	// openInKubeat labels the link back; monitorsWord names what a group
+	// counts ("3 monitors" / "3 monitor").
+	openInKubeat, monitorsWord string
 }
 
 var languages = map[string]phrases{
@@ -67,6 +71,8 @@ var languages = map[string]phrases{
 		factMonitor: "Monitor", factTarget: "Target", factNamespace: "Namespace", factStart: "Started", factEnd: "Ended", factCause: "Cause",
 
 		unitDay: "d", unitHour: "h", unitMin: "m", unitSec: "s",
+
+		openInKubeat: "Open in Kubeat", monitorsWord: "monitors",
 	},
 	LanguageTurkish: {
 		down:        "🔴 %s erişilemiyor%s. Art arda %d kontrol başarısız. Son hata: %s",
@@ -96,6 +102,8 @@ var languages = map[string]phrases{
 		factMonitor: "Monitor", factTarget: "Hedef", factNamespace: "Namespace", factStart: "Başlangıç", factEnd: "Bitiş", factCause: "Neden",
 
 		unitDay: "gün", unitHour: "sa", unitMin: "dk", unitSec: "sn",
+
+		openInKubeat: "Kubeat'te aç", monitorsWord: "monitor",
 	},
 }
 

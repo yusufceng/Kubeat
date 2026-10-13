@@ -55,17 +55,78 @@ func capture(t *testing.T) (*httptest.Server, func() []map[string]any) {
 	}
 }
 
-func TestSlackSenderPostsOnlyText(t *testing.T) {
+func TestSlackSenderPostsTextAndAnAttachment(t *testing.T) {
 	srv, bodies := capture(t)
 	sender := &SlackSender{Client: srv.Client()}
 	n := sampleDown()
+	n.PublicURL = "https://kubeat.example/"
 
 	if err := sender.Send(context.Background(), store.Channel{Type: store.ChannelSlack, Target: srv.URL}, n); err != nil {
 		t.Fatal(err)
 	}
 	got := bodies()[0]
-	if len(got) != 1 || got["text"] != Text(n) {
-		t.Errorf("slack body = %v, want only the text field", got)
+	// The text is what a notification preview shows.
+	if got["text"] != Text(n) {
+		t.Errorf("slack text = %v", got["text"])
+	}
+	attachment := got["attachments"].([]any)[0].(map[string]any)
+	if attachment["color"] != colorDown || attachment["title"] != "ödeme-api" ||
+		attachment["title_link"] != "https://kubeat.example/monitors/7" || attachment["footer"] != "Kubeat" {
+		t.Errorf("attachment = %v", attachment)
+	}
+	var titles []string
+	for _, f := range attachment["fields"].([]any) {
+		titles = append(titles, f.(map[string]any)["title"].(string))
+	}
+	if strings.Join(titles, ",") != "Monitor,Hedef,Namespace,Başlangıç,Neden" {
+		t.Errorf("field titles = %v", titles)
+	}
+
+	// Without a public address the attachment carries no link.
+	n.PublicURL = ""
+	if err := sender.Send(context.Background(), store.Channel{Target: srv.URL}, n); err != nil {
+		t.Fatal(err)
+	}
+	if link := bodies()[1]["attachments"].([]any)[0].(map[string]any)["title_link"]; link != nil {
+		t.Errorf("title_link without a public URL = %v", link)
+	}
+}
+
+func TestGoogleChatSenderPostsACard(t *testing.T) {
+	srv, bodies := capture(t)
+	sender := &GoogleChatSender{Client: srv.Client()}
+	n := sampleDown()
+	n.PublicURL = "https://kubeat.example"
+
+	if err := sender.Send(context.Background(), store.Channel{Type: store.ChannelGoogleChat, Target: srv.URL}, n); err != nil {
+		t.Fatal(err)
+	}
+	got := bodies()[0]
+	if got["text"] != Text(n) {
+		t.Errorf("chat text = %v", got["text"])
+	}
+	card := got["cardsV2"].([]any)[0].(map[string]any)["card"].(map[string]any)
+	header := card["header"].(map[string]any)
+	if header["title"] != "🔴 ödeme-api" || header["subtitle"] != "https://pay.example.com/healthz" {
+		t.Errorf("header = %v", header)
+	}
+	widgets := card["sections"].([]any)[0].(map[string]any)["widgets"].([]any)
+	first := widgets[0].(map[string]any)["decoratedText"].(map[string]any)
+	if first["topLabel"] != "Monitor" || first["text"] != "ödeme-api" {
+		t.Errorf("first widget = %v", first)
+	}
+	button := widgets[len(widgets)-1].(map[string]any)["buttonList"].(map[string]any)["buttons"].([]any)[0].(map[string]any)
+	if button["text"] != "Kubeat'te aç" ||
+		button["onClick"].(map[string]any)["openLink"].(map[string]any)["url"] != "https://kubeat.example/monitors/7" {
+		t.Errorf("button = %v", button)
+	}
+
+	// A test notification has no details: no card at all.
+	if err := sender.Send(context.Background(), store.Channel{Target: srv.URL}, Notification{Event: EventTest}); err != nil {
+		t.Fatal(err)
+	}
+	if cards := bodies()[1]["cardsV2"]; cards != nil {
+		t.Errorf("test message carries a card: %v", cards)
 	}
 }
 
@@ -88,10 +149,13 @@ func TestTeamsSenderPostsAnAdaptiveCard(t *testing.T) {
 		t.Fatalf("attachment = %v", attachment)
 	}
 	elements := card["body"].([]any)
-	if text := elements[0].(map[string]any); text["type"] != "TextBlock" || text["text"] != Text(n) || text["wrap"] != true {
-		t.Errorf("first element = %v", text)
+	if head := elements[0].(map[string]any); head["text"] != "🔴 ödeme-api" || head["color"] != "Attention" || head["weight"] != "Bolder" {
+		t.Errorf("first element = %v", head)
 	}
-	facts := elements[1].(map[string]any)["facts"].([]any)
+	if text := elements[1].(map[string]any); text["type"] != "TextBlock" || text["text"] != Text(n) || text["wrap"] != true {
+		t.Errorf("second element = %v", text)
+	}
+	facts := elements[2].(map[string]any)["facts"].([]any)
 	var titles []string
 	for _, f := range facts {
 		titles = append(titles, f.(map[string]any)["title"].(string))
@@ -105,8 +169,8 @@ func TestTeamsSenderPostsAnAdaptiveCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	testCard := bodies()[1]["attachments"].([]any)[0].(map[string]any)["content"].(map[string]any)
-	if n := len(testCard["body"].([]any)); n != 1 {
-		t.Errorf("test card has %d elements, want 1", n)
+	if n := len(testCard["body"].([]any)); n != 2 {
+		t.Errorf("test card has %d elements, want the heading and the text", n)
 	}
 }
 
@@ -322,7 +386,7 @@ func TestRouterPicksSenderByType(t *testing.T) {
 	if got[0]["event"] != "down" || got[0]["monitor"] == nil {
 		t.Errorf("webhook body = %v", got[0])
 	}
-	if len(got[1]) != 1 {
+	if got[1]["text"] != Text(n) || got[1]["attachments"] == nil {
 		t.Errorf("slack body = %v", got[1])
 	}
 	if got[2]["attachments"] == nil {

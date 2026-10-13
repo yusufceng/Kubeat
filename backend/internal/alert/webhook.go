@@ -24,8 +24,11 @@ type WebhookSender struct {
 }
 
 type webhookBody struct {
-	Event    Event            `json:"event"`
-	Text     string           `json:"text"`
+	Event Event  `json:"event"`
+	Text  string `json:"text"`
+	// URL is where to look at this in Kubeat; absent without a public
+	// address (UPTIME_PUBLIC_URL).
+	URL      string           `json:"url,omitempty"`
 	Monitor  *webhookMonitor  `json:"monitor,omitempty"`
 	Incident *webhookIncident `json:"incident,omitempty"`
 }
@@ -46,7 +49,7 @@ type webhookIncident struct {
 }
 
 func newWebhookBody(n Notification) webhookBody {
-	body := webhookBody{Event: n.Event, Text: Text(n)}
+	body := webhookBody{Event: n.Event, Text: Text(n), URL: URL(n)}
 	if n.Event == EventTest {
 		return body
 	}
