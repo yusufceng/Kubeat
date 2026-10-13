@@ -27,6 +27,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
+	"github.com/yusufceng/Kubeat/backend/internal/oidcauth"
 	"github.com/yusufceng/Kubeat/backend/internal/prom"
 	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
 	"github.com/yusufceng/Kubeat/backend/internal/secretbox"
@@ -80,6 +81,22 @@ func main() {
 	if ldapClient != nil {
 		ldap = ldapClient
 		logger.Info("directory sign-in enabled", "url", cfg.LDAPURL)
+	}
+	oidcClient, err := oidcauth.New(oidcauth.Config{
+		Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret, RedirectURL: cfg.OIDCRedirectURL,
+		Scopes: strings.Fields(cfg.OIDCScopes), UsernameClaim: cfg.OIDCUsernameClaim, DisplayNameClaim: cfg.OIDCDisplayNameClaim,
+		EmailClaim: cfg.OIDCEmailClaim, GroupsClaim: cfg.OIDCGroupsClaim, CAFile: cfg.OIDCCAFile,
+		InsecureSkipVerify: cfg.OIDCInsecureSkipVerify, Timeout: cfg.OIDCTimeout,
+	})
+	if err != nil {
+		logger.Error("invalid OIDC configuration", "error", err)
+		db.Close()
+		os.Exit(1)
+	}
+	var oidc api.OIDC
+	if oidcClient != nil {
+		oidc = oidcClient
+		logger.Info("OIDC sign-in enabled", "issuer", cfg.OIDCIssuer, "name", cfg.OIDCName)
 	}
 
 	// Background work stops on the same signal as the HTTP server and is
@@ -283,6 +300,10 @@ func main() {
 			LDAP:                     ldap,
 			LDAPDefaultRole:          store.Role(cfg.LDAPDefaultRole),
 			LDAPDefaultNamespaces:    splitList(cfg.LDAPDefaultNamespaces),
+			OIDC:                     oidc,
+			OIDCName:                 cfg.OIDCName,
+			OIDCDefaultRole:          store.Role(cfg.OIDCDefaultRole),
+			OIDCDefaultNamespaces:    splitList(cfg.OIDCDefaultNamespaces),
 			Notifier:                 alerts,
 			Metrics:                  meter.Handler(),
 			EmailEnabled:             senders.EmailEnabled(),

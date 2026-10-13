@@ -688,8 +688,8 @@ export type User = {
   username: string;
   display_name: string;
   email: string;
-  /** "local" accounts have a password here; "ldap" ones are checked against the directory. */
-  source: "local" | "ldap";
+  /** "local" accounts have a password here; "ldap" and "oidc" ones sign in elsewhere. */
+  source: "local" | "ldap" | "oidc";
   role: Role;
   /** Empty for an admin; ["*"] means every namespace. */
   namespaces: string[];
@@ -701,7 +701,16 @@ export type User = {
 /** The signed-in user, with what they may do. */
 export type Me = User & { service: boolean; admin: boolean; sees_all: boolean; can_edit: boolean };
 
-export type Providers = { setup_needed: boolean; ldap: boolean };
+export type Providers = {
+  setup_needed: boolean;
+  ldap: boolean;
+  /** Set when an OpenID Connect provider is configured; name is what to call it. */
+  oidc: { name: string } | null;
+};
+
+export type OidcStatus = { enabled: boolean; issuer?: string; name?: string; default_role: Role | "" };
+
+export const getOidcStatus = () => request<OidcStatus>("/oidc");
 
 export type Session = { token: string; expires_at: string; user: User };
 

@@ -31,6 +31,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 20 | Olay bağlamı: monitor sayfasında pod'ların ve workload'un cluster olayları | Tamamlandı |
 | 21 | Ekip raporları: namespace başına uptime ve kesinti özeti, CSV | Tamamlandı |
 | 22 | Alarm yönlendirme: kanalda etiket ve olay süzgeci, namespace başına gruplama, monitor sayfasında "alarm nereye gider"; workload monitor'da rollout toleransı | Tamamlandı |
+| 23 | SSO: OpenID Connect ile giriş (PKCE), gruplardan rol | Tamamlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 

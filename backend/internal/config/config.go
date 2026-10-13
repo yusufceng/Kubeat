@@ -46,12 +46,31 @@ type Config struct {
 	// LDAPDefaultRole is what a directory user gets when none of their
 	// groups is mapped; empty refuses them. LDAPDefaultNamespaces is the
 	// scope of that role, as a comma-separated list.
-	LDAPDefaultRole       string        // UPTIME_LDAP_DEFAULT_ROLE
-	LDAPDefaultNamespaces string        // UPTIME_LDAP_DEFAULT_NAMESPACES
-	DBPath                string        // UPTIME_DB_PATH
-	DBBusyTimeout         time.Duration // UPTIME_DB_BUSY_TIMEOUT
-	ReadHeaderTimeout     time.Duration // UPTIME_READ_HEADER_TIMEOUT
-	ShutdownTimeout       time.Duration // UPTIME_SHUTDOWN_TIMEOUT
+	LDAPDefaultRole       string // UPTIME_LDAP_DEFAULT_ROLE
+	LDAPDefaultNamespaces string // UPTIME_LDAP_DEFAULT_NAMESPACES
+
+	// OIDC sign-in through an OpenID Connect provider; off unless the
+	// issuer is set. The redirect URL is the frontend's /auth/callback as
+	// the provider knows it.
+	OIDCIssuer             string        // UPTIME_OIDC_ISSUER
+	OIDCClientID           string        // UPTIME_OIDC_CLIENT_ID
+	OIDCClientSecret       string        // UPTIME_OIDC_CLIENT_SECRET
+	OIDCRedirectURL        string        // UPTIME_OIDC_REDIRECT_URL
+	OIDCScopes             string        // UPTIME_OIDC_SCOPES, space-separated
+	OIDCUsernameClaim      string        // UPTIME_OIDC_USERNAME_CLAIM
+	OIDCDisplayNameClaim   string        // UPTIME_OIDC_DISPLAY_NAME_CLAIM
+	OIDCEmailClaim         string        // UPTIME_OIDC_EMAIL_CLAIM
+	OIDCGroupsClaim        string        // UPTIME_OIDC_GROUPS_CLAIM
+	OIDCName               string        // UPTIME_OIDC_NAME, the button's label
+	OIDCCAFile             string        // UPTIME_OIDC_CA_FILE
+	OIDCInsecureSkipVerify bool          // UPTIME_OIDC_INSECURE_SKIP_VERIFY
+	OIDCTimeout            time.Duration // UPTIME_OIDC_TIMEOUT
+	OIDCDefaultRole        string        // UPTIME_OIDC_DEFAULT_ROLE
+	OIDCDefaultNamespaces  string        // UPTIME_OIDC_DEFAULT_NAMESPACES
+	DBPath                 string        // UPTIME_DB_PATH
+	DBBusyTimeout          time.Duration // UPTIME_DB_BUSY_TIMEOUT
+	ReadHeaderTimeout      time.Duration // UPTIME_READ_HEADER_TIMEOUT
+	ShutdownTimeout        time.Duration // UPTIME_SHUTDOWN_TIMEOUT
 
 	SchedulerTick       time.Duration // UPTIME_SCHEDULER_TICK
 	MaxJitter           time.Duration // UPTIME_MAX_JITTER
@@ -168,6 +187,20 @@ func Load() (Config, error) {
 		LDAPDefaultRole:       envString("UPTIME_LDAP_DEFAULT_ROLE", ""),
 		LDAPDefaultNamespaces: envString("UPTIME_LDAP_DEFAULT_NAMESPACES", ""),
 
+		OIDCIssuer:            envString("UPTIME_OIDC_ISSUER", ""),
+		OIDCClientID:          envString("UPTIME_OIDC_CLIENT_ID", ""),
+		OIDCClientSecret:      envString("UPTIME_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:       envString("UPTIME_OIDC_REDIRECT_URL", ""),
+		OIDCScopes:            envString("UPTIME_OIDC_SCOPES", "openid profile email"),
+		OIDCUsernameClaim:     envString("UPTIME_OIDC_USERNAME_CLAIM", "preferred_username"),
+		OIDCDisplayNameClaim:  envString("UPTIME_OIDC_DISPLAY_NAME_CLAIM", "name"),
+		OIDCEmailClaim:        envString("UPTIME_OIDC_EMAIL_CLAIM", "email"),
+		OIDCGroupsClaim:       envString("UPTIME_OIDC_GROUPS_CLAIM", "groups"),
+		OIDCName:              envString("UPTIME_OIDC_NAME", "SSO"),
+		OIDCCAFile:            envString("UPTIME_OIDC_CA_FILE", ""),
+		OIDCDefaultRole:       envString("UPTIME_OIDC_DEFAULT_ROLE", ""),
+		OIDCDefaultNamespaces: envString("UPTIME_OIDC_DEFAULT_NAMESPACES", ""),
+
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
 		BackupDir:    envString("UPTIME_BACKUP_DIR", ""),
 
@@ -215,6 +248,7 @@ func Load() (Config, error) {
 		{&cfg.LoginLockout, "UPTIME_LOGIN_LOCKOUT", 15 * time.Minute},
 		{&cfg.AuditRetention, "UPTIME_AUDIT_RETENTION", 90 * 24 * time.Hour},
 		{&cfg.LDAPTimeout, "UPTIME_LDAP_TIMEOUT", 10 * time.Second},
+		{&cfg.OIDCTimeout, "UPTIME_OIDC_TIMEOUT", 10 * time.Second},
 		{&cfg.CertWarning, "UPTIME_CERT_WARNING", 14 * 24 * time.Hour},
 		{&cfg.NotifyRetryDelay, "UPTIME_NOTIFY_RETRY_DELAY", 5 * time.Second},
 		{&cfg.NotifyTimeout, "UPTIME_NOTIFY_TIMEOUT", 5 * time.Second},
@@ -314,10 +348,21 @@ func Load() (Config, error) {
 	if cfg.LDAPInsecureSkipVerify, err = envBool("UPTIME_LDAP_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err
 	}
+	if cfg.OIDCInsecureSkipVerify, err = envBool("UPTIME_OIDC_INSECURE_SKIP_VERIFY", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.OIDCIssuer != "" && (cfg.OIDCClientID == "" || cfg.OIDCRedirectURL == "") {
+		return Config{}, fmt.Errorf("UPTIME_OIDC_ISSUER is set: UPTIME_OIDC_CLIENT_ID and UPTIME_OIDC_REDIRECT_URL are required with it")
+	}
 	switch cfg.LDAPDefaultRole {
 	case "", "admin", "editor", "viewer":
 	default:
 		return Config{}, fmt.Errorf("UPTIME_LDAP_DEFAULT_ROLE: must be admin, editor, viewer or empty, got %q", cfg.LDAPDefaultRole)
+	}
+	switch cfg.OIDCDefaultRole {
+	case "", "admin", "editor", "viewer":
+	default:
+		return Config{}, fmt.Errorf("UPTIME_OIDC_DEFAULT_ROLE: must be admin, editor, viewer or empty, got %q", cfg.OIDCDefaultRole)
 	}
 	return cfg, nil
 }

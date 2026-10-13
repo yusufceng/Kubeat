@@ -13,10 +13,20 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
+	"github.com/yusufceng/Kubeat/backend/internal/oidcauth"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
 // LDAP checks a username and password against a directory.
+// OIDC signs users in through an OpenID Connect provider.
+type OIDC interface {
+	Issuer() string
+	// Start returns the provider URL to send the browser to.
+	Start(ctx context.Context) (string, error)
+	// Finish turns what the provider sent back into an identity.
+	Finish(ctx context.Context, state, code string) (oidcauth.Identity, error)
+}
+
 type LDAP interface {
 	URL() string
 	Authenticate(ctx context.Context, username, password string) (ldapauth.Identity, error)
@@ -45,6 +55,7 @@ func openPath(r *http.Request) bool {
 	switch {
 	case path == "/api/v1/health", path == "/metrics",
 		path == "/api/v1/auth/login", path == "/api/v1/auth/setup", path == "/api/v1/auth/providers",
+		path == "/api/v1/auth/oidc/start", path == "/api/v1/auth/oidc/callback",
 		strings.HasPrefix(path, "/api/v1/badges/"):
 		return true
 	case strings.HasPrefix(path, "/api/v1/status-pages/by-slug/") && strings.HasSuffix(path, "/view"):
@@ -226,6 +237,12 @@ type providersResponse struct {
 	SetupNeeded bool `json:"setup_needed"`
 	// LDAP says whether directory accounts can sign in.
 	LDAP bool `json:"ldap"`
+	// OIDC is set when a provider is configured; Name is what to call it.
+	OIDC *oidcProvider `json:"oidc"`
+}
+
+type oidcProvider struct {
+	Name string `json:"name"`
 }
 
 // authProviders tells the sign-in page what it can offer.
@@ -235,7 +252,99 @@ func (h *handler) authProviders(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, providersResponse{SetupNeeded: n == 0, LDAP: h.opts.LDAP != nil})
+	resp := providersResponse{SetupNeeded: n == 0, LDAP: h.opts.LDAP != nil}
+	if h.opts.OIDC != nil {
+		resp.OIDC = &oidcProvider{Name: h.opts.OIDCName}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// oidcStart begins a sign-in through the provider: the answer is the URL
+// the browser is to be sent to.
+func (h *handler) oidcStart(w http.ResponseWriter, r *http.Request) {
+	if h.opts.OIDC == nil {
+		writeError(w, http.StatusNotFound, "OIDC sign-in is not configured")
+		return
+	}
+	url, err := h.opts.OIDC.Start(r.Context())
+	if err != nil {
+		h.opts.Logger.Error("oidc sign-in could not start", "error", err)
+		writeError(w, http.StatusBadGateway, "the identity provider could not be reached; try again later")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"url": url})
+}
+
+type oidcCallbackRequest struct {
+	State string `json:"state"`
+	Code  string `json:"code"`
+}
+
+// oidcCallback completes a sign-in with what the provider sent back and
+// answers with a session, like a password sign-in.
+func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
+	if h.opts.OIDC == nil {
+		writeError(w, http.StatusNotFound, "OIDC sign-in is not configured")
+		return
+	}
+	var req oidcCallbackRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.State == "" || req.Code == "" {
+		writeError(w, http.StatusBadRequest, "state and code are required")
+		return
+	}
+	id, err := h.opts.OIDC.Finish(r.Context(), req.State, req.Code)
+	switch {
+	case errors.Is(err, oidcauth.ErrInvalidState):
+		unauthorized(w, "the sign-in expired or was not started here; try again")
+		return
+	case errors.Is(err, oidcauth.ErrUnavailable):
+		h.opts.Logger.Error("oidc sign-in failed", "error", err)
+		writeError(w, http.StatusBadGateway, "the identity provider could not be reached; try again later")
+		return
+	case err != nil:
+		h.opts.Logger.Warn("oidc sign-in refused", "error", err)
+		unauthorized(w, "the identity provider's answer could not be verified")
+		return
+	}
+	if !validUsername(id.Username) {
+		writeError(w, http.StatusForbidden, fmt.Sprintf("the username the provider gave, %q, cannot be used here", id.Username))
+		return
+	}
+
+	user, err := h.opts.Store.GetUserByUsername(r.Context(), id.Username)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		h.internalError(w, r, err)
+		return
+	}
+	known := err == nil
+	if known && user.Source != store.UserOIDC {
+		// A local or directory account of that name belongs to someone
+		// who signs in another way; the provider does not get to take it.
+		h.audit(r, "login_denied", "user", user.ID, id.Username+": an account of this name signs in another way")
+		writeError(w, http.StatusForbidden, "an account with this username signs in another way; ask an administrator")
+		return
+	}
+	user, err = h.directoryUser(r.Context(), user, known, store.UserOIDC, directoryIdentity{
+		Username: id.Username, DisplayName: id.DisplayName, Email: id.Email, Groups: id.Groups,
+	}, oidcauth.SameGroup, h.opts.OIDCDefaultRole, h.opts.OIDCDefaultNamespaces)
+	if err != nil {
+		var denied noRoleError
+		if errors.As(err, &denied) {
+			h.audit(r, "login_denied", "user", user.ID, id.Username+": "+err.Error())
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		h.internalError(w, r, err)
+		return
+	}
+	if !user.Enabled {
+		writeError(w, http.StatusForbidden, "the account is disabled")
+		return
+	}
+	h.signIn(w, r, user, "login")
 }
 
 type setupRequest struct {
@@ -347,7 +456,10 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadGateway, "the directory could not be asked; try again later")
 			return
 		}
-		if user, err = h.ldapUser(r.Context(), user, known, identity); err != nil {
+		user, err = h.directoryUser(r.Context(), user, known, store.UserLDAP, directoryIdentity{
+			Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email, Groups: identity.Groups,
+		}, ldapauth.SameDN, h.opts.LDAPDefaultRole, h.opts.LDAPDefaultNamespaces)
+		if err != nil {
 			var denied noRoleError
 			if errors.As(err, &denied) {
 				h.audit(r, "login_denied", "user", user.ID, req.Username+": "+err.Error())
@@ -383,21 +495,31 @@ func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, key, usern
 type noRoleError struct{ groups int }
 
 func (e noRoleError) Error() string {
-	return fmt.Sprintf("none of your %d directory groups has a role here; ask an administrator", e.groups)
+	return fmt.Sprintf("none of your %d groups has a role here; ask an administrator", e.groups)
 }
 
-// ldapUser creates or updates the local record of a directory user from
-// what the directory said. The role comes from the groups on every sign-in,
-// so a change in the directory takes effect the next time.
-func (h *handler) ldapUser(ctx context.Context, current store.User, known bool, id ldapauth.Identity) (store.User, error) {
+// directoryIdentity is what a directory or an identity provider said about
+// a user, in the terms the account is made from.
+type directoryIdentity struct {
+	Username, DisplayName, Email string
+	Groups                       []string
+}
+
+// directoryUser creates or updates the local record of a user who signs in
+// elsewhere (LDAP or OIDC) from what was said about them. The role comes
+// from the group mappings on every sign-in, so a change in the directory
+// takes effect the next time; sameGroup says how a mapping's group is
+// compared with the user's (by DN for LDAP, by name for OIDC).
+func (h *handler) directoryUser(ctx context.Context, current store.User, known bool, source string, id directoryIdentity,
+	sameGroup func(mapped, actual string) bool, defaultRole store.Role, defaultNamespaces []string) (store.User, error) {
 	mappings, err := h.opts.Store.ListLDAPGroupRoles(ctx)
 	if err != nil {
 		return store.User{}, err
 	}
-	role, namespaces, found := h.opts.LDAPDefaultRole, h.opts.LDAPDefaultNamespaces, h.opts.LDAPDefaultRole != ""
+	role, namespaces, found := defaultRole, defaultNamespaces, defaultRole != ""
 	for _, m := range mappings {
 		for _, g := range id.Groups {
-			if !ldapauth.SameDN(m.GroupDN, g) {
+			if !sameGroup(m.GroupDN, g) {
 				continue
 			}
 			// The strongest role wins; namespaces add up.
@@ -418,7 +540,7 @@ func (h *handler) ldapUser(ctx context.Context, current store.User, known bool, 
 	}
 
 	u := current
-	u.Username, u.Source, u.Role, u.Namespaces = id.Username, store.UserLDAP, role, namespaces
+	u.Username, u.Source, u.Role, u.Namespaces = id.Username, source, role, namespaces
 	if id.DisplayName != "" {
 		u.DisplayName = id.DisplayName
 	}
@@ -669,7 +791,7 @@ func (h *handler) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if u.Source == store.UserLDAP && (req.Role != nil || req.Namespaces != nil || req.Password != nil) {
+	if u.Source != store.UserLocal && (req.Role != nil || req.Namespaces != nil || req.Password != nil) {
 		writeError(w, http.StatusBadRequest, "the role and password of a directory account come from the directory and its group mappings")
 		return
 	}
@@ -755,6 +877,26 @@ func (h *handler) deleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	h.audit(r, "delete", "user", id, u.Username)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type oidcStatusResponse struct {
+	Enabled bool   `json:"enabled"`
+	Issuer  string `json:"issuer,omitempty"`
+	Name    string `json:"name,omitempty"`
+	// DefaultRole is what a provider user gets without a mapped group;
+	// empty means they cannot sign in.
+	DefaultRole store.Role `json:"default_role"`
+}
+
+func (h *handler) oidcStatus(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	resp := oidcStatusResponse{Enabled: h.opts.OIDC != nil, DefaultRole: h.opts.OIDCDefaultRole}
+	if h.opts.OIDC != nil {
+		resp.Issuer, resp.Name = h.opts.OIDC.Issuer(), h.opts.OIDCName
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type ldapStatusResponse struct {

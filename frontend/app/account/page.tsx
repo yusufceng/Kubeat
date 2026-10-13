@@ -2,6 +2,8 @@ import { Suspense } from "react";
 import { currentUser } from "@/lib/auth";
 import { PasswordForm, roleLabels } from "@/app/ui/user-forms";
 
+const sourceLabels = { local: "Yerel", ldap: "Kurumsal dizin (LDAP)", oidc: "SSO (OpenID Connect)" } as const;
+
 async function Account() {
   const me = await currentUser();
   return (
@@ -20,7 +22,7 @@ async function Account() {
         </div>
         <div>
           <dt className="text-xs text-muted">Hesap</dt>
-          <dd>{me.source === "ldap" ? "Kurumsal dizin (LDAP)" : "Yerel"}</dd>
+          <dd>{sourceLabels[me.source]}</dd>
         </div>
         {me.email && (
           <div>
@@ -31,8 +33,8 @@ async function Account() {
       </dl>
       <section className="card p-5">
         <h2 className="mb-4 text-sm font-semibold">Parola</h2>
-        {me.source === "ldap" ? (
-          <p className="text-sm text-muted">Parolanız dizinde tutulur; orada değiştirilir.</p>
+        {me.source !== "local" ? (
+          <p className="text-sm text-muted">Parolanız burada tutulmaz; {sourceLabels[me.source]} tarafında değiştirilir.</p>
         ) : (
           <PasswordForm />
         )}

@@ -66,6 +66,26 @@ ldap:
     # UPTIME_LDAP_DEFAULT_ROLE: viewer
     # UPTIME_LDAP_DEFAULT_NAMESPACES: "*"
 
+# Sign-in through an OpenID Connect provider (Keycloak, Azure AD, Okta,
+# Dex...). Register Kubeat there with the redirect URL
+# https://<kubeat host>/auth/callback; with route.host or ingress.host set
+# the chart fills redirectURL in from it. Roles come from the group
+# mappings on the Users page, as for LDAP.
+oidc:
+  issuer: ""                     # https://sso.example.com/realms/corp
+  clientID: ""
+  clientSecretSecret:            # optional: a public client uses PKCE alone
+    name: ""
+    key: client-secret
+  redirectURL: ""                # defaults to https://<route or ingress host>/auth/callback
+  name: SSO                      # the sign-in button's label
+  extraEnv: {}
+    # UPTIME_OIDC_SCOPES: "openid profile email groups"
+    # UPTIME_OIDC_GROUPS_CLAIM: groups
+    # UPTIME_OIDC_CA_FILE: /etc/kubeat/oidc-ca/ca.crt   (mount it with backend.extraVolumes)
+    # UPTIME_OIDC_DEFAULT_ROLE: viewer
+    # UPTIME_OIDC_DEFAULT_NAMESPACES: "*"
+
 # Periodic copies of the database on a volume of their own. A copy on the
 # database's own volume would be lost together with it.
 backup:

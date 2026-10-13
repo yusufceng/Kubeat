@@ -127,6 +127,13 @@ type Options struct {
 	LDAP                  LDAP
 	LDAPDefaultRole       store.Role
 	LDAPDefaultNamespaces []string
+	// OIDC, if set, lets users sign in through an OpenID Connect provider;
+	// OIDCName is what the sign-in page calls it. Roles come from the
+	// group mappings, as for LDAP, with the same kind of default.
+	OIDC                  OIDC
+	OIDCName              string
+	OIDCDefaultRole       store.Role
+	OIDCDefaultNamespaces []string
 	// Metrics, if set, is served at /metrics.
 	Metrics http.Handler
 	// EmailEnabled says whether an SMTP server is configured; e-mail
@@ -155,7 +162,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 19
+const Revision = 20
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -222,6 +229,9 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("POST /api/v1/users", h.createUser)
 	mux.HandleFunc("PATCH /api/v1/users/{id}", h.updateUser)
 	mux.HandleFunc("DELETE /api/v1/users/{id}", h.deleteUser)
+	mux.HandleFunc("GET /api/v1/auth/oidc/start", h.oidcStart)
+	mux.HandleFunc("POST /api/v1/auth/oidc/callback", h.oidcCallback)
+	mux.HandleFunc("GET /api/v1/oidc", h.oidcStatus)
 	mux.HandleFunc("GET /api/v1/ldap", h.ldapStatus)
 	mux.HandleFunc("GET /api/v1/ldap/groups", h.listGroupRoles)
 	mux.HandleFunc("POST /api/v1/ldap/groups", h.createGroupRole)

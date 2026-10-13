@@ -1,5 +1,14 @@
 import { Suspense } from "react";
-import { getLdapStatus, type GroupRole, type LdapStatus, listGroupRoles, listUsers, type User } from "@/lib/api";
+import {
+  getLdapStatus,
+  getOidcStatus,
+  type GroupRole,
+  type LdapStatus,
+  listGroupRoles,
+  listUsers,
+  type OidcStatus,
+  type User,
+} from "@/lib/api";
 import { currentUser } from "@/lib/auth";
 import { workspaceMonitors } from "@/lib/workspace";
 import { BackendError } from "@/app/ui/backend-error";
@@ -12,12 +21,14 @@ async function Users() {
   }
   let users: User[];
   let ldap: LdapStatus;
+  let oidc: OidcStatus;
   let groups: GroupRole[];
   let known: string[];
   try {
-    const [u, l, g, monitors] = await Promise.all([listUsers(), getLdapStatus(), listGroupRoles(), workspaceMonitors()]);
+    const [u, l, o, g, monitors] = await Promise.all([listUsers(), getLdapStatus(), getOidcStatus(), listGroupRoles(), workspaceMonitors()]);
     users = u;
     ldap = l;
+    oidc = o;
     groups = g;
     known = [...new Set(monitors.map((m) => m.namespace).filter(Boolean))].sort();
   } catch (err) {
@@ -35,6 +46,26 @@ async function Users() {
         <h2 className="mb-1 text-sm font-semibold">Yeni kullanıcı</h2>
         <p className="mb-4 text-xs text-muted">Yerel hesap: parolası burada tutulur.</p>
         <NewUserForm known={known} />
+      </section>
+
+      <section className="card p-5">
+        <h2 className="mb-1 text-sm font-semibold">SSO (OpenID Connect)</h2>
+        {oidc.enabled ? (
+          <p className="text-xs text-muted">
+            {oidc.name}: <span className="font-mono">{oidc.issuer}</span>. Sağlayıcı kullanıcıları ilk girişte burada
+            bir hesap edinir; rolleri aşağıdaki grup eşlemelerinden gelir (grup adı, Keycloak için grup yolu) ve her
+            girişte yenilenir.
+            {oidc.default_role
+              ? ` Eşleşen grubu olmayanlar "${oidc.default_role}" rolünü alır.`
+              : " Eşleşen grubu olmayanlar giriş yapamaz."}
+          </p>
+        ) : (
+          <p className="text-xs text-muted">
+            SSO kapalı. Açmak için backend&apos;e <code className="font-mono">UPTIME_OIDC_ISSUER</code>,{" "}
+            <code className="font-mono">UPTIME_OIDC_CLIENT_ID</code> ve{" "}
+            <code className="font-mono">UPTIME_OIDC_REDIRECT_URL</code> verin; README&apos;de anlatılıyor.
+          </p>
+        )}
       </section>
 
       <section className="card p-5">

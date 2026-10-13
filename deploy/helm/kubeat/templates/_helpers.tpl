@@ -25,3 +25,19 @@ seccompProfile:
 {{- define "kubeat.apiTokenSecret" -}}
 {{ .Values.apiToken.existingSecret | default (printf "%s-api-token" .Release.Name) }}
 {{- end }}
+
+{{/*
+The URL the identity provider sends the browser back to: as given, or made
+from the Route or Ingress host.
+*/}}
+{{- define "kubeat.oidcRedirectURL" -}}
+{{- if .Values.oidc.redirectURL -}}
+{{ .Values.oidc.redirectURL }}
+{{- else if and .Values.route.enabled .Values.route.host -}}
+https://{{ .Values.route.host }}/auth/callback
+{{- else if and .Values.ingress.enabled .Values.ingress.host -}}
+https://{{ .Values.ingress.host }}/auth/callback
+{{- else -}}
+{{- fail "oidc.redirectURL is required when neither route.host nor ingress.host is set" -}}
+{{- end -}}
+{{- end -}}

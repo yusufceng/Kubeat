@@ -247,6 +247,43 @@ Gerçek bir dizine karşı test: `KUBEAT_TEST_LDAP=ldap://127.0.0.1:3893 go test
 ./internal/ldapauth/` (glauth ile; kullanıcılar `deploy/demo` altında değil,
 testin açıklamasında).
 
+#### SSO (OpenID Connect)
+
+Keycloak, Azure AD, Okta, Dex, Authentik gibi bir OpenID Connect sağlayıcısı
+tanımlanınca giriş sayfasında "<ad> ile giriş yap" düğmesi çıkar. Kubeat
+OIDC istemcisidir: tarayıcı sağlayıcıya gönderilir, geri geldiğinde kod
+backend tarafından PKCE ile takas edilir, ID token doğrulanır (imza, hedef,
+nonce), kullanıcı bilgisi ID token ve userinfo'dan okunur.
+
+```
+UPTIME_OIDC_ISSUER=https://sso.example.com/realms/corp
+UPTIME_OIDC_CLIENT_ID=kubeat
+UPTIME_OIDC_CLIENT_SECRET=...                 # public client ise boş; PKCE her zaman kullanılır
+UPTIME_OIDC_REDIRECT_URL=https://kubeat.apps.example/auth/callback
+```
+
+- Sağlayıcıda istemci bu redirect URL ile kaydedilir; chart `route.host`
+  ya da `ingress.host` verilmişse adresi kendisi türetir.
+- Hesap `preferred_username` (`UPTIME_OIDC_USERNAME_CLAIM`), `name` ve
+  `email` claim'lerinden kurulur; gruplar `groups` claim'inden
+  (`UPTIME_OIDC_GROUPS_CLAIM`). Okta için kapsamlara `groups` eklenir
+  (`UPTIME_OIDC_SCOPES="openid profile email groups"`), Keycloak için bir
+  group membership mapper, Azure AD için token'da grup claim'i açılır.
+- **Roller gruplardan gelir**, LDAP ile aynı eşleme tablosundan:
+  **Kullanıcılar** sayfasındaki grup eşlemesine LDAP DN'i yerine grup adı
+  yazılır (Keycloak'ta `/platform-admins` gibi yol; baştaki `/` ve harf
+  büyüklüğü önemsizdir). Eşleşen grubu olmayan kullanıcı
+  `UPTIME_OIDC_DEFAULT_ROLE` yoksa giremez.
+- Sağlayıcı kullanıcısı ilk girişte burada bir hesap edinir (kaynak
+  `oidc`); rolü her girişte yenilenir. Aynı adda yerel ya da LDAP hesabı
+  varsa sağlayıcı girişi reddedilir: bir hesap tek yoldan girer.
+- Özel CA için `UPTIME_OIDC_CA_FILE`; sağlayıcı ulaşılamazsa giriş sayfası
+  bunu söyler, oturumlar etkilenmez. Sağlayıcıya açılış sırasında değil,
+  ilk girişte bağlanılır.
+- OpenShift'in kendi OAuth sunucusu OIDC değildir; "OpenShift ile giriş"
+  için cluster'ın bağlı olduğu kurumsal sağlayıcı (çoğunlukla Keycloak ya da
+  Azure AD) doğrudan kullanılır.
+
 ## Arayüz
 
 Arayüz bir çalışma alanıdır: solda tüm monitor'ların listesi, sağda genel
@@ -936,6 +973,21 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_LDAP_GROUP_BASE_DN`, `UPTIME_LDAP_GROUP_FILTER` | – | `memberOf` yoksa grupların arandığı yer ve süzgeç (`(member={dn})`) |
 | `UPTIME_LDAP_TIMEOUT` | `10s` | Dizin işlemlerinin zaman aşımı |
 | `UPTIME_LDAP_DEFAULT_ROLE`, `UPTIME_LDAP_DEFAULT_NAMESPACES` | – | Eşleşen grubu olmayan dizin kullanıcısının rolü ve kapsamı; boşsa giremez |
+| `UPTIME_OIDC_ISSUER` | – | OpenID Connect sağlayıcısının issuer adresi; boşsa SSO kapalı |
+| `UPTIME_OIDC_CLIENT_ID` | – | Sağlayıcıda kayıtlı istemci kimliği (issuer ile zorunlu) |
+| `UPTIME_OIDC_CLIENT_SECRET` | – | İstemci sırrı; public client için boş |
+| `UPTIME_OIDC_REDIRECT_URL` | – | Sağlayıcının geri döndüğü adres: `https://<kubeat>/auth/callback` (issuer ile zorunlu) |
+| `UPTIME_OIDC_SCOPES` | `openid profile email` | İstenen kapsamlar, boşlukla ayrılmış |
+| `UPTIME_OIDC_USERNAME_CLAIM` | `preferred_username` | Kullanıcı adının okunduğu claim |
+| `UPTIME_OIDC_DISPLAY_NAME_CLAIM` | `name` | Görünen adın okunduğu claim |
+| `UPTIME_OIDC_EMAIL_CLAIM` | `email` | E-postanın okunduğu claim |
+| `UPTIME_OIDC_GROUPS_CLAIM` | `groups` | Grupların okunduğu claim (ID token ya da userinfo) |
+| `UPTIME_OIDC_NAME` | `SSO` | Giriş düğmesinde görünen ad |
+| `UPTIME_OIDC_CA_FILE` | – | Sağlayıcının sertifikasını doğrulayacak CA dosyası |
+| `UPTIME_OIDC_INSECURE_SKIP_VERIFY` | `false` | Sağlayıcının sertifikasını doğrulamaz |
+| `UPTIME_OIDC_TIMEOUT` | `10s` | Sağlayıcıya yapılan isteklerin zaman aşımı |
+| `UPTIME_OIDC_DEFAULT_ROLE` | – | Eşleşen grubu olmayan sağlayıcı kullanıcısının rolü; boşsa giremez |
+| `UPTIME_OIDC_DEFAULT_NAMESPACES` | – | O rolün kapsamı (virgülle; `*` hepsi) |
 | `UPTIME_DB_BUSY_TIMEOUT` | `5s` | Kilitli veritabanı için bekleme süresi |
 | `UPTIME_READ_HEADER_TIMEOUT` | `5s` | HTTP istek başlığı okuma süresi |
 | `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi için süre |

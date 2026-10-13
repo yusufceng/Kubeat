@@ -3,6 +3,13 @@ import { Suspense } from "react";
 import { getProviders, type Providers } from "@/lib/api";
 import { LoginForm } from "@/app/login/login-form";
 
+/** What went wrong on the way back from the identity provider. */
+const oidcMessages: Record<string, string> = {
+  norole: "Kimlik sağlayıcı sizi tanıdı ama burada bir rolünüz yok; bir yöneticiye başvurun.",
+  unavailable: "Kimlik sağlayıcıya ulaşılamadı. Biraz sonra tekrar deneyin.",
+  refused: "Kimlik sağlayıcı girişi tamamlamadı; tekrar deneyin.",
+};
+
 async function Form({
   searchParams,
 }: {
@@ -19,13 +26,28 @@ async function Form({
   // redirect() works by throwing.)
   if (providers?.setup_needed) redirect("/setup");
   const ldap = providers?.ldap ?? false;
+  const oidc = providers?.oidc ?? null;
   const next = params.next;
+  const oidcProblem = typeof params.oidc === "string" ? oidcMessages[params.oidc] : undefined;
   return (
     <>
       {params.expired !== undefined && (
         <p role="status" className="rounded-lg bg-sunken px-3 py-2 text-sm text-muted">
           Oturumunuz sona erdi; yeniden giriş yapın.
         </p>
+      )}
+      {oidcProblem && (
+        <p role="alert" className="rounded-lg border border-down/40 bg-down/8 px-3 py-2 text-sm text-down">
+          {oidcProblem}
+        </p>
+      )}
+      {oidc && (
+        <>
+          <a href="/auth/oidc" className="btn btn-primary justify-center">
+            {oidc.name} ile giriş yap
+          </a>
+          <p className="text-center text-xs text-muted">ya da hesapla</p>
+        </>
       )}
       <LoginForm next={typeof next === "string" ? next : "/"} ldap={ldap} />
     </>

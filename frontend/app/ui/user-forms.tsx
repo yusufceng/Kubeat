@@ -118,7 +118,9 @@ export function UserRow({ user, self, known }: { user: User; self: boolean; know
   const [role, setRole] = useState<Role>(user.role);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const ldap = user.source === "ldap";
+  // Accounts that sign in elsewhere: their role and password are not ours to set.
+  const ldap = user.source !== "local";
+  const sourceBadge = user.source === "ldap" ? "LDAP" : user.source === "oidc" ? "SSO" : null;
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -138,7 +140,7 @@ export function UserRow({ user, self, known }: { user: User; self: boolean; know
           <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
             <span className={user.enabled ? "" : "text-muted line-through"}>{user.display_name || user.username}</span>
             <span className="rounded bg-sunken px-1.5 py-0.5 text-xs font-normal">{roleLabels[user.role]}</span>
-            {ldap && <span className="rounded bg-maint/12 px-1.5 py-0.5 text-xs font-normal text-maint">LDAP</span>}
+            {sourceBadge && <span className="rounded bg-maint/12 px-1.5 py-0.5 text-xs font-normal text-maint">{sourceBadge}</span>}
             {!user.enabled && <span className="rounded bg-sunken px-1.5 py-0.5 text-xs font-normal text-muted">Devre dışı</span>}
             {self && <span className="text-xs font-normal text-muted">(siz)</span>}
           </div>

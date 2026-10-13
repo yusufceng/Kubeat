@@ -11,7 +11,8 @@ export function proxy(request: NextRequest) {
   // Reports of push monitors come from jobs, which have no session; the
   // token in their path is checked by the backend. Status pages and their
   // badges are public by design.
-  if (pathname.startsWith("/api/push/") || pathname.startsWith("/status/") || pathname.startsWith("/api/badge/")) {
+  // The OIDC relay (/auth/oidc, /auth/callback) runs before any session exists.
+  if (pathname.startsWith("/api/push/") || pathname.startsWith("/status/") || pathname.startsWith("/api/badge/") || pathname.startsWith("/auth/")) {
     return NextResponse.next();
   }
   const signedIn = Boolean(request.cookies.get(SESSION_COOKIE)?.value);

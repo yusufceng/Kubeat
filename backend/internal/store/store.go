@@ -452,6 +452,7 @@ const AllNamespaces = "*"
 const (
 	UserLocal = "local" // a password kept here
 	UserLDAP  = "ldap"  // checked against the directory
+	UserOIDC  = "oidc"  // signed in through the OpenID Connect provider
 )
 
 // User is an account.
