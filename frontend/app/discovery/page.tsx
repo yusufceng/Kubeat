@@ -12,6 +12,7 @@ import { config } from "@/lib/config";
 import { LocalTime } from "@/app/ui/local-time";
 import { currentUser } from "@/lib/auth";
 import { CandidateForm } from "@/app/ui/candidate-form";
+import { restoreSourceAction } from "@/app/actions";
 import { getT } from "@/lib/i18n/server";
 import { typeLabel } from "@/lib/monitor-types";
 
@@ -45,7 +46,7 @@ async function ClusterError({ err }: { err: unknown }) {
 }
 
 /** How the monitors asked for with annotations are doing. */
-async function SyncCard({ sync }: { sync: DiscoveryStatus["sync"] }) {
+async function SyncCard({ sync, canEdit }: { sync: DiscoveryStatus["sync"]; canEdit: boolean }) {
   const t = await getT();
   const snippet = (text: string) => <code className="rounded bg-sunken px-1">{text}</code>;
   return (
@@ -92,7 +93,16 @@ async function SyncCard({ sync }: { sync: DiscoveryStatus["sync"] }) {
                   <span className="font-mono">
                     {s.namespace}/{s.source}
                   </span>
-                  <span className="text-muted"> — {s.reason}</span>
+                  <span className="text-muted"> — {s.dismissed ? t("discovery.sync.dismissed") : s.reason}</span>
+                  {s.dismissed && canEdit && (
+                    <form action={restoreSourceAction} className="ml-2 inline">
+                      <input type="hidden" name="namespace" value={s.namespace} />
+                      <input type="hidden" name="source" value={s.source} />
+                      <button type="submit" className="font-medium underline hover:text-ink">
+                        {t("discovery.sync.restore")}
+                      </button>
+                    </form>
+                  )}
                 </li>
               ))}
             </ul>
@@ -186,7 +196,7 @@ async function Discovery({
 
   return (
     <>
-      <SyncCard sync={status.sync} />
+      <SyncCard sync={status.sync} canEdit={me.can_edit} />
       <form method="get" className="flex flex-wrap items-end gap-3">
         <label>
           <span className="mb-1 block text-xs font-medium text-muted">{t("discovery.namespace")}</span>

@@ -246,3 +246,35 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
+type restoreRequest struct {
+	Namespace string `json:"namespace"`
+	Source    string `json:"source"`
+}
+
+// discoveryRestore undoes the deletion of an annotated object's monitor:
+// the next sync creates it again.
+func (h *handler) discoveryRestore(w http.ResponseWriter, r *http.Request) {
+	var req restoreRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil || req.Source == "" {
+		writeError(w, http.StatusBadRequest, "namespace and source are required")
+		return
+	}
+	if p := principal(r); !p.CanEdit(req.Namespace) {
+		scopeError(w, p)
+		return
+	}
+	err := h.opts.Store.RestoreSource(r.Context(), req.Namespace, req.Source)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no deleted monitor for that object")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	h.audit(r, "restore", "monitor", 0, req.Namespace+"/"+req.Source)
+	w.WriteHeader(http.StatusNoContent)
+}

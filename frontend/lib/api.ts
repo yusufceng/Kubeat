@@ -461,8 +461,13 @@ export type SyncStatus = {
   created: number;
   updated: number;
   removed: number;
-  skipped: { namespace: string; source: string; reason: string }[];
+  /** dismissed: the monitor was deleted here although the annotation still asks for it. */
+  skipped: { namespace: string; source: string; reason: string; dismissed: boolean }[];
 };
+
+/** Undoes the deletion of an annotated object's monitor; the next sync creates it again. */
+export const restoreSource = (namespace: string, source: string) =>
+  request<void>("/discovery/restore", { method: "POST", body: JSON.stringify({ namespace, source }) });
 
 export type DiscoveryStatus = { enabled: boolean; detail: string; sync: SyncStatus | null };
 

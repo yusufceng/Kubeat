@@ -260,3 +260,68 @@ func TestSyncChangesNothingWhenTheClusterIsAway(t *testing.T) {
 		t.Errorf("monitors after a failed read = %v", got)
 	}
 }
+
+func TestSyncLeavesADeletedMonitorDeleted(t *testing.T) {
+	cluster := &fakeCluster{candidates: []k8s.Candidate{serviceCandidate("api", 80, "http", monitored(nil))}}
+	s, db := newSyncer(t, cluster)
+	ctx := context.Background()
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := names(t, db)["shop/service/api:80"]
+	if !ok {
+		t.Fatal("the annotated service was not monitored")
+	}
+
+	// Someone deletes it in Kubeat: the annotation still asks, the
+	// dismissal says no.
+	if err := db.DismissSource(ctx, store.DismissedSource{Namespace: "shop", Source: m.Source, At: time.Now(), By: "ayse"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteMonitor(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(names(t, db)) != 0 {
+		t.Fatal("the deleted monitor came back")
+	}
+	if st := s.Status(); len(st.Skipped) != 1 || !st.Skipped[0].Dismissed || st.Skipped[0].Source != "service/api:80" || st.Created != 0 {
+		t.Errorf("status = %+v", st)
+	}
+
+	// Restoring it brings it back at the next sync.
+	if err := db.RestoreSource(ctx, "shop", m.Source); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := names(t, db)["shop/service/api:80"]; !ok {
+		t.Fatal("the restored monitor was not created again")
+	}
+
+	// A dismissal ends with the annotation: annotating again starts afresh.
+	m = names(t, db)["shop/service/api:80"]
+	if err := db.DismissSource(ctx, store.DismissedSource{Namespace: "shop", Source: m.Source, At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteMonitor(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	cluster.candidates = []k8s.Candidate{serviceCandidate("api", 80, "http", nil)} // annotation removed
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := db.ListDismissedSources(ctx); len(left) != 0 {
+		t.Errorf("dismissal outlived its annotation: %+v", left)
+	}
+	cluster.candidates = []k8s.Candidate{serviceCandidate("api", 80, "http", monitored(nil))}
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := names(t, db)["shop/service/api:80"]; !ok {
+		t.Fatal("annotating again did not create the monitor")
+	}
+}

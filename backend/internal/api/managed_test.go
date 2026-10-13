@@ -45,13 +45,32 @@ func TestManagedMonitorsFollowTheirAnnotations(t *testing.T) {
 	if code := do(t, http.MethodPatch, url, `{"interval_seconds":30,"tags":["prod"],"description":"ours","enabled":false}`, &got); code != http.StatusOK || !got.Managed || got.Enabled || len(got.Tags) != 1 {
 		t.Errorf("PATCH tags = %d %+v", code, got)
 	}
-	if code := do(t, http.MethodDelete, url, "", &problem); code != http.StatusConflict {
-		t.Errorf("DELETE = %d, want 409", code)
-	}
-
 	var status discoveryStatusResponse
 	if code := do(t, http.MethodGet, srv.URL+"/api/v1/discovery", "", &status); code != http.StatusOK || status.Sync == nil || status.Sync.Managed != 1 || !status.Sync.LastRunAt.Equal(ran) {
 		t.Errorf("discovery status = %d %+v", code, status)
+	}
+
+	// Deleting it works and is remembered, so the sync does not bring it
+	// back while the annotation stays; restoring forgets that.
+	if code := do(t, http.MethodDelete, url, "", nil); code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d, want 204", code)
+	}
+	dismissed, err := db.ListDismissedSources(context.Background())
+	if err != nil || len(dismissed) != 1 || dismissed[0].Namespace != "shop" || dismissed[0].Source != "service/api:80" {
+		t.Fatalf("dismissed = %+v, %v", dismissed, err)
+	}
+	restore := srv.URL + "/api/v1/discovery/restore"
+	if code := do(t, http.MethodPost, restore, `{"namespace":"shop","source":"service/api:80"}`, nil); code != http.StatusNoContent {
+		t.Errorf("restore = %d, want 204", code)
+	}
+	if left, _ := db.ListDismissedSources(context.Background()); len(left) != 0 {
+		t.Errorf("after the restore: %+v", left)
+	}
+	if code := do(t, http.MethodPost, restore, `{"namespace":"shop","source":"service/api:80"}`, &problem); code != http.StatusNotFound {
+		t.Errorf("restoring twice = %d, want 404", code)
+	}
+	if code := do(t, http.MethodPost, restore, `{"namespace":"shop"}`, &problem); code != http.StatusBadRequest {
+		t.Errorf("restore without a source = %d, want 400", code)
 	}
 }
 

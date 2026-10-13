@@ -14,7 +14,6 @@ export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "nam
   const [error, setError] = useState<string | null>(null);
   const [cloning, startClone] = useTransition();
   // The annotation's name is markup, so the hint is split around it.
-  const managedHint = t("monitorPage.actions.managedHint").split("kubeat.io/monitor");
 
   function clone() {
     const name = prompt(
@@ -53,8 +52,14 @@ export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "nam
         <button type="button" onClick={clone} disabled={cloning} className="btn">
           <CopyIcon /> {cloning ? t("monitorPage.actions.copying") : t("monitorPage.copy")}
         </button>
-        {!monitor.managed && (
-          <ConfirmForm action={deleteMonitorAction} question={t("monitorPage.actions.confirmDelete", { name: monitor.name })}>
+        {(
+          <ConfirmForm
+            action={deleteMonitorAction}
+            question={
+              t("monitorPage.actions.confirmDelete", { name: monitor.name }) +
+              (monitor.managed ? " " + t("monitorPage.actions.confirmDelete.managed") : "")
+            }
+          >
             <input type="hidden" name="id" value={monitor.id} />
             <button type="submit" className="btn btn-danger">
               <TrashIcon /> {t("common.delete")}
@@ -62,13 +67,6 @@ export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "nam
           </ConfirmForm>
         )}
       </div>
-      {monitor.managed && (
-        <p className="max-w-xs text-right text-xs text-muted">
-          {managedHint[0]}
-          <code>kubeat.io/monitor</code>
-          {managedHint[1]}
-        </p>
-      )}
       {error && (
         <p role="alert" className="text-sm text-down">
           {error}

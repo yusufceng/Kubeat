@@ -27,6 +27,7 @@ import {
   type DnsOptions,
   type HttpOptions,
   importCandidates,
+  restoreSource,
   type MaintenanceRepeat,
   type Monitor,
   type MonitorChanges,
@@ -349,6 +350,12 @@ export async function deleteMaintenanceAction(formData: FormData): Promise<void>
 
 /** null before the first import; afterwards its outcome. */
 export type ImportState = { created: number; skipped: number; error: string | null } | null;
+
+/** Lets discovery monitor an annotated object again after its monitor was deleted. */
+export async function restoreSourceAction(formData: FormData): Promise<void> {
+  await restoreSource(String(formData.get("namespace") ?? ""), String(formData.get("source") ?? ""));
+  refresh();
+}
 
 export async function importCandidatesAction(
   _prev: ImportState,

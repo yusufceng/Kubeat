@@ -66,11 +66,10 @@ export const monitorsList = defineMessages(
       "{count} monitor ve tüm kontrol geçmişleri silinsin mi? Bu geri alınamaz.",
     "monitorsList.list.bulk.deleteCount.one": "{count} monitor'ü sil",
     "monitorsList.list.bulk.deleteCount.other": "{count} monitor'ü sil",
-    "monitorsList.list.bulk.onlyManaged.title": "Buradan silinemez",
-    "monitorsList.list.bulk.managedSkipped.one":
-      "{count} monitor annotation ile yönetiliyor ve silinmeyecek. Kaldırmak için cluster'daki nesnesinden kubeat.io/monitor annotation'ını silin.",
-    "monitorsList.list.bulk.managedSkipped.other":
-      "{count} monitor annotation ile yönetiliyor ve silinmeyecek. Kaldırmak için cluster'daki nesnelerinden kubeat.io/monitor annotation'ını silin.",
+    "monitorsList.list.bulk.managedNote.one":
+      "{count} tanesi annotation ile yönetiliyor: nesnesinde kubeat.io/monitor durduğu sürece yeniden oluşturulmaz; Keşif sayfasından yeniden izlemeye alınabilir.",
+    "monitorsList.list.bulk.managedNote.other":
+      "{count} tanesi annotation ile yönetiliyor: nesnelerinde kubeat.io/monitor durduğu sürece yeniden oluşturulmazlar; Keşif sayfasından yeniden izlemeye alınabilirler.",
     "monitorsList.list.bulk.failed.one": "{count} monitor değiştirilemedi.",
     "monitorsList.list.bulk.failed.other": "{count} monitor değiştirilemedi.",
     "monitorsList.list.empty.before": "Henüz monitor yok. Yukarıdaki düğmeyle ekleyin ya da",
@@ -161,11 +160,10 @@ export const monitorsList = defineMessages(
       "Delete {count} monitors and all of their check history? This cannot be undone.",
     "monitorsList.list.bulk.deleteCount.one": "Delete {count} monitor",
     "monitorsList.list.bulk.deleteCount.other": "Delete {count} monitors",
-    "monitorsList.list.bulk.onlyManaged.title": "Cannot be deleted here",
-    "monitorsList.list.bulk.managedSkipped.one":
-      "{count} monitor is managed by an annotation and will not be deleted. To remove it, delete the kubeat.io/monitor annotation from its object in the cluster.",
-    "monitorsList.list.bulk.managedSkipped.other":
-      "{count} monitors are managed by annotations and will not be deleted. To remove them, delete the kubeat.io/monitor annotation from their objects in the cluster.",
+    "monitorsList.list.bulk.managedNote.one":
+      "{count} of them is managed by an annotation: it is not recreated while its object keeps kubeat.io/monitor, and can be monitored again from the Discovery page.",
+    "monitorsList.list.bulk.managedNote.other":
+      "{count} of them are managed by annotations: they are not recreated while their objects keep kubeat.io/monitor, and can be monitored again from the Discovery page.",
     "monitorsList.list.bulk.failed.one": "{count} monitor could not be changed.",
     "monitorsList.list.bulk.failed.other": "{count} monitors could not be changed.",
     "monitorsList.list.empty.before": "No monitors yet. Add one with the button above or",

@@ -158,7 +158,8 @@ export const monitorPage = defineMessages(
     "monitorPage.actions.resume": "Devam ettir",
     "monitorPage.actions.copying": "Kopyalanıyor…",
     "monitorPage.actions.confirmDelete": "\"{name}\" ve tüm kontrol geçmişi silinsin mi?",
-    "monitorPage.actions.managedHint": "Silmek için nesnedeki kubeat.io/monitor annotation'ını kaldırın.",
+    "monitorPage.actions.confirmDelete.managed":
+      "Bu monitor annotation ile yönetiliyor: nesnesinde kubeat.io/monitor durduğu sürece yeniden oluşturulmaz; Keşif sayfasından yeniden izlemeye alabilirsiniz.",
     "monitorPage.pushUrl.title": "Rapor adresi",
     "monitorPage.pushUrl.intro":
       "İzlenen iş her çalıştığında bu adrese bir istek atmalı. Adresteki anahtar bu monitor'un sırrıdır; başka bir kimlik bilgisi gerekmez.",
@@ -343,7 +344,8 @@ export const monitorPage = defineMessages(
     "monitorPage.actions.resume": "Resume",
     "monitorPage.actions.copying": "Copying…",
     "monitorPage.actions.confirmDelete": "Delete \"{name}\" and all of its check history?",
-    "monitorPage.actions.managedHint": "To delete it, remove the kubeat.io/monitor annotation from the object.",
+    "monitorPage.actions.confirmDelete.managed":
+      "This monitor is managed by an annotation: it is not recreated while its object keeps kubeat.io/monitor; you can monitor it again from the Discovery page.",
     "monitorPage.pushUrl.title": "Report address",
     "monitorPage.pushUrl.intro":
       "The monitored job should send a request to this address every time it runs. The key in the address is this monitor's secret; no other credential is needed.",

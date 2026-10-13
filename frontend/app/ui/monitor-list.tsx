@@ -102,10 +102,9 @@ export function MonitorList({
     setBulkError(null);
   }
 
-  // Monitors kept in step with an annotated object cannot be deleted here:
-  // the next sync would bring them back.
-  const deletable = useMemo(() => items.filter((i) => selected.has(i.id) && !i.managed), [items, selected]);
-  const managedChosen = chosen.length - deletable.length;
+  const deletable = useMemo(() => items.filter((i) => selected.has(i.id)), [items, selected]);
+  // Those kept in step with an annotated object stay deleted until restored.
+  const managedChosen = deletable.filter((i) => i.managed).length;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   function bulk(action: BulkAction) {
@@ -266,31 +265,23 @@ export function MonitorList({
               </button>
               {confirmingDelete && (
                 <ConfirmDialog
-                  title={deletable.length > 0 ? t("confirm.title") : t("monitorsList.list.bulk.onlyManaged.title")}
-                  confirmLabel={deletable.length > 0 ? t.n("monitorsList.list.bulk.deleteCount", deletable.length) : undefined}
+                  title={t("confirm.title")}
+                  confirmLabel={t.n("monitorsList.list.bulk.deleteCount", deletable.length)}
                   onCancel={() => setConfirmingDelete(false)}
                   onConfirm={() => {
                     setConfirmingDelete(false);
                     bulk("delete");
                   }}
                 >
-                  {deletable.length > 0 && (
-                    <>
-                      <p>{t.n("monitorsList.list.bulk.confirmDelete", deletable.length)}</p>
-                      <ul className="mt-2 max-h-40 overflow-auto rounded-lg bg-sunken px-3 py-2 text-ink">
-                        {deletable.map((i) => (
-                          <li key={i.id} className="truncate">
-                            {i.name}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                  {managedChosen > 0 && (
-                    <p className={deletable.length > 0 ? "mt-3" : undefined}>
-                      {t.n("monitorsList.list.bulk.managedSkipped", managedChosen)}
-                    </p>
-                  )}
+                  <p>{t.n("monitorsList.list.bulk.confirmDelete", deletable.length)}</p>
+                  <ul className="mt-2 max-h-40 overflow-auto rounded-lg bg-sunken px-3 py-2 text-ink">
+                    {deletable.map((i) => (
+                      <li key={i.id} className="truncate">
+                        {i.name}
+                      </li>
+                    ))}
+                  </ul>
+                  {managedChosen > 0 && <p className="mt-3">{t.n("monitorsList.list.bulk.managedNote", managedChosen)}</p>}
                 </ConfirmDialog>
               )}
             </div>

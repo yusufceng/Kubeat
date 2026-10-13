@@ -386,6 +386,7 @@ eklenmelidir.
 | `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
 | `POST` | `/api/v1/discovery/import` | Seçilen hedefleri monitor'a çevirir |
+| `POST` | `/api/v1/discovery/restore` | Silinmiş bir annotation monitor'ünü yeniden izlemeye alır: `{namespace, source}` |
 | `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye |
 | `GET` | `/api/v1/reports?days=30&namespace=shop&format=csv` | Namespace başına uptime, kesinti sayısı ve süresi; `format=csv` ile indirilebilir |
 | `GET` | `/api/v1/maintenance` | Bakım pencereleri, en son başlayan önce |
@@ -910,8 +911,17 @@ değiştirilmez.
 
 Bu monitor'lar arayüzde **annotation** rozetiyle görünür. Hedefleri ve
 zamanlamaları nesneden geldiği için arayüzden ya da API'den değiştirilemez
-ve silinemez (`409`); etiket, açıklama, duraklatma ve bildirimler
-değiştirilebilir. Keşif sayfasından elle içe aktarılmış bir nesneye
+(`409`); etiket, açıklama, duraklatma ve bildirimler değiştirilebilir.
+
+Böyle bir monitor **silinebilir**. Nesnesindeki annotation yerinde kaldığı
+için Kubeat silmeyi hatırlar ve monitor'ü yeniden oluşturmaz; keşif
+sayfasında "Kubeat'te silindi" satırıyla görünür ve oradaki **Yeniden izle**
+(`POST /api/v1/discovery/restore`) ile geri alınır. Annotation nesneden
+kaldırıldığında bu kayıt da silinir: sonradan yeniden eklenirse monitor
+baştan oluşturulur. Annotation'ı GitOps ile yönetiyorsanız kalıcı çözüm
+onu kaynağından kaldırmaktır.
+
+Keşif sayfasından elle içe aktarılmış bir nesneye
 annotation eklenirse elle yapılan monitor'a dokunulmaz; durum keşif
 sayfasında "already monitored by hand" olarak görünür. Her değişiklik
 denetim kaydına `discovery` adıyla yazılır.

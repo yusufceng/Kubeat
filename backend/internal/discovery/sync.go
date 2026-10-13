@@ -54,6 +54,9 @@ type Store interface {
 	UpdateMonitor(ctx context.Context, m store.Monitor) (store.Monitor, error)
 	DeleteMonitor(ctx context.Context, id int64) error
 	AppendAudit(ctx context.Context, e store.AuditEntry) error
+	// The objects whose monitor was deleted by hand, and forgetting one.
+	ListDismissedSources(ctx context.Context) ([]store.DismissedSource, error)
+	RestoreSource(ctx context.Context, namespace, source string) error
 }
 
 // Options configures a Syncer.
@@ -76,6 +79,9 @@ type Skip struct {
 	Namespace string `json:"namespace"`
 	Source    string `json:"source"`
 	Reason    string `json:"reason"`
+	// Dismissed says the monitor was deleted in Kubeat although the
+	// annotation still asks for it; it can be restored.
+	Dismissed bool `json:"dismissed"`
 }
 
 // Status is the outcome of the last run.
@@ -171,7 +177,26 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 		}
 	}
 
-	wanted := s.wanted(candidates, st)
+	dismissals, err := s.opts.Store.ListDismissedSources(ctx)
+	if err != nil {
+		return err
+	}
+	dismissed := make(map[string]bool, len(dismissals))
+	for _, d := range dismissals {
+		dismissed[key(d.Namespace, d.Source)] = true
+	}
+
+	wanted, annotated := s.wanted(candidates, st)
+	// A dismissal lasts as long as the annotation it overrules: once the
+	// object stops asking, annotating it again starts afresh.
+	for _, d := range dismissals {
+		if annotated[key(d.Namespace, d.Source)] {
+			continue
+		}
+		if err := s.opts.Store.RestoreSource(ctx, d.Namespace, d.Source); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+	}
 	keys := make([]string, 0, len(wanted))
 	for k := range wanted {
 		keys = append(keys, k)
@@ -182,6 +207,9 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 		want := wanted[k]
 		current, found := existing[k]
 		switch {
+		case !found && dismissed[k]:
+			st.Skipped = append(st.Skipped, Skip{Namespace: want.Namespace, Source: want.Source, Reason: "deleted in Kubeat; restore it to monitor it again", Dismissed: true})
+			continue
 		case !found:
 			if err := s.create(ctx, want); err != nil {
 				return err
@@ -269,9 +297,11 @@ func (s *Syncer) audit(ctx context.Context, action string, id int64, summary str
 
 // wanted turns the annotated candidates into the monitors they ask for,
 // keyed by namespace and source. Candidates whose annotations cannot be
-// honoured are reported, not guessed at.
-func (s *Syncer) wanted(candidates []k8s.Candidate, st *Status) map[string]store.Monitor {
-	out := make(map[string]store.Monitor)
+// honoured are reported, not guessed at; annotated names every candidate
+// that asks, honoured or not.
+func (s *Syncer) wanted(candidates []k8s.Candidate, st *Status) (out map[string]store.Monitor, annotated map[string]bool) {
+	out = make(map[string]store.Monitor)
+	annotated = make(map[string]bool)
 	for _, c := range candidates {
 		if !strings.EqualFold(strings.TrimSpace(c.Annotations[AnnotationMonitor]), "true") {
 			continue
@@ -281,6 +311,7 @@ func (s *Syncer) wanted(candidates []k8s.Candidate, st *Status) map[string]store
 				continue
 			}
 		}
+		annotated[key(c.Namespace, c.Source())] = true
 		m, err := s.monitorFor(c)
 		if err != nil {
 			st.Skipped = append(st.Skipped, Skip{Namespace: c.Namespace, Source: c.Source(), Reason: err.Error()})
@@ -288,7 +319,7 @@ func (s *Syncer) wanted(candidates []k8s.Candidate, st *Status) map[string]store
 		}
 		out[key(m.Namespace, m.Source)] = m
 	}
-	return out
+	return out, annotated
 }
 
 func portMatches(c k8s.Candidate, port string) bool {

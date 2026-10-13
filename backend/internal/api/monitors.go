@@ -859,12 +859,21 @@ func (h *handler) deleteMonitor(w http.ResponseWriter, r *http.Request) {
 		scopeError(w, p)
 		return
 	}
+	summary := m.Name
 	if m.Managed && h.opts.Sync != nil {
-		// It would be back within the interval; the annotation is the way.
-		writeError(w, http.StatusConflict, managedError)
-		return
+		// The annotation still asks for it and would bring it back within
+		// the interval; the dismissal tells the sync that it was deleted
+		// on purpose. It ends when the annotation goes or it is restored.
+		err := h.opts.Store.DismissSource(r.Context(), store.DismissedSource{
+			Namespace: m.Namespace, Source: m.Source, At: time.Now().UTC(), By: principal(r).Username,
+		})
+		if err != nil {
+			h.internalError(w, r, err)
+			return
+		}
+		summary += " (its object keeps the kubeat.io/monitor annotation; not recreated until restored)"
 	}
-	h.audit(r, "delete", "monitor", id, m.Name)
+	h.audit(r, "delete", "monitor", id, summary)
 	err = h.opts.Store.DeleteMonitor(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "monitor not found")
