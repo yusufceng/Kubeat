@@ -23,7 +23,7 @@ spec:
             severity: {{ .Values.metrics.prometheusRule.severity | quote }}
           annotations:
             summary: {{ `"{{ $labels.monitor }} is down"` }}
-            description: {{ `"Kubeat monitor {{ $labels.monitor }} ({{ $labels.type }}{{ if $labels.namespace }}, namespace {{ $labels.namespace }}{{ end }}) has an open outage."` }}
+            description: {{ `"Kubeat monitor {{ $labels.monitor }} ({{ $labels.type }}{{ if $labels.monitor_namespace }}, namespace {{ $labels.monitor_namespace }}{{ end }}) has an open outage."` }}
         - alert: KubeatCertificateExpiring
           expr: (kubeat_monitor_cert_expiry_timestamp_seconds - time()) < {{ .Values.metrics.prometheusRule.certWarningDays }} * 86400
           for: 10m

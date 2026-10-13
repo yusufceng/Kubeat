@@ -712,7 +712,7 @@ yayınlar. Başlıcaları:
 
 | Metrik | Anlamı |
 | --- | --- |
-| `kubeat_monitor_up{monitor,namespace,type}` | Son kontrol başarılıysa 1, değilse 0 |
+| `kubeat_monitor_up{monitor,monitor_namespace,type}` | Son kontrol başarılıysa 1, değilse 0 |
 | `kubeat_monitor_response_seconds` | Son kontrolün süresi |
 | `kubeat_monitor_incident_open` | Açık kesinti varsa 1 |
 | `kubeat_monitor_cert_expiry_timestamp_seconds` | Sertifikanın bitiş zamanı |
@@ -723,9 +723,10 @@ yayınlar. Başlıcaları:
 
 Chart'ta `metrics.serviceMonitor.enabled=true` bir ServiceMonitor oluşturur;
 böylece monitor durumları cluster'ın kendi Prometheus'unda sorgulanabilir
-(OpenShift konsolunda Observe → Metrics). ServiceMonitor `honorLabels`
-kullanır: `kubeat_monitor_*` serilerindeki `namespace` etiketi izlenen
-nesnenin namespace'idir, Kubeat'inki değil.
+(OpenShift konsolunda Observe → Metrics). İzlenen nesnenin namespace'i
+`monitor_namespace` etiketindedir; `namespace` etiketini Prometheus kendisi
+koyar ve Kubeat'in çalıştığı namespace'i gösterir (OpenShift'in user
+workload monitoring'i bunu zorunlu tutar).
 
 **Cluster'ın Alertmanager'ı ile alarm.** `metrics.prometheusRule.enabled=true`
 bir PrometheusRule ekler; alarmlar cluster'ın kendi Alertmanager'ına ve
@@ -736,7 +737,7 @@ yapılır. Kurallar:
 
 | Alarm | Koşul |
 | --- | --- |
-| `KubeatMonitorDown` | `kubeat_monitor_incident_open == 1`; etiketlerinde `monitor`, `namespace`, `type` ve `severity` (`metrics.prometheusRule.severity`, varsayılan `warning`) |
+| `KubeatMonitorDown` | `kubeat_monitor_incident_open == 1`; etiketlerinde `monitor`, `monitor_namespace`, `type` ve `severity` (`metrics.prometheusRule.severity`, varsayılan `warning`) |
 | `KubeatCertificateExpiring` | Sertifikanın bitişine `metrics.prometheusRule.certWarningDays` (14) günden az kaldı |
 | `KubeatDown` | Backend 5 dakikadır scrape edilemiyor (`critical`); bu sırada `KubeatMonitorDown` alarmları susar, çözülmez |
 | `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |

@@ -242,7 +242,11 @@ type StatusLister interface {
 }
 
 var (
-	monitorLabels = []string{"monitor", "namespace", "type"}
+	// The monitor's namespace is not called "namespace": a scraping
+	// Prometheus sets that label to where the target runs (OpenShift's user
+	// workload monitoring enforces it), and the monitor's would be pushed
+	// aside to "exported_namespace".
+	monitorLabels = []string{"monitor", "monitor_namespace", "type"}
 
 	monitorUp = prometheus.NewDesc("kubeat_monitor_up",
 		"1 if the monitor's latest check succeeded, 0 if it failed. Absent for monitors that are paused or not checked yet.", monitorLabels, nil)

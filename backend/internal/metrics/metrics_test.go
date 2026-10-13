@@ -119,8 +119,8 @@ func TestPerMonitorMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	apiLabels := "{monitor=shop/api}{namespace=shop}{type=http}"
-	dbLabels := "{monitor=db}{namespace=}{type=tcp}"
+	apiLabels := "{monitor=shop/api}{monitor_namespace=shop}{type=http}"
+	dbLabels := "{monitor=db}{monitor_namespace=}{type=tcp}"
 	want := map[string]float64{
 		"kubeat_monitor_scrape_success":                                     1,
 		"kubeat_monitors{state=enabled}":                                    3,
@@ -132,7 +132,7 @@ func TestPerMonitorMetrics(t *testing.T) {
 		"kubeat_monitor_incident_open" + apiLabels:                          0,
 		"kubeat_monitor_up" + dbLabels:                                      0,
 		"kubeat_monitor_incident_open" + dbLabels:                           1,
-		"kubeat_monitor_incident_open{monitor=fresh}{namespace=}{type=tcp}": 0,
+		"kubeat_monitor_incident_open{monitor=fresh}{monitor_namespace=}{type=tcp}": 0,
 	}
 	for key, value := range want {
 		v, ok := got[key]
@@ -155,7 +155,7 @@ func TestPerMonitorMetrics(t *testing.T) {
 	rec := httptest.NewRecorder()
 	m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
 	body := rec.Body.String()
-	if rec.Code != 200 || !strings.Contains(body, `kubeat_monitor_up{monitor="shop/api",namespace="shop",type="http"} 1`) ||
+	if rec.Code != 200 || !strings.Contains(body, `kubeat_monitor_up{monitor="shop/api",monitor_namespace="shop",type="http"} 1`) ||
 		!strings.Contains(body, "# HELP kubeat_checks_in_flight") {
 		t.Errorf("handler: status %d, body lacks expected lines", rec.Code)
 	}
