@@ -75,6 +75,7 @@ type Store interface {
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
 	MarkIncidentNotified(ctx context.Context, id int64, at time.Time) error
 	ListChannels(ctx context.Context) ([]store.Channel, error)
+	RecordChannelDelivery(ctx context.Context, id int64, at time.Time, deliveryError string) error
 	InMaintenance(ctx context.Context, m store.Monitor, at time.Time) (bool, error)
 }
 
@@ -489,6 +490,13 @@ func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(sto
 func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
 	err := e.sendWithRetry(ctx, ch, n)
 	e.opts.Metrics.Notification(string(ch.Type), string(n.Event), err == nil)
+	deliveryError := ""
+	if err != nil {
+		deliveryError = err.Error()
+	}
+	if recordErr := e.store.RecordChannelDelivery(context.WithoutCancel(ctx), ch.ID, time.Now().UTC(), deliveryError); recordErr != nil {
+		e.opts.Logger.Error("channel delivery not recorded", "channel", ch.Name, "error", recordErr)
+	}
 	what := n.Monitor.Name
 	if len(n.Group) > 1 {
 		what = fmt.Sprintf("%d monitors", len(n.Group))

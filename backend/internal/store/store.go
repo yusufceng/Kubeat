@@ -310,6 +310,12 @@ type Channel struct {
 	Events    []string
 	Enabled   bool
 	CreatedAt time.Time
+	// The last delivery attempt: when (zero before the first), whether it
+	// was delivered, and the error when it was not. Kept by the alert
+	// engine, not set by writers of the channel.
+	LastAttemptAt time.Time
+	LastOK        bool
+	LastError     string
 }
 
 // ChannelEvents are the kinds of notification a channel can be limited to:
@@ -596,6 +602,9 @@ type Store interface {
 	InMaintenance(ctx context.Context, m Monitor, at time.Time) (bool, error)
 
 	CreateChannel(ctx context.Context, c Channel) (Channel, error)
+	// RecordChannelDelivery notes the outcome of a delivery attempt;
+	// deliveryError is empty when it was delivered.
+	RecordChannelDelivery(ctx context.Context, id int64, at time.Time, deliveryError string) error
 	GetChannel(ctx context.Context, id int64) (Channel, error)
 	// UpdateChannel changes everything about the channel with c.ID except
 	// its type and creation time.

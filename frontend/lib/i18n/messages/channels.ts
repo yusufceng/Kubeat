@@ -32,6 +32,8 @@ export const channels = defineMessages(
 
     // app/ui/channel-forms.tsx — one channel in the list
     "channelRow.paused": "Durduruldu",
+    "channelRow.lastDelivery.ok": "Son gönderim iletildi:",
+    "channelRow.lastDelivery.failed": "Son gönderim BAŞARISIZ:",
     "channelRow.allMonitors": "tüm monitor'lar",
     "channelRow.onlyNamespaces": "yalnızca {namespaces}",
     "channelRow.tags": "etiket: {tags}",
@@ -136,6 +138,8 @@ export const channels = defineMessages(
 
     // app/ui/channel-forms.tsx — one channel in the list
     "channelRow.paused": "Paused",
+    "channelRow.lastDelivery.ok": "Last delivery succeeded:",
+    "channelRow.lastDelivery.failed": "Last delivery FAILED:",
     "channelRow.allMonitors": "all monitors",
     "channelRow.onlyNamespaces": "only {namespaces}",
     "channelRow.tags": "tags: {tags}",

@@ -124,7 +124,7 @@ func (s *SQLite) ListIncidents(ctx context.Context, monitorID int64, limit int) 
 	return incidents, nil
 }
 
-const channelColumns = "id, name, type, target, secret, namespaces, enabled, created_at, tags, events"
+const channelColumns = "id, name, type, target, secret, namespaces, enabled, created_at, tags, events, last_attempt_at, last_ok, last_error"
 
 // scanChannel reads a channel and decrypts its target and secret.
 func (s *SQLite) scanChannel(row rowScanner) (Channel, error) {
@@ -156,10 +156,18 @@ func scanRawChannel(row rowScanner) (Channel, error) {
 		c                        Channel
 		namespaces, tags, events string
 		createdAt                int64
+		lastAttempt              sql.NullInt64
+		lastOK                   bool
+		lastError                string
 		err                      error
 	)
-	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Secret, &namespaces, &c.Enabled, &createdAt, &tags, &events); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Secret, &namespaces, &c.Enabled, &createdAt, &tags, &events, &lastAttempt, &lastOK, &lastError); err != nil {
 		return Channel{}, err
+	}
+	// The delivery columns mean nothing until something was attempted.
+	if lastAttempt.Valid {
+		c.LastAttemptAt = time.UnixMilli(lastAttempt.Int64).UTC()
+		c.LastOK, c.LastError = lastOK, lastError
 	}
 	if c.Namespaces, err = decodeNamespaces(namespaces); err != nil {
 		return Channel{}, fmt.Errorf("channel %d: %w", c.ID, err)
@@ -276,6 +284,18 @@ func (s *SQLite) UpdateChannel(ctx context.Context, c Channel) (Channel, error) 
 		return Channel{}, fmt.Errorf("update channel: %w", err)
 	}
 	return updated, nil
+}
+
+// RecordChannelDelivery notes the outcome of a delivery attempt. A channel
+// deleted in the meantime is not an error: the attempt still happened.
+func (s *SQLite) RecordChannelDelivery(ctx context.Context, id int64, at time.Time, deliveryError string) error {
+	_, err := s.write.ExecContext(ctx,
+		"UPDATE notification_channels SET last_attempt_at = ?, last_ok = ?, last_error = ? WHERE id = ?",
+		at.UnixMilli(), deliveryError == "", deliveryError, id)
+	if err != nil {
+		return fmt.Errorf("record channel delivery: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLite) GetChannel(ctx context.Context, id int64) (Channel, error) {

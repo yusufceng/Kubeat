@@ -356,3 +356,38 @@ func TestIncidentLastNotified(t *testing.T) {
 		t.Errorf("unknown incident: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestRecordChannelDelivery(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	ch, err := db.CreateChannel(ctx, Channel{Name: "ops", Type: ChannelWebhook, Target: "https://hooks.example.com/abc", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
+	if err := db.RecordChannelDelivery(ctx, ch.ID, at, "connection refused"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetChannel(ctx, ch.ID)
+	if err != nil || !got.LastAttemptAt.Equal(at) || got.LastOK || got.LastError != "connection refused" {
+		t.Fatalf("after a failure: %+v, %v", got, err)
+	}
+	if err := db.RecordChannelDelivery(ctx, ch.ID, at.Add(time.Minute), ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = db.GetChannel(ctx, ch.ID); !got.LastOK || got.LastError != "" || !got.LastAttemptAt.Equal(at.Add(time.Minute)) {
+		t.Fatalf("after a success: %+v", got)
+	}
+	// Updating the channel keeps the record.
+	got.Name = "ops2"
+	if _, err := db.UpdateChannel(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = db.GetChannel(ctx, ch.ID); !got.LastOK || !got.LastAttemptAt.Equal(at.Add(time.Minute)) {
+		t.Fatalf("after an update: %+v", got)
+	}
+	// A channel that is gone is not an error.
+	if err := db.RecordChannelDelivery(ctx, 999, at, "x"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -40,6 +40,7 @@ type Store interface {
 	ListMaintenance(ctx context.Context, limit int) ([]store.Maintenance, error)
 	DeleteMaintenance(ctx context.Context, id int64) error
 	CreateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
+	RecordChannelDelivery(ctx context.Context, id int64, at time.Time, deliveryError string) error
 	GetChannel(ctx context.Context, id int64) (store.Channel, error)
 	UpdateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
 	ListChannels(ctx context.Context) ([]store.Channel, error)

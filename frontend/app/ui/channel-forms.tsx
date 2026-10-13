@@ -13,6 +13,7 @@ import { type ChannelEvent, channelEventLabels, channelTypeOrder, channelTypes }
 import { MASKED_VALUE } from "@/lib/constants";
 import { useT } from "@/lib/i18n/client";
 import { EditIcon, PauseIcon, PlayIcon, TrashIcon } from "@/app/ui/icons";
+import { TimeAgo } from "@/app/ui/time-ago";
 
 /**
  * The form of a channel. With a channel it edits that one; without, it
@@ -220,6 +221,15 @@ export function ChannelRow({ channel, namespaces }: { channel: Channel; namespac
             {channel.tags.length > 0 && ` · ${t("channelRow.tags", { tags: channel.tags.join(", ") })}`}
             {channel.events.length > 0 && ` · ${channel.events.map((e) => t(channelEventLabels[e]).toLowerCase()).join(", ")}`}
           </div>
+          {channel.last_delivery && (
+            <div className={`mt-0.5 text-xs ${channel.last_delivery.delivered ? "text-muted" : "font-medium text-down"}`}>
+              {channel.last_delivery.delivered ? t("channelRow.lastDelivery.ok") : t("channelRow.lastDelivery.failed")}{" "}
+              <TimeAgo iso={channel.last_delivery.at} />
+              {!channel.last_delivery.delivered && channel.last_delivery.error && (
+                <span className="font-mono font-normal"> · {channel.last_delivery.error}</span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <form action={testAction}>

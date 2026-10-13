@@ -180,6 +180,8 @@ export type Channel = {
   events: ChannelEvent[];
   enabled: boolean;
   created_at: string;
+  /** The last delivery attempt; null before the first. */
+  last_delivery: { at: string; delivered: boolean; error?: string } | null;
 };
 
 /** What a client sets on a channel. */

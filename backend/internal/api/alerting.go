@@ -90,6 +90,15 @@ type channelResponse struct {
 	Events     []string  `json:"events"`
 	Enabled    bool      `json:"enabled"`
 	CreatedAt  time.Time `json:"created_at"`
+	// LastDelivery is the outcome of the last attempt to send to the
+	// channel; null before the first. Its error is redacted.
+	LastDelivery *deliveryResponse `json:"last_delivery"`
+}
+
+type deliveryResponse struct {
+	At        time.Time `json:"at"`
+	Delivered bool      `json:"delivered"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // maskURL keeps the scheme and host and hides the path, query and user info.
@@ -116,10 +125,14 @@ func toChannelResponse(c store.Channel) channelResponse {
 		}
 		return list
 	}
-	return channelResponse{
+	resp := channelResponse{
 		ID: c.ID, Name: c.Name, Type: string(c.Type), Target: shownTarget(c), HasSecret: c.Secret != "",
 		Namespaces: orEmpty(c.Namespaces), Tags: orEmpty(c.Tags), Events: orEmpty(c.Events), Enabled: c.Enabled, CreatedAt: c.CreatedAt,
 	}
+	if !c.LastAttemptAt.IsZero() {
+		resp.LastDelivery = &deliveryResponse{At: c.LastAttemptAt, Delivered: c.LastOK, Error: redact(c.LastError, c)}
+	}
+	return resp
 }
 
 // monitorChannelResponse names a channel that hears about a monitor. It
@@ -511,7 +524,16 @@ func (h *handler) testChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.opts.Notifier.SendOnce(r.Context(), ch, alert.Notification{Event: alert.EventTest}); err != nil {
+	err = h.opts.Notifier.SendOnce(r.Context(), ch, alert.Notification{Event: alert.EventTest})
+	// The test is an attempt like any other: the channel's status shows it.
+	deliveryError := ""
+	if err != nil {
+		deliveryError = err.Error()
+	}
+	if recordErr := h.opts.Store.RecordChannelDelivery(r.Context(), ch.ID, time.Now().UTC(), deliveryError); recordErr != nil {
+		h.opts.Logger.Error("channel delivery not recorded", "channel", ch.Name, "error", recordErr)
+	}
+	if err != nil {
 		h.opts.Logger.Warn("channel test failed", "channel", ch.Name, "error", err)
 		writeJSON(w, http.StatusOK, testChannelResponse{Error: redact(err.Error(), ch)})
 		return
