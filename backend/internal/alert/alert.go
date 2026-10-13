@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
@@ -341,8 +342,25 @@ type groupKey struct {
 // pendingGroup is a group waiting for GroupWait to pass since its first
 // notification.
 type pendingGroup struct {
+	event Event
 	notes []Notification
 	due   time.Time
+	seq   int // the order the groups began in
+}
+
+// takeDue removes the groups due by now (all of them with everything set)
+// and returns them in the order they began, so that notifications leave in
+// the order they arose rather than in the map's.
+func takeDue(groups map[groupKey]*pendingGroup, now time.Time, everything bool) []*pendingGroup {
+	var due []*pendingGroup
+	for key, g := range groups {
+		if everything || !g.due.After(now) {
+			due = append(due, g)
+			delete(groups, key)
+		}
+	}
+	sort.Slice(due, func(i, j int) bool { return due[i].seq < due[j].seq })
+	return due
 }
 
 // Run delivers queued notifications until ctx is cancelled, then delivers
@@ -351,6 +369,7 @@ type pendingGroup struct {
 // others of their group.
 func (e *Engine) Run(ctx context.Context) {
 	groups := make(map[groupKey]*pendingGroup)
+	started := 0
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 	// rearm sets the timer for the group due first.
@@ -374,18 +393,15 @@ func (e *Engine) Run(ctx context.Context) {
 		key := groupKey{n.Event, n.Monitor.Namespace}
 		g, ok := groups[key]
 		if !ok {
-			g = &pendingGroup{due: time.Now().Add(e.opts.GroupWait)}
+			started++
+			g = &pendingGroup{event: n.Event, due: time.Now().Add(e.opts.GroupWait), seq: started}
 			groups[key] = g
 		}
 		g.notes = append(g.notes, n)
 	}
-	flushDue := func(now time.Time) {
-		for key, g := range groups {
-			if g.due.After(now) {
-				continue
-			}
-			delete(groups, key)
-			e.deliverGroup(ctx, key.event, g.notes)
+	flush := func(everything bool) {
+		for _, g := range takeDue(groups, time.Now(), everything) {
+			e.deliverGroup(ctx, g.event, g.notes)
 		}
 	}
 
@@ -395,7 +411,7 @@ func (e *Engine) Run(ctx context.Context) {
 			add(n)
 			rearm()
 		case <-timer.C:
-			flushDue(time.Now())
+			flush(false)
 			rearm()
 		case <-ctx.Done():
 			timer.Stop()
@@ -405,10 +421,7 @@ func (e *Engine) Run(ctx context.Context) {
 					add(n)
 				default:
 					// Shutting down: what is waiting goes now.
-					for key, g := range groups {
-						delete(groups, key)
-						e.deliverGroup(ctx, key.event, g.notes)
-					}
+					flush(true)
 					return
 				}
 			}
