@@ -4,26 +4,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "@/lib/i18n/client";
 
 /**
- * A question asked before something that cannot be undone, in the
- * interface's own look instead of the browser's. It is a modal <dialog>:
- * Escape and a click outside cancel it, and the cancel button has the
- * focus, so that Enter does not confirm by accident.
+ * The frame of a question asked in the interface's own look instead of the
+ * browser's: a modal <dialog> that Escape and a click outside dismiss.
  */
-export function ConfirmDialog({
-  title,
-  children,
-  confirmLabel,
-  onConfirm,
-  onCancel,
-}: {
-  title: string;
-  children: React.ReactNode;
-  /** The destructive button's text; without it only "close" is offered. */
-  confirmLabel?: string;
-  onConfirm?: () => void;
-  onCancel: () => void;
-}) {
-  const t = useT();
+function Modal({ title, onCancel, children }: { title: string; onCancel: () => void; children: React.ReactNode }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
@@ -52,19 +36,101 @@ export function ConfirmDialog({
         <h2 id={titleId} className="text-base font-semibold">
           {title}
         </h2>
-        <div className="mt-2 text-sm text-muted">{children}</div>
-        <div className="mt-5 flex justify-end gap-2">
-          <button type="button" className="btn" autoFocus onClick={onCancel}>
-            {confirmLabel ? t("common.cancel") : t("common.close")}
-          </button>
-          {confirmLabel && (
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              {confirmLabel}
-            </button>
-          )}
-        </div>
+        {children}
       </div>
     </dialog>
+  );
+}
+
+/**
+ * Asks for one line of text, such as the name of a copy. The field starts
+ * with the suggestion selected, so typing replaces it; an empty answer
+ * cannot be submitted.
+ */
+export function PromptDialog({
+  title,
+  label,
+  initial,
+  submitLabel,
+  onSubmit,
+  onCancel,
+}: {
+  title: string;
+  label: string;
+  initial: string;
+  submitLabel: string;
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  const [value, setValue] = useState(initial);
+  const fieldId = useId();
+  return (
+    <Modal title={title} onCancel={onCancel}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (value.trim()) onSubmit(value.trim());
+        }}
+      >
+        <label htmlFor={fieldId} className="mt-3 block text-sm text-muted">
+          {label}
+        </label>
+        <input
+          id={fieldId}
+          className="field mt-1.5"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onFocus={(e) => e.currentTarget.select()}
+          autoFocus
+          autoComplete="off"
+        />
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" className="btn" onClick={onCancel}>
+            {t("common.cancel")}
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={!value.trim()}>
+            {submitLabel}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * A question asked before something that cannot be undone. The cancel
+ * button has the focus, so that Enter does not confirm by accident.
+ */
+export function ConfirmDialog({
+  title,
+  children,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  children: React.ReactNode;
+  /** The destructive button's text; without it only "close" is offered. */
+  confirmLabel?: string;
+  onConfirm?: () => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  return (
+    <Modal title={title} onCancel={onCancel}>
+      <div className="mt-2 text-sm text-muted">{children}</div>
+      <div className="mt-5 flex justify-end gap-2">
+        <button type="button" className="btn" autoFocus onClick={onCancel}>
+          {confirmLabel ? t("common.cancel") : t("common.close")}
+        </button>
+        {confirmLabel && (
+          <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        )}
+      </div>
+    </Modal>
   );
 }
 

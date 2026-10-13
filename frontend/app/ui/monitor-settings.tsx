@@ -1,6 +1,6 @@
 "use client";
 
-import { ConfirmForm } from "@/app/ui/confirm";
+import { ConfirmForm, PromptDialog } from "@/app/ui/confirm";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { cloneMonitorAction, deleteMonitorAction, setMonitorEnabledAction } from "@/app/actions";
@@ -13,14 +13,10 @@ export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "nam
   const t = useT();
   const [error, setError] = useState<string | null>(null);
   const [cloning, startClone] = useTransition();
-  // The annotation's name is markup, so the hint is split around it.
+  const [naming, setNaming] = useState(false);
 
-  function clone() {
-    const name = prompt(
-      t("monitorPage.actions.cloneName"),
-      t("monitorPage.actions.cloneDefault", { name: monitor.name }),
-    )?.trim();
-    if (!name) return;
+  function clone(name: string) {
+    setNaming(false);
     setError(null);
     startClone(async () => {
       const result = await cloneMonitorAction(monitor.id, name);
@@ -49,7 +45,17 @@ export function MonitorActions({ monitor }: { monitor: Pick<Monitor, "id" | "nam
         <Link href={`/monitors/${monitor.id}/edit`} className="btn">
           <EditIcon /> {t("common.edit")}
         </Link>
-        <button type="button" onClick={clone} disabled={cloning} className="btn">
+        {naming && (
+          <PromptDialog
+            title={t("monitorPage.actions.cloneTitle")}
+            label={t("monitorPage.actions.cloneName")}
+            initial={t("monitorPage.actions.cloneDefault", { name: monitor.name })}
+            submitLabel={t("monitorPage.copy")}
+            onSubmit={clone}
+            onCancel={() => setNaming(false)}
+          />
+        )}
+        <button type="button" onClick={() => setNaming(true)} disabled={cloning} className="btn">
           <CopyIcon /> {cloning ? t("monitorPage.actions.copying") : t("monitorPage.copy")}
         </button>
         {(
