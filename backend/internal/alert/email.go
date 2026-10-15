@@ -40,6 +40,9 @@ var ErrEmailNotConfigured = errors.New("e-mail is not configured: set UPTIME_SMT
 // EmailSender sends notifications as plain-text e-mail.
 type EmailSender struct {
 	SMTP SMTPConfig
+	// Dialer connects to the mail server, under TLS too; nil uses a plain
+	// net.Dialer. It is where a target policy applies to e-mail.
+	Dialer *net.Dialer
 }
 
 // Enabled reports whether an SMTP server is configured.
@@ -117,13 +120,17 @@ func buildMessage(from string, to []string, n Notification, now time.Time) []byt
 func (s *EmailSender) deliver(ctx context.Context, recipients []string, message []byte) error {
 	addr := net.JoinHostPort(s.SMTP.Host, fmt.Sprint(s.SMTP.Port))
 	tlsConfig := &tls.Config{ServerName: s.SMTP.Host}
+	dialer := s.Dialer
+	if dialer == nil {
+		dialer = &net.Dialer{}
+	}
 
 	var conn net.Conn
 	var err error
 	if s.SMTP.Security == SMTPTLS {
-		conn, err = (&tls.Dialer{Config: tlsConfig}).DialContext(ctx, "tcp", addr)
+		conn, err = (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", addr)
 	} else {
-		conn, err = (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
 	}
 	if err != nil {
 		return err

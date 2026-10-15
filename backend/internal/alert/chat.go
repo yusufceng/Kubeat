@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
@@ -51,14 +52,26 @@ type slackField struct {
 // shortValue says whether a detail fits beside another one.
 func shortValue(v string) bool { return len([]rune(v)) <= 40 }
 
+// chatEscaper escapes the characters Slack gives a meaning in text, and
+// Mattermost reading Slack's format, and Google Chat in its own: "<" opens
+// a mention such as <!channel> or <users/all>, or a link such as
+// <https://…|label> whose label hides the address, and "&" starts the
+// escape of either. Names, targets and errors, a push report's message
+// among them, are escaped with it, so that they read as typed instead of
+// notifying a whole channel or disguising a link. The same three escapes
+// make the text safe where Google Chat renders HTML.
+var chatEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 func newSlackBody(n Notification, now time.Time) slackBody {
-	text := Text(n)
+	esc := chatEscaper.Replace
+	text := esc(Text(n))
+	// The link is Kubeat's own address, which Slack takes as it is.
 	attachment := slackAttachment{
-		Color: Color(n), Fallback: text, Title: subject(n), TitleLink: URL(n),
+		Color: Color(n), Fallback: text, Title: esc(subject(n)), TitleLink: URL(n),
 		Footer: "Kubeat", Timestamp: now.Unix(),
 	}
 	for _, f := range Facts(n) {
-		attachment.Fields = append(attachment.Fields, slackField{Title: f.Label, Value: f.Value, Short: shortValue(f.Value)})
+		attachment.Fields = append(attachment.Fields, slackField{Title: esc(f.Label), Value: esc(f.Value), Short: shortValue(f.Value)})
 	}
 	return slackBody{Text: text, Attachments: []slackAttachment{attachment}}
 }
@@ -127,16 +140,18 @@ type chatOpenLink struct {
 }
 
 func newChatBody(n Notification) chatBody {
-	text := Text(n)
-	body := chatBody{Text: text}
+	esc := chatEscaper.Replace
+	body := chatBody{Text: esc(Text(n))}
 	facts := Facts(n)
 	link := URL(n)
 	if len(facts) == 0 && link == "" {
 		return body
 	}
+	// Chat renders a subset of HTML in most of a card's text, so every value
+	// placed in the card is escaped as well.
 	section := chatSection{}
 	for _, f := range facts {
-		section.Widgets = append(section.Widgets, chatWidget{DecoratedText: &chatDecorated{TopLabel: f.Label, Text: f.Value, Wrap: true}})
+		section.Widgets = append(section.Widgets, chatWidget{DecoratedText: &chatDecorated{TopLabel: esc(f.Label), Text: esc(f.Value), Wrap: true}})
 	}
 	if link != "" {
 		section.Widgets = append(section.Widgets, chatWidget{ButtonList: &chatButtonList{
@@ -145,7 +160,7 @@ func newChatBody(n Notification) chatBody {
 	}
 	body.CardsV2 = []chatCardWrap{{
 		CardID: "kubeat",
-		Card:   chatCard{Header: &chatHeader{Title: Emoji(n) + " " + subject(n), Subtitle: n.Monitor.Target}, Sections: []chatSection{section}},
+		Card:   chatCard{Header: &chatHeader{Title: Emoji(n) + " " + esc(subject(n)), Subtitle: esc(n.Monitor.Target)}, Sections: []chatSection{section}},
 	}}
 	return body
 }

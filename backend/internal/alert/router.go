@@ -3,9 +3,11 @@ package alert
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -15,9 +17,13 @@ type Router struct {
 	email   *EmailSender
 }
 
-// NewRouter returns a Router for every channel type.
-func NewRouter(client *http.Client, userAgent string, smtp SMTPConfig, endpoints Endpoints) *Router {
-	email := &EmailSender{SMTP: smtp}
+// NewRouter returns a Router for every channel type. Every connection its
+// senders make goes through guard: to a channel's own address, which
+// whoever may edit the channel sets, and to the services the operator set
+// in smtp and endpoints alike. A nil guard lets them connect anywhere.
+func NewRouter(guard *netguard.Policy, userAgent string, smtp SMTPConfig, endpoints Endpoints) *Router {
+	client := &http.Client{Transport: guard.Transport()}
+	email := &EmailSender{SMTP: smtp, Dialer: guard.Dialer(&net.Dialer{})}
 	// Mattermost reads Slack's format, Google Chat its own cards.
 	text := &SlackSender{Client: client, UserAgent: userAgent}
 	return &Router{

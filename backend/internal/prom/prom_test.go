@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,6 +141,80 @@ func TestBearerTokenIsReadPerRequest(t *testing.T) {
 	os.Remove(tokenFile)
 	if _, err := c.PodUsage(context.Background(), "shop", []string{"web-1"}); err == nil {
 		t.Error("a missing token file was ignored")
+	}
+}
+
+// The token goes to the configured server only. A redirect to another
+// server is followed without it: the token is the pod's service account
+// token, and must not reach whoever the server, or someone answering in its
+// place, sends the client to.
+func TestBearerTokenStaysWithTheConfiguredServer(t *testing.T) {
+	other := &fakeProm{memory: map[string]float64{"web-1": 1}}
+	elsewhere := httptest.NewServer(http.HandlerFunc(other.handler))
+	defer elsewhere.Close()
+	var (
+		mu   sync.Mutex
+		seen []string
+	)
+	configured := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("Authorization"))
+		mu.Unlock()
+		http.Redirect(w, r, elsewhere.URL+r.URL.Path+"?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
+	}))
+	defer configured.Close()
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	os.WriteFile(tokenFile, []byte("sa-token"), 0o600)
+
+	c := newClient(t, configured, func(o *Options) { o.TokenFile = tokenFile })
+	if _, err := c.PodUsage(context.Background(), "shop", []string{"web-1"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	other.mu.Lock()
+	defer other.mu.Unlock()
+	if len(seen) != 2 || seen[0] != "Bearer sa-token" || seen[1] != "Bearer sa-token" {
+		t.Errorf("the configured server got %q, want the token on both queries", seen)
+	}
+	if len(other.auth) != 2 {
+		t.Fatalf("the other server got %d requests, want the two redirected queries", len(other.auth))
+	}
+	for _, auth := range other.auth {
+		if auth != "" {
+			t.Errorf("the token followed the redirect to another server: %q", auth)
+		}
+	}
+}
+
+// The same server with its default port written out is still the
+// configured one.
+func TestOrigin(t *testing.T) {
+	same := [][2]string{
+		{"https://thanos-querier.openshift-monitoring.svc:9091", "https://THANOS-querier.openshift-monitoring.svc:9091/api/v1/query"},
+		{"https://thanos", "https://thanos:443/api"},
+		{"http://prometheus", "HTTP://prometheus:80/api"},
+		{"http://[fd00::1]:9090", "http://[fd00::1]:9090/api"},
+	}
+	for _, pair := range same {
+		a, _ := url.Parse(pair[0])
+		b, _ := url.Parse(pair[1])
+		if origin(a) != origin(b) {
+			t.Errorf("%s and %s differ: %s, %s", pair[0], pair[1], origin(a), origin(b))
+		}
+	}
+	different := [][2]string{
+		{"https://thanos:9091", "http://thanos:9091"},
+		{"https://thanos:9091", "https://thanos:9092"},
+		{"https://thanos", "https://thanos.evil.example"},
+		{"http://prometheus", "http://prometheus:8080"},
+	}
+	for _, pair := range different {
+		a, _ := url.Parse(pair[0])
+		b, _ := url.Parse(pair[1])
+		if origin(a) == origin(b) {
+			t.Errorf("%s and %s agree: %s", pair[0], pair[1], origin(a))
+		}
 	}
 }
 

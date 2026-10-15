@@ -210,3 +210,32 @@ func TestHeartbeatIntervalMustAllowATick(t *testing.T) {
 		t.Errorf("unused heartbeat interval rejected: %v", err)
 	}
 }
+
+func TestTargetCIDRs(t *testing.T) {
+	t.Setenv("UPTIME_TARGET_DENY_CIDRS", "10.0.0.0/8, fd00::/8")
+	t.Setenv("UPTIME_TARGET_ALLOW_CIDRS", "127.0.0.1/32,,169.254.20.10/32")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.TargetDenyCIDRs != "10.0.0.0/8, fd00::/8" || cfg.TargetAllowCIDRs != "127.0.0.1/32,,169.254.20.10/32" {
+		t.Errorf("deny=%q allow=%q", cfg.TargetDenyCIDRs, cfg.TargetAllowCIDRs)
+	}
+
+	// A mistake names its variable and, for a bare address, the CIDR meant.
+	for _, key := range []string{"UPTIME_TARGET_DENY_CIDRS", "UPTIME_TARGET_ALLOW_CIDRS"} {
+		for value, want := range map[string]string{
+			"10.0.0.0/8,localhost": `"localhost" is not a CIDR`,
+			"10.0.0.0/40":          `"10.0.0.0/40" is not a CIDR`,
+			"127.0.0.1":            "write it as 127.0.0.1/32",
+			"fe80::1%eth0":         "write it as fe80::1/128",
+		} {
+			t.Setenv(key, value)
+			_, err := Load()
+			if err == nil || !strings.HasPrefix(err.Error(), key+": ") || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s=%q: err = %v, want one naming the variable and saying %q", key, value, err, want)
+			}
+		}
+		t.Setenv(key, "")
+	}
+}

@@ -9,7 +9,9 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -87,9 +89,13 @@ func New(opts Options) (*Client, error) {
 		opts.MemoryQuery = DefaultMemoryQuery
 	}
 
+	server, err := url.Parse(opts.URL)
+	if err != nil {
+		return nil, fmt.Errorf("prometheus: %w", err)
+	}
 	client, err := api.NewClient(api.Config{
 		Address:      opts.URL,
-		RoundTripper: &tokenTransport{base: transport, tokenFile: opts.TokenFile},
+		RoundTripper: &tokenTransport{base: transport, tokenFile: opts.TokenFile, origin: origin(server)},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("prometheus: %w", err)
@@ -97,10 +103,31 @@ func New(opts Options) (*Client, error) {
 	return &Client{api: v1.NewAPI(client), opts: opts}, nil
 }
 
-// tokenTransport adds the bearer token from a file to every request.
+// tokenTransport adds the bearer token from a file to the requests that go
+// to the configured server. The token is the pod's service account token,
+// so a redirect elsewhere is followed without it: it is for the server the
+// operator named, not for wherever that server, or someone answering in
+// its place, sends the client.
 type tokenTransport struct {
 	base      http.RoundTripper
 	tokenFile string
+	// origin is the configured server's, as origin writes it.
+	origin string
+}
+
+// origin is a URL's scheme, host and port, with the scheme's default port
+// written out, so that "https://thanos" and "https://thanos:443" agree.
+func origin(u *url.URL) string {
+	scheme, port := strings.ToLower(u.Scheme), u.Port()
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
 }
 
 // namespaceKey carries the namespace a query is about to the transport.
@@ -125,7 +152,7 @@ func withNamespace(req *http.Request) *http.Request {
 
 func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = withNamespace(req)
-	if t.tokenFile == "" {
+	if t.tokenFile == "" || origin(req.URL) != t.origin {
 		return t.base.RoundTrip(req)
 	}
 	token, err := os.ReadFile(t.tokenFile)

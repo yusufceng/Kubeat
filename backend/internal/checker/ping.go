@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"time"
 
@@ -42,6 +43,12 @@ func (c *Checker) checkPing(ctx context.Context, host string) outcome {
 			ip = a.IP
 			break
 		}
+	}
+	// Echo requests go out without a dialer, so the guard is asked here,
+	// about the address they would go to.
+	addr, _ := netip.AddrFromSlice(ip)
+	if err := c.opts.Guard.Check(addr); err != nil {
+		return failed(err)
 	}
 
 	network, listen, protocol := "udp4", "0.0.0.0", protocolICMPv4

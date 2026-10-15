@@ -72,6 +72,11 @@ func TestDiscordSender(t *testing.T) {
 	if fields := embed["fields"].([]any); len(fields) != 5 || fields[0].(map[string]any)["name"] != "Monitor" {
 		t.Errorf("embed fields = %v", fields)
 	}
+	// Nothing in the message may ping anyone, @everyone included.
+	mentions, _ := got.Body["allowed_mentions"].(map[string]any)
+	if parse, ok := mentions["parse"].([]any); !ok || len(parse) != 0 {
+		t.Errorf("allowed_mentions = %v, want an empty parse list", got.Body["allowed_mentions"])
+	}
 
 	// A message longer than Discord takes is cut, not refused.
 	n.Incident.Cause = strings.Repeat("ş", 3000)
@@ -234,10 +239,50 @@ func TestGotifySender(t *testing.T) {
 	}
 }
 
+// A refusal names the provider and the status, and of the answer repeats
+// only the reason in the field the provider documents for it: a channel's
+// address may point anywhere, and whatever answers there is not to be read
+// back through a test delivery.
+func TestRefusalsRepeatOnlyTheProvidersReason(t *testing.T) {
+	const secret = "INTERNAL-SECRET-BODY: db_password=hunter2"
+	send := func(typ store.ChannelType, status int, reply string) error {
+		srv, _ := provider(t, status, reply)
+		router := NewRouter(nil, "kubeat/test", SMTPConfig{}, Endpoints{Telegram: srv.URL, PagerDuty: srv.URL})
+		return router.Send(context.Background(), store.Channel{Type: typ, Target: srv.URL + "/topic", Secret: "s"}, sampleDown())
+	}
+	for typ, tc := range map[store.ChannelType]struct{ name, reply, reason string }{
+		store.ChannelDiscord:   {"Discord", `{"message":"Unknown Webhook","code":10015}`, "Unknown Webhook"},
+		store.ChannelTelegram:  {"Telegram", `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`, "Bad Request: chat not found"},
+		store.ChannelNtfy:      {"ntfy", `{"code":40301,"http":403,"error":"forbidden"}`, "forbidden"},
+		store.ChannelGotify:    {"Gotify", `{"error":"Unauthorized","errorCode":401,"errorDescription":"you need to provide a valid access token"}`, "you need to provide a valid access token"},
+		store.ChannelPagerDuty: {"PagerDuty", `{"status":"invalid event","message":"Event object is invalid","errors":["Length of 'routing_key' is incorrect"]}`, "Length of 'routing_key' is incorrect"},
+	} {
+		if err := send(typ, http.StatusBadRequest, tc.reply); err == nil || err.Error() != tc.name+" answered 400: "+tc.reason {
+			t.Errorf("%s with a reason: err = %v", typ, err)
+		}
+		for _, reply := range []string{
+			secret,                                  // not JSON
+			`{"secret":"` + secret + `"}`,           // JSON without the field
+			`{"message":{"text":"` + secret + `"}}`, // the field, but not text
+			`["` + secret + `"]`,
+		} {
+			if err := send(typ, http.StatusInternalServerError, reply); err == nil || err.Error() != tc.name+" answered 500" {
+				t.Errorf("%s answering %s: err = %v, want the status alone", typ, reply, err)
+			}
+		}
+	}
+	// A long reason is cut.
+	long := strings.Repeat("ş", 300)
+	if err := send(store.ChannelDiscord, http.StatusBadRequest, `{"message":"`+long+`"}`); err == nil ||
+		!strings.HasSuffix(err.Error(), "…") || len(err.Error()) > len("Discord answered 400: ")+reasonLimit+len("…") {
+		t.Errorf("long reason: %v", err)
+	}
+}
+
 // Every type has a sender, and the chat tools that read "text" get it.
 func TestRouterKnowsEveryType(t *testing.T) {
 	srv, seen := provider(t, http.StatusOK, `{}`)
-	router := NewRouter(srv.Client(), "kubeat/test", SMTPConfig{}, Endpoints{Telegram: srv.URL, PagerDuty: srv.URL})
+	router := NewRouter(nil, "kubeat/test", SMTPConfig{}, Endpoints{Telegram: srv.URL, PagerDuty: srv.URL})
 	n := sampleDown()
 	for _, typ := range store.ChannelTypes {
 		if typ == store.ChannelEmail {

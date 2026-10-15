@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -42,6 +43,13 @@ type Options struct {
 	// RolloutGrace is how long a workload monitor tolerates missing pods
 	// while a rollout is in progress; zero tolerates none.
 	RolloutGrace time.Duration
+	// Guard decides where checks may connect. Every engine dials through
+	// the checker's dialer, which it checks; ping, which sends packets
+	// without one, asks it about the address it resolved. A target is set
+	// by whoever may edit a monitor, so without a guard any of them could
+	// reach the backend's own loopback or the cloud's metadata service.
+	// Nil allows every address.
+	Guard *netguard.Policy
 }
 
 // Checker runs the checks of every monitor type. It is safe for concurrent
@@ -61,15 +69,22 @@ type Checker struct {
 // New returns a Checker. Timeouts are not set here; every check is bounded
 // by the context passed to Check.
 func New(opts Options) *Checker {
+	dialer := opts.Guard.Dialer(&net.Dialer{})
 	transport := func(skipVerify bool) *http.Transport {
 		t := http.DefaultTransport.(*http.Transport).Clone()
 		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: skipVerify}
+		// The checker's own dialer, so that the guard sees every connection
+		// of an HTTP check too; a redirect is a new connection and is
+		// checked like the first. Through a proxy the connection goes to
+		// the proxy, so the guard checks the target before that.
+		t.DialContext = dialer.DialContext
+		t.Proxy = opts.Guard.Proxy(t.Proxy)
 		return t
 	}
 	return &Checker{
 		verifying: transport(opts.InsecureSkipVerify),
 		insecure:  transport(true),
-		dialer:    &net.Dialer{},
+		dialer:    dialer,
 		opts:      opts,
 		rollouts:  make(map[string]time.Time),
 		now:       time.Now,

@@ -27,6 +27,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/oidcauth"
 	"github.com/yusufceng/Kubeat/backend/internal/prom"
 	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
@@ -107,7 +108,19 @@ func main() {
 	meter := metrics.New(version)
 	meter.WatchMonitors(db, cfg.MetricsTimeout, logger)
 
-	senders := alert.NewRouter(&http.Client{}, userAgent, alert.SMTPConfig{
+	// Checks and notifications connect only where the target policy allows:
+	// a monitor's target and a channel's address are set by whoever may
+	// edit them, and must not lead to the backend's own loopback or to the
+	// cloud's metadata service. Load has checked both lists already.
+	guard, err := netguard.New(splitList(cfg.TargetDenyCIDRs), splitList(cfg.TargetAllowCIDRs))
+	if err != nil {
+		logger.Error("invalid target policy", "error", err)
+		db.Close()
+		os.Exit(1)
+	}
+	logger.Info("target policy in effect", "target_policy", guard)
+
+	senders := alert.NewRouter(guard, userAgent, alert.SMTPConfig{
 		Host:     cfg.SMTPHost,
 		Port:     cfg.SMTPPort,
 		Username: cfg.SMTPUsername,
@@ -183,6 +196,7 @@ func main() {
 		Workloads:          replicas,
 		Endpoints:          endpoints,
 		RolloutGrace:       cfg.WorkloadRolloutGrace,
+		Guard:              guard,
 	}), scheduler.Options{
 		Tick:          cfg.SchedulerTick,
 		MaxJitter:     cfg.MaxJitter,

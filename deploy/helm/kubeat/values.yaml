@@ -41,6 +41,11 @@ backend:
     # UPTIME_DEFAULT_FAILURE_THRESHOLD: "3"
     # UPTIME_CERT_WARNING: 336h
     # UPTIME_WORKLOAD_ROLLOUT_GRACE: 10m
+    # Where checks and notifications may connect; loopback, link-local (cloud
+    # metadata) and multicast are denied, private ranges are not (README,
+    # "Hedef politikası"). Comma-separated CIDRs.
+    # UPTIME_TARGET_ALLOW_CIDRS: "169.254.20.10/32"   # NodeLocal DNSCache as a DNS monitor's resolver
+    # UPTIME_TARGET_DENY_CIDRS: "10.0.0.0/8"          # checks only outside the cluster
   # Extra volumes for the backend, e.g. a CA bundle for the metrics server or
   # for checks of targets signed by an internal CA.
   extraVolumes: []

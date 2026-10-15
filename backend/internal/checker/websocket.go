@@ -57,7 +57,7 @@ func (c *Checker) checkWebSocket(ctx context.Context, m store.Monitor) outcome {
 	// The handshake is HTTP/1.1; a connection of its own, since after the
 	// upgrade it is no longer an HTTP connection that could be reused.
 	transport := &http.Transport{
-		Proxy:             http.ProxyFromEnvironment,
+		Proxy:             c.opts.Guard.Proxy(http.ProxyFromEnvironment),
 		DialContext:       c.dialer.DialContext,
 		TLSClientConfig:   c.tlsConfig("", m.WebSocket.SkipTLSVerify),
 		TLSNextProto:      map[string]func(string, *tls.Conn) http.RoundTripper{}, // no HTTP/2

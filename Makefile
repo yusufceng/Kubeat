@@ -7,6 +7,10 @@ API_TOKEN ?= local-dev-token
 # Lokal geliştirmede ilk yönetici hesabının ("admin") parolası; hesap yoksa
 # backend açılışta oluşturur. Gerçek kurulumda chart rastgele bir parola üretir.
 ADMIN_PASSWORD ?= admin
+# Lokal geliştirmede bu makinedeki servisler de kontrol edilebilsin diye
+# loopback hedef politikasından istisna tutulur. Gerçek kurulumda loopback
+# yasaktır (README, "Hedef politikası").
+TARGET_ALLOW_CIDRS ?= 127.0.0.0/8,::1/128
 
 # Cluster hedefleri her zaman bu bağlamı kullanır; kubectl'in o anki bağlamını
 # asla kullanmaz.
@@ -27,7 +31,8 @@ dev:
 	@trap 'kill 0' INT TERM EXIT; $(MAKE) backend & $(MAKE) frontend & wait
 
 backend:
-	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) UPTIME_API_TOKEN=$(API_TOKEN) UPTIME_ADMIN_PASSWORD=$(ADMIN_PASSWORD) go run ./cmd/server
+	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) UPTIME_API_TOKEN=$(API_TOKEN) UPTIME_ADMIN_PASSWORD=$(ADMIN_PASSWORD) \
+		UPTIME_TARGET_ALLOW_CIDRS=$(TARGET_ALLOW_CIDRS) go run ./cmd/server
 
 frontend:
 	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) npm run dev -- -p $(FRONTEND_PORT)

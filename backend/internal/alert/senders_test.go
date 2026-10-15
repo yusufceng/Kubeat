@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -373,7 +374,7 @@ func TestEmailSenderFailures(t *testing.T) {
 
 func TestRouterPicksSenderByType(t *testing.T) {
 	srv, bodies := capture(t)
-	router := NewRouter(srv.Client(), "kubeat/test", SMTPConfig{}, Endpoints{})
+	router := NewRouter(nil, "kubeat/test", SMTPConfig{}, Endpoints{})
 	ctx := context.Background()
 	n := sampleDown()
 
@@ -422,5 +423,134 @@ func TestNotificationWithoutATarget(t *testing.T) {
 	// With a target, both still carry it.
 	if n := sampleDown(); !strings.Contains(Text(n), "erişilemiyor (https://pay.example.com/healthz).") || Facts(n)[1] != (Fact{"Hedef", n.Monitor.Target}) {
 		t.Errorf("text = %q, facts = %+v", Text(n), Facts(n))
+	}
+}
+
+// injected is a notification whose monitor name and cause, as a push
+// report could set it, try to notify a whole chat channel and to disguise
+// a link.
+func injected() Notification {
+	n := sampleDown()
+	n.PublicURL = "https://kubeat.example"
+	n.Monitor.Name = "api <!here> & co"
+	n.Incident.Cause = "the source reported a failure: <!channel> <users/all> sign in again: <https://evil.example/login|https://kubeat.example/login>"
+	return n
+}
+
+// What came from a monitor, a target or a push report reads as typed in
+// Slack and Mattermost: no broadcast mention, no link whose label hides
+// its address.
+func TestSlackTextIsEscaped(t *testing.T) {
+	srv, bodies := capture(t)
+	router := NewRouter(nil, "kubeat/test", SMTPConfig{}, Endpoints{})
+	n := injected()
+	for _, typ := range []store.ChannelType{store.ChannelSlack, store.ChannelMattermost} {
+		if err := router.Send(context.Background(), store.Channel{Type: typ, Target: srv.URL}, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, got := range bodies() {
+		text, _ := got["text"].(string)
+		attachment := got["attachments"].([]any)[0].(map[string]any)
+		if strings.ContainsAny(text, "<>") || !strings.Contains(text, "api &lt;!here&gt; &amp; co") ||
+			!strings.Contains(text, "&lt;!channel&gt; &lt;users/all&gt;") || !strings.Contains(text, "&lt;https://evil.example/login|https://kubeat.example/login&gt;") {
+			t.Errorf("body %d: text = %q", i, text)
+		}
+		if attachment["fallback"] != text || attachment["title"] != "api &lt;!here&gt; &amp; co" {
+			t.Errorf("body %d: fallback = %q, title = %q", i, attachment["fallback"], attachment["title"])
+		}
+		for _, f := range attachment["fields"].([]any) {
+			field := f.(map[string]any)
+			if title, value := field["title"].(string), field["value"].(string); strings.ContainsAny(title+value, "<>") {
+				t.Errorf("body %d: field %q = %q", i, title, value)
+			}
+		}
+	}
+
+	// Kubeat's own link stays a link: its "&" is not escaped.
+	up := injected()
+	up.Event, up.Incident.ResolvedAt = EventUp, up.Incident.StartedAt.Add(time.Minute)
+	link := newSlackBody(up, time.Now()).Attachments[0].TitleLink
+	if link != URL(up) || !strings.Contains(link, "&to=") {
+		t.Errorf("title_link = %q, want %q", link, URL(up))
+	}
+}
+
+// Google Chat reads the same mentions and links in its text, and HTML in a
+// card: what a monitor or a target wrote is escaped in both.
+func TestGoogleChatTextIsEscaped(t *testing.T) {
+	body := newChatBody(injected())
+	if strings.ContainsAny(body.Text, "<>") || !strings.Contains(body.Text, "&lt;users/all&gt;") || !strings.Contains(body.Text, "&amp; co") {
+		t.Errorf("text = %q", body.Text)
+	}
+	card := body.CardsV2[0].Card
+	if card.Header.Title != "🔴 api &lt;!here&gt; &amp; co" {
+		t.Errorf("header = %q", card.Header.Title)
+	}
+	for _, w := range card.Sections[0].Widgets {
+		if d := w.DecoratedText; d != nil && strings.ContainsAny(d.TopLabel+d.Text, "<>") {
+			t.Errorf("decorated text %q = %q", d.TopLabel, d.Text)
+		}
+	}
+	// The cause, escaped, is still all there.
+	cause := card.Sections[0].Widgets[4].DecoratedText
+	if cause.TopLabel != "Neden" || cause.Text != chatEscaper.Replace(injected().Incident.Cause) {
+		t.Errorf("cause = %+v", cause)
+	}
+}
+
+// With a target policy no sender reaches the backend's own loopback: not a
+// channel's address, nor the Telegram, PagerDuty or mail server the
+// operator set. An exception lets them through.
+func TestRouterConnectsThroughTheGuard(t *testing.T) {
+	srv, bodies := capture(t)
+	mail := newFakeSMTP(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	send := func(router *Router, typ store.ChannelType) error {
+		target := srv.URL + "/topic"
+		if typ == store.ChannelEmail {
+			target = "ops@example.com"
+		}
+		return router.Send(ctx, store.Channel{Type: typ, Target: target, Secret: "s"}, sampleDown())
+	}
+	endpoints := Endpoints{Telegram: srv.URL, PagerDuty: srv.URL}
+
+	strict, err := netguard.New(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, security := range []string{SMTPNone, SMTPTLS} {
+		smtp := mail.config()
+		smtp.Security = security
+		router := NewRouter(strict, "kubeat/test", smtp, endpoints)
+		for _, typ := range store.ChannelTypes {
+			if err := send(router, typ); !errors.Is(err, netguard.ErrBlocked) {
+				t.Errorf("%s (mail %s): err = %v, want the target policy's", typ, security, err)
+			}
+		}
+	}
+	mail.mu.Lock()
+	commands := len(mail.commands)
+	mail.mu.Unlock()
+	if len(bodies()) != 0 || commands != 0 {
+		t.Errorf("blocked senders still delivered: %d requests, %d SMTP commands", len(bodies()), commands)
+	}
+
+	open, err := netguard.New(nil, []string{"127.0.0.0/8", "::1/128"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(open, "kubeat/test", mail.config(), endpoints)
+	for _, typ := range store.ChannelTypes {
+		if err := send(router, typ); err != nil {
+			t.Errorf("%s with an exception: %v", typ, err)
+		}
+	}
+	mail.mu.Lock()
+	delivered := mail.data != ""
+	mail.mu.Unlock()
+	if len(bodies()) != len(store.ChannelTypes)-1 || !delivered {
+		t.Errorf("with an exception: %d requests, mail delivered: %v", len(bodies()), delivered)
 	}
 }

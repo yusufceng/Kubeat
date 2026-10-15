@@ -34,7 +34,8 @@ func newTestAPIWith(t *testing.T, customize func(*Options)) (*httptest.Server, *
 		t.Fatalf("open store: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	notifier := alert.New(db, alert.NewRouter(http.DefaultClient, "kubeat/test", alert.SMTPConfig{}, alert.Endpoints{}), alert.Options{
+	// No target policy: the channels these tests deliver to are local servers.
+	notifier := alert.New(db, alert.NewRouter(nil, "kubeat/test", alert.SMTPConfig{}, alert.Endpoints{}), alert.Options{
 		Attempts: 1, SendTimeout: 2 * time.Second, Logger: logger,
 	})
 	opts := Options{

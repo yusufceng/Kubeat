@@ -16,6 +16,25 @@ var JSONOperators = []string{"==", "!=", ">", ">=", "<", "<=", "contains"}
 // DefaultJSONOperator applies when a JSON check names none.
 const DefaultJSONOperator = "=="
 
+// maxShownValue bounds, in characters, how much of the value a JSON check
+// found its result repeats. A short value tells what was found; repeated
+// whole, a path that selects a large object would copy most of a response
+// into results that everyone who can read the monitor sees.
+const maxShownValue = 100
+
+// shownValue is found as a result repeats it: cut after maxShownValue
+// characters.
+func shownValue(found string) string {
+	n := 0
+	for i := range found { // i is where each character starts
+		if n == maxShownValue {
+			return found[:i] + "…"
+		}
+		n++
+	}
+	return found
+}
+
 // jsonStep is one step of a path: a key of an object or an index of an array.
 type jsonStep struct {
 	key     string
@@ -93,9 +112,9 @@ func matchJSON(document []byte, path, operator, expected string) (string, error)
 		return "", fmt.Errorf("json path %q: %w", path, err)
 	}
 	if !ok {
-		return "", fmt.Errorf("json path %q is %s, expected %s %s", path, found, operator, expected)
+		return "", fmt.Errorf("json path %q is %s, expected %s %s", path, shownValue(found), operator, expected)
 	}
-	return path + " = " + found, nil
+	return path + " = " + shownValue(found), nil
 }
 
 func describeStep(s jsonStep) string {
@@ -138,7 +157,7 @@ func compare(found, operator, expected string) (bool, error) {
 		return strings.Contains(found, expected), nil
 	case ">", ">=", "<", "<=":
 		if !numeric {
-			return false, fmt.Errorf("%s needs numbers, but the value is %s and the expected one %s", operator, found, expected)
+			return false, fmt.Errorf("%s needs numbers, but the value is %s and the expected one %s", operator, shownValue(found), expected)
 		}
 		switch operator {
 		case ">":

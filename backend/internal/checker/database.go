@@ -96,6 +96,9 @@ func (c *Checker) checkMySQL(ctx context.Context, m store.Monitor) outcome {
 	o := m.Database
 	cfg := mysql.NewConfig()
 	cfg.Net, cfg.Addr = "tcp", m.Target
+	// The checker's dialer, which the guard watches; the driver's own
+	// would connect anywhere.
+	cfg.DialFunc = c.dialer.DialContext
 	cfg.User, cfg.Passwd, cfg.DBName = o.Username, o.Password, o.Database
 	cfg.TLS = c.databaseTLS(m, host)
 	// The driver logs broken connections on its own; the check reports them.

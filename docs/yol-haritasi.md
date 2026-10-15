@@ -123,6 +123,12 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   bir önbellek konmalıdır.
 - Gizli değerler `UPTIME_SECRET_KEY` ile şifrelenir; anahtar değiştirme
   (rotation) yoktur ve push token'ları şifrelenmez.
+- Hedef politikası yalnızca loopback, link-local (bulut metadata servisi) ve
+  multicast adreslerini kapatır; özel ağlar bilerek açıktır, yani monitor ya
+  da kanal düzenleyebilen biri cluster içindeki her servise istek
+  gönderebilir. Bunu `UPTIME_TARGET_DENY_CIDRS` daraltır. Vekil
+  (`HTTP_PROXY`) üzerinden giden istekte hedef backend'de çözülüp denetlenir,
+  ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun ağına bağlıdır.
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye
   `kubeat.io/monitor` annotation'ı eklenir.
 - Annotation eşitlemesi her turda tüm cluster'ın Service, Pod, Ingress, Route

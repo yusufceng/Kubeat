@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -86,6 +87,14 @@ type Config struct {
 
 	HTTPInsecureSkipVerify bool // UPTIME_HTTP_INSECURE_SKIP_VERIFY
 	KeywordBodyLimit       int  // UPTIME_KEYWORD_BODY_LIMIT_BYTES
+
+	// Where checks and notifications may not connect, beyond the built-in
+	// ranges (loopback, link-local with the cloud metadata services,
+	// multicast; see netguard), and the exceptions, which win over both.
+	// Comma-separated CIDRs. Private ranges are not denied unless listed
+	// here: in-cluster targets live in them.
+	TargetDenyCIDRs  string // UPTIME_TARGET_DENY_CIDRS
+	TargetAllowCIDRs string // UPTIME_TARGET_ALLOW_CIDRS
 
 	MinCheckInterval time.Duration // UPTIME_MIN_CHECK_INTERVAL
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
@@ -215,6 +224,9 @@ func Load() (Config, error) {
 		OIDCCAFile:            envString("UPTIME_OIDC_CA_FILE", ""),
 		OIDCDefaultRole:       envString("UPTIME_OIDC_DEFAULT_ROLE", ""),
 		OIDCDefaultNamespaces: envString("UPTIME_OIDC_DEFAULT_NAMESPACES", ""),
+
+		TargetDenyCIDRs:  envString("UPTIME_TARGET_DENY_CIDRS", ""),
+		TargetAllowCIDRs: envString("UPTIME_TARGET_ALLOW_CIDRS", ""),
 
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
 		BackupDir:    envString("UPTIME_BACKUP_DIR", ""),
@@ -356,6 +368,12 @@ func Load() (Config, error) {
 	if cfg.HTTPInsecureSkipVerify, err = envBool("UPTIME_HTTP_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err
 	}
+	if err := checkCIDRs("UPTIME_TARGET_DENY_CIDRS", cfg.TargetDenyCIDRs); err != nil {
+		return Config{}, err
+	}
+	if err := checkCIDRs("UPTIME_TARGET_ALLOW_CIDRS", cfg.TargetAllowCIDRs); err != nil {
+		return Config{}, err
+	}
 	if cfg.AdminPasswordReset, err = envBool("UPTIME_ADMIN_PASSWORD_RESET", false); err != nil {
 		return Config{}, err
 	}
@@ -438,6 +456,27 @@ func envPositiveInt(key string, def int) (int, error) {
 		return 0, fmt.Errorf("%s: must be positive, got %s", key, v)
 	}
 	return n, nil
+}
+
+// checkCIDRs checks a comma-separated list of CIDRs, such as
+// "10.0.0.0/8, fd00::/8". A bare address is refused with the CIDR it
+// should be, so that nobody has to guess whether it meant one address.
+func checkCIDRs(key, list string) error {
+	for _, entry := range strings.Split(list, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if _, err := netip.ParsePrefix(entry); err == nil {
+			continue
+		}
+		if addr, err := netip.ParseAddr(entry); err == nil {
+			addr = addr.WithZone("")
+			return fmt.Errorf("%s: %q is an address, not a CIDR; write it as %s/%d", key, entry, addr, addr.BitLen())
+		}
+		return fmt.Errorf("%s: %q is not a CIDR such as 10.0.0.0/8", key, entry)
+	}
+	return nil
 }
 
 func envBool(key string, def bool) (bool, error) {

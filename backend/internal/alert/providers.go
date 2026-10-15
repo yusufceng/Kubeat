@@ -24,17 +24,37 @@ type Endpoints struct {
 	PagerDuty string
 }
 
+// reasonLimit bounds how much of a provider's reason an error repeats.
+const reasonLimit = 200
+
 // accepted turns an answer outside 2xx into an error that names the
-// provider and carries what it said, which usually tells what is wrong.
-func accepted(provider string, status int, answer []byte) error {
+// provider and the status. Of the answer's body it keeps only reason, which
+// the sender read from the field the provider documents for it: the answer
+// comes from wherever the channel's address points, which need not be the
+// provider, and a test delivery must not read other services' answers back
+// to whoever set the address. Without a reason the status stands alone.
+func accepted(provider string, status int, reason string) error {
 	if status >= 200 && status < 300 {
 		return nil
 	}
-	said := strings.TrimSpace(string(answer))
-	if said == "" {
-		return fmt.Errorf("%s answered %d", provider, status)
+	if reason = strings.TrimSpace(reason); reason != "" {
+		return fmt.Errorf("%s answered %d: %s", provider, status, truncate(reason, reasonLimit))
 	}
-	return fmt.Errorf("%s answered %d: %s", provider, status, truncate(said, 200))
+	return fmt.Errorf("%s answered %d", provider, status)
+}
+
+// jsonReason returns the text in one field of a JSON object, where a
+// provider explains a refusal; "" for any other answer.
+func jsonReason(answer []byte, field string) string {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(answer, &object) != nil {
+		return ""
+	}
+	var reason string
+	if json.Unmarshal(object[field], &reason) != nil {
+		return ""
+	}
+	return reason
 }
 
 func truncate(s string, max int) string {
@@ -96,7 +116,10 @@ func newDiscordBody(n Notification, now time.Time) map[string]any {
 		}
 		embed.Fields = append(embed.Fields, discordEmbedField{Name: f.Label, Value: truncate(f.Value, discordFieldLimit-1), Inline: shortValue(f.Value)})
 	}
-	return map[string]any{"embeds": []discordEmbed{embed}}
+	// No mention in the message pings anyone, @everyone and @here
+	// included: a monitor's name or a push report's text cannot page a
+	// whole server.
+	return map[string]any{"embeds": []discordEmbed{embed}, "allowed_mentions": map[string][]string{"parse": {}}}
 }
 
 func (s *DiscordSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
@@ -104,7 +127,8 @@ func (s *DiscordSender) Send(ctx context.Context, ch store.Channel, n Notificati
 	if err != nil {
 		return err
 	}
-	return accepted("Discord", status, answer)
+	// Discord explains a refusal in "message".
+	return accepted("Discord", status, jsonReason(answer, "message"))
 }
 
 // TelegramSender sends a message as a bot. The channel's target is the chat
@@ -127,13 +151,7 @@ func (s *TelegramSender) Send(ctx context.Context, ch store.Channel, n Notificat
 		return err
 	}
 	// Telegram explains a refusal in "description".
-	var reply struct {
-		Description string `json:"description"`
-	}
-	if json.Unmarshal(answer, &reply) == nil && reply.Description != "" {
-		answer = []byte(reply.Description)
-	}
-	return accepted("Telegram", status, answer)
+	return accepted("Telegram", status, jsonReason(answer, "description"))
 }
 
 // telegramText is the message as Telegram's limited HTML: the subject in
@@ -245,7 +263,23 @@ func (s *PagerDutySender) enqueue(ctx context.Context, event pagerDutyEvent) err
 	if err != nil {
 		return err
 	}
-	return accepted("PagerDuty", status, answer)
+	return accepted("PagerDuty", status, pagerDutyReason(answer))
+}
+
+// pagerDutyReason is how the Events API explains a refusal: what is wrong
+// with the event in "errors", or else a summary in "message".
+func pagerDutyReason(answer []byte) string {
+	var reply struct {
+		Message string   `json:"message"`
+		Errors  []string `json:"errors"`
+	}
+	if json.Unmarshal(answer, &reply) != nil {
+		return ""
+	}
+	if len(reply.Errors) > 0 {
+		return strings.Join(reply.Errors, "; ")
+	}
+	return reply.Message
 }
 
 // NtfySender publishes to an ntfy topic. The channel's target is the
@@ -300,7 +334,8 @@ func (s *NtfySender) Send(ctx context.Context, ch store.Channel, n Notification)
 	if err != nil {
 		return err
 	}
-	return accepted("ntfy", status, answer)
+	// ntfy explains a refusal in "error".
+	return accepted("ntfy", status, jsonReason(answer, "error"))
 }
 
 // GotifySender creates a message on a Gotify server. The channel's target
@@ -325,7 +360,8 @@ func (s *GotifySender) Send(ctx context.Context, ch store.Channel, n Notificatio
 	if err != nil {
 		return err
 	}
-	return accepted("Gotify", status, answer)
+	// Gotify explains a refusal in "errorDescription".
+	return accepted("Gotify", status, jsonReason(answer, "errorDescription"))
 }
 
 // gotifyMarkdown is the message as Gotify renders markdown: the text, the

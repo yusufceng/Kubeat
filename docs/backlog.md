@@ -41,3 +41,14 @@ gider. Restart sayıları için alarm yok; panelde görünür. 2. madde hâlâ a
    monitor başına birden çok örnek gerekmedi, çünkü backend cluster içinde
    çalışır ve pod'lara doğrudan erişir; sonuç tek kayıttır, düşen pod'lar
    hata metninde adlarıyla yer alır. Pod başına ayrı geçmiş tutulmaz.
+
+## Sohbet kanallarında kalan biçim kaçışlaması
+
+2026-10-16'da Slack, Mattermost ve Google Chat'te `&`, `<`, `>` kaçışlandı,
+Discord mesajı kimseyi etiketlemez oldu: push raporunun mesajı ya da bir
+hedefin hata metni `<!channel>` ile herkesi çağıramıyor, etiketi adresini
+gizleyen bağlantı kuramıyor. Kalanlar: Mattermost düz `@channel`, `@all`,
+`@here` ve markdown `[etiket](adres)` yazımını da tanır; Teams'in TextBlock'u
+ve Gotify'ın mesajı markdown işler. Konuşulan çözüm, dışarıdan gelen
+değerleri satır içi kod olarak yazmak ya da `@` işaretini bozmaktır;
+metinlerin okunurluğunu değiştirdiği için ayrıca karar verilmeli.

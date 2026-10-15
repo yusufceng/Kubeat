@@ -145,6 +145,64 @@ bir ağ eklentisi gerekir). Bu durumda başka namespace'lerdeki işler push
 raporlarını arayüzün adresine göndermeli ya da `networkPolicy.backendIngressFrom`
 ile izin almalıdır.
 
+### Hedef politikası
+
+Monitor hedeflerini ve bildirim kanallarının adreslerini, onları
+düzenleyebilen her kullanıcı belirler; backend bu adreslere cluster'ın
+içinden bağlanır. Böyle bir adres backend'in kendisine (loopback) ya da
+bulut sağlayıcısının metadata servisine (`169.254.169.254`) götürmesin diye
+kontroller ve bildirimler her bağlantıyı **hedef politikasına** göre açar.
+Politika bağlantı anında, ad çözüldükten sonra bağlanılacak adrese bakar:
+zararsız görünen bir alan adı, iki sorgu arasında değişen bir DNS yanıtı ve
+yönlendirmenin (redirect) her adımı aynı kurala takılır. Yöneticinin verdiği
+Telegram, PagerDuty ve SMTP adresleri de politikadan geçer.
+
+Yerleşik olarak yasak olan aralıklar:
+
+| Aralık | Neden |
+| --- | --- |
+| `127.0.0.0/8`, `::1/128` | Loopback: backend pod'unun kendisi |
+| `0.0.0.0/8`, `::/128` | "Bu makine"; `0.0.0.0` loopback'e ulaşır |
+| `169.254.0.0/16`, `fe80::/10` | Link-local; bulut metadata servisi `169.254.169.254`'tedir |
+| `fd00:ec2::254/128` | AWS metadata servisinin IPv6 adresi |
+| `100.100.100.200/32` | Alibaba Cloud metadata servisi |
+| `224.0.0.0/4`, `ff00::/8`, `255.255.255.255/32` | Multicast ve broadcast |
+
+Özel ağlar (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`,
+`fd00::/8`) bilerek yasak **değildir**: Kubeat'in işi cluster içindeki
+servisleri kontrol etmektir ve ClusterIP'ler (OpenShift'te `172.30.0.0/16`),
+pod IP'leri ve `*.svc` adları bu aralıklardadır. IPv6 biçiminde yazılmış
+IPv4 adresleri (`::ffff:127.0.0.1`) ve NAT64 adresleri (`64:ff9b::/96`),
+taşıdıkları IPv4 adresine göre denetlenir.
+
+Yasak bir adrese giden kontrol ya da kanal testi, adresi ve aralığı söyleyen
+bir hatayla başarısız olur: `169.254.169.254 is blocked by the target policy
+(169.254.0.0/16); UPTIME_TARGET_ALLOW_CIDRS can allow it`. İki ayar,
+virgülle ayrılmış CIDR listesi alır; tek bir adres `/32` (IPv6'da `/128`)
+ile yazılır, geçersiz bir girdi backend'i başlatmaz:
+
+- `UPTIME_TARGET_DENY_CIDRS`: yerleşik listeye eklenen yasaklar.
+- `UPTIME_TARGET_ALLOW_CIDRS`: istisnalar; yerleşik ya da eklenmiş her
+  yasağın önüne geçer.
+
+```
+# Aynı node'daki bir ajanın 127.0.0.1'deki ucunu kontrol etmek
+UPTIME_TARGET_ALLOW_CIDRS=127.0.0.1/32
+# DNS monitor'unda çözücü olarak NodeLocal DNSCache (169.254.20.10)
+UPTIME_TARGET_ALLOW_CIDRS=169.254.20.10/32
+# Yalnızca cluster dışını kontrol eden sıkı bir kurulum: pod ve Service ağı da yasak
+UPTIME_TARGET_DENY_CIDRS=10.0.0.0/8
+```
+
+Açılışta `target policy in effect` log satırı eklenen yasakları ve
+istisnaları yazar. Çözücüsü verilmemiş DNS monitor'ları ve ad çözme,
+pod'un kendi çözücüsünü (CoreDNS) kullanır; politika ona uygulanmaz.
+Backend'e `HTTP_PROXY`/`HTTPS_PROXY` verildiyse vekil üzerinden giden bir
+isteğin hedefi önce backend'de çözülüp denetlenir; vekilin kendi adresi de
+politikaya tabidir, loopback'te dinleyen bir vekil için istisna gerekir.
+Lokal geliştirmede `make backend` loopback'i istisna tutar
+(`TARGET_ALLOW_CIDRS`), böylece makinedeki servisler kontrol edilebilir.
+
 ### Gizli değerlerin şifrelenmesi
 
 Monitor'ların header değerleri, parola ve token'ları ile bildirim
@@ -481,7 +539,8 @@ değişmez.
   `data.items[2].id`. `json_operator` (`==`, `!=`, `>`, `>=`, `<`, `<=`,
   `contains`) ile `json_expected` değerine karşılaştırılır. Sayılar değerce
   karşılaştırılır (`12` ile `12.0` eşittir); sıralama operatörleri iki tarafta
-  da sayı ister.
+  da sayı ister. Sonuçta bulunan değerin en fazla ilk 100 karakteri
+  gösterilir.
 - `headers`: isteğe eklenen header'lar.
 - `body`, `content_type`: istekle gönderilen gövde.
 - `auth`: `basic` (`auth_user` + `auth_secret`) ya da `bearer` (`auth_secret`
@@ -518,6 +577,8 @@ adına ping "no reply" verir. Service için `http` ya da `tcp` kullanın.
   varsayılan `A`.
 - `resolver`: sorulacak sunucu, `host` ya da `host:port`. Boşsa backend'in
   çalıştığı ortamın çözümleyicisi kullanılır (cluster içinde CoreDNS).
+  Verilen sunucu hedef politikasına tabidir: NodeLocal DNSCache
+  (`169.254.20.10`) için istisna gerekir.
 - `expected`: bulunan kayıtlardan en az birinin içermesi gereken metin.
 
 Bulunan kayıtlar sonuçla birlikte saklanır ve arayüzde görünür.
@@ -1015,8 +1076,11 @@ da `monthly`. Verilen başlangıç ve süre ilk tekrarı tanımlar; sonrakiler
 | `webhook` | Herhangi bir URL | – | Aşağıdaki JSON gövdesi |
 
 Her kanal durdurulabilir, düzenlenebilir ve test edilebilir (`PATCH
-/api/v1/channels/{id}`, `POST .../test`). Başarısız bir test, sağlayıcının
-verdiği yanıtı gösterir.
+/api/v1/channels/{id}`, `POST .../test`). Başarısız bir test yanıtın durum
+kodunu ve sağlayıcının JSON yanıtında belgelediği nedeni gösterir (Discord
+`message`, Telegram `description`, ntfy `error`, Gotify `errorDescription`,
+PagerDuty `errors`). Yanıt gövdesinin kendisi gösterilmez: kanalın adresi
+herhangi bir servisi gösterebilir ve test, oradaki yanıtı okumaya yaramamalıdır.
 
 **Kapsam.** Üç süzgeç birlikte uygulanır, hepsi isteğe bağlıdır:
 
@@ -1060,6 +1124,13 @@ monitor sayfasına, gruplanmış mesajda namespace sayfasına gider ve
 `UPTIME_PUBLIC_URL` (chart'ta `publicURL`, Route/Ingress host'undan
 türetilir) ayarlı değilse hiç konmaz.
 
+Monitor adları, hedefler ve hata metinleri (push raporunun mesajı dahil)
+yazıldığı gibi görünür: Slack, Mattermost ve Google Chat'te `&`, `<` ve `>`
+kaçışlanır; metindeki `<!channel>` ya da `<users/all>` kimseyi çağırmaz,
+etiketi adresini gizleyen bir bağlantı oluşmaz. Discord mesajı kimseyi
+etiketlemez (`@everyone` dahil); Telegram'a giden metin HTML olarak
+kaçışlanır.
+
 **Gizli değerler.** URL'ler API yanıtlarında maskelenir (`https://host/…`),
 `secret` ise hiç dönmez; yalnızca `has_secret` bilgisi verilir. Güncellemede
 maskelenmiş adres ya da `********` gönderilirse kayıtlı değer korunur. Hata
@@ -1072,7 +1143,8 @@ olup sunucu STARTTLS sunmuyorsa gönderim reddedilir, şifresiz gönderilmez.
 Telegram ve PagerDuty internetteki servislerdir. Cluster'dan doğrudan çıkış
 yoksa backend'e `HTTPS_PROXY` verilebilir ya da adresler
 `UPTIME_TELEGRAM_API_URL` ve `UPTIME_PAGERDUTY_EVENTS_URL` ile kendi
-vekilinize yönlendirilebilir.
+vekilinize yönlendirilebilir. Bu adresler de hedef politikasına tabidir;
+vekil loopback'te dinliyorsa istisna gerekir.
 
 Genel webhook kanalına şu gövdeyle `POST` yapılır. `text` alanı insan tarafından
 okunabilir özettir.
@@ -1148,6 +1220,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SERIES_POINTS` | `120` | Bir grafikteki yaklaşık nokta sayısı |
 | `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | TLS kullanan tüm kontrollerde (HTTP, TCP, gRPC, WebSocket) sertifika doğrulamasını kapatır |
 | `UPTIME_KEYWORD_BODY_LIMIT_BYTES` | `1048576` | Keyword ya da JSON değeri aranırken yanıt gövdesinin okunan kısmı |
+| `UPTIME_TARGET_DENY_CIDRS` | – | Kontrollerin ve bildirimlerin bağlanmayacağı, yerleşik listeye (loopback, link-local, metadata, multicast) eklenen aralıklar; virgülle ayrılmış CIDR. Bkz. "Hedef politikası" |
+| `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |
@@ -1177,7 +1251,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_EVENT_CACHE` | `10s` | Bir namespace'in olay listesinin cluster'dan yeniden okunmadan önce ne kadar süre kullanılacağı; `0` her seferinde okur |
 | `UPTIME_WORKLOAD_ROLLOUT_GRACE` | `10m` | Workload monitor'un süren bir rolling update'te eksik pod'ları ne kadar hoş göreceği; `0` hiç |
 | `UPTIME_PROMETHEUS_URL` | – | Pod CPU/bellek kullanımının okunduğu Prometheus uyumlu API; boşsa kullanım gösterilmez |
-| `UPTIME_PROMETHEUS_TOKEN_FILE` | – | Her istekte okunan bearer token dosyası |
+| `UPTIME_PROMETHEUS_TOKEN_FILE` | – | Her istekte okunan bearer token dosyası; token yalnızca `UPTIME_PROMETHEUS_URL`'deki sunucuya gider, başka bir sunucuya yönlendirmede gönderilmez |
 | `UPTIME_PROMETHEUS_CA_FILE` | – | Sunucu sertifikasının doğrulanacağı CA dosyası |
 | `UPTIME_PROMETHEUS_INSECURE_SKIP_VERIFY` | `false` | Sunucu sertifikasını doğrulamaz |
 | `UPTIME_PROMETHEUS_TIMEOUT` | `10s` | Sorgu zaman aşımı |
