@@ -72,6 +72,31 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
   `UPTIME_NOTIFY_GROUP_WAIT`, `UPTIME_RECOVERY_THRESHOLD`, ...); bkz.
   [values.yaml](deploy/helm/kubeat/values.yaml).
 
+### GitOps ile kurulum (Argo CD, OpenShift GitOps)
+
+Chart dört Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde
+cluster'dan geri okuyarak korur:
+
+| Secret (anahtar) | İçerik | Kendi Secret'ınız için |
+| --- | --- | --- |
+| `<release>-secret-key` (`key`) | Veritabanındaki gizli değerleri şifreleyen anahtar | `secretKey.existingSecret` |
+| `<release>-admin` (`password`) | İlk yöneticinin parolası | `auth.existingSecret` |
+| `<release>-api-token` (`token`) | API anahtarı | `apiToken.existingSecret` |
+| `<release>-metrics-token` (`token`) | Metrik anahtarı | `metrics.auth.existingSecret` |
+
+Cluster'a erişmeden şablon üreten araçlar (`helm template`, Argo CD,
+OpenShift GitOps) bu Secret'ları geri okuyamaz: her üretimde yeni değerler
+çıkar ve her eşitleme Secret'ların üzerine yazar. En ağır sonuç şifreleme
+anahtarındadır: backend bir sonraki açılışta yeni anahtarı reddeder ve eski
+anahtarla şifrelenmiş değerler geri gelmez. API anahtarı da değişir; metrik
+anahtarı backend yeniden başlayana kadar ServiceMonitor'ün gönderdiğiyle
+uyuşmaz ve scrape'ler `401` alır; yönetici Secret'ı da artık gerçek parolayı
+göstermez.
+
+Bu yüzden GitOps ile kurarken dört Secret'ı kendiniz oluşturun (Sealed
+Secrets, External Secrets Operator, ...) ve adlarını yukarıdaki
+`existingSecret` değerleriyle verin; chart o zaman bunları üretmez.
+
 ### OpenShift
 
 OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakılır,
@@ -141,11 +166,12 @@ Backend API'si her istekte ya giriş yapmış bir kullanıcının oturumunu ya d
 `UPTIME_API_TOKEN` anahtarını (`Authorization: Bearer ...`) ister; arayüz
 oturumla, betikler anahtarla konuşur (bkz. "Hesaplar ve giriş"). Anahtar
 ayarlanmazsa API yalnızca oturumla kullanılabilir. Sağlık kontrolü
-(`/api/v1/health`), `/metrics`, yayımlanmış durum sayfaları ve rozetler
-kimlik istemez; hiçbiri bir şey değiştirmez. Push raporları
-(`/api/push/{token}`) da anahtar istemez: adresteki token o monitor'un
-sırrıdır ve yalnızca o monitor'a rapor yazabilir. Token'ı (ve rapor
-adresini) yalnızca monitor'u değiştirebilenler görür; izleyicilere
+(`/api/v1/health`), yayımlanmış durum sayfaları ve rozetler kimlik istemez;
+hiçbiri bir şey değiştirmez. `/metrics`, `UPTIME_METRICS_TOKEN` ayarlıysa
+yalnızca o anahtarı sunan scrape'lere yanıt verir (bkz. "Metrik anahtarı").
+Push raporları (`/api/push/{token}`) da anahtar istemez: adresteki token o
+monitor'un sırrıdır ve yalnızca o monitor'a rapor yazabilir. Token'ı (ve
+rapor adresini) yalnızca monitor'u değiştirebilenler görür; izleyicilere
 gösterilmez, çünkü onunla monitor'u düşmüş ya da çalışıyor gösterebilirler.
 
 Cluster'a ya da metrik sunucusuna yapılan bir istek başarısız olduğunda
@@ -157,12 +183,27 @@ ulaşılamadığı ya da sunucunun sertifikasına güvenilmediği; türü belli 
 hatalarda ayrıntının logda olduğu yazar. Hatanın tam metni her zaman backend
 logundadır.
 
-Helm chart anahtarı ilk kurulumda rastgele üretir, bir Secret'ta saklar ve
-güncellemelerde korur. Ek olarak `networkPolicy.enabled=true`, backend'e
-yalnızca arayüz pod'larının bağlanmasına izin verir (NetworkPolicy uygulayan
-bir ağ eklentisi gerekir). Bu durumda başka namespace'lerdeki işler push
-raporlarını arayüzün adresine göndermeli ya da `networkPolicy.backendIngressFrom`
-ile izin almalıdır.
+Helm chart API anahtarını ilk kurulumda rastgele üretir, bir Secret'ta
+saklar ve güncellemelerde korur; Argo CD gibi araçlarla kurarken bkz.
+"GitOps ile kurulum".
+
+**Ağ erişimi.** `networkPolicy.enabled=true` (varsayılan kapalı) backend'e
+yalnızca arayüz pod'larının, `metrics.serviceMonitor.enabled` açıksa
+`networkPolicy.metricsFrom`'daki Prometheus'un ve
+`networkPolicy.backendIngressFrom`'da sayılanların bağlanmasına izin verir;
+NetworkPolicy uygulayan bir ağ eklentisi gerekir. `metricsFrom` varsayılan
+olarak OpenShift'in user workload monitoring'ini
+(`openshift-user-workload-monitoring` namespace'i) seçer; platformun kendi
+Prometheus'u için `openshift-monitoring`, başka cluster'larda Prometheus'un
+namespace'i yazılır. Politika yalnızca backend'e gelen bağlantıları
+kısıtlar, backend'in kendi bağlantılarını değil: kontroller her servise,
+pod'a ve adrese ulaşabilmelidir. Politika açıkken başka namespace'lerdeki
+işler push raporlarını backend'e değil arayüze gönderir
+(`http://<release>-frontend.<namespace>.svc:3000/api/push/<token>`); arayüz
+raporu backend'e iletir. Chart `PUSH_INTERNAL_URL`'i bu adrese çevirir,
+monitor sayfası da cluster içi adres olarak bunu gösterir. API anahtarıyla
+backend'e doğrudan bağlanan betikler `networkPolicy.backendIngressFrom` ile
+izin almalıdır.
 
 ### Hedef politikası
 
@@ -265,7 +306,10 @@ okunamaz.
 - Anahtar değiştirme (rotation) yoktur.
 
 Helm chart anahtarı ilk kurulumda üretir (`<release>-secret-key` Secret'ı),
-güncellemelerde korur ve release kaldırılsa bile silmez. Okumak için:
+güncellemelerde korur ve release kaldırılsa bile silmez. Cluster'a erişmeden
+şablon üreten araçlar (Argo CD, OpenShift GitOps, `helm template`) onu
+koruyamaz; böyle kurarken anahtarı kendiniz verin (bkz. "GitOps ile
+kurulum"). Okumak için:
 
 ```
 kubectl -n kubeat get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d
@@ -532,6 +576,120 @@ başlıklar gönderir:
   ve `Cross-Origin-Opener-Policy: same-origin` gönderilir; `X-Powered-By`
   gönderilmez.
 
+### Metrik anahtarı
+
+`/metrics` her monitor'un adını, namespace'ini, durumunu ve sertifika
+bitişini verir; keşiften gelen monitor'ların adlarında Service adları,
+portlar ve Ingress host'ları da vardır. Anahtar yokken backend portuna
+ulaşabilen herkes bunları, rolünün namespace sınırına bakılmaksızın okur.
+`UPTIME_METRICS_TOKEN` ayarlanınca `/metrics` yalnızca bu anahtarı
+`Authorization: Bearer ...` ile sunan isteklere yanıt verir; API anahtarı da
+kabul edilir, kullanıcı oturumu edilmez. Diğer istekler `401` alır. Anahtar
+ayarlı değilse `/metrics` açıktır ve backend bunu açılışta loglar.
+
+Chart'ta `metrics.auth.enabled` varsayılan olarak açıktır: chart ayrı bir
+anahtar üretir (`<release>-metrics-token` Secret'ı, `token` anahtarı),
+güncellemelerde korur ve backend'e verir. `metrics.serviceMonitor.enabled`
+ile gelen ServiceMonitor anahtarı aynı Secret'tan okuyup gönderir
+(`authorization`); OpenShift user workload monitoring'de de başka bir şey
+gerekmez. Anahtarı kendiniz yönetmek için `metrics.auth.existingSecret`
+verilir. Bu anahtar bilerek API anahtarından ayrıdır: scrape eden Prometheus
+onun bir kopyasını kendi yapılandırmasında tutar (OpenShift'te
+`openshift-user-workload-monitoring` namespace'indeki bir Secret'ta) ve
+orada metriklerden başka bir şey açmamalıdır.
+
+**Yükseltme notu:** Prometheus'u elle yapılandırılmış (ServiceMonitor
+kullanmayan) kurulumlarda scrape'ler bu sürümle `401` almaya başlar. Scrape
+yapılandırmasına anahtarı ekleyin ya da `metrics.auth.enabled=false` verin:
+
+```yaml
+scrape_configs:
+  - job_name: kubeat
+    authorization:
+      credentials_file: /etc/prometheus/kubeat/token   # <release>-metrics-token Secret'ından bağlanır
+    static_configs:
+      - targets: ["kubeat-backend.kubeat.svc:8080"]
+```
+
+Anahtarı okumak için:
+
+```
+kubectl -n kubeat get secret kubeat-metrics-token -o jsonpath='{.data.token}' | base64 -d
+```
+
+### Dışarıya açma: Route ve Ingress
+
+Girişte parola (LDAP'ta dizin parolası), sonra her istekte oturum çerezi
+gider; arayüz HTTPS ile sunulmalıdır.
+
+- **Route** (`route.enabled=true`) edge TLS ile sunar ve düz HTTP'yi
+  HTTPS'e yönlendirir. `route.annotations` router ayarlarını taşır:
+  `haproxy.router.openshift.io/hsts_header: max-age=31536000` tarayıcının
+  bundan sonra yalnızca HTTPS kullanmasını sağlar (paylaşılan apps alan
+  adında `preload` eklemeyin); cluster yöneticisi `requiredHSTSPolicies` ile
+  HSTS'i zorunlu tuttuysa Route bu annotation olmadan reddedilir.
+  `haproxy.router.openshift.io/rate-limit-connections: "true"` ile
+  `haproxy.router.openshift.io/rate-limit-connections.rate-http: "500"`
+  istemci adresi başına 10 saniyede en fazla 500 isteğe izin verir. Sınır
+  Route'taki her şeyi sayar (arayüz, durum sayfaları, rozetler, push
+  raporları) ve aynı NAT arkasındaki istemciler onu paylaşır; düşük
+  tutmayın.
+- **Ingress** (`ingress.enabled=true`) varsayılan olarak TLS ile sunar
+  (`ingress.tls.enabled=true`). Sertifika `ingress.tls.secretName`
+  (varsayılan `<release>-tls`) adlı `kubernetes.io/tls` Secret'ındadır:
+  kendiniz oluşturun ya da cert-manager'a oluşturtun
+  (`ingress.annotations` ile `cert-manager.io/cluster-issuer: <issuer>`).
+  Controller'ın HSTS ya da istek sınırı ayarları da `ingress.annotations`
+  ile verilir. Chart `UPTIME_PUBLIC_URL`'i ve OIDC dönüş adresini TLS
+  açıkken `https://<ingress.host>`, kapalıyken `http://<ingress.host>`
+  olarak türetir. TLS'i yalnızca TLS Ingress'in önünde, bir yük
+  dengeleyicide bitiyorsa kapatın; o durumda `publicURL` ve
+  `oidc.redirectURL` değerlerini `https://` adresle verin. TLS kapalıyken
+  kurulum notları uyarır.
+
+**Yükseltme notu:** Ingress ile kurulmuş ve TLS'i yük dengeleyicide biten
+kurulumlarda yükseltirken `ingress.tls.enabled=false` (ve `https://` ile
+`publicURL`) verin; yoksa Ingress var olmayan bir sertifika Secret'ı ister ve
+controller HTTPS'e yönlendirmeye başlar.
+
+### Servis hesabı
+
+Backend keşif için pod'un servis hesabıyla cluster'ı okur. Yetkiler salt
+okunurdur ve kodun kullandığıyla sınırlıdır: yazma yoktur, Secret'lar
+okunmaz, namespace'ler ve pod'lar yalnızca listelenir (`list`, tek tek
+`get` yok). Yine de bir pod ya da workload listesi pod tanımının tamamını,
+ortam değişkenlerine düz yazılmış değerler dahil, getirir; Route'un içine
+yazılmış bir sertifika da özel anahtarıyla gelir. Kubeat bunları
+kullanıcılarına göstermez, ama backend'in token'ını ele geçiren biri
+varsayılan kurulumda bunları cluster'ın tamamında okuyabilir. Ekiplerin
+paylaştığı bir cluster'da keşfi `discovery.namespaces` ile izlenecek
+namespace'lerle sınırlayın (bkz. "Cluster-admin olmadan"); gizli değerleri
+ortam değişkenlerine düz yazmak yerine `secretKeyRef` ile verin.
+
+`prometheus.tokenFile` verildiğinde backend her sorguda bu token'ı
+`prometheus.url`'e gönderir. Bu yüzden `prometheus.insecureSkipVerify`
+onunla birlikte kullanılmamalıdır: sertifika denetlenmezse araya giren
+token'ı alır. Bunun yerine `prometheus.caFile` verin (OpenShift'te service
+CA); ikisi birlikte verilirse kurulum notları uyarır.
+
+### Tedarik zinciri
+
+- Taban imajlar (`golang`, `ubi9/ubi-minimal`, `node`,
+  `ubi9/nodejs-24-minimal`) `latest` gibi kayan etiketlerle değil, tam sürüm
+  etiketleriyle sabitlenir; bir sürümün neyle derlendiği böylece bellidir.
+- Go sürümü `backend/go.mod`'daki `toolchain` satırıdır. CI onunla derler ve
+  test eder; backend imajını derleyen `golang` imajı da aynı sürümdedir. İkisi
+  birlikte yükseltilir.
+- Dependabot ([.github/dependabot.yml](.github/dependabot.yml)) her hafta Go
+  modülleri, npm paketleri, taban imajlar ve GitHub Actions için güncelleme
+  PR'ları açar. Yeni Go ve Node ana sürümleri elle alınır: Node'un ana sürümü
+  çalışma imajınınkiyle (`nodejs-24-minimal`) aynı olmalıdır.
+- CI'daki `govulncheck` işi bilinen açıkları kodun gerçekten çağırdığı
+  yerlerde arar (bağımlılıklar ve standart kütüphane); bulursa CI kırmızı
+  olur.
+- İmajlar yalnızca sürüm etiketinde derlenir; taban imajdaki bir düzeltme
+  kullanıcılara bir sonraki sürümle ulaşır.
+
 ## Arayüz
 
 Arayüz bir çalışma alanıdır: solda tüm monitor'ların listesi, sağda genel
@@ -784,6 +942,10 @@ ne kadar gecikmeye göz yumulacağı. Bu süre içinde rapor gelmezse monitor
 başarısız olur. Adres hem arayüzün adresinden hem cluster içinde backend
 servisinden (`http://<release>-backend:8080/api/push/<token>`) kabul edilir;
 API anahtarı ya da oturum gerekmez, token'ın kendisi sırdır.
+`networkPolicy.enabled=true` iken başka namespace'lerden backend'e
+ulaşılamaz; işler raporu arayüzün servisine gönderir
+(`http://<release>-frontend.<namespace>.svc:3000/api/push/<token>`, bkz.
+"Güvenlik").
 
 ```yaml
 # Bir CronJob'un sonunda:
@@ -1005,6 +1167,10 @@ helm upgrade --install kubeat deploy/helm/kubeat \
   --set prometheus.openshiftMonitoringView=true
 ```
 
+Token'ın gittiği sunucunun sertifikası `prometheus.caFile` ile doğrulanır;
+`prometheus.insecureSkipVerify` token ile birlikte kullanılmamalıdır (bkz.
+"Servis hesabı").
+
 Minikube'da denemek için `make minikube-demo` küçük bir Prometheus kurar;
 ardından:
 
@@ -1037,7 +1203,10 @@ yayınlar. Başlıcaları:
 
 Chart'ta `metrics.serviceMonitor.enabled=true` bir ServiceMonitor oluşturur;
 böylece monitor durumları cluster'ın kendi Prometheus'unda sorgulanabilir
-(OpenShift konsolunda Observe → Metrics). İzlenen nesnenin namespace'i
+(OpenShift konsolunda Observe → Metrics). Metrikler bir anahtar ister
+(`metrics.auth.enabled`, varsayılan açık); ServiceMonitor onu kendisi
+gönderir, elle yapılandırılmış bir Prometheus'un da göndermesi gerekir (bkz.
+"Metrik anahtarı"). İzlenen nesnenin namespace'i
 `monitor_namespace` etiketindedir; `namespace` etiketini Prometheus kendisi
 koyar ve Kubeat'in çalıştığı namespace'i gösterir (OpenShift'in user
 workload monitoring'i bunu zorunlu tutar).
@@ -1359,6 +1528,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SECRET_KEY_FILE` | – | Anahtarın okunduğu dosya, örneğin bağlanmış bir Secret; `UPTIME_SECRET_KEY` ile birlikte verilemez |
 | `UPTIME_ALLOW_PLAINTEXT_SECRETS` | `false` | Anahtar yokken de başlar; gizli değerler şifresiz yazılır |
 | `UPTIME_ADMIN_PASSWORD` | – | Hesap yokken `admin` yöneticisini bu parolayla oluşturur; parola kurallarına uymazsa backend başlamaz. Boşsa ilk yönetici `/setup`'ta oluşturulur |
+| `UPTIME_METRICS_TOKEN` | – | `/metrics`'in istediği anahtar (`Authorization: Bearer ...`; API anahtarı da geçer); boşsa `/metrics` herkese açıktır |
 | `UPTIME_ADMIN_PASSWORD_RESET` | `false` | `admin` parolasını `UPTIME_ADMIN_PASSWORD` değerine çeker; bir kez kullanılır |
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
 | `UPTIME_LOGIN_MAX_FAILURES` | `10` | Bir kullanıcı adını kilitleyen hatalı deneme sayısı |

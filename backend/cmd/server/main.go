@@ -350,6 +350,7 @@ func main() {
 			OIDCDefaultNamespaces:    splitList(cfg.OIDCDefaultNamespaces),
 			Notifier:                 alerts,
 			Metrics:                  meter.Handler(),
+			MetricsToken:             cfg.MetricsToken,
 			EmailEnabled:             senders.EmailEnabled(),
 			Discovery:                cluster,
 			Sync:                     sync,
@@ -391,6 +392,9 @@ func main() {
 
 	if cfg.APIToken == "" {
 		logger.Info("UPTIME_API_TOKEN is not set: the API accepts signed-in users only; set a token for scripts and automation")
+	}
+	if cfg.MetricsToken == "" {
+		logger.Info("UPTIME_METRICS_TOKEN is not set: /metrics answers anyone who can reach the port")
 	}
 	logger.Info("server listening", "addr", cfg.Addr, "version", version, "db", cfg.DBPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {

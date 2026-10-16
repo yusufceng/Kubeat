@@ -127,6 +127,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("UPTIME_WORKERS", "50")
 	t.Setenv("UPTIME_RETENTION", "48h")
 	t.Setenv("UPTIME_HTTP_INSECURE_SKIP_VERIFY", "true")
+	t.Setenv("UPTIME_METRICS_TOKEN", "scrape-token")
 
 	got, err := Load()
 	if err != nil {
@@ -141,6 +142,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if got.Workers != 50 || got.Retention != 48*time.Hour || !got.HTTPInsecureSkipVerify {
 		t.Errorf("Workers=%d Retention=%s HTTPInsecureSkipVerify=%v", got.Workers, got.Retention, got.HTTPInsecureSkipVerify)
+	}
+	if got.MetricsToken != "scrape-token" {
+		t.Errorf("MetricsToken = %q, want scrape-token", got.MetricsToken)
 	}
 	got = Config{Addr: got.Addr, DBPath: got.DBPath, DBBusyTimeout: got.DBBusyTimeout,
 		ReadHeaderTimeout: got.ReadHeaderTimeout, ShutdownTimeout: got.ShutdownTimeout}

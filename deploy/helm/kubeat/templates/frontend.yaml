@@ -38,9 +38,15 @@ spec:
               value: "http://{{ .Release.Name }}-backend:8080"
             - name: DEFAULT_LOCALE
               value: {{ .Values.language | quote }}
-            # What push monitors show to jobs in other namespaces.
+            # What push monitors show to jobs in other namespaces. With the
+            # NetworkPolicy only the frontend may reach the backend, so jobs
+            # report to the frontend, which passes the reports on.
             - name: PUSH_INTERNAL_URL
+              {{- if .Values.networkPolicy.enabled }}
+              value: "http://{{ .Release.Name }}-frontend.{{ .Release.Namespace }}.svc:3000"
+              {{- else }}
               value: "http://{{ .Release.Name }}-backend.{{ .Release.Namespace }}.svc:8080"
+              {{- end }}
             - name: SESSION_TTL_HOURS
               value: {{ .Values.auth.sessionTtlHours | quote }}
             # Whether users are on HTTPS, for the session cookie and

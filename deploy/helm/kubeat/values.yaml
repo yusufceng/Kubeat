@@ -87,6 +87,17 @@ frontend:
     limits:
       memory: 512Mi
 
+# The chart generates four Secrets on the first install and keeps them
+# across upgrades by reading them back from the cluster: the administrator
+# password (auth), the API token (apiToken), the encryption key (secretKey)
+# and the metrics token (metrics.auth). A renderer without access to the
+# cluster (helm template, Argo CD, OpenShift GitOps) cannot read them back:
+# it generates new values on every render, and a sync overwrites the
+# Secrets. A new encryption key is the worst of it: after its next restart
+# the backend refuses it, and what the old key encrypted is lost with it.
+# Under GitOps create these Secrets yourself (Sealed Secrets, External
+# Secrets, ...) and name them in the existingSecret values.
+
 # Sign-in to the UI with a single administrator password. By default the
 # chart generates the password once and keeps it; the install notes say how
 # to read it.
@@ -181,15 +192,31 @@ secretKey:
   existingSecret: ""
 
 # Restricts who can connect to the backend at the network level, in addition
-# to the token. Needs a network plugin that enforces NetworkPolicy.
+# to the tokens: the frontend, the Prometheus below and backendIngressFrom.
+# Needs a network plugin that enforces NetworkPolicy. Only connections to the
+# backend are restricted, never the backend's own: checks must reach any
+# service, pod or address. With the policy on, jobs in other namespaces send
+# push reports to the frontend instead, which passes them on
+# (http://<release>-frontend.<namespace>.svc:3000/api/push/<token>); the UI
+# shows that address.
 networkPolicy:
   enabled: false
-  # Extra sources allowed to reach the backend, e.g. the namespace of the
-  # Prometheus that scrapes /metrics. A list of NetworkPolicy "from" entries.
+  # Who scrapes /metrics, allowed while metrics.serviceMonitor is on: by
+  # default OpenShift's user workload monitoring. For the platform's own
+  # Prometheus name openshift-monitoring; elsewhere the namespace of the
+  # Prometheus, e.g. kubernetes.io/metadata.name: monitoring. A list of
+  # NetworkPolicy "from" entries.
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-user-workload-monitoring
+  # Extra sources allowed to reach the backend, e.g. the namespace of jobs
+  # that call the API with the API token. A list of NetworkPolicy "from"
+  # entries.
   backendIngressFrom: []
     # - namespaceSelector:
     #     matchLabels:
-    #       kubernetes.io/metadata.name: openshift-user-workload-monitoring
+    #       kubernetes.io/metadata.name: ci
 
 # Where pod CPU and memory usage is read from: any Prometheus-compatible
 # API. Leave the URL empty to show pods without resource usage.
@@ -199,6 +226,8 @@ prometheus:
   # pod's own service account token and the service CA.
   tokenFile: ""      # e.g. /var/run/secrets/kubernetes.io/serviceaccount/token
   caFile: ""         # e.g. /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+  # Never together with tokenFile: the token would go to whoever answers at
+  # the URL. Give caFile instead.
   insecureSkipVerify: false
   # OpenShift only: binds the service account to cluster-monitoring-view,
   # which Thanos Querier requires.
@@ -206,6 +235,17 @@ prometheus:
 
 # The backend serves Prometheus metrics at /metrics on its service port.
 metrics:
+  # The metrics name every monitor and its namespace, so they answer only
+  # scrapes that present a token of their own as a bearer token
+  # (UPTIME_METRICS_TOKEN). The chart generates it once and keeps it, and the
+  # ServiceMonitor below sends it. A Prometheus configured by hand must send
+  # it too (authorization.credentials_file), or set enabled to false, which
+  # leaves /metrics open to anyone who can reach the backend.
+  auth:
+    enabled: true
+    # Name of an existing Secret with the key "token", to manage it yourself.
+    # Never the API token's Secret: the scraping Prometheus keeps a copy.
+    existingSecret: ""
   # Creates a ServiceMonitor so the cluster's Prometheus scrapes them. Needs
   # the prometheus-operator CRDs; on OpenShift, user workload monitoring.
   serviceMonitor:
@@ -255,6 +295,10 @@ smtp:
 
 # Lets the backend list namespaces, services, pods, ingresses and routes
 # (read-only, cluster-wide) so monitors can be created from what is running.
+# Read-only still reveals a lot to whoever holds the backend's service
+# account token: a pod or workload carries its literal environment values,
+# a Route with an inline certificate its private key. On a cluster shared by
+# teams, list the namespaces to watch below.
 discovery:
   enabled: true
   # Limits discovery to these namespaces and grants read access there with
@@ -273,9 +317,31 @@ podSecurityContext: {}
 
 # Exposes the frontend outside the cluster. Enable at most one.
 route:
-  enabled: false       # OpenShift Route
+  enabled: false       # OpenShift Route, edge TLS; plain HTTP is redirected
   host: ""
+  # Annotations for the OpenShift router, e.g.
+  #   haproxy.router.openshift.io/hsts_header: max-age=31536000
+  #     browsers then come back over HTTPS only (leave out preload on a
+  #     shared apps domain)
+  #   haproxy.router.openshift.io/rate-limit-connections: "true"
+  #   haproxy.router.openshift.io/rate-limit-connections.rate-http: "500"
+  #     at most 500 requests per client address in 10 seconds. Everything on
+  #     the Route counts (the UI, status pages, badges, push reports), and
+  #     clients behind one NAT share the limit.
+  annotations: {}
 ingress:
   enabled: false
   className: ""
   host: kubeat.local
+  # e.g. cert-manager.io/cluster-issuer: letsencrypt, which also creates the
+  # TLS Secret below; or the controller's own settings (HSTS, rate limits).
+  annotations: {}
+  # Signing in sends passwords (directory passwords too, with LDAP) and every
+  # request the session cookie, so the Ingress serves host over HTTPS with
+  # the kubernetes.io/tls Secret secretName. Turn it off only when TLS ends
+  # in front of the ingress controller, at a load balancer; then set
+  # publicURL (and oidc.redirectURL) to the https:// address, as the chart
+  # derives http:// from the host.
+  tls:
+    enabled: true
+    secretName: ""     # defaults to <release>-tls

@@ -55,14 +55,14 @@ Her madde için beklenen sonuç ve bakılacak yer yazılı. Olmayanı not alın.
 | 4 | Keşif Route'ları görüyor | Keşif → namespace seç | Route satırları "Route adresi" gerekçesiyle, Service satırları probe yoluyla |
 | 5 | Route'un arkasındaki pod'lar | Route'tan oluşan monitor'un sayfası → Pod'lar | Pod listesi, olaylar; CPU/bellek Thanos'tan |
 | 6 | Thanos yetkisi | Aynı sayfa, CPU/bellek sütunu | Değer geliyor; "metrics server could not be queried" **yok** |
-| 7 | ServiceMonitor scrape ediliyor | Konsol → Observe → Metrics → `kubeat_monitor_up` | Monitor başına seri, `namespace` etiketi izlenen nesnenin |
+| 7 | ServiceMonitor scrape ediliyor | Konsol → Observe → Metrics → `kubeat_monitor_up`; Observe → Targets | Monitor başına seri, `monitor_namespace` etiketi izlenen nesnenin; hedef `up`, metrik anahtarıyla `401` yok |
 | 8 | PrometheusRule alarmı | Bir monitor'u bilerek düşür (Service'i scale 0) → Observe → Alerting | `KubeatMonitorDown` önce Pending, sonra Firing; Alertmanager alıcısına düşüyor |
 | 9 | Annotation ile keşif | `oc -n <ns> annotate svc/<ad> kubeat.io/monitor=true kubeat.io/each-pod=true` | 1 dk içinde monitor "annotation" rozetiyle; annotation kalkınca siliniyor |
 | 10 | Pod bazlı kontrol | Yukarıdaki monitor'da `oc exec <pod> -- pkill -STOP <süreç>` | "1 of N pods failed: <pod>" ve olay; pod Ready kalırken |
 | 11 | Workload monitor rollout'ta sessiz | Deployment'ı `oc rollout restart` et | Olay açılmıyor, ayrıntı "rollout in progress" |
 | 12 | Ping (ICMP) | `ping` tipinde monitor | Çalışıyor; "ping_group_range" hatası varsa not alın (RHCOS'ta bilinmiyor) |
 | 13 | Yedekleme | `backup.enabled=true` ile kur, `oc -n kubeat exec deploy/kubeat-backend -- ls /backup` | Dosya üretiliyor, PVC'ye yazılabiliyor (fsGroup) |
-| 14 | NetworkPolicy | `networkPolicy.enabled=true` ile kur, başka namespace'ten `curl kubeat-backend.kubeat.svc:8080/api/v1/health` | Reddediliyor; arayüz çalışmaya devam ediyor |
+| 14 | NetworkPolicy | `networkPolicy.enabled=true` ile kur, başka namespace'ten `curl kubeat-backend.kubeat.svc:8080/api/v1/health` | Reddediliyor; arayüz çalışmaya devam ediyor; ServiceMonitor scrape'i sürüyor (`metricsFrom`); push raporu `kubeat-frontend.kubeat.svc:3000/api/push/<token>` üzerinden geçiyor |
 | 15 | OIDC / LDAP | `oidc.*` ya da `ldap.*` değerleriyle kur (Route host'u router'a bırakıldıysa `publicURL=https://<host>` da ver), Kullanıcılar'da grup eşlemesi yap | "SSO ile giriş" çalışıyor, rol gruptan geliyor; giriş sonrası Route adresine dönülüyor |
 | 16 | Yükseltme süresi | `helm upgrade` sırasında monitor listesini izle | Kontroller kaç saniye durdu? (tek replica; 10–20 sn beklenir) |
 | 17 | Tarayıcı güvenlik başlıkları | `curl -sI https://<route>/login`; sonra arayüzde birkaç sayfa gez | `Content-Security-Policy` ve `Strict-Transport-Security` var, `X-Powered-By` yok; tarayıcı konsolunda CSP ihlali yok |

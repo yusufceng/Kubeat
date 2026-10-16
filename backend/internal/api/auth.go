@@ -49,6 +49,8 @@ var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]*$`)
 // openPath reports whether a request needs no credentials: health and
 // metrics for the cluster, push reports and public status pages, which
 // carry their own secrets or are public by design, and signing in itself.
+// The metrics may ask for a token of their own (metricsAuth), but never for
+// a session: a scrape has none.
 func openPath(r *http.Request) bool {
 	path := r.URL.Path
 	if token, isPush := strings.CutPrefix(path, pushPath); isPush {
@@ -113,6 +115,27 @@ func (h *handler) authenticate(next http.Handler) http.Handler {
 			_ = h.opts.Store.TouchSession(r.Context(), sess.TokenHash, now)
 		}
 		next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), auth.FromUser(user))))
+	})
+}
+
+// metricsAuth puts the metrics behind the metrics token, when one is set.
+// They name every monitor and its namespace, so whoever could reach the
+// port would otherwise see past the namespaces their role is limited to.
+// The scraper presents the token as a bearer token; the service token is
+// accepted too. A user's session is not: the metrics are not scoped.
+func (h *handler) metricsAuth(next http.Handler) http.Handler {
+	if h.opts.MetricsToken == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		valid := ok && (subtle.ConstantTimeCompare([]byte(token), []byte(h.opts.MetricsToken)) == 1 ||
+			(h.opts.Token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.opts.Token)) == 1))
+		if !valid {
+			unauthorized(w, "present the metrics token")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

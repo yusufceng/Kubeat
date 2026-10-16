@@ -8,6 +8,10 @@ metadata:
   name: {{ .Release.Name }}
   labels:
     {{- include "kubeat.labels" . | nindent 4 }}
+  {{- with .Values.route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- with .Values.route.host }}
   host: {{ . }}
@@ -28,12 +32,26 @@ metadata:
   name: {{ .Release.Name }}
   labels:
     {{- include "kubeat.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . }}
   {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  # Signing in sends passwords and every request the session cookie, so the
+  # UI is served over HTTPS.
+  tls:
+    - secretName: {{ .Values.ingress.tls.secretName | default (printf "%s-tls" .Release.Name) | quote }}
+      {{- with .Values.ingress.host }}
+      hosts:
+        - {{ . | quote }}
+      {{- end }}
+  {{- end }}
   rules:
-    - host: {{ .Values.ingress.host }}
+    - host: {{ .Values.ingress.host | quote }}
       http:
         paths:
           - path: /

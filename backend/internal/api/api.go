@@ -152,8 +152,10 @@ type Options struct {
 	OIDCName              string
 	OIDCDefaultRole       store.Role
 	OIDCDefaultNamespaces []string
-	// Metrics, if set, is served at /metrics.
-	Metrics http.Handler
+	// Metrics, if set, is served at /metrics. MetricsToken, if set, is the
+	// bearer token a scrape must present; the service token is accepted too.
+	Metrics      http.Handler
+	MetricsToken string
 	// EmailEnabled says whether an SMTP server is configured; e-mail
 	// channels cannot be created without one.
 	EmailEnabled bool
@@ -210,7 +212,7 @@ func NewHandler(opts Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)
 	if opts.Metrics != nil {
-		mux.Handle("GET /metrics", opts.Metrics)
+		mux.Handle("GET /metrics", h.metricsAuth(opts.Metrics))
 	}
 	mux.HandleFunc("GET /api/v1/monitors", h.listMonitors)
 	mux.HandleFunc("POST /api/v1/monitors", h.createMonitor)

@@ -25,6 +25,11 @@ type Config struct {
 	SecretKey             string // UPTIME_SECRET_KEY
 	SecretKeyFile         string // UPTIME_SECRET_KEY_FILE
 	AllowPlaintextSecrets bool   // UPTIME_ALLOW_PLAINTEXT_SECRETS
+	// MetricsToken, if set, is the bearer token a scrape of /metrics must
+	// present; the API token is accepted too. Without it the metrics, which
+	// name every monitor and its namespace, are open to anyone who can
+	// reach the port, whatever namespaces their role is limited to.
+	MetricsToken string // UPTIME_METRICS_TOKEN
 
 	// Accounts. AdminPassword creates the administrator "admin" when there
 	// is no account yet; with AdminPasswordReset it also resets admin's
@@ -225,6 +230,7 @@ func Load() (Config, error) {
 		APIToken:      envString("UPTIME_API_TOKEN", ""),
 		SecretKey:     envString("UPTIME_SECRET_KEY", ""),
 		SecretKeyFile: envString("UPTIME_SECRET_KEY_FILE", ""),
+		MetricsToken:  envString("UPTIME_METRICS_TOKEN", ""),
 
 		AdminPassword: envString("UPTIME_ADMIN_PASSWORD", ""),
 

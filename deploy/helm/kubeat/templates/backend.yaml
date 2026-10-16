@@ -81,6 +81,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "kubeat.apiTokenSecret" . }}
                   key: token
+            {{- if .Values.metrics.auth.enabled }}
+            - name: UPTIME_METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubeat.metricsTokenSecret" . }}
+                  key: token
+            {{- end }}
             - name: UPTIME_SECRET_KEY
               valueFrom:
                 secretKeyRef:

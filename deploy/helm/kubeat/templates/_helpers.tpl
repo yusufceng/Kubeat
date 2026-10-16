@@ -27,6 +27,23 @@ seccompProfile:
 {{- end }}
 
 {{/*
+The Secret holding the token a scrape of /metrics presents: the backend
+expects it and the ServiceMonitor sends it.
+*/}}
+{{- define "kubeat.metricsTokenSecret" -}}
+{{ .Values.metrics.auth.existingSecret | default (printf "%s-metrics-token" .Release.Name) }}
+{{- end }}
+
+{{/*
+The Ingress host as a URL: HTTPS only when the Ingress serves TLS itself.
+When TLS ends in front of the ingress controller, at a load balancer, the
+address users really reach is given in publicURL and oidc.redirectURL.
+*/}}
+{{- define "kubeat.ingressURL" -}}
+{{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
+{{- end -}}
+
+{{/*
 Where users reach Kubeat, for the links in notifications, the OIDC redirect
 and the frontend's HTTPS settings: as given, or made from the Route or
 Ingress host.
@@ -37,7 +54,7 @@ Ingress host.
 {{- else if and .Values.route.enabled .Values.route.host -}}
 https://{{ .Values.route.host }}
 {{- else if and .Values.ingress.enabled .Values.ingress.host -}}
-https://{{ .Values.ingress.host }}
+{{ include "kubeat.ingressURL" . }}
 {{- end -}}
 {{- end -}}
 

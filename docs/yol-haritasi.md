@@ -116,9 +116,12 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   denemeyle `UPTIME_LOGIN_LOCKOUT` süresince kilitleyebilir; IP bazlı sınır
   yoktur. Kilitli bir hesap için API anahtarı, SSO ya da backend'i yeniden
   başlatmak kalır (README, "Kilitli hesaba girmek").
-- `/metrics` kimlik istemez ve monitor adlarını, namespace'lerini ve
-  sertifika bitişlerini açığa çıkarır; backend'e kimlerin ulaşabileceğini
-  NetworkPolicy belirler.
+- `/metrics` monitor adlarını, namespace'lerini ve sertifika bitişlerini
+  verir ve kullanıcı rollerinin namespace sınırını tanımaz; bu yüzden
+  `UPTIME_METRICS_TOKEN` ile ayrı bir anahtar ister (chart onu varsayılan
+  olarak üretir). Anahtar ayarlanmazsa açıktır ve backend'e kimlerin
+  ulaşabileceğini NetworkPolicy belirler. NetworkPolicy `/metrics`'i push ve
+  API'den ayıramaz: üçü aynı porttadır.
 - Yayımlanmış bir durum sayfasının her görüntülenmesi tüm monitor'ların
   durumunu okur; önbellek yoktur. Çok ziyaret edilen bir sayfa için önüne
   bir önbellek konmalıdır.

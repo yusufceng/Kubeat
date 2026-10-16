@@ -1,0 +1,25 @@
+{{- /*
+The token a scrape of /metrics presents. Generated once and kept across
+upgrades; set metrics.auth.existingSecret to manage it yourself. It is a
+token of its own, never the API token: the Prometheus that scrapes keeps a
+copy in its configuration (on OpenShift in a Secret of
+openshift-user-workload-monitoring), where it must open nothing but the
+metrics.
+*/ -}}
+{{- if and .Values.metrics.auth.enabled (not .Values.metrics.auth.existingSecret) }}
+{{- $name := printf "%s-metrics-token" .Release.Name }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kubeat.labels" . | nindent 4 }}
+type: Opaque
+data:
+  {{- if and $existing $existing.data (index $existing.data "token") }}
+  token: {{ index $existing.data "token" }}
+  {{- else }}
+  token: {{ randAlphaNum 48 | b64enc }}
+  {{- end }}
+{{- end }}

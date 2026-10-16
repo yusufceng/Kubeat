@@ -1,7 +1,8 @@
 {{- if .Values.metrics.prometheusRule.enabled }}
 # Alerts the cluster's own Prometheus raises from Kubeat's metrics, so that
 # outages reach the Alertmanager and receivers the platform already has.
-# Needs the ServiceMonitor (or another scrape of /metrics) to be in place.
+# Needs the ServiceMonitor (or another scrape of /metrics, which then sends
+# the metrics token) to be in place.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

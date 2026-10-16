@@ -466,7 +466,7 @@ func TestAPIToken(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	// Probes and scrapes need no token.
+	// Probes need no token, and scrapes none while no metrics token is set.
 	for _, path := range []string{"/api/v1/health", "/metrics"} {
 		if code := request("GET", path, ""); code != http.StatusOK {
 			t.Errorf("GET %s without a token: status = %d, want 200", path, code)
@@ -505,6 +505,62 @@ func TestAPIToken(t *testing.T) {
 	}
 	if code := request("POST", "/api/v1/monitors", "Bearer s3cret-token"); code != http.StatusCreated {
 		t.Errorf("POST with the token: status = %d, want 201", code)
+	}
+}
+
+func TestMetricsToken(t *testing.T) {
+	metrics := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("kubeat_build_info 1\n")) })
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.Metrics = metrics
+		o.MetricsToken = "scrape-token"
+	})
+	addUser(t, srv.URL, "ayse", store.RoleViewer, "team-a")
+	session, code := signIn(t, srv.URL, "ayse", "parola-123")
+	if code != http.StatusOK {
+		t.Fatalf("sign in: status = %d", code)
+	}
+
+	scrape := func(auth string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest("GET", srv.URL+"/metrics", nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	// The metrics token opens the metrics, and so does the service token.
+	for _, auth := range []string{"Bearer scrape-token", "Bearer " + testToken} {
+		if resp := scrape(auth); resp.StatusCode != http.StatusOK {
+			t.Errorf("GET /metrics with %q: status = %d, want 200", auth, resp.StatusCode)
+		}
+	}
+	// Nothing else does; not even a session, as the metrics are not scoped
+	// to the namespaces of the user's role.
+	for name, auth := range map[string]string{
+		"no header":    "",
+		"wrong token":  "Bearer wrong",
+		"prefix":       "Bearer scrape",
+		"longer":       "Bearer scrape-token-and-more",
+		"wrong scheme": "Basic scrape-token",
+		"token alone":  "scrape-token",
+		"session":      "Bearer " + session,
+	} {
+		resp := scrape(auth)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("GET /metrics with %s: status = %d, want 401", name, resp.StatusCode)
+		}
+		if resp.Header.Get("WWW-Authenticate") == "" {
+			t.Errorf("GET /metrics with %s: the 401 has no WWW-Authenticate header", name)
+		}
+	}
+	// Probes still need nothing.
+	if code := doAs(t, "", "GET", srv.URL+"/api/v1/health", "", nil); code != http.StatusOK {
+		t.Errorf("GET /api/v1/health without a token: status = %d, want 200", code)
 	}
 }
 

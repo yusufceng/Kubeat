@@ -1,7 +1,13 @@
 {{- define "kubeat.discoveryRules" -}}
 - apiGroups: [""]
-  resources: ["services", "pods"]
+  resources: ["services"]
   verbs: ["get", "list"]
+# Pods are only listed, never read one by one: discovery reads their probes,
+# the pod panel their state. A list still returns whole pod specs, literal
+# environment values included, so no verb more than needed is granted.
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list"]
 # The events shown next to a monitor's pods.
 - apiGroups: [""]
   resources: ["events"]
@@ -31,9 +37,10 @@ metadata:
   labels:
     {{- include "kubeat.labels" . | nindent 4 }}
 rules:
+  # Listed for the namespaces the discovery page offers; never read one by one.
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
   {{- include "kubeat.discoveryRules" . | nindent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

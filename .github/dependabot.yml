@@ -1,0 +1,59 @@
+# Weekly update PRs for what the builds pull in. The base images are pinned
+# to exact tags in backend/Dockerfile and frontend/Dockerfile, so these PRs
+# are how they move; images are rebuilt only for a release tag, so a base
+# image fix reaches users with the next release.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go-modules:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      npm-packages:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      # A new Go release is taken on purpose, together with the toolchain
+      # line in backend/go.mod, which CI builds with. Patch releases come
+      # through; raise the toolchain line with them.
+      - dependency-name: golang
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      # The build's Node major goes with the runtime image's
+      # (ubi9/nodejs-24-minimal); the two change together, by hand.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
