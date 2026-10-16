@@ -452,12 +452,29 @@ UPTIME_OIDC_CLIENT_SECRET=...                 # public client ise boş; PKCE her
 UPTIME_OIDC_REDIRECT_URL=https://kubeat.apps.example/auth/callback
 ```
 
-- Sağlayıcıda istemci bu redirect URL ile kaydedilir; chart `route.host`
-  ya da `ingress.host` verilmişse adresi kendisi türetir. Route'a host
-  vermeyip router'a bıraktıysanız `UPTIME_OIDC_REDIRECT_URL` boş da
-  kalabilir: her giriş, arayüzün o an sunulduğu adresin `/auth/callback`
-  yolunu kullanır (yalnızca HTTPS; sağlayıcı zaten kayıtlı olmayan adresi
-  reddeder). Kayıtlı adresin Route'un gerçek host'u olması yine şarttır.
+- Sağlayıcıda istemci bu redirect URL ile kaydedilir. Boş bırakılırsa
+  `UPTIME_PUBLIC_URL` adresinin `/auth/callback` yolu kullanılır; chart
+  adresi `publicURL`, `route.host` ya da `ingress.host` değerinden kendisi
+  türetir. Route'a host vermeyip router'a bıraktıysanız, router'ın verdiği
+  host'u öğrendikten sonra `publicURL` değerini `https://<host>` yapın;
+  chart o zamana kadar kurulum notlarında uyarır.
+- İkisi de yoksa SSO yalnızca `localhost` üzerinde çalışan bir arayüzle
+  (`next dev`) çalışır ve backend açılışta bunu uyarı olarak loglar.
+  Arayüzün kendi adresi diye bildirdiği değere başka hiçbir yerde
+  güvenilmez: joker (wildcard) redirect kabul eden bir sağlayıcı
+  kullanıcının kodunu, kimlik doğrulamasız bir isteğin istediği herhangi
+  bir adrese gönderirdi.
+- Adres açılışta denetlenir: tam bir URL olmalı, yolu `/auth/callback`
+  olmalı ve HTTPS kullanmalıdır (düz HTTP yalnızca `localhost` için;
+  özel IP'ler ve cluster içi adlar serbesttir). Uymazsa backend başlamaz
+  ve nedenini söyler.
+- Giriş, onu başlatan tarayıcıya bağlıdır: arayüz sağlayıcıya giderken
+  state değerini o tarayıcıda kısa ömürlü bir çerezde (`/auth` yolunda, 10
+  dakika) tutar ve dönüşte yalnızca aynı state ile devam eder. Böylece
+  kimse kendi başlattığı bir girişin dönüş bağlantısını başkasına açtırıp
+  onu kendi hesabına sokamaz; başka bir tarayıcıda başlatılmış bir girişin
+  bağlantısı açılırsa giriş sayfası girişin buradan yeniden başlatılmasını
+  ister.
 - Hesap `preferred_username` (`UPTIME_OIDC_USERNAME_CLAIM`), `name` ve
   `email` claim'lerinden kurulur; gruplar `groups` claim'inden
   (`UPTIME_OIDC_GROUPS_CLAIM`). Okta için kapsamlara `groups` eklenir
@@ -477,6 +494,43 @@ UPTIME_OIDC_REDIRECT_URL=https://kubeat.apps.example/auth/callback
 - OpenShift'in kendi OAuth sunucusu OIDC değildir; "OpenShift ile giriş"
   için cluster'ın bağlı olduğu kurumsal sağlayıcı (çoğunlukla Keycloak ya da
   Azure AD) doğrudan kullanılır.
+
+### Tarayıcı güvenliği
+
+Arayüz her yanıtla tarayıcıya sayfanın neler yapabileceğini söyleyen
+başlıklar gönderir:
+
+- **Content-Security-Policy.** Sayfalar yalnızca Kubeat'in kendi
+  script, stil, font ve görsellerini yükler; başka bir adrese bağlanamaz,
+  başka bir adrese form gönderemez, eklenti ve `eval` çalıştıramaz, başka
+  bir sitenin iframe'inde gösterilemez (clickjacking). Rozetler, push
+  raporları ve CSV indirmesi hiçbir şey çalıştırmayan ayrı bir politikayla
+  gelir. Satır içi (inline) script'lere izin verilir: Cache Components ile
+  sayfaların kabuğu istekten önce üretildiği için istek başına bir nonce
+  taşıyamaz.
+- **Durum sayfalarını iframe'de göstermek** (wiki, Grafana, duvar ekranı)
+  için izin verilen siteler `STATUS_PAGE_FRAME_ANCESTORS` ile verilir
+  (chart'ta `frontend.statusPageFrameAncestors`, örn.
+  `https://wiki.example.com`); varsayılan `'none'` hiçbirine izin vermez.
+  Arayüzün geri kalanı hiçbir zaman iframe'de gösterilmez; rozetler
+  `<img>` ile her yere konabilir.
+- **Strict-Transport-Security.** İstek HTTPS ile geldiyse ya da
+  `PUBLIC_URL` `https://` ise gönderilir (tarayıcı onu yalnızca HTTPS
+  üzerinden aldığında dikkate alır): tarayıcı bu host'a `HSTS_MAX_AGE`
+  (varsayılan 1 yıl) boyunca yalnızca HTTPS ile bağlanır; `0` kapatır.
+  `includeSubDomains` ve `preload` kullanılmaz: host çoğunlukla paylaşılan
+  bir apps alan adının altındadır.
+- **Oturum çerezi** `COOKIE_SECURE=auto` (varsayılan) ile, `PUBLIC_URL`
+  `https://` ise ya da önündeki proxy'lerden biri isteğin HTTPS ile
+  geldiğini (`X-Forwarded-Proto`) söylüyorsa Secure işaretlenir; tarayıcı
+  onu düz HTTP üzerinden hiç göndermez. `always` ve `never` de verilebilir.
+  `localhost` dışında düz HTTP ile erişilen bir kurulumda (TLS'siz bir
+  Ingress) `never` gerekir (chart'ta `frontend.cookieSecure=never`); yoksa
+  tarayıcı çerezi kabul etmez ve giriş yapılamaz.
+- Ayrıca `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
+  kamera, mikrofon, konum, ödeme ve USB'yi kapatan bir `Permissions-Policy`
+  ve `Cross-Origin-Opener-Policy: same-origin` gönderilir; `X-Powered-By`
+  gönderilmez.
 
 ## Arayüz
 
@@ -534,6 +588,10 @@ vardır; README ya da wiki sayfasına konabilir:
 
 `?label=metin` ile soldaki yazı değiştirilebilir. Hiçbir yayındaki sayfada
 olmayan monitor'un rozeti yoktur (404).
+
+Durum sayfası başka bir sitede iframe içinde gösterilecekse o sitenin
+adresi `STATUS_PAGE_FRAME_ANCESTORS` ile verilir (bkz. "Tarayıcı
+güvenliği"); varsayılan olarak hiçbir site gösteremez.
 
 ## API
 
@@ -1325,7 +1383,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_OIDC_ISSUER` | – | OpenID Connect sağlayıcısının issuer adresi; boşsa SSO kapalı |
 | `UPTIME_OIDC_CLIENT_ID` | – | Sağlayıcıda kayıtlı istemci kimliği (issuer ile zorunlu) |
 | `UPTIME_OIDC_CLIENT_SECRET` | – | İstemci sırrı; public client için boş |
-| `UPTIME_OIDC_REDIRECT_URL` | – | Sağlayıcının geri döndüğü adres: `https://<kubeat>/auth/callback`; boşsa her giriş, arayüzün o an sunulduğu adresi kullanır |
+| `UPTIME_OIDC_REDIRECT_URL` | – | Sağlayıcının geri döndüğü adres: `https://<kubeat>/auth/callback`; boşsa `UPTIME_PUBLIC_URL` adresinin `/auth/callback` yolu. HTTPS olmalıdır (düz HTTP yalnızca `localhost`); ikisi de yoksa SSO yalnızca `localhost`'taki bir arayüzle çalışır |
 | `UPTIME_OIDC_SCOPES` | `openid profile email` | İstenen kapsamlar, boşlukla ayrılmış |
 | `UPTIME_OIDC_USERNAME_CLAIM` | `preferred_username` | Kullanıcı adının okunduğu claim |
 | `UPTIME_OIDC_DISPLAY_NAME_CLAIM` | `name` | Görünen adın okunduğu claim |
@@ -1371,7 +1429,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |
 | `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Gönderilmeyi bekleyebilecek en fazla bildirim sayısı |
-| `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz |
+| `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz. `UPTIME_OIDC_REDIRECT_URL` boşsa SSO dönüş adresi de bundan türetilir |
 | `UPTIME_LANGUAGE` | `en` | Bildirim metinlerinin ve ilk yönetici hesabının görünen adının dili: `en` ya da `tr` |
 | `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |
 | `UPTIME_DISCOVERY_ENABLED` | `true` | Cluster keşfini açar |
@@ -1412,6 +1470,10 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `DEFAULT_LOCALE` | `en` | Tarayıcısı bizde olan bir dil istemeyen ziyaretçinin arayüz dili: `en` ya da `tr` |
+| `PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres (backend'deki `UPTIME_PUBLIC_URL`); `https://` ise oturum çerezi Secure işaretlenir ve HSTS gönderilir. Chart `publicURL`'den ya da Route/Ingress host'undan verir |
+| `COOKIE_SECURE` | `auto` | Oturum çerezinin Secure (yalnızca HTTPS) işaretlenmesi: `auto` (`PUBLIC_URL` `https://` ise ya da `X-Forwarded-Proto` değerlerinden biri `https` ise), `always` ya da `never` (`localhost` dışından düz HTTP ile erişim için) |
+| `STATUS_PAGE_FRAME_ANCESTORS` | `'none'` | Durum sayfalarını iframe içinde gösterebilecek siteler, CSP `frame-ancestors` kaynak listesi olarak (örn. `https://wiki.example.com`); arayüzün geri kalanı hiç gösterilemez |
+| `HSTS_MAX_AGE` | `31536000` | HTTPS ile gelen tarayıcıya gönderilen `Strict-Transport-Security` süresi (saniye); `0` kapalı |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `STATUS_PAGE_REFRESH_MS` | `30000` | Açık bir durum sayfasının yenilenme aralığı (ms) |
 | `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar monitor listesinde tüm namespace'ler açık gelir; üzerinde yalnızca sorunlu olanlar açılır |

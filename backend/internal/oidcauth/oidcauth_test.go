@@ -235,13 +235,14 @@ func TestRedirectFromTheCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Without a configured redirect, the caller's HTTPS /auth/callback is used.
-	authURL, err := c.Start(context.Background(), "https://kubeat.apps.example/auth/callback")
+	// Without a configured redirect, the caller's /auth/callback is used
+	// when it is on this machine: the frontend run with next dev.
+	authURL, err := c.Start(context.Background(), "http://localhost:3000/auth/callback")
 	if err != nil {
 		t.Fatal(err)
 	}
 	u, _ := url.Parse(authURL)
-	if got := u.Query().Get("redirect_uri"); got != "https://kubeat.apps.example/auth/callback" {
+	if got := u.Query().Get("redirect_uri"); got != "http://localhost:3000/auth/callback" {
 		t.Errorf("redirect_uri = %q", got)
 	}
 	// ...and the exchange sends the same one back.
@@ -249,16 +250,25 @@ func TestRedirectFromTheCaller(t *testing.T) {
 	if _, err := c.Finish(context.Background(), u.Query().Get("state"), "good-code"); err != nil {
 		t.Fatal(err)
 	}
-	if f.gotRedirect != "https://kubeat.apps.example/auth/callback" {
+	if f.gotRedirect != "http://localhost:3000/auth/callback" {
 		t.Errorf("token request redirect = %q", f.gotRedirect)
 	}
-	for _, bad := range []string{"", "http://kubeat.apps.example/auth/callback", "https://kubeat.apps.example/elsewhere", "https://x/auth/callback/../admin"} {
-		if _, err := c.Start(context.Background(), bad); err == nil {
-			t.Errorf("caller redirect %q was accepted", bad)
+	for _, local := range []string{"http://127.0.0.1:3000/auth/callback", "http://[::1]:3000/auth/callback", "https://LOCALHOST/auth/callback"} {
+		if _, err := c.Start(context.Background(), local); err != nil {
+			t.Errorf("caller redirect %q: %v", local, err)
 		}
 	}
-	if _, err := c.Start(context.Background(), "http://localhost:3000/auth/callback"); err != nil {
-		t.Errorf("localhost over http: %v", err)
+	// Anywhere else the code would go wherever an unauthenticated request
+	// said: to another host, or to the pod's own address behind a Route.
+	for _, bad := range []string{
+		"", "https://attacker.apps.example/auth/callback", "https://kubeat.apps.example/auth/callback",
+		"https://0.0.0.0:3000/auth/callback", "https://10.128.0.12:3000/auth/callback", "http://localhost.attacker.example/auth/callback",
+		"http://localhost:3000/elsewhere", "http://localhost:3000/auth/callback/../admin", "ftp://localhost/auth/callback", "//localhost/auth/callback",
+	} {
+		_, err := c.Start(context.Background(), bad)
+		if err == nil || !strings.Contains(err.Error(), "set UPTIME_OIDC_REDIRECT_URL or UPTIME_PUBLIC_URL") {
+			t.Errorf("caller redirect %q: err = %v, want a refusal that says what to set", bad, err)
+		}
 	}
 	// A configured redirect wins over whatever the caller says.
 	fixed := newClient(t, f)

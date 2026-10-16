@@ -23,7 +23,8 @@ import (
 type OIDC interface {
 	Issuer() string
 	// Start returns the provider URL to send the browser to.
-	// callersRedirect is used when no redirect URL is configured.
+	// callersRedirect is used only when no redirect URL is configured,
+	// and only if it is on localhost (the frontend run with next dev).
 	Start(ctx context.Context, callersRedirect string) (string, error)
 	// Finish turns what the provider sent back into an identity.
 	Finish(ctx context.Context, state, code string) (oidcauth.Identity, error)

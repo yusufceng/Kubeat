@@ -27,12 +27,9 @@ seccompProfile:
 {{- end }}
 
 {{/*
-The URL the identity provider sends the browser back to: as given, or made
-from the Route or Ingress host.
-*/}}
-{{/*
-Where users reach Kubeat, for the links in notifications: as given, or
-made from the Route or Ingress host.
+Where users reach Kubeat, for the links in notifications, the OIDC redirect
+and the frontend's HTTPS settings: as given, or made from the Route or
+Ingress host.
 */}}
 {{- define "kubeat.publicURL" -}}
 {{- if .Values.publicURL -}}
@@ -44,12 +41,15 @@ https://{{ .Values.ingress.host }}
 {{- end -}}
 {{- end -}}
 
+{{/*
+The URL the identity provider sends the browser back to: as given, or the
+/auth/callback of the public URL. Empty while neither is known (a Route
+whose host the router picks): SSO then needs publicURL set to that host.
+*/}}
 {{- define "kubeat.oidcRedirectURL" -}}
 {{- if .Values.oidc.redirectURL -}}
 {{ .Values.oidc.redirectURL }}
-{{- else if and .Values.route.enabled .Values.route.host -}}
-https://{{ .Values.route.host }}/auth/callback
-{{- else if and .Values.ingress.enabled .Values.ingress.host -}}
-https://{{ .Values.ingress.host }}/auth/callback
+{{- else if include "kubeat.publicURL" . -}}
+{{ include "kubeat.publicURL" . | trimSuffix "/" }}/auth/callback
 {{- end -}}
 {{- end -}}

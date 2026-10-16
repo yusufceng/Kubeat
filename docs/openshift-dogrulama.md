@@ -63,8 +63,9 @@ Her madde için beklenen sonuç ve bakılacak yer yazılı. Olmayanı not alın.
 | 12 | Ping (ICMP) | `ping` tipinde monitor | Çalışıyor; "ping_group_range" hatası varsa not alın (RHCOS'ta bilinmiyor) |
 | 13 | Yedekleme | `backup.enabled=true` ile kur, `oc -n kubeat exec deploy/kubeat-backend -- ls /backup` | Dosya üretiliyor, PVC'ye yazılabiliyor (fsGroup) |
 | 14 | NetworkPolicy | `networkPolicy.enabled=true` ile kur, başka namespace'ten `curl kubeat-backend.kubeat.svc:8080/api/v1/health` | Reddediliyor; arayüz çalışmaya devam ediyor |
-| 15 | OIDC / LDAP | `oidc.*` ya da `ldap.*` değerleriyle kur, Kullanıcılar'da grup eşlemesi yap | "SSO ile giriş" çalışıyor, rol gruptan geliyor |
+| 15 | OIDC / LDAP | `oidc.*` ya da `ldap.*` değerleriyle kur (Route host'u router'a bırakıldıysa `publicURL=https://<host>` da ver), Kullanıcılar'da grup eşlemesi yap | "SSO ile giriş" çalışıyor, rol gruptan geliyor; giriş sonrası Route adresine dönülüyor |
 | 16 | Yükseltme süresi | `helm upgrade` sırasında monitor listesini izle | Kontroller kaç saniye durdu? (tek replica; 10–20 sn beklenir) |
+| 17 | Tarayıcı güvenlik başlıkları | `curl -sI https://<route>/login`; sonra arayüzde birkaç sayfa gez | `Content-Security-Policy` ve `Strict-Transport-Security` var, `X-Powered-By` yok; tarayıcı konsolunda CSP ihlali yok |
 
 ## Geri bildirim
 

@@ -6,6 +6,34 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
+/** positiveInt for settings where zero means "off". */
+function nonNegativeInt(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return value?.trim() && Number.isInteger(n) && n >= 0 ? n : fallback;
+}
+
+/** "auto", "always" or "never"; anything else is "auto". */
+function cookieSecureMode(value: string | undefined): "auto" | "always" | "never" {
+  const mode = value?.trim().toLowerCase();
+  return mode === "always" || mode === "never" ? mode : "auto";
+}
+
+/**
+ * A CSP source list such as "'self' https://wiki.example.com". The keywords
+ * none and self get their quotes when written without (a quoted 'none' is
+ * hard to pass through YAML and shells); a list that could end the
+ * directive and start another, or is not plain ASCII, falls back.
+ */
+function cspSources(value: string | undefined, fallback: string): string {
+  const sources = (value ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((s) => (s === "none" || s === "self" ? `'${s}'` : s));
+  return sources.length > 0 && sources.every((s) => /^[\x21-\x7e]+$/.test(s) && !/[;,]/.test(s))
+    ? sources.join(" ")
+    : fallback;
+}
+
 /** "24h" -> 86400. Accepts whole seconds, minutes or hours, like the backend. */
 function durationSeconds(value: string): number | null {
   const match = /^(\d+)([smh])$/.exec(value.trim());
@@ -34,6 +62,31 @@ export const config = {
    */
   pushInternalUrl: process.env.PUSH_INTERNAL_URL || process.env.BACKEND_URL || "http://localhost:8080",
   backendTimeoutMs: positiveInt(process.env.BACKEND_TIMEOUT_MS, 3000),
+  /**
+   * Where users reach Kubeat, as "https://kubeat.apps.example": the
+   * backend's UPTIME_PUBLIC_URL. When it is HTTPS, browsers are on HTTPS
+   * whatever the proxies in front of us say (see secureCookies and the
+   * Strict-Transport-Security header).
+   */
+  publicUrl: (process.env.PUBLIC_URL ?? "").trim().replace(/\/+$/, ""),
+  /**
+   * Whether cookies are marked Secure, sent over HTTPS only: "always",
+   * "never", or "auto": when publicUrl is HTTPS or the request came over
+   * HTTPS. "never" is for plain HTTP from anywhere but localhost.
+   */
+  cookieSecure: cookieSecureMode(process.env.COOKIE_SECURE),
+  /**
+   * The pages that may show a status page in a frame (a wiki, a wall
+   * display), as a CSP frame-ancestors source list such as
+   * "https://wiki.example.com"; "'none'" allows none. The rest of the UI
+   * is never shown in a frame.
+   */
+  statusPageFrameAncestors: cspSources(process.env.STATUS_PAGE_FRAME_ANCESTORS, "'none'"),
+  /**
+   * How long, in seconds, a browser that reached us over HTTPS keeps to
+   * HTTPS for this host (Strict-Transport-Security); 0 sends no such header.
+   */
+  hstsMaxAge: nonNegativeInt(process.env.HSTS_MAX_AGE, 31536000),
   /** How often open pages reload their data. */
   refreshIntervalMs: positiveInt(process.env.REFRESH_INTERVAL_MS, 5000),
   /** How often an open status page reloads; visitors are many, so slower. */

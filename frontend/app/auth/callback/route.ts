@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
+import { seeOther } from "@/app/auth/see-other";
 import { config } from "@/lib/config";
-import { setSessionCookie } from "@/lib/session";
+import { setSessionCookie, takeOidcState } from "@/lib/session";
 
 /**
  * Where the identity provider sends the browser back to. The code and
@@ -9,11 +10,17 @@ import { setSessionCookie } from "@/lib/session";
  */
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
-  const back = (reason: string) => Response.redirect(new URL(`/login?oidc=${reason}`, request.url), 303);
+  const back = (reason: string) => seeOther(`/login?oidc=${reason}`);
+  // Read first, so that it is cleared whatever happens next.
+  const started = await takeOidcState();
   if (params.get("error")) return back("refused");
   const state = params.get("state");
   const code = params.get("code");
   if (!state || !code) return back("refused");
+  // Only a sign-in this browser started goes on. A link with someone
+  // else's state and code would otherwise sign the browser into their
+  // account.
+  if (state !== started) return back("state");
 
   let res: Response;
   try {
@@ -39,5 +46,5 @@ export async function GET(request: NextRequest) {
   }
   const session = (await res.json()) as { token: string; expires_at: string };
   await setSessionCookie(session.token, session.expires_at);
-  return Response.redirect(new URL("/", request.url), 303);
+  return seeOther("/");
 }

@@ -8,9 +8,11 @@ imagePullSecrets: []
 # we have (frontend): "en" or "tr". Visitors can switch the UI themselves.
 language: en
 
-# Where users reach Kubeat, for the links in notifications. Derived from
-# route.host or ingress.host when they are set; a message carries no link
-# while none of them is known.
+# Where users reach Kubeat: for the links in notifications, the OIDC
+# redirect URL, and the frontend's knowledge that users are on HTTPS (the
+# session cookie's Secure flag, Strict-Transport-Security). Derived from
+# route.host or ingress.host when they are set. With a Route whose host the
+# router picks, set it to that host once the Route exists.
 publicURL: ""   # https://kubeat.apps.example
 
 backend:
@@ -56,6 +58,21 @@ frontend:
   # Any frontend setting (REFRESH_INTERVAL_MS, HISTORY_LIMIT, ...; the
   # README lists them) the chart has no value for.
   extraEnv: {}
+  # Whether the session cookie is marked Secure, so that browsers send it
+  # over HTTPS only: "auto" when publicURL (or the Route or Ingress host it
+  # is derived from) is https:// or the request came over HTTPS; "always";
+  # or "never", which users who reach the UI over plain HTTP from anywhere
+  # but localhost (an Ingress without TLS) need, or they cannot sign in.
+  cookieSecure: auto
+  # The pages that may show status pages in a frame (a wiki, a wall
+  # display), as a Content-Security-Policy frame-ancestors source list:
+  # "https://wiki.example.com https://grafana.example.com". "'none'" allows
+  # none; the rest of the UI is never shown in a frame.
+  statusPageFrameAncestors: "'none'"
+  # Strict-Transport-Security max-age in seconds, sent to browsers that
+  # reach the UI over HTTPS: they keep to HTTPS for this host that long.
+  # 0 turns it off.
+  hstsMaxAge: 31536000
   image:
     repository: ghcr.io/yusufceng/kubeat-frontend
     tag: ""
@@ -112,17 +129,19 @@ ldap:
 
 # Sign-in through an OpenID Connect provider (Keycloak, Azure AD, Okta,
 # Dex...). Register Kubeat there with the redirect URL
-# https://<kubeat host>/auth/callback; with route.host or ingress.host set
-# the chart fills redirectURL in from it. Roles come from the group
-# mappings on the Users page, as for LDAP.
+# https://<kubeat host>/auth/callback; with publicURL, route.host or
+# ingress.host set the chart fills redirectURL in from it. Without any of
+# them (a Route whose host the router picks) SSO does not work until
+# publicURL is set to that host. Roles come from the group mappings on the
+# Users page, as for LDAP.
 oidc:
   issuer: ""                     # https://sso.example.com/realms/corp
   clientID: ""
   clientSecretSecret:            # optional: a public client uses PKCE alone
     name: ""
     key: client-secret
-  redirectURL: ""                # https://<route or ingress host>/auth/callback; derived from
-                                 # route.host/ingress.host, else from the request at sign-in time
+  redirectURL: ""                # https://<kubeat host>/auth/callback; derived from publicURL,
+                                 # route.host or ingress.host. Must be https.
   name: SSO                      # the sign-in button's label
   extraEnv: {}
     # UPTIME_OIDC_SCOPES: "openid profile email groups"

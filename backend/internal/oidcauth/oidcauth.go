@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,8 +35,10 @@ type Config struct {
 	ClientSecret string // empty for a public client; PKCE is always used
 	// RedirectURL is where the provider sends the browser back to: the
 	// frontend's /auth/callback, as registered with the provider. Left
-	// empty, each sign-in uses the address the frontend says it is served
-	// at; the provider still only accepts registered ones.
+	// empty, a sign-in may name its own, but only one on this machine
+	// (the frontend run with `next dev` on localhost). An address taken
+	// from a request could be anyone's: the provider would send the
+	// user's code there, and the state kept here would let it be redeemed.
 	RedirectURL string
 	// Scopes are requested in addition to "openid".
 	Scopes []string
@@ -172,22 +175,27 @@ func (c *Client) oauthConfig(p *oidc.Provider, redirect string) oauth2.Config {
 }
 
 // resolveRedirect is the redirect of one sign-in: the configured one, or
-// else the caller's, which must be an HTTPS /auth/callback (plain HTTP only
-// on localhost). The provider rejects unregistered ones either way; this
-// only keeps obvious nonsense out of the flow.
+// else the caller's, which must be an /auth/callback on this machine. A
+// provider that accepts wildcard redirects would otherwise send the code
+// wherever an unauthenticated request asked it to.
 func (c *Client) resolveRedirect(callers string) (string, error) {
 	if c.cfg.RedirectURL != "" {
 		return c.cfg.RedirectURL, nil
 	}
 	u, err := url.Parse(callers)
-	if err != nil || u.Path != "/auth/callback" || u.Host == "" {
-		return "", fmt.Errorf("no redirect URL is configured and %q is not an /auth/callback address", callers)
-	}
-	host := u.Hostname()
-	if u.Scheme != "https" && !(u.Scheme == "http" && (host == "localhost" || host == "127.0.0.1")) {
-		return "", fmt.Errorf("no redirect URL is configured and %q is not HTTPS", callers)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !loopback(u.Hostname()) || u.Path != "/auth/callback" {
+		return "", fmt.Errorf("no redirect URL is configured, and %q is not one on localhost: set UPTIME_OIDC_REDIRECT_URL or UPTIME_PUBLIC_URL", callers)
 	}
 	return u.String(), nil
+}
+
+// loopback reports whether host names this machine.
+func loopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func random() (string, error) {
@@ -200,8 +208,8 @@ func random() (string, error) {
 
 // Start begins a sign-in: it returns the URL to send the browser to and
 // remembers the state the provider will bring back. callersRedirect is
-// where the frontend says it is served, used when no redirect URL is
-// configured.
+// where the frontend says it is served, used only when no redirect URL is
+// configured and it is on localhost.
 func (c *Client) Start(ctx context.Context, callersRedirect string) (authURL string, err error) {
 	redirect, err := c.resolveRedirect(callersRedirect)
 	if err != nil {

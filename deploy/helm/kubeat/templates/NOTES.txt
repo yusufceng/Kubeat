@@ -17,3 +17,9 @@ Open the UI:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-frontend 3000:3000
   then http://localhost:3000
 {{- end }}
+{{- if and .Values.oidc.issuer (not (include "kubeat.oidcRedirectURL" .)) }}
+
+SSO is configured, but no address of Kubeat is known to send users back
+to after it, so SSO will not work yet. Set publicURL to the address users
+open (for a Route, the host the router gave it), or oidc.redirectURL.
+{{- end }}

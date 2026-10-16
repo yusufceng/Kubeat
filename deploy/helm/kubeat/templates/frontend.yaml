@@ -43,6 +43,19 @@ spec:
               value: "http://{{ .Release.Name }}-backend.{{ .Release.Namespace }}.svc:8080"
             - name: SESSION_TTL_HOURS
               value: {{ .Values.auth.sessionTtlHours | quote }}
+            # Whether users are on HTTPS, for the session cookie and
+            # Strict-Transport-Security; the same address the backend gets.
+            {{- with include "kubeat.publicURL" $ }}
+            - name: PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            - name: COOKIE_SECURE
+              value: {{ .Values.frontend.cookieSecure | quote }}
+            - name: STATUS_PAGE_FRAME_ANCESTORS
+              value: {{ .Values.frontend.statusPageFrameAncestors | quote }}
+            # An int64 first: a number this large would print as 3.1536e+07.
+            - name: HSTS_MAX_AGE
+              value: {{ .Values.frontend.hstsMaxAge | int64 | quote }}
             {{- range $name, $value := .Values.frontend.extraEnv }}
             - name: {{ $name }}
               value: {{ $value | quote }}

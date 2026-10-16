@@ -244,6 +244,67 @@ func TestLoadRejectsUnknownSMTPSecurity(t *testing.T) {
 	}
 }
 
+// The OIDC redirect URL comes from the configuration only: set, or made
+// from the public address, and checked at start.
+func TestOIDCRedirectURL(t *testing.T) {
+	t.Setenv("UPTIME_PUBLIC_URL", "https://kubeat.apps.example/")
+	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "")
+	if cfg, err := Load(); err != nil || cfg.OIDCRedirectURL != "" {
+		t.Errorf("OIDC off: redirect = %q, %v; want none", cfg.OIDCRedirectURL, err)
+	}
+
+	t.Setenv("UPTIME_OIDC_ISSUER", "https://sso.example.com/realms/corp")
+	t.Setenv("UPTIME_OIDC_CLIENT_ID", "kubeat")
+	if cfg, err := Load(); err != nil || cfg.OIDCRedirectURL != "https://kubeat.apps.example/auth/callback" {
+		t.Errorf("from the public URL: %q, %v", cfg.OIDCRedirectURL, err)
+	}
+	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "https://sso-entry.example/auth/callback")
+	if cfg, err := Load(); err != nil || cfg.OIDCRedirectURL != "https://sso-entry.example/auth/callback" {
+		t.Errorf("set: %q, %v; it wins over the public URL", cfg.OIDCRedirectURL, err)
+	}
+	t.Setenv("UPTIME_PUBLIC_URL", "")
+	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "")
+	if cfg, err := Load(); err != nil || cfg.OIDCRedirectURL != "" {
+		t.Errorf("neither set: %q, %v; main warns about it", cfg.OIDCRedirectURL, err)
+	}
+
+	// Plain HTTP only on this machine; private addresses and internal
+	// names are where many installs serve the UI.
+	for _, good := range []string{
+		"http://localhost:3000/auth/callback", "http://127.0.0.1:3000/auth/callback", "http://[::1]:3000/auth/callback",
+		"https://10.0.0.5/auth/callback", "https://kubeat.shop.svc:3000/auth/callback",
+	} {
+		t.Setenv("UPTIME_OIDC_REDIRECT_URL", good)
+		if _, err := Load(); err != nil {
+			t.Errorf("UPTIME_OIDC_REDIRECT_URL=%q: %v", good, err)
+		}
+	}
+	for _, bad := range []string{
+		"http://kubeat.apps.example/auth/callback", "kubeat.apps.example/auth/callback", "/auth/callback", "https:///auth/callback",
+		"https://kubeat.apps.example/", "https://kubeat.apps.example/auth/callback?x=1", "https://kubeat.apps.example/auth/callback#x",
+		"https://user@kubeat.apps.example/auth/callback",
+	} {
+		t.Setenv("UPTIME_OIDC_REDIRECT_URL", bad)
+		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), "UPTIME_OIDC_REDIRECT_URL: ") {
+			t.Errorf("UPTIME_OIDC_REDIRECT_URL=%q: err = %v, want a refusal naming it", bad, err)
+		}
+	}
+	// A public URL that cannot make one is refused as well, with what to set.
+	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "")
+	for _, bad := range []string{"http://kubeat.apps.example", "https://example.com/kubeat"} {
+		t.Setenv("UPTIME_PUBLIC_URL", bad)
+		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), "UPTIME_PUBLIC_URL") || !strings.Contains(err.Error(), "set UPTIME_OIDC_REDIRECT_URL") {
+			t.Errorf("UPTIME_PUBLIC_URL=%q: err = %v", bad, err)
+		}
+	}
+	// Without OIDC neither is used, so neither is checked.
+	t.Setenv("UPTIME_OIDC_ISSUER", "")
+	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "http://kubeat.apps.example/auth/callback")
+	if _, err := Load(); err != nil {
+		t.Errorf("unused redirect URL rejected: %v", err)
+	}
+}
+
 func TestReminderInterval(t *testing.T) {
 	for value, want := range map[string]time.Duration{"": 0, "0": 0, "0s": 0, "1h": time.Hour} {
 		t.Setenv("UPTIME_REMINDER_INTERVAL", value)

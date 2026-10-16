@@ -9,6 +9,7 @@ const oidcMessages: Record<string, string> = {
   norole: "login.oidc.norole",
   unavailable: "login.oidc.unavailable",
   refused: "login.oidc.refused",
+  state: "login.oidc.state",
 };
 
 async function Form({

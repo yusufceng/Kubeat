@@ -3,7 +3,9 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -70,7 +72,9 @@ type Config struct {
 
 	// OIDC sign-in through an OpenID Connect provider; off unless the
 	// issuer is set. The redirect URL is the frontend's /auth/callback as
-	// the provider knows it.
+	// the provider knows it; left empty, it is PublicURL's /auth/callback.
+	// Without either, only a frontend on localhost (next dev) can sign in
+	// through the provider: see oidcauth.Config.RedirectURL.
 	OIDCIssuer             string        // UPTIME_OIDC_ISSUER
 	OIDCClientID           string        // UPTIME_OIDC_CLIENT_ID
 	OIDCClientSecret       string        // UPTIME_OIDC_CLIENT_SECRET
@@ -196,6 +200,7 @@ type Config struct {
 	Language string // UPTIME_LANGUAGE
 	// PublicURL is where users reach Kubeat, used for the links in
 	// notifications: "https://kubeat.apps.example". Empty leaves them out.
+	// It also makes the OIDC redirect URL when that is not set.
 	PublicURL string // UPTIME_PUBLIC_URL
 	// WorkloadRolloutGrace is how long a workload monitor puts up with
 	// missing pods while a rollout is in progress; zero means not at all.
@@ -447,6 +452,21 @@ func Load() (Config, error) {
 	if cfg.OIDCIssuer != "" && cfg.OIDCClientID == "" {
 		return Config{}, fmt.Errorf("UPTIME_OIDC_ISSUER is set: UPTIME_OIDC_CLIENT_ID is required with it")
 	}
+	if cfg.OIDCIssuer != "" {
+		// The provider sends the user's code to the redirect URL, so it is
+		// checked here rather than at the first sign-in. Left empty, it is
+		// the /auth/callback of the address users reach Kubeat at.
+		if cfg.OIDCRedirectURL != "" {
+			if err := checkCallbackURL(cfg.OIDCRedirectURL); err != nil {
+				return Config{}, fmt.Errorf("UPTIME_OIDC_REDIRECT_URL: %w", err)
+			}
+		} else if cfg.PublicURL != "" {
+			cfg.OIDCRedirectURL = cfg.PublicURL + "/auth/callback"
+			if err := checkCallbackURL(cfg.OIDCRedirectURL); err != nil {
+				return Config{}, fmt.Errorf("UPTIME_PUBLIC_URL does not make a usable OIDC redirect URL (set UPTIME_OIDC_REDIRECT_URL): %w", err)
+			}
+		}
+	}
 	switch cfg.LDAPDefaultRole {
 	case "", "admin", "editor", "viewer":
 	default:
@@ -561,4 +581,31 @@ func envBool(key string, def bool) (bool, error) {
 		return false, fmt.Errorf("%s: %w", key, err)
 	}
 	return b, nil
+}
+
+// checkCallbackURL checks an address the identity provider is to send the
+// browser back to: the UI's /auth/callback, absolute, and over HTTPS, since
+// the user's code travels in it. Plain HTTP is accepted only for this
+// machine, where `next dev` serves the UI. Private addresses and internal
+// names are fine: many installs serve the UI on nothing else.
+func checkCallbackURL(raw string) error {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || !u.IsAbs() || u.Host == "":
+		return fmt.Errorf("%q is not an absolute URL such as https://kubeat.apps.example/auth/callback", raw)
+	case u.Scheme != "https" && !(u.Scheme == "http" && loopback(u.Hostname())):
+		return fmt.Errorf("%q must use https; plain http only on localhost", raw)
+	case u.Path != "/auth/callback" || u.User != nil || u.RawQuery != "" || u.Fragment != "":
+		return fmt.Errorf("%q must be the UI's /auth/callback, such as https://kubeat.apps.example/auth/callback", raw)
+	}
+	return nil
+}
+
+// loopback reports whether host names this machine.
+func loopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

@@ -105,7 +105,12 @@ func main() {
 	var oidc api.OIDC
 	if oidcClient != nil {
 		oidc = oidcClient
-		logger.Info("OIDC sign-in enabled", "issuer", cfg.OIDCIssuer, "name", cfg.OIDCName)
+		logger.Info("OIDC sign-in enabled", "issuer", cfg.OIDCIssuer, "name", cfg.OIDCName, "redirect_url", cfg.OIDCRedirectURL)
+		if cfg.OIDCRedirectURL == "" {
+			// The frontend's own idea of its address is trusted only on
+			// localhost; behind a Route it is the pod's 0.0.0.0:3000.
+			logger.Warn("OIDC sign-in works only for a frontend on localhost: set UPTIME_PUBLIC_URL to the address users reach Kubeat at, or UPTIME_OIDC_REDIRECT_URL to its /auth/callback")
+		}
 	}
 
 	// Background work stops on the same signal as the HTTP server and is
