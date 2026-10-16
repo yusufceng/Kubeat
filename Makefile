@@ -4,9 +4,19 @@ FRONTEND_PORT ?= 3000
 # Lokal geliştirmede backend ile frontend arasındaki ortak anahtar. Gerçek
 # kurulumda chart rastgele bir anahtar üretir.
 API_TOKEN ?= local-dev-token
-# Lokal geliştirmede ilk yönetici hesabının ("admin") parolası; hesap yoksa
-# backend açılışta oluşturur. Gerçek kurulumda chart rastgele bir parola üretir.
-ADMIN_PASSWORD ?= admin
+# Lokal geliştirmede ilk yönetici hesabı. Boşsa ilk açılışta arayüz /setup
+# sayfasında ilk yöneticiyi oluşturtur. Verilirse backend hesap yokken "admin"
+# hesabını bu parolayla açar; parola kurallara uymalıdır (en az 8 karakter,
+# "admin" ya da "password" gibi ilk denenenlerden biri değil), yoksa backend
+# başlamaz. Gerçek kurulumda chart rastgele bir parola üretir.
+ADMIN_PASSWORD ?=
+# Arayüzün dinlediği adres: yalnızca bu makineden erişilsin diye 127.0.0.1.
+# Ağdaki başka bir cihazdan denemek için FRONTEND_HOST=0.0.0.0.
+FRONTEND_HOST ?= 127.0.0.1
+# Lokal veritabanındaki gizli değerleri şifreleyen anahtar; ilk çalıştırmada
+# bir kez üretilir ve git'e girmez. Silinirse veritabanındaki şifreli değerler
+# okunamaz ve backend başlamaz: o zaman backend/uptime.db de silinmelidir.
+DEV_SECRET_KEY := .dev/secret.key
 # Lokal geliştirmede bu makinedeki servisler de kontrol edilebilsin diye
 # loopback hedef politikasından istisna tutulur. Gerçek kurulumda loopback
 # yasaktır (README, "Hedef politikası").
@@ -30,12 +40,17 @@ MINIKUBE_SECURITY ?= --set podSecurityContext.fsGroup=1001
 dev:
 	@trap 'kill 0' INT TERM EXIT; $(MAKE) backend & $(MAKE) frontend & wait
 
-backend:
+backend: $(DEV_SECRET_KEY)
 	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) UPTIME_API_TOKEN=$(API_TOKEN) UPTIME_ADMIN_PASSWORD=$(ADMIN_PASSWORD) \
-		UPTIME_TARGET_ALLOW_CIDRS=$(TARGET_ALLOW_CIDRS) go run ./cmd/server
+		UPTIME_SECRET_KEY_FILE=$(abspath $(DEV_SECRET_KEY)) UPTIME_TARGET_ALLOW_CIDRS=$(TARGET_ALLOW_CIDRS) go run ./cmd/server
+
+$(DEV_SECRET_KEY):
+	@mkdir -p $(@D)
+	@umask 077 && openssl rand -base64 36 > $@.partial && mv $@.partial $@
+	@echo "$@ oluşturuldu: lokal veritabanının şifreleme anahtarı"
 
 frontend:
-	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) npm run dev -- -p $(FRONTEND_PORT)
+	cd frontend && BACKEND_URL=http://127.0.0.1:$(BACKEND_PORT) npm run dev -- -p $(FRONTEND_PORT) -H $(FRONTEND_HOST)
 
 test:
 	cd backend && go test ./...

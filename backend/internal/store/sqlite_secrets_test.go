@@ -1,8 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -37,14 +39,15 @@ func everything(t *testing.T, s *SQLite) string {
 
 func secretMonitors() []Monitor {
 	api := newMonitor("api")
-	api.HTTP = HTTPOptions{Auth: HTTPAuthBearer, AuthSecret: "t0ken-in-the-clear", Headers: map[string]string{"X-Api-Key": "header-in-the-clear"}}
+	api.HTTP = HTTPOptions{Auth: HTTPAuthBearer, AuthSecret: "t0ken-in-the-clear", Headers: map[string]string{"X-Api-Key": "header-in-the-clear"},
+		Method: "POST", Body: `{"password":"body-in-the-clear"}`, ContentType: "application/json"}
 	db := newMonitor("db")
 	db.Type, db.Target = MonitorPostgres, "db:5432"
 	db.Database = DatabaseOptions{Username: "probe", Password: "password-in-the-clear", Database: "shop"}
 	return []Monitor{api, db, newMonitor("plain")}
 }
 
-var secretValues = []string{"t0ken-in-the-clear", "header-in-the-clear", "password-in-the-clear", "hooks.example.com/s3cret-path", "bot-token-in-the-clear"}
+var secretValues = []string{"t0ken-in-the-clear", "header-in-the-clear", "body-in-the-clear", "password-in-the-clear", "hooks.example.com/s3cret-path", "bot-token-in-the-clear"}
 
 func TestSecretsAreEncryptedAtRest(t *testing.T) {
 	ctx := context.Background()
@@ -85,7 +88,8 @@ func TestSecretsAreEncryptedAtRest(t *testing.T) {
 
 	// Every way of reading gives the secrets back.
 	api, _ := s.GetMonitor(ctx, created[0].ID)
-	if api.HTTP.AuthSecret != "t0ken-in-the-clear" || api.HTTP.Headers["X-Api-Key"] != "header-in-the-clear" {
+	if api.HTTP.AuthSecret != "t0ken-in-the-clear" || api.HTTP.Headers["X-Api-Key"] != "header-in-the-clear" ||
+		api.HTTP.Body != `{"password":"body-in-the-clear"}` || api.HTTP.ContentType != "application/json" {
 		t.Errorf("GetMonitor = %+v", api.HTTP)
 	}
 	if list, _ := s.ListMonitors(ctx); list[1].Database.Password != "password-in-the-clear" {
@@ -114,8 +118,8 @@ func TestSecretsAreEncryptedAtRest(t *testing.T) {
 	}
 
 	counts, err := s.CountSecrets(ctx)
-	if err != nil || counts.Plain != 0 || counts.Sealed != 6 {
-		t.Errorf("counts = %+v, %v; want 6 sealed (token, header, password, two targets, one channel secret)", counts, err)
+	if err != nil || counts.Plain != 0 || counts.Sealed != 7 {
+		t.Errorf("counts = %+v, %v; want 7 sealed (token, header, body, password, two targets, one channel secret)", counts, err)
 	}
 
 	// Without the key, or with another, the secrets cannot be read, and the
@@ -156,7 +160,7 @@ func TestEncryptingAnExistingDatabase(t *testing.T) {
 	s.CreateChannel(ctx, Channel{Name: "bot", Type: ChannelTelegram, Target: "-100", Secret: "bot-token-in-the-clear", Enabled: true})
 
 	before, _ := s.ListMonitors(ctx)
-	if counts, _ := s.CountSecrets(ctx); counts.Sealed != 0 || counts.Plain != 6 {
+	if counts, _ := s.CountSecrets(ctx); counts.Sealed != 0 || counts.Plain != 7 {
 		t.Fatalf("counts before = %+v", counts)
 	}
 	if !strings.Contains(everything(t, s), "password-in-the-clear") {
@@ -172,7 +176,7 @@ func TestEncryptingAnExistingDatabase(t *testing.T) {
 	if err := s.EncryptSecrets(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if counts, _ := s.CountSecrets(ctx); counts.Plain != 0 || counts.Sealed != 6 {
+	if counts, _ := s.CountSecrets(ctx); counts.Plain != 0 || counts.Sealed != 7 {
 		t.Errorf("counts after = %+v", counts)
 	}
 	raw := everything(t, s)
@@ -187,5 +191,87 @@ func TestEncryptingAnExistingDatabase(t *testing.T) {
 	}
 	if channels, _ := s.ListChannels(ctx); channels[0].Target != "https://hooks.example.com/s3cret-path" || channels[1].Secret != "bot-token-in-the-clear" {
 		t.Errorf("channels after = %+v", channels)
+	}
+}
+
+// Encrypting rewrites the rows, but what they held before can stay in the
+// files: in the free space of the database's pages and in its write-ahead
+// log. After Vacuum no byte of a plain value is left, an older one included.
+func TestVacuumLeavesNoPlainCopies(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "plain.db")
+	s, err := OpenSQLite(ctx, path, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var created []Monitor
+	for _, m := range secretMonitors() {
+		c, err := s.CreateMonitor(ctx, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		created = append(created, c)
+	}
+	s.CreateChannel(ctx, Channel{Name: "hook", Type: ChannelWebhook, Target: "https://hooks.example.com/s3cret-path", Enabled: true})
+	s.CreateChannel(ctx, Channel{Name: "bot", Type: ChannelTelegram, Target: "-100", Secret: "bot-token-in-the-clear", Enabled: true})
+	// A value replaced before the key came is no less a secret.
+	api := created[0]
+	api.HTTP.AuthSecret = "earlier-t0ken-in-the-clear"
+	if _, err := s.UpdateMonitor(ctx, api); err != nil {
+		t.Fatal(err)
+	}
+	api.HTTP.AuthSecret = "t0ken-in-the-clear"
+	if _, err := s.UpdateMonitor(ctx, api); err != nil {
+		t.Fatal(err)
+	}
+	plain := append([]string{"earlier-t0ken-in-the-clear"}, secretValues...)
+
+	// What a copy of the files would show.
+	leftovers := func() []string {
+		var found []string
+		for _, file := range []string{path, path + "-wal"} {
+			raw, err := os.ReadFile(file)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+			for _, secret := range plain {
+				if bytes.Contains(raw, []byte(secret)) {
+					found = append(found, filepath.Base(file)+": "+secret)
+				}
+			}
+		}
+		return found
+	}
+	if len(leftovers()) == 0 {
+		t.Fatal("the plain values are not in the files to begin with; the test would prove nothing")
+	}
+
+	box, _ := secretbox.New(testKey)
+	s.UseSecrets(box)
+	if err := s.EncryptSecrets(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Vacuum(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if found := leftovers(); len(found) > 0 {
+		t.Errorf("after encrypting and vacuuming, the files still hold %v", found)
+	}
+	// Nothing was lost on the way.
+	if m, err := s.GetMonitor(ctx, api.ID); err != nil || m.HTTP.AuthSecret != "t0ken-in-the-clear" || m.HTTP.Body != `{"password":"body-in-the-clear"}` {
+		t.Errorf("after vacuuming: %+v, %v", m.HTTP, err)
+	}
+	if channels, err := s.ListChannels(ctx); err != nil || len(channels) != 2 || channels[1].Secret != "bot-token-in-the-clear" {
+		t.Errorf("channels after vacuuming = %+v, %v", channels, err)
+	}
+}
+
+// Whatever the writer deletes or overwrites is zeroed in the file.
+func TestWriterZeroesWhatItDeletes(t *testing.T) {
+	s := openTest(t)
+	var on int
+	if err := s.write.QueryRowContext(context.Background(), "PRAGMA secure_delete").Scan(&on); err != nil || on != 1 {
+		t.Errorf("secure_delete = %d, %v; want 1", on, err)
 	}
 }

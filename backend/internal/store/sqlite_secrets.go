@@ -94,7 +94,7 @@ func (s *SQLite) EncryptSecrets(ctx context.Context) error {
 		return fmt.Errorf("encrypt secrets: %w", err)
 	}
 	for _, m := range monitors {
-		if m.HTTP.AuthSecret == "" && m.Database.Password == "" && len(m.HTTP.Headers) == 0 {
+		if m.HTTP.AuthSecret == "" && m.HTTP.Body == "" && m.Database.Password == "" && len(m.HTTP.Headers) == 0 {
 			continue
 		}
 		if _, err := s.UpdateMonitor(ctx, m); err != nil {

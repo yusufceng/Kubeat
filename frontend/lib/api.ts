@@ -777,7 +777,10 @@ export const getProviders = () => request<Providers>("/auth/providers", undefine
 export const setup = (body: { username: string; display_name: string; password: string }) =>
   request<Session>("/auth/setup", { method: "POST", body: JSON.stringify(body) }, { open: true });
 
-/** Signs in; a refusal is an ApiError with status 401, 403 or 429. */
+/**
+ * Signs in; a refusal is an ApiError with status 401, 403, 429, or 503 when
+ * the backend is checking too many sign-ins at once.
+ */
 export const login = (username: string, password: string) =>
   request<Session>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }, { open: true });
 
@@ -786,6 +789,7 @@ export const logout = (token: string) =>
 
 export const getMe = () => request<Me>("/auth/me");
 
+/** A wrong current password is a 400; too many of them in a row, a 429. */
 export const changePassword = (current_password: string, new_password: string) =>
   request<void>("/auth/password", { method: "POST", body: JSON.stringify({ current_password, new_password }) });
 

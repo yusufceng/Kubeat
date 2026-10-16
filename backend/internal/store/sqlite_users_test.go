@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -179,6 +182,46 @@ func TestLDAPGroupRolesAndAudit(t *testing.T) {
 	}
 	if n, _ := s.DeleteAuditBefore(ctx, now.Add(-24*time.Hour)); n != 1 {
 		t.Errorf("deleted %d old entries, want 1", n)
+	}
+}
+
+// The first account is created only while there is none, also when
+// several are created at the same moment under different names.
+func TestCreateFirstUser(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	const racers = 8
+	var (
+		wg      sync.WaitGroup
+		won     atomic.Int32
+		refused atomic.Int32
+	)
+	for i := range racers {
+		wg.Go(func() {
+			_, err := s.CreateFirstUser(ctx, User{Username: fmt.Sprintf("admin-%d", i), PasswordHash: "$2a$hash", Role: RoleAdmin, Enabled: true})
+			switch {
+			case err == nil:
+				won.Add(1)
+			case errors.Is(err, ErrConflict):
+				refused.Add(1)
+			default:
+				t.Errorf("racer %d: %v", i, err)
+			}
+		})
+	}
+	wg.Wait()
+	if won.Load() != 1 || refused.Load() != racers-1 {
+		t.Errorf("%d first accounts created and %d refused, want 1 and %d", won.Load(), refused.Load(), racers-1)
+	}
+	if n, _ := s.CountUsers(ctx); n != 1 {
+		t.Errorf("%d accounts exist, want 1", n)
+	}
+	// Later accounts come from CreateUser.
+	if _, err := s.CreateFirstUser(ctx, User{Username: "late", Role: RoleAdmin}); !errors.Is(err, ErrConflict) {
+		t.Errorf("a first account when one exists: err = %v, want ErrConflict", err)
+	}
+	if u, err := s.CreateUser(ctx, User{Username: "late", Role: RoleViewer, Namespaces: []string{"shop"}}); err != nil || u.ID == 0 {
+		t.Errorf("CreateUser after the first = %+v, %v", u, err)
 	}
 }
 

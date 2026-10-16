@@ -392,6 +392,10 @@ async function describe(err: unknown): Promise<string> {
         : t("monitorForm.actions.error.forbiddenDetail", { message: err.message });
     if (err.status === 404) return t("monitorForm.actions.error.notFound");
     if (err.status === 401) return t("monitorForm.actions.error.sessionExpired");
+    // A password check refused: too many wrong ones, or too many at once
+    // (the backend's own 503; one of ours means it was not reached).
+    if (err.status === 429) return t("monitorForm.actions.error.tooMany");
+    if (err.status === 503 && err.message.startsWith("too many")) return t("monitorForm.actions.error.busy");
   }
   return t("monitorForm.actions.error.backend");
 }

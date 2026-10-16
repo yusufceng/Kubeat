@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -198,16 +199,6 @@ func scopeNamespaces(role store.Role, namespaces []string) ([]string, error) {
 	return out, nil
 }
 
-func (h *handler) validPassword(password string) error {
-	if len(password) < h.opts.PasswordMinLength {
-		return fmt.Errorf("the password must be at least %d characters", h.opts.PasswordMinLength)
-	}
-	if len(password) > maxHeaderValue {
-		return errors.New("the password is too long")
-	}
-	return nil
-}
-
 // newSession signs the user in and returns the token for their browser.
 func (h *handler) newSession(ctx context.Context, u store.User) (token string, expires time.Time, err error) {
 	token, hash, err := auth.NewToken()
@@ -355,7 +346,10 @@ type setupRequest struct {
 }
 
 // authSetup creates the first administrator. It works only while there is
-// no account: afterwards accounts are made by administrators.
+// no account: afterwards accounts are made by administrators. The count is
+// read first for a quick answer, but what decides is the insert, which
+// makes the account only if there is still none: of two setups sent at
+// the same time, from the operator and from someone else, one gets 409.
 func (h *handler) authSetup(w http.ResponseWriter, r *http.Request) {
 	var req setupRequest
 	if !decodeBody(w, r, &req) {
@@ -375,7 +369,7 @@ func (h *handler) authSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "username must be letters, digits and . _ @ -, without spaces")
 		return
 	}
-	if err := h.validPassword(req.Password); err != nil {
+	if err := auth.ValidatePassword(req.Username, req.Password, h.opts.PasswordMinLength); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -384,7 +378,7 @@ func (h *handler) authSetup(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	u, err := h.opts.Store.CreateUser(r.Context(), store.User{
+	u, err := h.opts.Store.CreateFirstUser(r.Context(), store.User{
 		Username: req.Username, DisplayName: strings.TrimSpace(req.DisplayName), Source: store.UserLocal, PasswordHash: hash, Role: store.RoleAdmin, Enabled: true,
 	})
 	if errors.Is(err, store.ErrConflict) {
@@ -429,30 +423,47 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	key := strings.ToLower(req.Username)
 	now := time.Now().UTC()
-	if locked := h.opts.Throttle.LockedFor(key, now); locked > 0 {
-		writeError(w, http.StatusTooManyRequests, fmt.Sprintf("too many failed attempts; try again in %d minutes", int(locked.Minutes())+1))
+	// The attempt counts as a failure from here on, before the password is
+	// checked: parallel attempts cannot all be tried before the first
+	// failure is recorded. What turns out not to be a guess is taken back.
+	attempt, locked, ok := h.opts.Throttle.Begin(key, now)
+	if !ok {
+		writeError(w, http.StatusTooManyRequests, tooManyAttempts(locked))
 		return
 	}
+	undo := func() { h.opts.Throttle.Undo(key, now) }
 
 	user, err := h.opts.Store.GetUserByUsername(r.Context(), req.Username)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		undo()
 		h.internalError(w, r, err)
 		return
 	}
 	known := err == nil
+	release, ok := h.passwordChecks.acquire(r.Context())
+	if !ok {
+		undo()
+		writeError(w, http.StatusServiceUnavailable, "too many sign-ins at once; try again")
+		return
+	}
+	defer release()
 	switch {
 	case known && user.Source == store.UserLocal:
-		if !auth.CheckPassword(user.PasswordHash, req.Password) {
-			h.loginFailed(w, r, key, req.Username, "wrong password")
+		right := auth.CheckPassword(user.PasswordHash, req.Password)
+		release()
+		if !right {
+			h.loginFailed(w, r, req.Username, "wrong password", attempt)
 			return
 		}
 	case h.opts.LDAP != nil:
 		identity, err := h.opts.LDAP.Authenticate(r.Context(), req.Username, req.Password)
+		release()
 		if errors.Is(err, ldapauth.ErrInvalidCredentials) {
-			h.loginFailed(w, r, key, req.Username, "rejected by the directory")
+			h.loginFailed(w, r, req.Username, "rejected by the directory", attempt)
 			return
 		}
 		if err != nil {
+			undo()
 			h.opts.Logger.Error("ldap sign-in failed", "user", req.Username, "error", err)
 			writeError(w, http.StatusBadGateway, "the directory could not be asked; try again later")
 			return
@@ -461,6 +472,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email, Groups: identity.Groups,
 		}, ldapauth.SameDN, h.opts.LDAPDefaultRole, h.opts.LDAPDefaultNamespaces)
 		if err != nil {
+			undo()
 			var denied noRoleError
 			if errors.As(err, &denied) {
 				h.audit(r, "login_denied", "user", user.ID, req.Username+": "+err.Error())
@@ -471,15 +483,25 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		h.loginFailed(w, r, key, req.Username, "unknown user")
+		// No password to compare with, but a comparison all the same: the
+		// time of the answer must not tell this name from a local account's.
+		auth.CheckPassword("", req.Password)
+		release()
+		h.loginFailed(w, r, req.Username, "unknown user", attempt)
 		return
 	}
 	if !user.Enabled {
+		undo()
 		writeError(w, http.StatusForbidden, "the account is disabled")
 		return
 	}
 	h.opts.Throttle.Reset(key)
 	h.signIn(w, r, user, "login")
+}
+
+// tooManyAttempts is the answer for a key the throttle refuses.
+func tooManyAttempts(locked time.Duration) string {
+	return fmt.Sprintf("too many failed attempts; try again in %d minutes", int(locked.Minutes())+1)
 }
 
 // auditText writes a fixed audit phrase in the install's language; what it
@@ -496,17 +518,30 @@ func (h *handler) auditText(phrase string) string {
 
 // The fixed audit phrases in Turkish; keys are the English originals.
 var auditTR = map[string]string{
-	"wrong password":            "parola yanlış",
-	"rejected by the directory": "dizin kabul etmedi",
-	"unknown user":              "bilinmeyen kullanıcı",
+	"wrong password":                              "parola yanlış",
+	"rejected by the directory":                   "dizin kabul etmedi",
+	"unknown user":                                "bilinmeyen kullanıcı",
+	"%s; sign-in locked after %d failed attempts": "%s; %d hatalı denemeden sonra giriş kilitlendi",
 }
 
-// loginFailed counts the failure and answers as for any wrong password:
-// nothing in the answer tells a username apart from a password.
-func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, key, username, why string) {
-	h.opts.Throttle.Fail(key, time.Now().UTC())
-	h.opts.Logger.Info("sign-in refused", "user", username, "reason", why)
-	_ = h.opts.Store.AppendAudit(r.Context(), store.AuditEntry{At: time.Now().UTC(), Username: username, Action: "login_failed", Summary: h.auditText(why)})
+// loginFailed answers as for any wrong password: nothing in the answer
+// tells a username apart from a password. The throttle counted the
+// attempt when it began; attempt is its number in the lockout period.
+//
+// Every failure is logged, but the audit log gets only a name's first
+// failure in the lockout period and the one that locks it, and no more
+// than LoginAuditPerMinute failures a minute in all: a flood of guesses,
+// at one name or at made-up ones, must not bury what else the log holds.
+func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, username, why string, attempt int) {
+	h.opts.Logger.Info("sign-in refused", "user", username, "reason", why, "attempt", attempt)
+	locks := attempt >= h.opts.Throttle.MaxFailures
+	if (attempt == 1 || locks) && h.failedLogins.allow(time.Now()) {
+		summary := h.auditText(why)
+		if locks {
+			summary = fmt.Sprintf(h.auditText("%s; sign-in locked after %d failed attempts"), summary, attempt)
+		}
+		_ = h.opts.Store.AppendAudit(r.Context(), store.AuditEntry{At: time.Now().UTC(), Username: username, Action: "login_failed", Summary: summary})
+	}
 	unauthorized(w, "invalid username or password")
 }
 
@@ -643,7 +678,10 @@ type passwordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
-// authPassword changes the password of the signed-in local user.
+// authPassword changes the password of the signed-in local user. The
+// current password is guarded like a sign-in: whoever holds a session that
+// is not theirs must not get to guess it, and take the account over, at
+// the speed of the CPU.
 func (h *handler) authPassword(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	if p.Service {
@@ -663,10 +701,26 @@ func (h *handler) authPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "the password of a directory account is changed in the directory")
 		return
 	}
-	if !auth.CheckPassword(u.PasswordHash, req.CurrentPassword) {
+	// A key of its own: usernames have no colon.
+	key := "pw:" + strconv.FormatInt(u.ID, 10)
+	now := time.Now().UTC()
+	if _, locked, ok := h.opts.Throttle.Begin(key, now); !ok {
+		writeError(w, http.StatusTooManyRequests, tooManyAttempts(locked))
+		return
+	}
+	release, ok := h.passwordChecks.acquire(r.Context())
+	if !ok {
+		h.opts.Throttle.Undo(key, now)
+		writeError(w, http.StatusServiceUnavailable, "too many password checks at once; try again")
+		return
+	}
+	right := auth.CheckPassword(u.PasswordHash, req.CurrentPassword)
+	release()
+	if !right {
 		writeError(w, http.StatusBadRequest, "the current password is wrong")
 		return
 	}
+	h.opts.Throttle.Reset(key)
 	if err := h.setPassword(r, u, req.NewPassword); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -678,7 +732,7 @@ func (h *handler) authPassword(w http.ResponseWriter, r *http.Request) {
 // setPassword stores a new password and signs the user out everywhere but
 // here, since whoever knew the old password may be signed in somewhere.
 func (h *handler) setPassword(r *http.Request, u store.User, password string) error {
-	if err := h.validPassword(password); err != nil {
+	if err := auth.ValidatePassword(u.Username, password, h.opts.PasswordMinLength); err != nil {
 		return err
 	}
 	hash, err := auth.HashPassword(password)
@@ -753,7 +807,7 @@ func (h *handler) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.validPassword(req.Password); err != nil {
+	if err := auth.ValidatePassword(req.Username, req.Password, h.opts.PasswordMinLength); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

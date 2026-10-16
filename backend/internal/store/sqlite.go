@@ -85,6 +85,25 @@ func (s *SQLite) Backup(ctx context.Context, dest string) error {
 	return nil
 }
 
+// Vacuum rewrites the database file without its free space, where deleted
+// and overwritten values stay readable unless they were zeroed when they
+// went, and empties the write-ahead log, which holds earlier versions of
+// the pages too. The rewrite holds the write lock and needs free disk
+// about the size of the database, so it is for occasions, not routine.
+func (s *SQLite) Vacuum(ctx context.Context) error {
+	if _, err := s.write.ExecContext(ctx, "VACUUM"); err != nil {
+		return fmt.Errorf("vacuum: %w", err)
+	}
+	var busy, frames, checkpointed int
+	if err := s.write.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &frames, &checkpointed); err != nil {
+		return fmt.Errorf("vacuum: checkpoint: %w", err)
+	}
+	if busy != 0 {
+		return errors.New("vacuum: checkpoint: a reader kept the write-ahead log from being emptied")
+	}
+	return nil
+}
+
 // SchemaVersion returns the number of migrations applied to the database
 // file at path, without modifying it.
 func SchemaVersion(ctx context.Context, path string) (int, error) {
@@ -122,6 +141,10 @@ func openPool(path string, busyTimeout time.Duration, writer bool) (*sql.DB, err
 	if writer {
 		// Take the write lock up front instead of failing on lock upgrade.
 		q.Set("_txlock", "immediate")
+		// What is deleted or overwritten is zeroed in the file instead of
+		// staying readable in its free space: an old value of a secret,
+		// or one stored before a key was configured, is gone with its row.
+		q.Add("_pragma", "secure_delete(1)")
 	} else {
 		q.Add("_pragma", "query_only(1)")
 	}
@@ -388,10 +411,16 @@ func encodeSettings(m Monitor) (string, error) {
 }
 
 // monitorSecrets replaces each secret of the monitor's options with what
-// convert makes of it: sealing them to store, opening them when read.
+// convert makes of it: sealing them to store, opening them when read. The
+// request body counts as one: it often carries a token or a password, of a
+// login or a GraphQL query. A value stored plain, before it was counted
+// among the secrets, opens as it is.
 func monitorSecrets(m *Monitor, convert func(string) (string, error)) error {
 	var err error
 	if m.HTTP.AuthSecret, err = convert(m.HTTP.AuthSecret); err != nil {
+		return err
+	}
+	if m.HTTP.Body, err = convert(m.HTTP.Body); err != nil {
 		return err
 	}
 	if m.Database.Password, err = convert(m.Database.Password); err != nil {

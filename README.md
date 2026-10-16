@@ -23,6 +23,14 @@ make frontend   # UI   -> http://localhost:3000
 make test
 ```
 
+İlk çalıştırmada hesap yoktur; arayüz `/setup` sayfasında ilk yöneticiyi
+oluşturtur (`make dev ADMIN_PASSWORD=...` verilirse backend `admin` hesabını o
+parolayla açar). Veritabanındaki gizli değerleri şifreleyen anahtar ilk
+çalıştırmada `.dev/secret.key` dosyasına bir kez üretilir ve git'e girmez;
+silinirse `backend/uptime.db` de silinmelidir. Arayüz yalnızca bu makineden
+erişilsin diye `127.0.0.1`'de dinler; ağdaki başka bir cihazdan denemek için
+`make dev FRONTEND_HOST=0.0.0.0`.
+
 ## Cluster'a kurulum
 
 Her sürüm etiketi (`v0.28.0` gibi) imajları `ghcr.io/yusufceng/kubeat-backend`
@@ -203,20 +211,41 @@ politikaya tabidir, loopback'te dinleyen bir vekil için istisna gerekir.
 Lokal geliştirmede `make backend` loopback'i istisna tutar
 (`TARGET_ALLOW_CIDRS`), böylece makinedeki servisler kontrol edilebilir.
 
+Backend'in HTTP sunucusu bir isteğin tamamını okumaya `UPTIME_HTTP_READ_TIMEOUT`
+(30 sn), yanıtını yazmaya `UPTIME_HTTP_WRITE_TIMEOUT` (2 dk) süre tanır, boşta
+bekleyen bağlantıyı `UPTIME_HTTP_IDLE_TIMEOUT` (2 dk) sonra kapatır ve en fazla
+`UPTIME_HTTP_MAX_HEADER_BYTES` (1 MiB) başlık kabul eder. Gövdesini yavaş
+gönderen ya da bağlantısını boşta tutan bir istemci bağlantıları süresiz
+meşgul edemez.
+
 ### Gizli değerlerin şifrelenmesi
 
-Monitor'ların header değerleri, parola ve token'ları ile bildirim
-kanallarının adresleri ve token'ları veritabanında durur. `UPTIME_SECRET_KEY`
-ayarlandığında bunlar AES-256-GCM ile şifrelenerek yazılır; veritabanı dosyası
-ya da yedeği başkasının eline geçse bile bu değerler okunamaz.
+Monitor'ların header değerleri, istek gövdeleri, parola ve token'ları ile
+bildirim kanallarının adresleri ve token'ları veritabanında durur. Bunlar
+`UPTIME_SECRET_KEY` anahtarıyla AES-256-GCM ile şifrelenerek yazılır;
+veritabanı dosyası ya da yedeği başkasının eline geçse bile bu değerler
+okunamaz.
 
-- Anahtar en az 32 karakterlik rastgele bir metin olmalıdır
-  (`openssl rand -base64 36`).
+- **Anahtar zorunludur**: ayarlı değilse backend başlamaz ve nedenini söyler.
+  Anahtar en az 32 karakterlik rastgele bir metin olmalıdır
+  (`openssl rand -base64 36`). Ortam değişkeni yerine bir dosyadan da
+  okunabilir: `UPTIME_SECRET_KEY_FILE` (bağlanmış bir Secret ya da Docker
+  secret; sondaki satır sonu atılır). İkisi birden verilemez.
+- Şifrelemeden bilerek vazgeçmek için `UPTIME_ALLOW_PLAINTEXT_SECRETS=true`
+  verilir: değerler şifresiz yazılır ve backend bunu her açılışta uyarı
+  olarak loglar. Veritabanında şifreli değer varken anahtar verilmezse ya da
+  yanlış anahtar verilirse backend bu ayarla da başlamaz.
 - Anahtar sonradan ayarlanırsa, açılışta daha önce şifresiz yazılmış değerler
-  de şifrelenir.
-- Anahtar ayarlı değilse değerler şifresiz yazılır ve backend bunu açılışta
-  uyarı olarak loglar. Veritabanında şifreli değer varken anahtar verilmezse
-  ya da yanlış anahtar verilirse backend başlamaz ve nedenini söyler.
+  şifrelenir ve veritabanı bir kez sıkıştırılır (`VACUUM`), ki şifresiz
+  kopyaları dosyanın boş alanında ve WAL dosyasında kalmasın. Bu, veritabanı
+  kadar boş disk ister ve büyük bir veritabanında o açılışı uzatır. Anahtardan
+  önce alınmış yedekler şifresizdir; yenileri onları silene kadar
+  (`UPTIME_BACKUP_KEEP`) öyle kalır, isterseniz elle silin.
+- Silinen ya da üzerine yazılan değerler dosyada sıfırlarla ezilir
+  (`secure_delete`). Veritabanı, WAL dosyası ve yedekler yalnızca backend'in
+  kendi kullanıcısının okuyabileceği izinlerle (`0600`) oluşturulur; daha önce
+  oluşturulmuş veritabanı dosyasının izni açılışta `0600`'a çekilir. Yedekleri
+  dışarı taşıyan bir iş bu yüzden backend'le aynı kullanıcıyla çalışmalıdır.
 - **Anahtar kaybedilirse şifreli değerler geri getirilemez**; monitor ve
   kanalların bu alanlarının yeniden girilmesi gerekir. Yedekle birlikte
   anahtarın da bir kopyasını saklayın.
@@ -230,6 +259,18 @@ güncellemelerde korur ve release kaldırılsa bile silmez. Okumak için:
 ```
 kubectl -n kubeat get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d
 ```
+
+**GitOps (Argo CD, OpenShift GitOps).** Chart ürettiği Secret'ları
+(`<release>-secret-key`, `<release>-admin`, `<release>-api-token`) Helm'in
+`lookup` fonksiyonuyla geri okuyarak korur. Şablonu `helm template` ile üreten
+araçlarda `lookup` çalışmaz: her render yeni değerler üretir ve
+senkronizasyon Secret'ların üzerine yazar. Şifreleme anahtarı değişince backend
+bir sonraki açılışta başlamaz ve şifreli değerler kurtarılamaz; API anahtarı
+değişir; `admin` Secret'ı hesabın parolasını artık tutmaz. Bu araçlarla
+kurarken üç Secret'ı da önceden oluşturup (Sealed Secrets, External Secrets
+vb.) `secretKey.existingSecret`, `apiToken.existingSecret` ve
+`auth.existingSecret` ile verin ya da chart'ın ürettiklerini senkronizasyonun
+dışında bırakın.
 
 ### Hesaplar ve giriş
 
@@ -246,10 +287,18 @@ Parolayı okumak için:
 kubectl -n kubeat get secret kubeat-admin -o jsonpath='{.data.password}' | base64 -d
 ```
 
+Hesap yokken `/setup`'a ilk ulaşan yönetici olur: chart dışı bir kurulumu ilk
+hesap oluşturulmadan ağa açmayın. Hesap tek adımda oluşturulur; aynı anda
+gönderilen iki kurulumdan yalnızca biri yönetici açar, diğeri "zaten bir
+hesap var" yanıtını (409) alır.
+
 `UPTIME_ADMIN_PASSWORD` yalnızca hesap yokken işe yarar. Yönetici parolası
 unutulursa `UPTIME_ADMIN_PASSWORD_RESET=true` ile bir kez başlatılır:
 `admin` hesabının parolası `UPTIME_ADMIN_PASSWORD` değerine çekilir ve
-oturumları kapatılır; sonra ayar kaldırılır.
+oturumları kapatılır; sonra ayar kaldırılır. Değer, kullanıldığında (hesap
+yokken ya da sıfırlamada) parola kurallarına (aşağıda) uymazsa backend
+başlamaz ve nedenini `UPTIME_ADMIN_PASSWORD: ...` diye loglar; zayıf bir
+parolayla açılmak ya da `/setup`'ı ilk gelene açık bırakmak yerine durur.
 
 **Roller.** Her hesabın bir rolü, yönetici dışındakilerin bir de kapsamı
 (namespace ve grup listesi, ya da hepsi için `*`) vardır:
@@ -271,20 +320,66 @@ Yetki backend'de denetlenir; arayüz yalnızca yapılamayanı gizler.
 (veritabanında hash'i tutulur) ve arayüz onu HttpOnly, SameSite=Lax (HTTPS
 üzerinden Secure) bir çerezde saklar. Oturum `UPTIME_SESSION_TTL`
 (varsayılan 12 saat) sonra biter; parola değişince diğer oturumlar kapanır;
-hesap devre dışı bırakılınca anında kapanır. Bir kullanıcı adı için art arda
-`UPTIME_LOGIN_MAX_FAILURES` (10) hatalı denemeden sonra giriş
-`UPTIME_LOGIN_LOCKOUT` (15 dk) boyunca o ad için kapanır. Sayaç backend
-belleğindedir. Parolalar bcrypt ile saklanır; en az
-`UPTIME_PASSWORD_MIN_LENGTH` (8) karakterdir.
+hesap devre dışı bırakılınca anında kapanır.
+
+**Parola kuralları.** Parolalar bcrypt ile saklanır. Bir parola en az
+`UPTIME_PASSWORD_MIN_LENGTH` (8) karakter ve en fazla 72 bayt olur (bcrypt
+fazlasını okumaz), kullanıcı adıyla aynı olamaz ve ilk denenenlerden biri
+olamaz: `admin`, `administrator`, `password`, `changeme`, `kubeat`,
+`12345678` (büyük-küçük harf fark etmez). Kurallar her yerde aynıdır: ilk
+hesapta, kullanıcı oluştururken, parola sıfırlarken ya da değiştirirken ve
+`UPTIME_ADMIN_PASSWORD`'da.
+
+**Deneme sınırı.** Bir kullanıcı adı için `UPTIME_LOGIN_LOCKOUT` (15 dk)
+içinde `UPTIME_LOGIN_MAX_FAILURES` (10) hatalı denemeden sonra giriş o ad
+için kapanır; süre dolana kadar doğru parola da reddedilir (429). Deneme,
+parola denetlenmeden önce sayılır: aynı anda gönderilen istekler de sınırı
+aşamaz. Dizine ulaşılamaması ya da devre dışı bir hesabın doğru parolası
+deneme sayılmaz. Parola değiştirirken sorulan mevcut parola da aynı sınırla,
+ayrı bir sayaçla korunur. Sayaç backend belleğindedir, yeniden başlatınca
+sıfırlanır ve en fazla `UPTIME_LOGIN_THROTTLE_MAX_KEYS` (100000) ad tutar;
+son denemesi kilit süresinden eski adlar her kilit süresinde bir silinir.
+Sınır dolarsa (uydurma adlarla bir saldırı) henüz tutulmayan adlar yer
+açılana kadar kilitli sayılır ve backend bunu uyarı olarak loglar.
+
+**Parola denetimleri.** Bir parola denetimi (bcrypt karşılaştırması ya da
+dizine bağlanma) bir çekirdeği çeyrek saniye kadar meşgul eder. Aynı anda en
+fazla `UPTIME_LOGIN_CONCURRENCY` (varsayılan: CPU sayısının yarısı, en az 1)
+denetim çalışır; sırasını `UPTIME_LOGIN_QUEUE_WAIT` (3 sn) içinde bulamayan
+giriş 503 ile geri çevrilir. Böylece bir giriş seli kontrollerin CPU'sunu
+tüketemez. Hesabı olmayan bir adın reddi de bir parola denetimi kadar sürer:
+yanıtın süresi hangi adların yerel hesabı olduğunu söylemez. Frontend
+backend'i `BACKEND_TIMEOUT_MS` (3 sn) kadar beklediğinden, sırada bu kadar
+bekleyen giriş arayüzde "backend'e ulaşılamadı" olarak da görünebilir.
 
 **Kayıt.** Kim ne zaman neyi oluşturdu, değiştirdi, sildi; girişler ve
 başarısız denemeler **Kayıt** sayfasında (yalnızca yöneticiler) listelenir
-ve `UPTIME_AUDIT_RETENTION` (90 gün) boyunca tutulur.
+ve `UPTIME_AUDIT_RETENTION` (90 gün) boyunca tutulur. Başarısız girişlerden
+kayda bir adın kilit süresi içindeki ilk hatası ve adı kilitleyen hata
+yazılır, aradakiler yazılmaz; hepsi birlikte dakikada en fazla
+`UPTIME_LOGIN_AUDIT_PER_MINUTE` (60) girdi olur. Fazlası dakikanın sonunda
+sayısıyla uyarı olarak loglanır; her başarısız deneme ayrıca bilgi olarak
+loglanır. Böylece uydurma adlarla bir deneme seli ne diski doldurur ne de
+kayıttaki diğer girdileri görünmez kılar.
 
 **API anahtarı.** `UPTIME_API_TOKEN` betikler ve otomasyon içindir: onu
 `Authorization: Bearer ...` ile sunan istek yönetici yetkisiyle çalışır ve
 kayıtta `api-token` olarak görünür. Arayüz artık bu anahtarı kullanmaz;
 her isteği kullanıcının oturumuyla yapar.
+
+**Kilitli hesaba girmek.** Kilit kullanıcı adına göredir: adını bilen biri
+bir hesabı hatalı denemelerle, örneğin her zaman var olan `admin`'i,
+kilitleyebilir. Kilit sürerken açık oturumlar çalışmaya devam eder. Başka
+yollar önceden hazır tutulmalıdır:
+
+- API anahtarı (`UPTIME_API_TOKEN`; chart onu `<release>-api-token`
+  Secret'ında üretir) deneme sınırına takılmaz ve yönetici yetkisiyle
+  çalışır: bir parola sıfırlanır (`PATCH /api/v1/users/{id}`) ya da geçici bir
+  yönetici hesabı açılır.
+- SSO (OIDC) tanımlıysa, SSO hesabı yönetici rolüne eşlenmiş biri sağlayıcı
+  üzerinden girer; bu giriş parola sayacına bakmaz.
+- Sayaç bellekte olduğundan backend'i yeniden başlatmak da kilitleri
+  kaldırır.
 
 #### LDAP
 
@@ -1170,14 +1265,20 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | --- | --- | --- |
 | `UPTIME_ADDR` | `:8080` | Backend'in dinlediği adres |
 | `UPTIME_DB_PATH` | `uptime.db` | SQLite dosyasının yolu |
-| `UPTIME_API_TOKEN` | – | API isteklerinde zorunlu tutulan anahtar; boşsa API açıktır |
-| `UPTIME_SECRET_KEY` | – | Veritabanındaki token ve parolaları şifreleyen anahtar; en az 32 karakter. Boşsa şifrelenmezler |
-| `UPTIME_ADMIN_PASSWORD` | – | Hesap yokken `admin` yöneticisini bu parolayla oluşturur |
+| `UPTIME_API_TOKEN` | – | Betikler için yönetici yetkisiyle çalışan API anahtarı; boşsa API yalnızca oturumla kullanılır |
+| `UPTIME_SECRET_KEY` | – | Veritabanındaki token ve parolaları şifreleyen anahtar; en az 32 karakter. Zorunlu: yoksa backend başlamaz (bkz. `UPTIME_ALLOW_PLAINTEXT_SECRETS`) |
+| `UPTIME_SECRET_KEY_FILE` | – | Anahtarın okunduğu dosya, örneğin bağlanmış bir Secret; `UPTIME_SECRET_KEY` ile birlikte verilemez |
+| `UPTIME_ALLOW_PLAINTEXT_SECRETS` | `false` | Anahtar yokken de başlar; gizli değerler şifresiz yazılır |
+| `UPTIME_ADMIN_PASSWORD` | – | Hesap yokken `admin` yöneticisini bu parolayla oluşturur; parola kurallarına uymazsa backend başlamaz. Boşsa ilk yönetici `/setup`'ta oluşturulur |
 | `UPTIME_ADMIN_PASSWORD_RESET` | `false` | `admin` parolasını `UPTIME_ADMIN_PASSWORD` değerine çeker; bir kez kullanılır |
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
 | `UPTIME_LOGIN_MAX_FAILURES` | `10` | Bir kullanıcı adını kilitleyen hatalı deneme sayısı |
-| `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi |
-| `UPTIME_PASSWORD_MIN_LENGTH` | `8` | En kısa parola |
+| `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi; denemesi bundan eski adlar bu aralıkla sayaçtan silinir |
+| `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu en fazla kullanıcı adı; doluyken henüz tutulmayan adlar kilitli sayılır |
+| `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan parola denetimi (bcrypt ya da dizine bağlanma) sayısı; `0` CPU sayısının yarısı, en az 1 |
+| `UPTIME_LOGIN_QUEUE_WAIT` | `3s` | Bir girişin parola denetimi sırasını en fazla bekleme süresi; sonra 503 |
+| `UPTIME_LOGIN_AUDIT_PER_MINUTE` | `60` | Kayda bir dakikada yazılan en fazla başarısız giriş; fazlası yalnızca uyarı olarak sayılır |
+| `UPTIME_PASSWORD_MIN_LENGTH` | `8` | En kısa parola (karakter); en uzunu 72 bayttır |
 | `UPTIME_AUDIT_RETENTION` | `2160h` | Kayıt girdilerinin saklanma süresi (90 gün) |
 | `UPTIME_LDAP_URL` | – | Dizin adresi (`ldap://` ya da `ldaps://`); boşsa LDAP kapalı |
 | `UPTIME_LDAP_BASE_DN` | – | Kullanıcıların arandığı DN |
@@ -1207,6 +1308,10 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_OIDC_DEFAULT_NAMESPACES` | – | O rolün kapsamı (virgülle; `*` hepsi) |
 | `UPTIME_DB_BUSY_TIMEOUT` | `5s` | Kilitli veritabanı için bekleme süresi |
 | `UPTIME_READ_HEADER_TIMEOUT` | `5s` | HTTP istek başlığı okuma süresi |
+| `UPTIME_HTTP_READ_TIMEOUT` | `30s` | Bir isteğin gövdesiyle birlikte okunma süresi |
+| `UPTIME_HTTP_WRITE_TIMEOUT` | `2m` | Başlıkları okunan bir isteğin yanıtının yazılıp bitmesi için süre |
+| `UPTIME_HTTP_IDLE_TIMEOUT` | `2m` | Boşta bekleyen keep-alive bağlantının kapatılma süresi |
+| `UPTIME_HTTP_MAX_HEADER_BYTES` | `1048576` | İstek başlıklarının en büyük boyutu (bayt) |
 | `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi için süre |
 | `UPTIME_SCHEDULER_TICK` | `1s` | Zamanı gelen monitor'ların ve monitor değişikliklerinin kontrol sıklığı |
 | `UPTIME_MAX_JITTER` | `5s` | Çalışırken eklenen bir monitor'un ilk kontrolünden önceki rastgele gecikmenin üst sınırı. Açılışta var olan monitor'lar kendi aralıklarına yayılır |

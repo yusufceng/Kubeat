@@ -16,8 +16,13 @@ type Config struct {
 	Addr string // UPTIME_ADDR
 	// APIToken, if set, is required as a bearer token on API requests.
 	APIToken string // UPTIME_API_TOKEN
-	// SecretKey, if set, encrypts the secrets kept in the database.
-	SecretKey string // UPTIME_SECRET_KEY
+	// SecretKey encrypts the secrets kept in the database. It can also be
+	// read from SecretKeyFile, a mounted Secret for instance, but not be
+	// given both ways. Without a key the server does not start, unless
+	// AllowPlaintextSecrets says to keep the secrets unencrypted.
+	SecretKey             string // UPTIME_SECRET_KEY
+	SecretKeyFile         string // UPTIME_SECRET_KEY_FILE
+	AllowPlaintextSecrets bool   // UPTIME_ALLOW_PLAINTEXT_SECRETS
 
 	// Accounts. AdminPassword creates the administrator "admin" when there
 	// is no account yet; with AdminPasswordReset it also resets admin's
@@ -29,6 +34,18 @@ type Config struct {
 	LoginLockout       time.Duration // UPTIME_LOGIN_LOCKOUT
 	PasswordMinLength  int           // UPTIME_PASSWORD_MIN_LENGTH
 	AuditRetention     time.Duration // UPTIME_AUDIT_RETENTION
+	// LoginThrottleMaxKeys bounds how many usernames the sign-in throttle
+	// tracks at once; while all are taken, a name it does not track yet
+	// is refused as if locked.
+	LoginThrottleMaxKeys int // UPTIME_LOGIN_THROTTLE_MAX_KEYS
+	// LoginConcurrency is how many password checks (bcrypt comparisons and
+	// directory binds) run at once, zero meaning half the CPUs; a sign-in
+	// waits at most LoginQueueWait for its turn.
+	LoginConcurrency int           // UPTIME_LOGIN_CONCURRENCY
+	LoginQueueWait   time.Duration // UPTIME_LOGIN_QUEUE_WAIT
+	// LoginAuditPerMinute caps the failed sign-ins written to the audit
+	// log in a minute; what is left out is counted in a warning.
+	LoginAuditPerMinute int // UPTIME_LOGIN_AUDIT_PER_MINUTE
 
 	// LDAP; see ldapauth.Config. Empty LDAPURL means local accounts only.
 	LDAPURL                string        // UPTIME_LDAP_URL
@@ -73,6 +90,14 @@ type Config struct {
 	DBBusyTimeout          time.Duration // UPTIME_DB_BUSY_TIMEOUT
 	ReadHeaderTimeout      time.Duration // UPTIME_READ_HEADER_TIMEOUT
 	ShutdownTimeout        time.Duration // UPTIME_SHUTDOWN_TIMEOUT
+	// The HTTP server's other bounds: how long reading a whole request and
+	// writing its answer may take, how long an idle keep-alive connection
+	// stays open, and how large the request headers may be. Without them
+	// a client that sends slowly, or not at all, holds a connection for good.
+	HTTPReadTimeout    time.Duration // UPTIME_HTTP_READ_TIMEOUT
+	HTTPWriteTimeout   time.Duration // UPTIME_HTTP_WRITE_TIMEOUT
+	HTTPIdleTimeout    time.Duration // UPTIME_HTTP_IDLE_TIMEOUT
+	HTTPMaxHeaderBytes int           // UPTIME_HTTP_MAX_HEADER_BYTES
 
 	SchedulerTick       time.Duration // UPTIME_SCHEDULER_TICK
 	MaxJitter           time.Duration // UPTIME_MAX_JITTER
@@ -192,8 +217,9 @@ func Load() (Config, error) {
 		PublicURL: strings.TrimSuffix(envString("UPTIME_PUBLIC_URL", ""), "/"),
 		DBPath:    envString("UPTIME_DB_PATH", "uptime.db"),
 
-		APIToken:  envString("UPTIME_API_TOKEN", ""),
-		SecretKey: envString("UPTIME_SECRET_KEY", ""),
+		APIToken:      envString("UPTIME_API_TOKEN", ""),
+		SecretKey:     envString("UPTIME_SECRET_KEY", ""),
+		SecretKeyFile: envString("UPTIME_SECRET_KEY_FILE", ""),
 
 		AdminPassword: envString("UPTIME_ADMIN_PASSWORD", ""),
 
@@ -259,6 +285,12 @@ func Load() (Config, error) {
 		{&cfg.DBBusyTimeout, "UPTIME_DB_BUSY_TIMEOUT", 5 * time.Second},
 		{&cfg.ReadHeaderTimeout, "UPTIME_READ_HEADER_TIMEOUT", 5 * time.Second},
 		{&cfg.ShutdownTimeout, "UPTIME_SHUTDOWN_TIMEOUT", 10 * time.Second},
+		// The slowest answers wait on the directory, the identity provider,
+		// the cluster or the metrics server, each bounded by a timeout of
+		// its own of seconds: well within the write timeout.
+		{&cfg.HTTPReadTimeout, "UPTIME_HTTP_READ_TIMEOUT", 30 * time.Second},
+		{&cfg.HTTPWriteTimeout, "UPTIME_HTTP_WRITE_TIMEOUT", 2 * time.Minute},
+		{&cfg.HTTPIdleTimeout, "UPTIME_HTTP_IDLE_TIMEOUT", 2 * time.Minute},
 		{&cfg.SchedulerTick, "UPTIME_SCHEDULER_TICK", time.Second},
 		{&cfg.MaxJitter, "UPTIME_MAX_JITTER", 5 * time.Second},
 		{&cfg.ResultFlushInterval, "UPTIME_RESULT_FLUSH_INTERVAL", time.Second},
@@ -275,6 +307,7 @@ func Load() (Config, error) {
 		{&cfg.StatusPageIncidentWindow, "UPTIME_STATUS_PAGE_INCIDENT_WINDOW", 14 * 24 * time.Hour},
 		{&cfg.SessionTTL, "UPTIME_SESSION_TTL", 12 * time.Hour},
 		{&cfg.LoginLockout, "UPTIME_LOGIN_LOCKOUT", 15 * time.Minute},
+		{&cfg.LoginQueueWait, "UPTIME_LOGIN_QUEUE_WAIT", 3 * time.Second},
 		{&cfg.AuditRetention, "UPTIME_AUDIT_RETENTION", 90 * 24 * time.Hour},
 		{&cfg.LDAPTimeout, "UPTIME_LDAP_TIMEOUT", 10 * time.Second},
 		{&cfg.OIDCTimeout, "UPTIME_OIDC_TIMEOUT", 10 * time.Second},
@@ -307,6 +340,9 @@ func Load() (Config, error) {
 		{&cfg.MaxResults, "UPTIME_MAX_RESULTS", 1000},
 		{&cfg.StatusPageDays, "UPTIME_STATUS_PAGE_DAYS", 90},
 		{&cfg.LoginMaxFailures, "UPTIME_LOGIN_MAX_FAILURES", 10},
+		{&cfg.LoginThrottleMaxKeys, "UPTIME_LOGIN_THROTTLE_MAX_KEYS", 100000},
+		{&cfg.LoginAuditPerMinute, "UPTIME_LOGIN_AUDIT_PER_MINUTE", 60},
+		{&cfg.HTTPMaxHeaderBytes, "UPTIME_HTTP_MAX_HEADER_BYTES", 1 << 20},
 		{&cfg.PasswordMinLength, "UPTIME_PASSWORD_MIN_LENGTH", 8},
 		{&cfg.SeriesPoints, "UPTIME_SERIES_POINTS", 120},
 		{&cfg.KeywordBodyLimit, "UPTIME_KEYWORD_BODY_LIMIT_BYTES", 1 << 20},
@@ -376,6 +412,25 @@ func Load() (Config, error) {
 	}
 	if cfg.AdminPasswordReset, err = envBool("UPTIME_ADMIN_PASSWORD_RESET", false); err != nil {
 		return Config{}, err
+	}
+	if cfg.LoginConcurrency, err = envIntOrZero("UPTIME_LOGIN_CONCURRENCY", 0); err != nil {
+		return Config{}, err
+	}
+	if cfg.AllowPlaintextSecrets, err = envBool("UPTIME_ALLOW_PLAINTEXT_SECRETS", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.SecretKeyFile != "" {
+		if cfg.SecretKey != "" {
+			return Config{}, fmt.Errorf("UPTIME_SECRET_KEY and UPTIME_SECRET_KEY_FILE are both set; set only one")
+		}
+		key, err := os.ReadFile(cfg.SecretKeyFile)
+		if err != nil {
+			return Config{}, fmt.Errorf("UPTIME_SECRET_KEY_FILE: %w", err)
+		}
+		// A file written by hand or by a tool usually ends in a newline.
+		if cfg.SecretKey = strings.TrimSpace(string(key)); cfg.SecretKey == "" {
+			return Config{}, fmt.Errorf("UPTIME_SECRET_KEY_FILE: %s is empty", cfg.SecretKeyFile)
+		}
 	}
 	if cfg.LDAPStartTLS, err = envBool("UPTIME_LDAP_START_TLS", false); err != nil {
 		return Config{}, err
@@ -477,6 +532,23 @@ func checkCIDRs(key, list string) error {
 		return fmt.Errorf("%s: %q is not a CIDR such as 10.0.0.0/8", key, entry)
 	}
 	return nil
+}
+
+// envIntOrZero is envPositiveInt for settings where zero means "choose for
+// me".
+func envIntOrZero(key string, def int) (int, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("%s: must not be negative, got %s", key, v)
+	}
+	return n, nil
 }
 
 func envBool(key string, def bool) (bool, error) {

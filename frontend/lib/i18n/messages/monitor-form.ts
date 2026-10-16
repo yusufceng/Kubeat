@@ -144,6 +144,8 @@ export const monitorForm = defineMessages(
     "monitorForm.actions.error.forbiddenDetail": "Yetki yok: {message}",
     "monitorForm.actions.error.notFound": "Bulunamadı ya da bu kayda erişim yetkiniz yok.",
     "monitorForm.actions.error.sessionExpired": "Oturumunuz sona erdi; yeniden giriş yapın.",
+    "monitorForm.actions.error.tooMany": "Çok fazla hatalı deneme yapıldı. Biraz sonra tekrar deneyin.",
+    "monitorForm.actions.error.busy": "Şu anda çok fazla parola denetleniyor. Birkaç saniye sonra tekrar deneyin.",
     "monitorForm.actions.error.backend": "Backend'e ulaşılamadı. Biraz sonra tekrar deneyin.",
   },
   {
@@ -288,6 +290,8 @@ export const monitorForm = defineMessages(
     "monitorForm.actions.error.forbiddenDetail": "Not allowed: {message}",
     "monitorForm.actions.error.notFound": "Not found, or you have no access to this record.",
     "monitorForm.actions.error.sessionExpired": "Your session has expired; sign in again.",
+    "monitorForm.actions.error.tooMany": "Too many failed attempts. Try again in a little while.",
+    "monitorForm.actions.error.busy": "Too many passwords are being checked right now. Try again in a few seconds.",
     "monitorForm.actions.error.backend": "The backend could not be reached. Try again in a moment.",
   },
 );

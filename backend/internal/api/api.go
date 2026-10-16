@@ -62,6 +62,7 @@ type Store interface {
 	MonitorIsPublic(ctx context.Context, monitorID int64) (bool, error)
 
 	CreateUser(ctx context.Context, u store.User) (store.User, error)
+	CreateFirstUser(ctx context.Context, u store.User) (store.User, error)
 	GetUser(ctx context.Context, id int64) (store.User, error)
 	GetUserByUsername(ctx context.Context, username string) (store.User, error)
 	ListUsers(ctx context.Context) ([]store.User, error)
@@ -129,6 +130,15 @@ type Options struct {
 	SessionTTL        time.Duration
 	Throttle          *auth.Throttle
 	PasswordMinLength int
+	// LoginConcurrency bounds the password checks that run at once, bcrypt
+	// comparisons and directory binds; zero means half the CPUs, at least
+	// one. A check waits at most LoginQueueWait for its turn (zero: as long
+	// as its request lasts) and is then refused with 503.
+	LoginConcurrency int
+	LoginQueueWait   time.Duration
+	// LoginAuditPerMinute caps the failed sign-ins written to the audit log
+	// in a minute; zero means no cap.
+	LoginAuditPerMinute int
 	// LDAP, if set, lets directory accounts sign in. A directory user gets
 	// the role of the group mappings that match their groups, or else
 	// LDAPDefaultRole (empty: no access) with LDAPDefaultNamespaces.
@@ -184,11 +194,19 @@ type Health struct {
 
 type handler struct {
 	opts Options
+	// passwordChecks are the slots password checks run in; failedLogins
+	// decides which failed sign-ins the audit log gets.
+	passwordChecks *slots
+	failedLogins   *auditCap
 }
 
 // NewHandler returns the root HTTP handler of the server.
 func NewHandler(opts Options) http.Handler {
-	h := &handler{opts: opts}
+	h := &handler{
+		opts:           opts,
+		passwordChecks: newSlots(opts.LoginConcurrency, opts.LoginQueueWait),
+		failedLogins:   newAuditCap(opts.LoginAuditPerMinute, opts.Logger),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)
 	if opts.Metrics != nil {

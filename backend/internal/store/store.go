@@ -642,6 +642,10 @@ type Store interface {
 	// CreateUser returns ErrConflict when the username is taken (whatever
 	// its case).
 	CreateUser(ctx context.Context, u User) (User, error)
+	// CreateFirstUser creates u only while there is no account at all, and
+	// returns ErrConflict once there is one. Checking and creating are one
+	// step: of two first accounts created at the same time, one fails.
+	CreateFirstUser(ctx context.Context, u User) (User, error)
 	GetUser(ctx context.Context, id int64) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	ListUsers(ctx context.Context) ([]User, error)

@@ -73,10 +73,22 @@ frontend:
 # Sign-in to the UI with a single administrator password. By default the
 # chart generates the password once and keeps it; the install notes say how
 # to read it.
+#
+# GitOps (Argo CD, OpenShift GitOps, anything that renders with
+# "helm template"): the chart keeps the Secrets it generates (this one,
+# apiToken's and secretKey's) by reading them back with "lookup", which does
+# not run there. Every render makes new values, and a sync overwrites the
+# Secrets: the API token changes, the admin Secret no longer matches the
+# account, and the backend no longer starts with the new encryption key.
+# Provide all three as existing Secrets there (Sealed Secrets, External
+# Secrets...), or keep the generated ones out of the sync.
 auth:
   # Name of an existing Secret with the key "password": the password of the
   # first administrator account, "admin", created on the backend's first
-  # start. Afterwards accounts are managed in the UI.
+  # start. Afterwards accounts are managed in the UI. It has to pass the
+  # password rules (UPTIME_PASSWORD_MIN_LENGTH characters to 72 bytes, not
+  # "admin", "password" or another of the first guesses), or the backend
+  # does not start while there is no account yet.
   existingSecret: ""
   sessionTtlHours: 12
 
@@ -130,10 +142,12 @@ backup:
     storageClass: ""     # empty uses the cluster default
     existingClaim: ""    # use this PVC instead of creating one
 
-# The backend API only answers requests carrying a shared secret, which the
-# frontend sends. By default the chart generates it once and keeps it.
+# The API token, for scripts and automation: a request presenting it acts as
+# an administrator, which also makes it the way in when the administrators'
+# accounts are locked. By default the chart generates it once and keeps it.
 apiToken:
   # Name of an existing Secret with the key "token", to manage it yourself.
+  # Needed with GitOps tools that render with "helm template" (see auth).
   existingSecret: ""
 
 # The key that encrypts tokens, passwords and webhook addresses in the
@@ -142,6 +156,9 @@ apiToken:
 # database is of no use without the key its secrets were encrypted with.
 secretKey:
   # Name of an existing Secret with the key "key" (32 characters or more).
+  # Needed with GitOps tools that render with "helm template" (see auth):
+  # there a sync would replace the generated key, and the backend could no
+  # longer read what it encrypted.
   existingSecret: ""
 
 # Restricts who can connect to the backend at the network level, in addition

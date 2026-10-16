@@ -48,6 +48,17 @@ func userFields(u *User) (namespaces string, err error) {
 }
 
 func (s *SQLite) CreateUser(ctx context.Context, u User) (User, error) {
+	return s.insertUser(ctx, u, false)
+}
+
+func (s *SQLite) CreateFirstUser(ctx context.Context, u User) (User, error) {
+	return s.insertUser(ctx, u, true)
+}
+
+// insertUser creates u; with first set, only while there is no account at
+// all. That condition is part of the INSERT, so no other write can come
+// between the check and the row.
+func (s *SQLite) insertUser(ctx context.Context, u User, first bool) (User, error) {
 	namespaces, err := userFields(&u)
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
@@ -56,15 +67,24 @@ func (s *SQLite) CreateUser(ctx context.Context, u User) (User, error) {
 		u.Source = UserLocal
 	}
 	u.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
-	res, err := s.write.ExecContext(ctx,
-		`INSERT INTO users (username, display_name, email, source, password_hash, role, namespaces, enabled, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	query := `INSERT INTO users (username, display_name, email, source, password_hash, role, namespaces, enabled, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if first {
+		query = `INSERT INTO users (username, display_name, email, source, password_hash, role, namespaces, enabled, created_at)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)`
+	}
+	res, err := s.write.ExecContext(ctx, query,
 		u.Username, u.DisplayName, u.Email, u.Source, u.PasswordHash, u.Role, namespaces, u.Enabled, u.CreatedAt.UnixMilli())
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
 	}
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return User{}, fmt.Errorf("create user: %w", err)
+	} else if n == 0 {
+		return User{}, ErrConflict // not the first account
 	}
 	if u.ID, err = res.LastInsertId(); err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)

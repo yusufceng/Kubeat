@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -40,6 +41,7 @@ var version = "dev"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	privateFiles()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -50,13 +52,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// A database created before files were made private would keep its
+	// mode, and pass it on: its journal files are created with the mode
+	// of the database file.
+	if err := os.Chmod(cfg.DBPath, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		logger.Warn("the database file could not be made private", "path", cfg.DBPath, "error", err)
+	}
 	db, err := store.OpenSQLite(ctx, cfg.DBPath, cfg.DBBusyTimeout)
 	if err != nil {
 		logger.Error("open database failed", "path", cfg.DBPath, "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
-	if err := protectSecrets(ctx, db, cfg.SecretKey, logger); err != nil {
+	if err := protectSecrets(ctx, db, cfg.SecretKey, cfg.AllowPlaintextSecrets, logger); err != nil {
 		logger.Error("the secrets in the database cannot be used", "error", err)
 		db.Close()
 		os.Exit(1)
@@ -281,6 +289,12 @@ func main() {
 		defer background.Done()
 		runSessionCleanup(ctx, db, cfg.AuditRetention, logger)
 	}()
+	throttle := &auth.Throttle{MaxFailures: cfg.LoginMaxFailures, Lockout: cfg.LoginLockout, MaxKeys: cfg.LoginThrottleMaxKeys}
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		sweepThrottle(ctx, throttle, logger)
+	}()
 
 	if cfg.PrometheusURL != "" {
 		client, err := prom.New(prom.Options{
@@ -301,6 +315,9 @@ func main() {
 		logger.Info("pod metrics enabled", "url", cfg.PrometheusURL)
 	}
 
+	// The dummy hash a sign-in of an unknown name is compared with takes as
+	// long as a real comparison to make; better now than in a sign-in.
+	auth.PrepareDummy()
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: api.NewHandler(api.Options{
@@ -314,8 +331,11 @@ func main() {
 			StatusPageIncidentWindow: cfg.StatusPageIncidentWindow,
 			Token:                    cfg.APIToken,
 			SessionTTL:               cfg.SessionTTL,
-			Throttle:                 &auth.Throttle{MaxFailures: cfg.LoginMaxFailures, Lockout: cfg.LoginLockout},
+			Throttle:                 throttle,
 			PasswordMinLength:        cfg.PasswordMinLength,
+			LoginConcurrency:         cfg.LoginConcurrency,
+			LoginQueueWait:           cfg.LoginQueueWait,
+			LoginAuditPerMinute:      cfg.LoginAuditPerMinute,
 			LDAP:                     ldap,
 			LDAPDefaultRole:          store.Role(cfg.LDAPDefaultRole),
 			LDAPDefaultNamespaces:    splitList(cfg.LDAPDefaultNamespaces),
@@ -341,7 +361,15 @@ func main() {
 			HistoryRetention:        cfg.RollupRetention,
 			SeriesPoints:            cfg.SeriesPoints,
 		}),
+		// Reading a request and writing its answer are bounded, and so is
+		// an idle connection's life: a client that sends a body slowly, or
+		// keeps connections open without using them, cannot hold them for
+		// good. Without a ReadTimeout only the headers had a deadline.
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		ReadTimeout:       cfg.HTTPReadTimeout,
+		WriteTimeout:      cfg.HTTPWriteTimeout,
+		IdleTimeout:       cfg.HTTPIdleTimeout,
+		MaxHeaderBytes:    cfg.HTTPMaxHeaderBytes,
 	}
 
 	shutdownDone := make(chan struct{})
@@ -374,9 +402,11 @@ func main() {
 
 // protectSecrets sets the store up to encrypt secrets with key and brings a
 // database written before the key was configured in line with it. Without
-// a key secrets stay as they are, unless the database already holds
-// encrypted ones: starting then would only fail later, one monitor at a time.
-func protectSecrets(ctx context.Context, db *store.SQLite, key string, logger *slog.Logger) error {
+// a key the server does not start: the secrets would sit readable in the
+// database file and every backup of it. allowPlaintext lets it start all
+// the same, but not when the database already holds encrypted secrets:
+// starting then would only fail later, one monitor at a time.
+func protectSecrets(ctx context.Context, db *store.SQLite, key string, allowPlaintext bool, logger *slog.Logger) error {
 	var box *secretbox.Box
 	if key != "" {
 		var err error
@@ -394,6 +424,10 @@ func protectSecrets(ctx context.Context, db *store.SQLite, key string, logger *s
 		if counts.Sealed > 0 {
 			return errors.New("the database holds encrypted secrets; set UPTIME_SECRET_KEY to the key they were encrypted with")
 		}
+		if !allowPlaintext {
+			return errors.New("UPTIME_SECRET_KEY is not set: set it, or UPTIME_SECRET_KEY_FILE, to a random key of 32 characters or more " +
+				"(openssl rand -base64 36) and keep a copy with the backups; to store tokens and passwords unencrypted instead, set UPTIME_ALLOW_PLAINTEXT_SECRETS=true")
+		}
 		logger.Warn("UPTIME_SECRET_KEY is not set: tokens and passwords are stored unencrypted in the database")
 		return nil
 	}
@@ -404,19 +438,43 @@ func protectSecrets(ctx context.Context, db *store.SQLite, key string, logger *s
 	if _, err := db.ListChannels(ctx); err != nil {
 		return err
 	}
-	if counts.Plain > 0 {
-		if err := db.EncryptSecrets(ctx); err != nil {
-			return err
-		}
-		logger.Info("secrets stored before the key was configured are now encrypted", "count", counts.Plain)
+	if counts.Plain == 0 {
+		return nil
+	}
+	if err := db.EncryptSecrets(ctx); err != nil {
+		return err
+	}
+	logger.Info("secrets stored before the key was configured are now encrypted", "count", counts.Plain)
+	if counts.Sealed > 0 {
+		// A database that had the key already, with a value only now
+		// counted among the secrets (request bodies): rewriting the rows
+		// zeroed the plain values in place, and nothing else was stored
+		// without the key. Older copies of those values may linger until
+		// overwritten, which is not worth compacting for at every upgrade.
+		return nil
+	}
+	// The plain values the database was written with stay in the free
+	// space of its file and in the write-ahead log until the file is
+	// rewritten. Once only, now: the next start finds nothing plain.
+	logger.Info("compacting the database once, so that no unencrypted copy of the secrets is left in it; this takes a while for a large one")
+	if err := db.Vacuum(ctx); err != nil {
+		logger.Warn("the database could not be compacted: unencrypted copies of the secrets may remain in the free space of its file; "+
+			"run VACUUM on it while the server is stopped", "error", err)
 	}
 	return nil
 }
+
+// adminUsername is the account UPTIME_ADMIN_PASSWORD creates and resets.
+const adminUsername = "admin"
 
 // bootstrapAdmin creates the administrator "admin" from UPTIME_ADMIN_PASSWORD
 // when there is no account yet, which is how a Helm install gets its first
 // sign-in. With UPTIME_ADMIN_PASSWORD_RESET it also resets that account's
 // password, for an operator who is locked out.
+//
+// The password is held to the rules of every other password, but only when
+// it is used. One that breaks them stops the start: going on without the
+// account would leave the first-run page open to whoever comes first.
 func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, logger *slog.Logger) error {
 	if cfg.AdminPassword == "" {
 		return nil
@@ -424,6 +482,12 @@ func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, lo
 	n, err := db.CountUsers(ctx)
 	if err != nil {
 		return err
+	}
+	if n > 0 && !cfg.AdminPasswordReset {
+		return nil
+	}
+	if err := auth.ValidatePassword(adminUsername, cfg.AdminPassword, cfg.PasswordMinLength); err != nil {
+		return fmt.Errorf("UPTIME_ADMIN_PASSWORD: %w", err)
 	}
 	hash, err := auth.HashPassword(cfg.AdminPassword)
 	if err != nil {
@@ -434,16 +498,13 @@ func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, lo
 		if cfg.Language == "tr" {
 			displayName = "Yönetici"
 		}
-		if _, err := db.CreateUser(ctx, store.User{Username: "admin", DisplayName: displayName, Source: store.UserLocal, PasswordHash: hash, Role: store.RoleAdmin, Enabled: true}); err != nil {
+		if _, err := db.CreateFirstUser(ctx, store.User{Username: adminUsername, DisplayName: displayName, Source: store.UserLocal, PasswordHash: hash, Role: store.RoleAdmin, Enabled: true}); err != nil {
 			return err
 		}
-		logger.Info("administrator account created from UPTIME_ADMIN_PASSWORD", "user", "admin")
+		logger.Info("administrator account created from UPTIME_ADMIN_PASSWORD", "user", adminUsername)
 		return nil
 	}
-	if !cfg.AdminPasswordReset {
-		return nil
-	}
-	admin, err := db.GetUserByUsername(ctx, "admin")
+	admin, err := db.GetUserByUsername(ctx, adminUsername)
 	if err != nil {
 		return fmt.Errorf("reset the admin password: %w", err)
 	}
@@ -497,6 +558,25 @@ func runSessionCleanup(ctx context.Context, db *store.SQLite, auditRetention tim
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+// sweepThrottle forgets, every lockout period, the sign-in names whose
+// attempts have all aged out, and warns while the throttle stays full:
+// names it does not track yet are refused until it has room again.
+func sweepThrottle(ctx context.Context, throttle *auth.Throttle, logger *slog.Logger) {
+	ticker := time.NewTicker(throttle.Lockout)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			if tracked := throttle.Sweep(now.UTC()); throttle.MaxKeys > 0 && tracked >= throttle.MaxKeys {
+				logger.Warn("the sign-in throttle is full, perhaps from a flood of made-up usernames: names it does not track yet are refused as locked until older ones age out",
+					"tracked", tracked, "max", throttle.MaxKeys)
+			}
 		}
 	}
 }

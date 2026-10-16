@@ -25,6 +25,10 @@ function refusal(err: unknown, t: T): string {
         return t("login.refusal.tooMany");
       case 502:
         return t("login.refusal.directory");
+      case 503:
+        // The backend's own answer when too many sign-ins are being checked
+        // at once; a 503 of our own means the backend was not reached.
+        return err.message.startsWith("too many") ? t("login.refusal.busy") : t("login.refusal.backend");
       case 409:
         return t("login.refusal.exists");
       case 400:

@@ -114,7 +114,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   Tek replica olduğu için şimdilik sorun değildir. Kilit kullanıcı adına
   göredir: adını bilen biri bir hesabı `UPTIME_LOGIN_MAX_FAILURES` yanlış
   denemeyle `UPTIME_LOGIN_LOCKOUT` süresince kilitleyebilir; IP bazlı sınır
-  yoktur.
+  yoktur. Kilitli bir hesap için API anahtarı, SSO ya da backend'i yeniden
+  başlatmak kalır (README, "Kilitli hesaba girmek").
 - `/metrics` kimlik istemez ve monitor adlarını, namespace'lerini ve
   sertifika bitişlerini açığa çıkarır; backend'e kimlerin ulaşabileceğini
   NetworkPolicy belirler.

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,11 @@ func TestLoadDefaults(t *testing.T) {
 		DBBusyTimeout:     5 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		ShutdownTimeout:   10 * time.Second,
+
+		HTTPReadTimeout:    30 * time.Second,
+		HTTPWriteTimeout:   2 * time.Minute,
+		HTTPIdleTimeout:    2 * time.Minute,
+		HTTPMaxHeaderBytes: 1 << 20,
 
 		SchedulerTick:       time.Second,
 		MaxJitter:           5 * time.Second,
@@ -74,6 +80,11 @@ func TestLoadDefaults(t *testing.T) {
 		LoginLockout:      15 * time.Minute,
 		PasswordMinLength: 8,
 		AuditRetention:    90 * 24 * time.Hour,
+
+		LoginThrottleMaxKeys: 100000,
+		LoginConcurrency:     0, // half the CPUs
+		LoginQueueWait:       3 * time.Second,
+		LoginAuditPerMinute:  60,
 
 		LDAPUserFilter:       "(uid={username})",
 		LDAPDisplayNameAttr:  "cn",
@@ -159,6 +170,63 @@ func TestLoadRejectsInvalidNumbersAndBools(t *testing.T) {
 	t.Setenv("UPTIME_HTTP_INSECURE_SKIP_VERIFY", "maybe")
 	if _, err := Load(); err == nil {
 		t.Error("UPTIME_HTTP_INSECURE_SKIP_VERIFY=maybe was accepted")
+	}
+}
+
+func TestLoginConcurrencyMayBeZero(t *testing.T) {
+	for value, want := range map[string]int{"": 0, "0": 0, "4": 4} {
+		t.Setenv("UPTIME_LOGIN_CONCURRENCY", value)
+		cfg, err := Load()
+		if err != nil || cfg.LoginConcurrency != want {
+			t.Errorf("UPTIME_LOGIN_CONCURRENCY=%q: %d, %v; want %d", value, cfg.LoginConcurrency, err, want)
+		}
+	}
+	for _, bad := range []string{"-1", "many"} {
+		t.Setenv("UPTIME_LOGIN_CONCURRENCY", bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("UPTIME_LOGIN_CONCURRENCY=%q was accepted", bad)
+		}
+	}
+}
+
+// The key can come from a file, a mounted Secret for instance, but not
+// from both places at once.
+func TestSecretKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "key")
+	if err := os.WriteFile(keyFile, []byte("  0123456789abcdef0123456789abcdef-from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("UPTIME_SECRET_KEY", "")
+	t.Setenv("UPTIME_SECRET_KEY_FILE", keyFile)
+	cfg, err := Load()
+	if err != nil || cfg.SecretKey != "0123456789abcdef0123456789abcdef-from-file" {
+		t.Errorf("key from a file = %q, %v", cfg.SecretKey, err)
+	}
+
+	t.Setenv("UPTIME_SECRET_KEY", "0123456789abcdef0123456789abcdef-from-env")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "both") {
+		t.Errorf("both set: err = %v", err)
+	}
+	t.Setenv("UPTIME_SECRET_KEY", "")
+
+	empty := filepath.Join(dir, "empty")
+	os.WriteFile(empty, []byte("\n"), 0o600)
+	for _, bad := range []string{empty, filepath.Join(dir, "missing")} {
+		t.Setenv("UPTIME_SECRET_KEY_FILE", bad)
+		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), "UPTIME_SECRET_KEY_FILE") {
+			t.Errorf("UPTIME_SECRET_KEY_FILE=%s: err = %v", bad, err)
+		}
+	}
+
+	t.Setenv("UPTIME_SECRET_KEY_FILE", "")
+	t.Setenv("UPTIME_ALLOW_PLAINTEXT_SECRETS", "yes")
+	if _, err := Load(); err == nil {
+		t.Error("UPTIME_ALLOW_PLAINTEXT_SECRETS=yes was accepted")
+	}
+	t.Setenv("UPTIME_ALLOW_PLAINTEXT_SECRETS", "true")
+	if cfg, err := Load(); err != nil || !cfg.AllowPlaintextSecrets || cfg.SecretKey != "" {
+		t.Errorf("plaintext allowed: %+v, %v", cfg.AllowPlaintextSecrets, err)
 	}
 }
 

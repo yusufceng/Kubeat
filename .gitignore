@@ -19,6 +19,8 @@ next-env.d.ts
 .env
 .env.*
 !.env.example
+# make backend'in ürettiği lokal şifreleme anahtarı
+.dev/
 
 # OS / IDE
 .DS_Store
