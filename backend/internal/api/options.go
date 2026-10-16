@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -22,7 +23,8 @@ const (
 	maxRedirects     = 20
 	// maskedValue stands in for a secret in responses: header values and
 	// the password or token of an HTTP check. Sent back unchanged in an
-	// update, it means "keep the stored value".
+	// update, it means "keep the stored value", as long as the secret goes
+	// to the same server as before (see keptSecrets).
 	maskedValue = "********"
 )
 
@@ -148,6 +150,78 @@ func toCheckOptions(m store.Monitor) checkOptions {
 		o.Workload = &workloadOptions{MinReady: m.Workload.MinReady}
 	}
 	return o
+}
+
+// A stored secret is kept by an update that sends back its mask, or leaves
+// out the options it belongs to, but only for the server it was entered
+// for. The masks keep a secret from being read; were it kept for another
+// server, anyone who may edit the monitor or channel could still have it
+// sent to a server of their choosing and read it there.
+
+// defaultPorts are the ports a URL's scheme implies when it names none.
+var defaultPorts = map[string]string{"http": "80", "https": "443", "ws": "80", "wss": "443"}
+
+// endpoint is the server a URL talks to: its scheme, host and port, with
+// the port the scheme implies when it names none. It is "" for anything
+// that is not a URL with a host.
+func endpoint(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	port := u.Port()
+	if port == "" {
+		port = defaultPorts[scheme]
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
+}
+
+// destination is the server a monitor's check connects to, and so hands
+// the monitor's credentials: the scheme, host and port of a URL, the host
+// and port of a host:port target.
+func destination(typ store.MonitorType, target string) string {
+	switch typ {
+	case store.MonitorHTTP, store.MonitorWebSocket:
+		return endpoint(target)
+	case store.MonitorTCP, store.MonitorGRPC, store.MonitorPostgres, store.MonitorMySQL, store.MonitorRedis:
+		if host, port, err := net.SplitHostPort(target); err == nil {
+			return net.JoinHostPort(strings.ToLower(host), port)
+		}
+	}
+	return target
+}
+
+// keptSecrets names the stored secrets of m that an update with these
+// options would keep: those sent back masked, or all of them when the
+// options of m's type are left out, which keeps them as they are.
+func (o checkOptions) keptSecrets(m store.Monitor) []string {
+	var kept []string
+	switch {
+	case m.Type == store.MonitorHTTP && o.HTTP == nil:
+		if m.HTTP.AuthSecret != "" {
+			kept = append(kept, "http.auth_secret")
+		}
+		for name := range m.HTTP.Headers {
+			kept = append(kept, "http.headers."+name)
+		}
+	case m.Type == store.MonitorHTTP:
+		if o.HTTP.AuthSecret == maskedValue && store.HTTPAuth(o.HTTP.Auth) == m.HTTP.Auth && m.HTTP.AuthSecret != "" {
+			kept = append(kept, "http.auth_secret")
+		}
+		for name, value := range o.HTTP.Headers {
+			name = http.CanonicalHeaderKey(name)
+			if _, stored := m.HTTP.Headers[name]; stored && value == maskedValue {
+				kept = append(kept, "http.headers."+name)
+			}
+		}
+	case m.Type.IsDatabase() && (o.Database == nil || o.Database.Password == maskedValue):
+		if m.Database.Password != "" {
+			kept = append(kept, "database.password")
+		}
+	}
+	slices.Sort(kept)
+	return slices.Compact(kept)
 }
 
 // defaultOptions returns the check options of a new monitor of the given

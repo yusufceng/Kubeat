@@ -146,7 +146,8 @@ func TestPushMonitor(t *testing.T) {
 	if len(job.PushToken) != 32 || job.PushToken == other.PushToken || job.Target != "" {
 		t.Fatalf("push monitors = %+v, %+v", job, other)
 	}
-	// The token comes back when the monitor is read, so the UI can show its URL.
+	// The token comes back when the monitor is read by someone who may
+	// change it, so the UI can show its URL.
 	var read monitorResponse
 	if do(t, "GET", base+"/1", "", &read); read.PushToken != job.PushToken {
 		t.Errorf("token when read = %q", read.PushToken)
@@ -196,6 +197,44 @@ func TestPushMonitor(t *testing.T) {
 	var updated monitorResponse
 	if code := do(t, "PATCH", base+"/1", `{"interval_seconds":120}`, &updated); code != http.StatusOK || updated.PushToken != job.PushToken {
 		t.Errorf("update: status = %d, token = %q", code, updated.PushToken)
+	}
+}
+
+// Whoever holds a push token can report the monitor up or down; it goes
+// only to those who may change the monitor, never to a viewer.
+func TestPushTokenOnlyForThoseWhoMayChangeTheMonitor(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	var job monitorResponse
+	if code := do(t, "POST", base, monitorJSON("nightly-backup", "push", "", `"namespace":"shop"`), &job); code != http.StatusCreated || job.PushToken == "" {
+		t.Fatalf("create: status = %d, token = %q", code, job.PushToken)
+	}
+	addUser(t, srv.URL, "editor", store.RoleEditor, "shop")
+	addUser(t, srv.URL, "viewer", store.RoleViewer, "shop")
+	addUser(t, srv.URL, "seer", store.RoleViewer, "*")
+	editor, _ := signIn(t, srv.URL, "editor", "parola-123")
+	viewer, _ := signIn(t, srv.URL, "viewer", "parola-123")
+	seer, _ := signIn(t, srv.URL, "seer", "parola-123")
+
+	for name, tc := range map[string]struct{ token, want string }{
+		"admin":               {testToken, job.PushToken},
+		"editor":              {editor, job.PushToken},
+		"viewer":              {viewer, ""},
+		"viewer of every one": {seer, ""},
+	} {
+		var one monitorResponse
+		if code := doAs(t, tc.token, "GET", base+"/"+itoa(job.ID), "", &one); code != http.StatusOK || one.PushToken != tc.want {
+			t.Errorf("%s reads the monitor: status = %d, token = %q, want %q", name, code, one.PushToken, tc.want)
+		}
+		var list []monitorResponse
+		if code := doAs(t, tc.token, "GET", base+"?history=1", "", &list); code != http.StatusOK || len(list) != 1 || list[0].PushToken != tc.want {
+			t.Errorf("%s lists the monitors: status = %d, list = %+v", name, code, list)
+		}
+	}
+	// What an editor saves comes back with the token, as before.
+	var updated monitorResponse
+	if code := doAs(t, editor, "PATCH", base+"/"+itoa(job.ID), `{"description":"gece yedeği"}`, &updated); code != http.StatusOK || updated.PushToken != job.PushToken {
+		t.Errorf("editor's update: status = %d, token = %q", code, updated.PushToken)
 	}
 }
 

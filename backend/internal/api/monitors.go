@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -55,7 +56,8 @@ type monitorResponse struct {
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	// PushToken is the secret of a push monitor's report URL,
-	// /api/push/{token}; absent for other types.
+	// /api/push/{token}; absent for other types, and for those who may not
+	// change the monitor (see toMonitorResponse).
 	PushToken string `json:"push_token,omitempty"`
 
 	// The check options of the monitor's type; the others are null.
@@ -121,7 +123,11 @@ func toResultResponse(r store.CheckResult) resultResponse {
 	return resp
 }
 
-func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResponse {
+// toMonitorResponse is the monitor as the principal p sees it. The push
+// token goes only to those who may change the monitor: whoever holds it can
+// report the monitor up or down, raise an incident or end one, without
+// signing in, which is more than a viewer may do.
+func toMonitorResponse(p auth.Principal, st store.MonitorStatus, window time.Duration) monitorResponse {
 	resp := monitorResponse{
 		ID:              st.ID,
 		Name:            st.Name,
@@ -134,7 +140,6 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 		EachPod:         st.EachPod,
 		Enabled:         st.Enabled,
 		CreatedAt:       st.CreatedAt,
-		PushToken:       st.PushToken,
 		checkOptions:    toCheckOptions(st.Monitor),
 		Status:          statusPending,
 		WindowSeconds:   int(window / time.Second),
@@ -151,6 +156,9 @@ func toMonitorResponse(st store.MonitorStatus, window time.Duration) monitorResp
 	}
 	if resp.Tags == nil {
 		resp.Tags = []string{}
+	}
+	if p.CanEdit(st.Namespace) {
+		resp.PushToken = st.PushToken
 	}
 	if !st.MaintenanceUntil.IsZero() {
 		resp.MaintenanceUntil = &st.MaintenanceUntil
@@ -262,7 +270,7 @@ func (h *handler) listMonitors(w http.ResponseWriter, r *http.Request) {
 		if (byNamespace && st.Namespace != namespace) || (ids != nil && !ids[st.ID]) || !p.CanRead(st.Namespace) {
 			continue
 		}
-		resp = append(resp, toMonitorResponse(st, window))
+		resp = append(resp, toMonitorResponse(p, st, window))
 		selected = append(selected, st.ID)
 	}
 
@@ -295,7 +303,8 @@ func (h *handler) getMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, err := h.opts.Store.GetMonitorStatus(r.Context(), id, time.Now().Add(-window))
-	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(st.Namespace)) {
+	p := principal(r)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !p.CanRead(st.Namespace)) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
@@ -303,7 +312,7 @@ func (h *handler) getMonitor(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toMonitorResponse(st, window))
+	writeJSON(w, http.StatusOK, toMonitorResponse(p, st, window))
 }
 
 type createMonitorRequest struct {
@@ -540,7 +549,7 @@ func (h *handler) storeMonitor(w http.ResponseWriter, r *http.Request, m store.M
 		return
 	}
 	h.audit(r, "create", "monitor", created.ID, created.Name)
-	writeJSON(w, http.StatusCreated, toMonitorResponse(store.MonitorStatus{Monitor: created}, h.opts.StatsWindow))
+	writeJSON(w, http.StatusCreated, toMonitorResponse(principal(r), store.MonitorStatus{Monitor: created}, h.opts.StatsWindow))
 }
 
 func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
@@ -748,6 +757,13 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		scopeError(w, p)
 		return
 	}
+	// Stored secrets go only to the server they were entered for.
+	if destination(current.Type, merged.Target) != destination(current.Type, current.Target) {
+		if kept := req.checkOptions.keptSecrets(current); len(kept) > 0 {
+			writeError(w, http.StatusBadRequest, "enter "+strings.Join(kept, ", ")+" again: stored secrets go only to the server they were entered for")
+			return
+		}
+	}
 
 	change := merged.monitor(current)
 	if err := req.checkOptions.apply(&change); err != nil {
@@ -790,7 +806,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toMonitorResponse(st, h.opts.StatsWindow))
+	writeJSON(w, http.StatusOK, toMonitorResponse(p, st, h.opts.StatsWindow))
 }
 
 // closeIncident resolves the monitor's open incidents, if any, without

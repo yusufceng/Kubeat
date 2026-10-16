@@ -87,21 +87,33 @@ func (h *handler) applyStatusPage(r *http.Request, req statusPageRequest, p *sto
 	case len(p.Description) > maxStatusPageText || len(p.Announcement) > maxStatusPageText:
 		return fmt.Errorf("description and announcement are at most %d bytes each", maxStatusPageText)
 	}
-	if req.Monitors == nil {
-		return nil
+	who := principal(r)
+	if req.Monitors != nil {
+		if err := h.applyPageMonitors(r, who, *req.Monitors, p); err != nil {
+			return err
+		}
 	}
+	// An editor's page must stay theirs: one without monitors would be
+	// nobody's but the admins' (see canEditPage).
+	if len(p.Monitors) == 0 && !who.IsAdmin() {
+		return errors.New("monitors: choose at least one; only an administrator manages a page without monitors")
+	}
+	return nil
+}
 
-	if len(*req.Monitors) > maxStatusPageMonitors {
+// applyPageMonitors validates the monitors a page is to show and sets them
+// on p: each must be one the principal may change.
+func (h *handler) applyPageMonitors(r *http.Request, who auth.Principal, monitors []statusPageMonitor, p *store.StatusPage) error {
+	if len(monitors) > maxStatusPageMonitors {
 		return fmt.Errorf("monitors: at most %d", maxStatusPageMonitors)
 	}
 	namespaces, err := h.monitorNamespaces(r.Context())
 	if err != nil {
 		return internalFailure{err}
 	}
-	who := principal(r)
-	p.Monitors = make([]store.StatusPageMonitor, 0, len(*req.Monitors))
+	p.Monitors = make([]store.StatusPageMonitor, 0, len(monitors))
 	seen := make(map[int64]bool)
-	for _, m := range *req.Monitors {
+	for _, m := range monitors {
 		name := strings.TrimSpace(m.DisplayName)
 		ns, known := namespaces[m.MonitorID]
 		switch {

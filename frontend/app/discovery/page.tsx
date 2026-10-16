@@ -45,8 +45,11 @@ async function ClusterError({ err }: { err: unknown }) {
   );
 }
 
-/** How the monitors asked for with annotations are doing. */
-async function SyncCard({ sync, canEdit }: { sync: DiscoveryStatus["sync"]; canEdit: boolean }) {
+/**
+ * How the monitors asked for with annotations are doing. For a user who does
+ * not see every namespace (scoped), the backend counts and lists only theirs.
+ */
+async function SyncCard({ sync, canEdit, scoped }: { sync: DiscoveryStatus["sync"]; canEdit: boolean; scoped: boolean }) {
   const t = await getT();
   const snippet = (text: string) => <code className="rounded bg-sunken px-1">{text}</code>;
   return (
@@ -81,6 +84,7 @@ async function SyncCard({ sync, canEdit }: { sync: DiscoveryStatus["sync"]; canE
               </>
             )}
           </p>
+          {scoped && <p className="mt-1 text-xs text-muted">{t("discovery.sync.scoped")}</p>}
           {sync.error && (
             <p role="alert" className="mt-2 text-xs text-down">
               {t("discovery.sync.readError")} <span className="font-mono">{sync.error}</span>
@@ -176,10 +180,11 @@ async function Discovery({
   }
   if (clusterError !== null) return <ClusterError err={clusterError} />;
   if (!status.enabled) {
+    // Why there is no cluster is told to administrators only.
     return (
       <Notice>
         {t("discovery.unavailable")}
-        <span className="mt-2 block font-mono text-xs">{status.detail}</span>
+        {status.detail && <span className="mt-2 block font-mono text-xs">{status.detail}</span>}
       </Notice>
     );
   }
@@ -196,7 +201,7 @@ async function Discovery({
 
   return (
     <>
-      <SyncCard sync={status.sync} canEdit={me.can_edit} />
+      <SyncCard sync={status.sync} canEdit={me.can_edit} scoped={!me.sees_all} />
       <form method="get" className="flex flex-wrap items-end gap-3">
         <label>
           <span className="mb-1 block text-xs font-medium text-muted">{t("discovery.namespace")}</span>

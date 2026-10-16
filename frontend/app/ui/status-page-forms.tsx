@@ -19,10 +19,13 @@ export type PageMonitorOption = { id: number; label: string; namespace: string }
 export function StatusPageForm({
   page,
   monitors,
+  needsMonitor,
   onDone,
 }: {
   page?: StatusPage;
   monitors: PageMonitorOption[];
+  /** Set for all but administrators: a page without monitors is theirs alone. */
+  needsMonitor: boolean;
   /** Called after a successful save. */
   onDone?: () => void;
 }) {
@@ -128,6 +131,7 @@ export function StatusPageForm({
           </div>
         )}
         <p className="mt-1 text-xs text-muted">{t("statusPageForm.monitors.hint")}</p>
+        {needsMonitor && <p className="mt-1 text-xs text-muted">{t("statusPageForm.monitors.needed")}</p>}
       </fieldset>
 
       <label className="flex items-center gap-2 text-sm sm:col-span-6">
@@ -155,7 +159,15 @@ export function StatusPageForm({
 }
 
 /** One status page in the list. */
-export function StatusPageRow({ page, monitors }: { page: StatusPage; monitors: PageMonitorOption[] }) {
+export function StatusPageRow({
+  page,
+  monitors,
+  needsMonitor,
+}: {
+  page: StatusPage;
+  monitors: PageMonitorOption[];
+  needsMonitor: boolean;
+}) {
   const t = useT();
   const [editing, setEditing] = useState(false);
   const labels = new Map(monitors.map((m) => [m.id, m.label]));
@@ -196,7 +208,7 @@ export function StatusPageRow({ page, monitors }: { page: StatusPage; monitors: 
       </div>
       {editing && (
         <div className="mt-3 flex flex-col gap-4 rounded-lg bg-sunken/60 p-4">
-          <StatusPageForm page={page} monitors={monitors} onDone={() => setEditing(false)} />
+          <StatusPageForm page={page} monitors={monitors} needsMonitor={needsMonitor} onDone={() => setEditing(false)} />
           {page.published && page.monitors.length > 0 && (
             <details className="text-xs text-muted">
               <summary className="cursor-pointer font-medium">{t("statusPageRow.badges.summary")}</summary>

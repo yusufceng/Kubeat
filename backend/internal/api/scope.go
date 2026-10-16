@@ -67,12 +67,16 @@ func (h *handler) monitorNamespaces(ctx context.Context) (map[int64]string, erro
 }
 
 // canEditPage reports whether the principal may manage a status page:
-// admins any, editors those showing only monitors they may change.
+// admins any, editors those showing only monitors they may change. A page
+// that shows no monitor, whether made so or emptied when its monitors were
+// deleted, belongs to no namespace and so to no editor: it is the admins'.
+// Otherwise every editor, of whatever namespace, could rewrite or remove
+// what such a page tells the public.
 func canEditPage(p auth.Principal, page store.StatusPage, namespaces map[int64]string) bool {
 	if p.IsAdmin() {
 		return true
 	}
-	if p.Role != store.RoleEditor {
+	if p.Role != store.RoleEditor || len(page.Monitors) == 0 {
 		return false
 	}
 	for _, m := range page.Monitors {

@@ -14,40 +14,49 @@ import (
 type discoveryStatusResponse struct {
 	Enabled bool `json:"enabled"`
 	// Detail is how the cluster is reached when enabled, and why discovery
-	// is unavailable otherwise.
+	// is unavailable otherwise; empty for all but administrators.
 	Detail string `json:"detail"`
 	// Sync is the state of the monitors kept in step with annotated
-	// objects; null when that is off.
+	// objects; null when that is off. Its counts and skipped objects cover
+	// only the namespaces the user may see, unless they see all.
 	Sync *discovery.Status `json:"sync"`
 }
 
-func (h *handler) discoveryStatus(w http.ResponseWriter, _ *http.Request) {
-	resp := discoveryStatusResponse{Enabled: h.opts.Discovery != nil, Detail: h.opts.DiscoveryStatus}
+func (h *handler) discoveryStatus(w http.ResponseWriter, r *http.Request) {
+	p := principal(r)
+	resp := discoveryStatusResponse{Enabled: h.opts.Discovery != nil, Detail: h.clusterDetail(p)}
 	if h.opts.Sync != nil {
 		st := h.opts.Sync.Status()
+		if !p.SeesAll() {
+			st = st.Within(p.CanRead)
+		}
+		if st.Error != "" && !p.IsAdmin() {
+			st.Error = upstreamReason(p, st.Cause)
+		}
 		resp.Sync = &st
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // discovery answers 503 and returns false when no cluster is available.
-func (h *handler) discovery(w http.ResponseWriter) (Discovery, bool) {
+func (h *handler) discovery(w http.ResponseWriter, r *http.Request) (Discovery, bool) {
 	if h.opts.Discovery == nil {
-		writeError(w, http.StatusServiceUnavailable, "discovery is not available: "+h.opts.DiscoveryStatus)
+		writeError(w, http.StatusServiceUnavailable, withDetail("discovery is not available", h.clusterDetail(principal(r))))
 		return nil, false
 	}
 	return h.opts.Discovery, true
 }
 
 // clusterError reports a failed call to the cluster API, typically missing
-// permissions or an unreachable API server.
+// permissions or an unreachable API server, in as much detail as the
+// principal may see (see upstreamReason).
 func (h *handler) clusterError(w http.ResponseWriter, r *http.Request, err error) {
 	h.opts.Logger.Error("cluster request failed", "path", r.URL.Path, "error", err)
-	writeError(w, http.StatusBadGateway, "cluster request failed: "+err.Error())
+	writeError(w, http.StatusBadGateway, "cluster request failed: "+upstreamReason(principal(r), err))
 }
 
 func (h *handler) discoveryNamespaces(w http.ResponseWriter, r *http.Request) {
-	d, ok := h.discovery(w)
+	d, ok := h.discovery(w, r)
 	if !ok {
 		return
 	}
@@ -98,7 +107,7 @@ func (h *handler) monitored(r *http.Request, namespace string) (map[string]int64
 }
 
 func (h *handler) discoveryCandidates(w http.ResponseWriter, r *http.Request) {
-	d, ok := h.discovery(w)
+	d, ok := h.discovery(w, r)
 	if !ok {
 		return
 	}
@@ -164,7 +173,7 @@ func monitorName(c k8s.Candidate) string {
 }
 
 func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
-	d, ok := h.discovery(w)
+	d, ok := h.discovery(w, r)
 	if !ok {
 		return
 	}
@@ -242,7 +251,7 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.audit(r, "create", "monitor", m.ID, m.Name)
-		resp.Created = append(resp.Created, toMonitorResponse(store.MonitorStatus{Monitor: m}, h.opts.StatsWindow))
+		resp.Created = append(resp.Created, toMonitorResponse(principal(r), store.MonitorStatus{Monitor: m}, h.opts.StatsWindow))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

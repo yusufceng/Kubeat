@@ -383,7 +383,8 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 type updateChannelRequest struct {
 	Name *string `json:"name"`
 	// Target sent back as it was shown (masked) keeps the stored one, and
-	// so does a Secret sent as the mask.
+	// so does a Secret sent as the mask, unless the target moves to another
+	// server: a stored secret goes only to the one it was entered for.
 	Target     *string   `json:"target"`
 	Secret     *string   `json:"secret"`
 	Namespaces *[]string `json:"namespaces"`
@@ -420,15 +421,23 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Target != nil || req.Secret != nil {
+		stored := ch.Target
 		target, secret := ch.Target, ch.Secret
 		if req.Target != nil && strings.TrimSpace(*req.Target) != shownTarget(ch) {
 			target = strings.TrimSpace(*req.Target)
 		}
-		if req.Secret != nil && *req.Secret != maskedValue {
+		keep := req.Secret == nil || *req.Secret == maskedValue
+		if !keep {
 			secret = strings.TrimSpace(*req.Secret)
 		}
 		if ch.Target, ch.Secret, err = h.channelSettings(ch.Type, target, secret); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// Gotify and ntfy send the token to the target's server: kept for a
+		// target on another one, it would go to whoever runs that.
+		if keep && ch.Secret != "" && endpoint(ch.Target) != endpoint(stored) {
+			writeError(w, http.StatusBadRequest, "enter secret again: a stored secret goes only to the server it was entered for")
 			return
 		}
 	}

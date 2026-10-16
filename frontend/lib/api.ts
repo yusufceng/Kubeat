@@ -230,7 +230,10 @@ export type Monitor = CheckOptions & {
   each_pod: boolean;
   enabled: boolean;
   created_at: string;
-  /** The secret of a push monitor's report URL; absent for other types. */
+  /**
+   * The secret of a push monitor's report URL; absent for other types, and
+   * for those who may not change the monitor, since it lets one report it up or down.
+   */
   push_token?: string;
   status: "up" | "down" | "pending" | "paused";
   last_result: CheckResult | null;
@@ -450,12 +453,16 @@ export const deleteChannel = (id: number) =>
 export const testChannel = (id: number) =>
   request<ChannelTest>(`/channels/${id}/test`, { method: "POST" });
 
-/** The monitors kept in step with annotated cluster objects; null when that is off. */
+/**
+ * The monitors kept in step with annotated cluster objects; null when that is
+ * off. For a user who does not see every namespace, the counts and the skipped
+ * objects are those of their namespaces alone.
+ */
 export type SyncStatus = {
   interval_seconds: number;
   /** Zero before the first run. */
   last_run_at: string;
-  /** Set when the cluster could not be read; nothing was changed then. */
+  /** Set when the cluster could not be read; nothing was changed then. Only administrators get the cluster's own words. */
   error: string;
   managed: number;
   created: number;
@@ -469,6 +476,7 @@ export type SyncStatus = {
 export const restoreSource = (namespace: string, source: string) =>
   request<void>("/discovery/restore", { method: "POST", body: JSON.stringify({ namespace, source }) });
 
+/** detail: how the cluster is reached, or why it is not; empty for all but administrators. */
 export type DiscoveryStatus = { enabled: boolean; detail: string; sync: SyncStatus | null };
 
 export type Candidate = {

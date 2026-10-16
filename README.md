@@ -144,7 +144,18 @@ ayarlanmazsa API yalnızca oturumla kullanılabilir. Sağlık kontrolü
 (`/api/v1/health`), `/metrics`, yayımlanmış durum sayfaları ve rozetler
 kimlik istemez; hiçbiri bir şey değiştirmez. Push raporları
 (`/api/push/{token}`) da anahtar istemez: adresteki token o monitor'un
-sırrıdır ve yalnızca o monitor'a rapor yazabilir.
+sırrıdır ve yalnızca o monitor'a rapor yazabilir. Token'ı (ve rapor
+adresini) yalnızca monitor'u değiştirebilenler görür; izleyicilere
+gösterilmez, çünkü onunla monitor'u düşmüş ya da çalışıyor gösterebilirler.
+
+Cluster'a ya da metrik sunucusuna yapılan bir istek başarısız olduğunda
+hatanın kendisini (Kubeat'in servis hesabı, API sunucusunun ve metrik
+sunucusunun adresi, sertifika ayrıntıları, kubeconfig bağlamı) yalnızca
+yöneticiler görür. Diğerlerine hatanın türü söylenir: servis hesabının hangi
+namespace'te neyi yapamadığı, kimliğinin kabul edilmediği, sunucuya
+ulaşılamadığı ya da sunucunun sertifikasına güvenilmediği; türü belli olmayan
+hatalarda ayrıntının logda olduğu yazar. Hatanın tam metni her zaman backend
+logundadır.
 
 Helm chart anahtarı ilk kurulumda rastgele üretir, bir Secret'ta saklar ve
 güncellemelerde korur. Ek olarak `networkPolicy.enabled=true`, backend'e
@@ -307,12 +318,20 @@ parolayla açılmak ya da `/setup`'ı ilk gelene açık bırakmak yerine durur.
 | --- | --- | --- |
 | Yönetici (`admin`) | Her şeyi | Her şeyi; kullanıcıları, LDAP eşlemelerini, kapsamsız kanalları |
 | Editör (`editor`) | Kapsamındaki monitor'ları, olayları, bakım pencerelerini; yalnızca kapsamıyla sınırlı kanalları ve durum sayfalarını | Kapsamında monitor ekler, düzenler, siler, susturur, keşiften içe aktarır; kapsamıyla sınırlı kanal, bakım penceresi ve durum sayfası açar |
-| İzleyici (`viewer`) | Kapsamındaki monitor'ları ve olayları; kapsamını ilgilendiren bakım pencerelerini | Hiçbir şeyi |
+| İzleyici (`viewer`) | Kapsamındaki monitor'ları (push monitor'larının rapor adresi hariç) ve olayları; kapsamını ilgilendiren bakım pencerelerini | Hiçbir şeyi |
 
 Elle eklenen bir monitor'un "grubu" kapsam açısından namespace gibidir: `shop`
 editörü grubu `shop` olan monitor'lar açabilir, grupsuz monitor açamaz.
 Grupsuz monitor'ları yalnızca kapsamı `*` olanlar ve yöneticiler görür.
-Keşif sayfası herkese yalnızca kapsamındaki namespace'leri gösterir.
+Keşif sayfası herkese yalnızca kapsamındaki namespace'leri gösterir; annotation
+eşitlemesinin sayıları ve atlanan nesneleri de kapsamı `*` olmayanlar için
+yalnızca bu namespace'lerden gelir.
+
+Editör bir durum sayfasını, sayfadaki her monitor'u değiştirebiliyorsa
+yönetir. Monitor'u olmayan bir sayfa (böyle oluşturulmuş ya da monitor'ları
+silinince boşalmış) hiçbir namespace'e ait değildir: onu yalnızca yöneticiler
+görür ve değiştirir. Editör monitor'suz sayfa oluşturamaz, kendi sayfasını da
+boşaltamaz.
 
 Yetki backend'de denetlenir; arayüz yalnızca yapılamayanı gizler.
 
@@ -501,6 +520,9 @@ duvardaki bir ekran içindir. **Durum sayfaları** menüsünden oluşturulur.
 - Tek bir başarısız kontrol sayfada "kesinti" görünmez; kesinti, alarm eşiği
   aşılıp olay açıldığında görünür.
 - "Yayında" işareti kaldırılan sayfa açılmaz (404).
+- Editörler yalnızca kapsamlarındaki monitor'ları gösteren sayfaları yönetir.
+  Monitor'u olmayan bir sayfa (yalnızca duyuru taşıyan ya da monitor'ları
+  silinmiş bir sayfa) yöneticilerindir.
 
 **Rozetler.** Yayındaki bir sayfada gösterilen her monitor'un iki rozeti
 vardır; README ya da wiki sayfasına konabilir:
@@ -527,7 +549,7 @@ eklenmelidir.
 | `GET` | `/api/v1/monitors/{id}?window=24h` | Tek monitor |
 | `PATCH` | `/api/v1/monitors/{id}` | Monitor'u düzenler; `{"enabled": false}` ile durdurur |
 | `DELETE` | `/api/v1/monitors/{id}` | Monitor'u ve sonuçlarını siler |
-| `POST` | `/api/v1/monitors/{id}/clone` | Monitor'un `{"name"}` adıyla bir kopyasını oluşturur; gizli değerler de kopyalanır |
+| `POST` | `/api/v1/monitors/{id}/clone` | Monitor'un `{"name"}` adıyla bir kopyasını oluşturur; gizli değerler de kopyalanır, kopyanın hedefi başka bir sunucuya çevrilirse yeniden girilmeleri gerekir |
 | `GET`, `POST` | `/api/push/{token}?status=up&msg=...&ping=...` | Push monitor'unun raporu; API anahtarı gerekmez |
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
 | `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş; `range` yerine `from=&to=` ile belirli bir aralık |
@@ -645,7 +667,12 @@ değişmez.
 - `tls_skip_verify`: yalnızca bu monitor için sertifika doğrulamasını kapatır.
 
 Header değerleri ve `auth_secret` API yanıtlarında `********` olarak
-maskelenir; güncellemede bu değer gönderilirse kayıtlı değer korunur.
+maskelenir; güncellemede bu değer gönderilirse kayıtlı değer korunur. Kayıtlı
+değerler yalnızca girildikleri sunucuya gider: hedef başka bir sunucuya
+taşınırsa (şeması, host'u ya da portu değişirse) güncelleme `400` ile
+reddedilir ve yeniden girilmesi gereken alanları sayar. `http` seçenekleri hiç
+gönderilmese de, yönetici için de böyledir: yoksa monitor'u düzenleyebilen
+biri onu kendi sunucusuna yöneltip gösterilmeyen değerleri orada okuyabilirdi.
 
 ### `tcp`
 
@@ -682,7 +709,8 @@ Bulunan kayıtlar sonuçla birlikte saklanır ve arayüzde görünür.
 
 Kontrol edilecek bir adres yoktur; izlenen şey (bir CronJob, bir yedekleme
 betiği) işini bitirince Kubeat'e haber verir. Monitor oluşturulunca yanıtta
-bir `push_token` döner; rapor adresi:
+bir `push_token` döner (monitor okunurken de döner, ama yalnızca onu
+değiştirebilenlere; izleyiciler görmez); rapor adresi:
 
 ```
 https://<kubeat-adresi>/api/push/<token>?status=up&msg=tamam&ping=820
@@ -733,9 +761,10 @@ yapıp gerçekten bir şey sorar.
   `password`, ACL kullanıyorsa ayrıca `username` verilir; `database` ve
   `query` kullanılmaz.
 - `password` API yanıtlarında `********` olarak maskelenir; güncellemede bu
-  değer gönderilirse kayıtlı parola korunur. Hata mesajları sunucunun
-  söylediğini taşır (`password authentication failed for user "probe"`),
-  parolayı taşımaz.
+  değer gönderilirse kayıtlı parola korunur. Hedefin host'u ya da portu
+  değişirse parola, `http` seçeneklerindeki gibi yeniden girilmelidir. Hata
+  mesajları sunucunun söylediğini taşır (`password authentication failed for
+  user "probe"`), parolayı taşımaz.
 
 Gerçek sunuculara karşı testler, adresleri verildiğinde çalışır:
 
@@ -1228,8 +1257,10 @@ kaçışlanır.
 
 **Gizli değerler.** URL'ler API yanıtlarında maskelenir (`https://host/…`),
 `secret` ise hiç dönmez; yalnızca `has_secret` bilgisi verilir. Güncellemede
-maskelenmiş adres ya da `********` gönderilirse kayıtlı değer korunur. Hata
-mesajları adresi ve token'ı içermez.
+maskelenmiş adres ya da `********` gönderilirse kayıtlı değer korunur. Gotify
+ve ntfy token'ı adresteki sunucuya gönderir: adres başka bir sunucuya
+(şeması, host'u ya da portu değişerek) taşınırsa kayıtlı `secret` korunmaz,
+yeniden girilmesi gerekir (`400`). Hata mesajları adresi ve token'ı içermez.
 
 E-posta için bir SMTP sunucusu tanımlanmalıdır (`UPTIME_SMTP_*`); tanımlı
 değilse e-posta kanalı eklenemez. Varsayılan bağlantı güvenliği `starttls`

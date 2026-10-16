@@ -31,14 +31,14 @@ async function StatusPages() {
       ) : (
         <ul className="card divide-y divide-line">
           {pages.map((p) => (
-            <StatusPageRow key={p.id} page={p} monitors={monitors} />
+            <StatusPageRow key={p.id} page={p} monitors={monitors} needsMonitor={!me.admin} />
           ))}
         </ul>
       )}
       {me.can_edit && (
         <section className="card p-5">
           <h2 className="mb-4 text-sm font-semibold">{t("statusPages.new.title")}</h2>
-          <StatusPageForm monitors={monitors} />
+          <StatusPageForm monitors={monitors} needsMonitor={!me.admin} />
         </section>
       )}
     </>

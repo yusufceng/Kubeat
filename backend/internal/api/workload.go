@@ -85,7 +85,8 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := h.opts.Store.GetMonitor(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(m.Namespace)) {
+	p := principal(r)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !p.CanRead(m.Namespace)) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
@@ -105,7 +106,7 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 		}
 		// The pods live where the target says, which may differ from the
 		// namespace the monitor is grouped under.
-		if !principal(r).CanRead(ns) {
+		if !p.CanRead(ns) {
 			writeJSON(w, http.StatusOK, unavailable("the monitor's workload is outside your namespaces"))
 			return
 		}
@@ -116,7 +117,7 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, unavailable("the monitor was not created from a cluster object"))
 		return
 	case h.opts.Workloads == nil:
-		writeJSON(w, http.StatusOK, unavailable("the backend is not connected to a cluster: "+h.opts.DiscoveryStatus))
+		writeJSON(w, http.StatusOK, unavailable(withDetail("the backend is not connected to a cluster", h.clusterDetail(p))))
 		return
 	}
 
@@ -144,7 +145,7 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 	events, err := h.opts.Workloads.Events(r.Context(), namespace, workload, time.Now().Add(-h.opts.EventWindow), time.Time{}, h.opts.EventLimit)
 	if err != nil {
 		h.opts.Logger.Warn("reading events failed", "monitor", m.Name, "error", err)
-		resp.EventsReason = "the cluster's events could not be read: " + err.Error()
+		resp.EventsReason = "the cluster's events could not be read: " + upstreamReason(p, err)
 	}
 	for _, e := range events {
 		resp.Events = append(resp.Events, eventResponse{At: e.At, Type: e.Type, Reason: e.Reason, Object: e.Object, Message: e.Message, Count: e.Count})
@@ -160,7 +161,7 @@ func (h *handler) monitorWorkload(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			usage = nil // never show values from a failed read
 			h.opts.Logger.Warn("reading pod metrics failed", "monitor", m.Name, "error", err)
-			resp.Metrics.Reason = "the metrics server could not be queried: " + err.Error()
+			resp.Metrics.Reason = "the metrics server could not be queried: " + upstreamReason(p, err)
 		} else {
 			resp.Metrics.Available = true
 		}

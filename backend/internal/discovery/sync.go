@@ -90,7 +90,10 @@ type Status struct {
 	// LastRunAt is zero before the first run.
 	LastRunAt time.Time `json:"last_run_at"`
 	// Error is set when the cluster could not be read; nothing was changed.
+	// Cause is the error it was written from, so that a reader who may not
+	// see its text can still be told what kind of failure it was.
 	Error string `json:"error"`
+	Cause error  `json:"-"`
 	// Managed is how many monitors the syncer keeps; the counts below are
 	// of the last run.
 	Managed int    `json:"managed"`
@@ -98,6 +101,46 @@ type Status struct {
 	Updated int    `json:"updated"`
 	Removed int    `json:"removed"`
 	Skipped []Skip `json:"skipped"`
+	// ByNamespace splits the counts above by namespace, for a reader who
+	// may see only some namespaces (see Within).
+	ByNamespace map[string]Counts `json:"-"`
+}
+
+// Counts are what a run did to the managed monitors of a namespace.
+type Counts struct {
+	Managed, Created, Updated, Removed int
+}
+
+// Within is the status as told to a reader who may see only the
+// namespaces visible accepts: the objects skipped in those, and the counts
+// of those alone. The rest would tell them what other teams run.
+func (st Status) Within(visible func(namespace string) bool) Status {
+	skipped := make([]Skip, 0, len(st.Skipped))
+	for _, s := range st.Skipped {
+		if visible(s.Namespace) {
+			skipped = append(skipped, s)
+		}
+	}
+	byNamespace := make(map[string]Counts)
+	for ns, n := range st.ByNamespace {
+		if visible(ns) {
+			byNamespace[ns] = n
+		}
+	}
+	st.Skipped, st.ByNamespace = skipped, byNamespace
+	st.total()
+	return st
+}
+
+// total sets the counts of the whole run from those of its namespaces.
+func (st *Status) total() {
+	st.Managed, st.Created, st.Updated, st.Removed = 0, 0, 0, 0
+	for _, n := range st.ByNamespace {
+		st.Managed += n.Managed
+		st.Created += n.Created
+		st.Updated += n.Updated
+		st.Removed += n.Removed
+	}
 }
 
 // Syncer creates, updates and removes managed monitors.
@@ -113,7 +156,9 @@ func New(opts Options) *Syncer {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	return &Syncer{opts: opts, status: Status{IntervalSeconds: int(opts.Interval / time.Second), Skipped: []Skip{}}}
+	return &Syncer{opts: opts, status: Status{
+		IntervalSeconds: int(opts.Interval / time.Second), Skipped: []Skip{}, ByNamespace: map[string]Counts{},
+	}}
 }
 
 // Status reports the last run.
@@ -143,15 +188,19 @@ func (s *Syncer) Run(ctx context.Context) {
 // cannot be read nothing is changed, so a cluster that is briefly away does
 // not take its monitors with it.
 func (s *Syncer) Sync(ctx context.Context) error {
-	st := Status{IntervalSeconds: int(s.opts.Interval / time.Second), LastRunAt: time.Now().UTC(), Skipped: []Skip{}}
+	st := Status{
+		IntervalSeconds: int(s.opts.Interval / time.Second), LastRunAt: time.Now().UTC(),
+		Skipped: []Skip{}, ByNamespace: map[string]Counts{},
+	}
 	err := s.sync(ctx, &st)
 	if err != nil {
-		st.Error = err.Error()
+		st.Error, st.Cause = err.Error(), err
 	}
 	s.mu.Lock()
 	if err != nil {
 		// Keep the counts of the last run that did something.
 		st.Managed, st.Created, st.Updated, st.Removed, st.Skipped = s.status.Managed, s.status.Created, s.status.Updated, s.status.Removed, s.status.Skipped
+		st.ByNamespace = s.status.ByNamespace
 	}
 	s.status = st
 	s.mu.Unlock()
@@ -206,6 +255,7 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 	for _, k := range keys {
 		want := wanted[k]
 		current, found := existing[k]
+		counts := st.ByNamespace[want.Namespace]
 		switch {
 		case !found && dismissed[k]:
 			st.Skipped = append(st.Skipped, Skip{Namespace: want.Namespace, Source: want.Source, Reason: "deleted in Kubeat; restore it to monitor it again", Dismissed: true})
@@ -214,7 +264,7 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 			if err := s.create(ctx, want); err != nil {
 				return err
 			}
-			st.Created++
+			counts.Created++
 		case !current.Managed:
 			st.Skipped = append(st.Skipped, Skip{Namespace: want.Namespace, Source: want.Source, Reason: "already monitored by hand"})
 			continue
@@ -227,7 +277,7 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 			if err := s.create(ctx, want); err != nil {
 				return err
 			}
-			st.Updated++
+			counts.Updated++
 		case differs(current, want):
 			current.Target, current.Interval, current.Timeout, current.FailureThreshold = want.Target, want.Interval, want.Timeout, want.FailureThreshold
 			current.GRPC.Service, current.EachPod = want.GRPC.Service, want.EachPod
@@ -235,9 +285,10 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 				return fmt.Errorf("update monitor %d: %w", current.ID, err)
 			}
 			s.audit(ctx, "update", current.ID, current.Name)
-			st.Updated++
+			counts.Updated++
 		}
-		st.Managed++
+		counts.Managed++
+		st.ByNamespace[want.Namespace] = counts
 	}
 
 	// What is managed but no longer asked for goes, incidents and history
@@ -252,8 +303,11 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 		if err := s.remove(ctx, m, "annotation removed or object gone"); err != nil {
 			return err
 		}
-		st.Removed++
+		counts := st.ByNamespace[m.Namespace]
+		counts.Removed++
+		st.ByNamespace[m.Namespace] = counts
 	}
+	st.total()
 	return nil
 }
 

@@ -9,7 +9,8 @@ export const monitorForm = defineMessages(
     "monitorForm.new.discoveryLink": "keşifle topluca ekleyebilirsiniz",
     "monitorForm.edit.what": "Monitor ayarları",
     "monitorForm.create": "Monitor'u oluştur",
-    "monitorForm.secret.keptHint": "Kayıtlı değer gösterilmez; değiştirmezseniz korunur.",
+    "monitorForm.secret.keptHint":
+      "Kayıtlı değer gösterilmez; değiştirmezseniz korunur. Hedef başka bir sunucuya taşınırsa yeniden girin.",
     "monitorForm.tls.skipVerify": "TLS sertifikasını doğrulama",
     "monitorForm.tls.skipVerify.hint": "Özel CA kullanan hedefler için. Sertifikanın bitiş tarihi yine izlenir.",
     "monitorForm.tls.use": "TLS kullan",
@@ -60,7 +61,7 @@ export const monitorForm = defineMessages(
     "monitorForm.request.token": "Token",
     "monitorForm.request.headers": "Header'lar (satır başına bir tane, “Ad: değer”)",
     "monitorForm.request.headers.hint":
-      "Kayıtlı değerler {mask} olarak gösterilir; satırı öyle bırakırsanız değer korunur.",
+      "Kayıtlı değerler {mask} olarak gösterilir; satırı öyle bırakırsanız değer korunur. Hedef başka bir sunucuya taşınırsa değerleri yeniden girin.",
     "monitorForm.request.headers.placeholder": "X-Tenant: shop",
     "monitorForm.request.body": "Gövde",
     "monitorForm.request.body.placeholder": '{"deep": true}',
@@ -155,7 +156,8 @@ export const monitorForm = defineMessages(
     "monitorForm.new.discoveryLink": "add them in bulk with discovery",
     "monitorForm.edit.what": "Monitor settings",
     "monitorForm.create": "Create monitor",
-    "monitorForm.secret.keptHint": "The stored value is not shown; it is kept unless you change it.",
+    "monitorForm.secret.keptHint":
+      "The stored value is not shown; it is kept unless you change it. Enter it again when the target moves to another server.",
     "monitorForm.tls.skipVerify": "Do not verify the TLS certificate",
     "monitorForm.tls.skipVerify.hint": "For targets that use a private CA. The certificate's expiry date is still watched.",
     "monitorForm.tls.use": "Use TLS",
@@ -206,7 +208,7 @@ export const monitorForm = defineMessages(
     "monitorForm.request.token": "Token",
     "monitorForm.request.headers": "Headers (one per line, “Name: value”)",
     "monitorForm.request.headers.hint":
-      "Stored values are shown as {mask}; leave the line as it is and the value is kept.",
+      "Stored values are shown as {mask}; leave the line as it is and the value is kept. Enter the values again when the target moves to another server.",
     "monitorForm.request.headers.placeholder": "X-Tenant: shop",
     "monitorForm.request.body": "Body",
     "monitorForm.request.body.placeholder": '{"deep": true}',

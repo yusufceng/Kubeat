@@ -70,6 +70,98 @@ func TestStatusPageCRUD(t *testing.T) {
 	}
 }
 
+// A page that shows no monitor belongs to no namespace, so to no editor:
+// only admins see and manage it, made so or emptied when its monitors were
+// deleted.
+func TestStatusPageWithoutMonitorsIsTheAdmins(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/api/v1/status-pages"
+	addUser(t, srv.URL, "shopper", store.RoleEditor, "shop")
+	addUser(t, srv.URL, "biller", store.RoleEditor, "billing")
+	shop, _ := signIn(t, srv.URL, "shopper", "parola-123")
+	billing, _ := signIn(t, srv.URL, "biller", "parola-123")
+	var cart monitorResponse
+	do(t, "POST", srv.URL+"/api/v1/monitors", monitorJSON("cart", "tcp", "cart:80", `"namespace":"shop"`), &cart)
+
+	slugs := func(token string) string {
+		t.Helper()
+		var list []statusPageResponse
+		if code := doAs(t, token, "GET", base, "", &list); code != http.StatusOK {
+			t.Fatalf("list: status = %d", code)
+		}
+		var out []string
+		for _, p := range list {
+			out = append(out, p.Slug)
+		}
+		return strings.Join(out, ",")
+	}
+	// What an editor may not manage does not exist for them.
+	notTheirs := func(who, token string, page int64) {
+		t.Helper()
+		for _, req := range [][2]string{{"GET", ""}, {"PATCH", `{"announcement":"Parolanızı sıfırlayın"}`}, {"DELETE", ""}} {
+			if code := doAs(t, token, req[0], base+"/"+itoa(page), req[1], nil); code != http.StatusNotFound {
+				t.Errorf("%s: %s page %d: status = %d, want 404", who, req[0], page, code)
+			}
+		}
+	}
+
+	// An announcement-only page of the admins.
+	var company statusPageResponse
+	if code := do(t, "POST", base, `{"slug":"company","title":"Şirket","announcement":"Bakım yok"}`, &company); code != http.StatusCreated {
+		t.Fatalf("admin creates a page without monitors: status = %d", code)
+	}
+	if got := slugs(shop); got != "" {
+		t.Errorf("editor's pages = %q", got)
+	}
+	notTheirs("shop editor", shop, company.ID)
+
+	// Editors make no such page, nor empty one of theirs.
+	for name, body := range map[string]string{
+		"without monitors":   `{"slug":"mine","title":"x"}`,
+		"with none of them":  `{"slug":"mine","title":"x","monitors":[]}`,
+		"in another's scope": `{"slug":"mine","title":"x","monitors":[{"monitor_id":` + itoa(cart.ID) + `}]}`,
+	} {
+		if code := doAs(t, billing, "POST", base, body, nil); code != http.StatusBadRequest {
+			t.Errorf("billing editor creates a page %s: status = %d, want 400", name, code)
+		}
+	}
+	var own statusPageResponse
+	if code := doAs(t, shop, "POST", base, `{"slug":"shop","title":"Mağaza","monitors":[{"monitor_id":`+itoa(cart.ID)+`}]}`, &own); code != http.StatusCreated {
+		t.Fatalf("editor creates a page: status = %d", code)
+	}
+	if code := doAs(t, shop, "PATCH", base+"/"+itoa(own.ID), `{"monitors":[]}`, nil); code != http.StatusBadRequest {
+		t.Errorf("editor empties their page: status = %d, want 400", code)
+	}
+	if code := doAs(t, shop, "PATCH", base+"/"+itoa(own.ID), `{"title":"Mağaza servisleri"}`, nil); code != http.StatusOK {
+		t.Errorf("editor renames their page: status = %d", code)
+	}
+	if got := slugs(shop); got != "shop" {
+		t.Errorf("shop editor's pages = %q", got)
+	}
+	notTheirs("billing editor", billing, own.ID)
+
+	// Its only monitor deleted, the page shows nothing and is the admins'.
+	if code := doAs(t, shop, "DELETE", srv.URL+"/api/v1/monitors/"+itoa(cart.ID), "", nil); code != http.StatusNoContent {
+		t.Fatalf("delete the monitor: status = %d", code)
+	}
+	for who, token := range map[string]string{"shop editor": shop, "billing editor": billing} {
+		if got := slugs(token); got != "" {
+			t.Errorf("%s's pages after the monitor went = %q", who, got)
+		}
+		notTheirs(who, token, own.ID)
+	}
+	if got := slugs(testToken); got != "shop,company" {
+		t.Errorf("admin's pages = %q", got)
+	}
+	var page statusPageResponse
+	if code := do(t, "PATCH", base+"/"+itoa(own.ID), `{"published":false}`, &page); code != http.StatusOK || page.Published || len(page.Monitors) != 0 {
+		t.Errorf("admin unpublishes the emptied page: status = %d, page = %+v", code, page)
+	}
+	if code := do(t, "DELETE", base+"/"+itoa(company.ID), "", nil); code != http.StatusNoContent {
+		t.Errorf("admin deletes their page: status = %d", code)
+	}
+}
+
 func TestStatusPageView(t *testing.T) {
 	srv, db := newTestAPI(t) // three days of history, incidents of the last two
 	ctx := context.Background()

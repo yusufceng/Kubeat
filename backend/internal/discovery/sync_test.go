@@ -241,6 +241,66 @@ func TestSyncReportsBadAnnotations(t *testing.T) {
 	}
 }
 
+// Each namespace's share of the counts is kept, so that a reader who sees
+// only some namespaces can be told about those alone.
+func TestSyncCountsEachNamespace(t *testing.T) {
+	ctx := context.Background()
+	ledger := serviceCandidate("ledger", 80, "", monitored(nil))
+	ledger.Namespace, ledger.Target = "billing", "ledger.billing.svc:80"
+	legacy := serviceCandidate("legacy", 81, "", monitored(map[string]string{AnnotationInterval: "1s"}))
+	legacy.Namespace, legacy.Target = "billing", "legacy.billing.svc:81"
+	cluster := &fakeCluster{candidates: []k8s.Candidate{
+		serviceCandidate("api", 80, "", monitored(nil)),
+		serviceCandidate("web", 81, "", monitored(nil)),
+		ledger, legacy,
+	}}
+	s, _ := newSyncer(t, cluster)
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st := s.Status()
+	if st.Managed != 3 || st.Created != 3 || len(st.Skipped) != 1 ||
+		st.ByNamespace["shop"] != (Counts{Managed: 2, Created: 2}) || st.ByNamespace["billing"] != (Counts{Managed: 1, Created: 1}) {
+		t.Fatalf("first run: %+v", st)
+	}
+
+	shop := st.Within(func(ns string) bool { return ns == "shop" })
+	if shop.Managed != 2 || shop.Created != 2 || len(shop.Skipped) != 0 || len(shop.ByNamespace) != 1 {
+		t.Errorf("within shop: %+v", shop)
+	}
+	billing := st.Within(func(ns string) bool { return ns == "billing" })
+	if billing.Managed != 1 || billing.Created != 1 || len(billing.Skipped) != 1 || billing.Skipped[0].Source != "service/legacy:81" {
+		t.Errorf("within billing: %+v", billing)
+	}
+	if none := st.Within(func(string) bool { return false }); none.Managed != 0 || none.Created != 0 || none.Skipped == nil || len(none.Skipped) != 0 {
+		t.Errorf("within nothing: %+v", none)
+	}
+	// What a reader is told leaves what the syncer keeps alone.
+	if again := s.Status(); again.Managed != 3 || len(again.Skipped) != 1 || len(again.ByNamespace) != 2 {
+		t.Errorf("the syncer's own status after Within: %+v", again)
+	}
+
+	// A removal counts in the namespace the monitor was in.
+	cluster.candidates = cluster.candidates[:1]
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st = s.Status()
+	if st.Managed != 1 || st.Removed != 2 ||
+		st.ByNamespace["shop"] != (Counts{Managed: 1, Removed: 1}) || st.ByNamespace["billing"] != (Counts{Removed: 1}) {
+		t.Errorf("after removals: %+v", st)
+	}
+
+	// A failed run keeps the counts of the last good one, and the error.
+	cluster.err = errors.New("the server is currently unable to handle the request")
+	if err := s.Sync(ctx); err == nil {
+		t.Fatal("expected the cluster error")
+	}
+	if st := s.Status(); !errors.Is(st.Cause, cluster.err) || st.Error == "" || st.ByNamespace["billing"] != (Counts{Removed: 1}) {
+		t.Errorf("after a failed run: %+v", st)
+	}
+}
+
 func TestSyncChangesNothingWhenTheClusterIsAway(t *testing.T) {
 	ctx := context.Background()
 	cluster := &fakeCluster{candidates: []k8s.Candidate{serviceCandidate("api", 8080, "", monitored(nil))}}

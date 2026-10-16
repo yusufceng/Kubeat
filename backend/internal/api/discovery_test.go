@@ -2,15 +2,18 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/discovery"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -168,6 +171,74 @@ func TestImportValidation(t *testing.T) {
 	var monitors []monitorResponse
 	if do(t, "GET", srv.URL+"/api/v1/monitors", "", &monitors); len(monitors) != 0 {
 		t.Errorf("rejected imports created monitors: %+v", monitors)
+	}
+}
+
+// The sync runs over the whole cluster; a user who sees some namespaces is
+// told about those alone: their skipped objects and their counts.
+func TestDiscoveryStatusShowsOnlyTheUsersNamespaces(t *testing.T) {
+	ran := time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC)
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.Discovery, o.DiscoveryStatus = &fakeDiscovery{}, "in-cluster"
+		o.Sync = fakeSync{status: discovery.Status{
+			IntervalSeconds: 60, LastRunAt: ran, Managed: 7, Created: 3, Updated: 1, Removed: 2,
+			Skipped: []discovery.Skip{
+				{Namespace: "shop", Source: "service/api:80", Reason: "already monitored by hand"},
+				{Namespace: "finance", Source: "service/payments-db:5432", Reason: "kubeat.io/interval: must be at least 5s"},
+				{Namespace: "kube-system", Source: "route/secret-admin-console", Reason: "deleted in Kubeat", Dismissed: true},
+			},
+			ByNamespace: map[string]discovery.Counts{
+				"shop":    {Managed: 2, Created: 1},
+				"finance": {Managed: 4, Created: 2, Removed: 2},
+				"payroll": {Managed: 1, Updated: 1},
+			},
+		}}
+	})
+	addUser(t, srv.URL, "viewer", store.RoleViewer, "shop")
+	addUser(t, srv.URL, "editor", store.RoleEditor, "shop", "payroll")
+	addUser(t, srv.URL, "seer", store.RoleViewer, "*")
+	url := srv.URL + "/api/v1/discovery"
+
+	for name, tc := range map[string]struct {
+		user                               string
+		skipped                            string
+		managed, created, updated, removed int
+	}{
+		"viewer of shop":          {"viewer", "shop/service/api:80", 2, 1, 0, 0},
+		"editor of shop, payroll": {"editor", "shop/service/api:80", 3, 1, 1, 0},
+		"viewer of every one":     {"seer", "shop/service/api:80,finance/service/payments-db:5432,kube-system/route/secret-admin-console", 7, 3, 1, 2},
+	} {
+		token, _ := signIn(t, srv.URL, tc.user, "parola-123")
+		code, body := bodyAs(t, token, url)
+		var status discoveryStatusResponse
+		if err := json.Unmarshal([]byte(body), &status); err != nil || code != http.StatusOK || status.Sync == nil {
+			t.Fatalf("%s: status = %d, body %s", name, code, body)
+		}
+		st := status.Sync
+		var skipped []string
+		for _, s := range st.Skipped {
+			skipped = append(skipped, s.Namespace+"/"+s.Source)
+		}
+		if got := strings.Join(skipped, ","); got != tc.skipped {
+			t.Errorf("%s: skipped %q, want %q", name, got, tc.skipped)
+		}
+		if st.Managed != tc.managed || st.Created != tc.created || st.Updated != tc.updated || st.Removed != tc.removed {
+			t.Errorf("%s: counts %d/%d/%d/%d, want %d/%d/%d/%d", name,
+				st.Managed, st.Created, st.Updated, st.Removed, tc.managed, tc.created, tc.updated, tc.removed)
+		}
+		if !st.LastRunAt.Equal(ran) || st.IntervalSeconds != 60 {
+			t.Errorf("%s: run %s every %ds", name, st.LastRunAt, st.IntervalSeconds)
+		}
+		if tc.user != "seer" && (strings.Contains(body, "finance") || strings.Contains(body, "kube-system")) {
+			t.Errorf("%s reads other namespaces: %s", name, body)
+		}
+	}
+
+	// An administrator sees the whole run.
+	var status discoveryStatusResponse
+	do(t, "GET", url, "", &status)
+	if status.Detail != "in-cluster" || status.Sync == nil || status.Sync.Managed != 7 || len(status.Sync.Skipped) != 3 {
+		t.Errorf("admin: %+v", status)
 	}
 }
 

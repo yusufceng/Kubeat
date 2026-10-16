@@ -8,10 +8,26 @@ import { clearSessionCookie, sessionToken, setSessionCookie } from "@/lib/sessio
 
 export type LoginState = { error: string | null };
 
-/** Only same-site paths are followed after sign-in. */
+/**
+ * Only paths of this site are followed after sign-in. Browsers drop tabs and
+ * line breaks from an address and read a backslash as a slash, so
+ * "/\t/evil.example" leads to another site although it starts with a single
+ * slash: anything with a control character, white space or a backslash is
+ * refused, and what is left must stay on the origin it is resolved against.
+ * The path is returned as parsed, so what was checked is what is followed.
+ */
 function safeNext(value: FormDataEntryValue | null): string {
   const next = typeof value === "string" ? value : "";
-  return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+  if (!next.startsWith("/") || next.startsWith("//") || /[\u0000-\u001f\u007f-\u009f\s\\]/.test(next)) return "/";
+  // Any origin will do as the base: only whether the path stays on it matters.
+  let url: URL;
+  try {
+    url = new URL(next, "http://x");
+  } catch {
+    return "/";
+  }
+  if (url.origin !== "http://x" || !url.pathname.startsWith("/") || url.pathname.startsWith("//")) return "/";
+  return url.pathname + url.search + url.hash;
 }
 
 function refusal(err: unknown, t: T): string {

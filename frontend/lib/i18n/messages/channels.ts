@@ -16,7 +16,8 @@ export const channels = defineMessages(
     "channelForm.name.label": "Ad",
     "channelForm.name.placeholder": "ops-kanali",
     "channelForm.target.masked": "Kayıtlı adres gizlidir; değiştirmezseniz korunur.",
-    "channelForm.secret.masked": "Kayıtlı değer gösterilmez; değiştirmezseniz korunur.",
+    "channelForm.secret.masked":
+      "Kayıtlı değer gösterilmez; değiştirmezseniz korunur. Adres başka bir sunucuya taşınırsa yeniden girin.",
     "channelForm.scope.legend": "Kapsam",
     "channelForm.scope.allMonitors":
       "Tüm monitor'lar. Namespace'li monitor eklendiğinde kanal belirli namespace'lerle sınırlanabilir.",
@@ -71,6 +72,8 @@ export const channels = defineMessages(
     "statusPageForm.monitors.displayName.placeholder": "Sayfada görünen ad (isteğe bağlı)",
     "statusPageForm.monitors.hint":
       "Sayfa yalnızca adı, durumu ve uptime geçmişini gösterir; adresler ve hata ayrıntıları gösterilmez.",
+    "statusPageForm.monitors.needed":
+      "En az bir monitor seçin: monitor'u olmayan bir sayfayı yalnızca yöneticiler yönetir.",
     "statusPageForm.published.label": "Yayında (işaretli değilse sayfa açılmaz)",
     "statusPageForm.create": "Sayfayı oluştur",
 
@@ -122,7 +125,8 @@ export const channels = defineMessages(
     "channelForm.name.label": "Name",
     "channelForm.name.placeholder": "ops-channel",
     "channelForm.target.masked": "The saved address is hidden; it is kept unless you change it.",
-    "channelForm.secret.masked": "The saved value is not shown; it is kept unless you change it.",
+    "channelForm.secret.masked":
+      "The saved value is not shown; it is kept unless you change it. Enter it again when the address moves to another server.",
     "channelForm.scope.legend": "Scope",
     "channelForm.scope.allMonitors":
       "All monitors. Once a monitor with a namespace is added, the channel can be limited to certain namespaces.",
@@ -177,6 +181,7 @@ export const channels = defineMessages(
     "statusPageForm.monitors.displayName.placeholder": "Name shown on the page (optional)",
     "statusPageForm.monitors.hint":
       "The page shows only the name, the state and the uptime history; addresses and error details are not shown.",
+    "statusPageForm.monitors.needed": "Choose at least one monitor: only administrators manage a page without monitors.",
     "statusPageForm.published.label": "Published (if unchecked, the page does not open)",
     "statusPageForm.create": "Create the page",
 

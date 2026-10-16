@@ -131,13 +131,14 @@ func (h *handler) monitorWindow(w http.ResponseWriter, r *http.Request) {
 // the reason names why the cluster could not be asked at all.
 func (h *handler) eventsBetween(r *http.Request, m store.Monitor, from, to time.Time) (events []eventResponse, truncated bool, reason string) {
 	none := []eventResponse{}
+	p := principal(r)
 	namespace, source := m.Namespace, m.Source
 	if m.Type == store.MonitorWorkload {
 		ns, kind, name, err := k8s.ParseWorkloadTarget(m.Target)
 		if err != nil {
 			return none, false, err.Error()
 		}
-		if !principal(r).CanRead(ns) {
+		if !p.CanRead(ns) {
 			return none, false, "the monitor's workload is outside your namespaces"
 		}
 		namespace, source = ns, string(kind)+"/"+name
@@ -146,19 +147,19 @@ func (h *handler) eventsBetween(r *http.Request, m store.Monitor, from, to time.
 	case source == "":
 		return none, false, "the monitor was not created from a cluster object"
 	case h.opts.Workloads == nil:
-		return none, false, "the backend is not connected to a cluster: " + h.opts.DiscoveryStatus
+		return none, false, withDetail("the backend is not connected to a cluster", h.clusterDetail(p))
 	}
 	workload, err := h.opts.Workloads.Workload(r.Context(), namespace, source)
 	if err != nil {
 		if !errors.Is(err, k8s.ErrNoWorkload) {
 			h.opts.Logger.Warn("reading workload failed", "monitor", m.Name, "error", err)
 		}
-		return none, false, "the cluster could not be read: " + err.Error()
+		return none, false, "the cluster could not be read: " + upstreamReason(p, err)
 	}
 	found, err := h.opts.Workloads.Events(r.Context(), namespace, workload, from, to, 0)
 	if err != nil {
 		h.opts.Logger.Warn("reading events failed", "monitor", m.Name, "error", err)
-		return none, false, "the cluster's events could not be read: " + err.Error()
+		return none, false, "the cluster's events could not be read: " + upstreamReason(p, err)
 	}
 	slices.Reverse(found) // oldest first: how it began
 	if limit := h.opts.EventLimit; limit > 0 && len(found) > limit {
