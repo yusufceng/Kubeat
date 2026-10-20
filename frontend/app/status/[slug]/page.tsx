@@ -10,7 +10,7 @@ import type { T } from "@/lib/i18n/translate";
 import { type Beat, BeatStrip, type SlotState } from "@/app/ui/beat-strip";
 import { LanguageToggle } from "@/app/ui/language-toggle";
 import { LiveDuration } from "@/app/ui/live-duration";
-import { LogoMark, Wordmark } from "@/app/ui/logo";
+import { Wordmark } from "@/app/ui/logo";
 import { AnnounceIcon, UnplugIcon } from "@/app/ui/page-icons";
 import { RefreshCountdown } from "@/app/ui/refresh-countdown";
 import { type GlyphKind, glyphTone, StatusGlyph } from "@/app/ui/status-glyph";
@@ -358,13 +358,10 @@ async function Footer() {
   const [before, after] = t("statusPage.footer").split("{kubeat}");
   return (
     <footer className="sp-foot">
-      <span className="inline-flex items-center gap-2">
-        <LogoMark size={14} />
-        <span>
-          {before}
-          <Wordmark className="text-ink-2" />
-          {after}
-        </span>
+      <span>
+        {before}
+        <Wordmark className="text-ink-2" />
+        {after}
       </span>
       <span aria-hidden>·</span>
       <LanguageToggle variant="inline" />

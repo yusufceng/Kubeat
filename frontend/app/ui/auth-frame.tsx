@@ -4,8 +4,9 @@ import { Logo } from "@/app/ui/logo";
 
 /**
  * The frame of the pages before a session: signing in and the first
- * account. A 360px column in the middle of the canvas, under the mark and
- * the name; the other language at the foot.
+ * account. A 360px column in the middle of the canvas, under the logo,
+ * whose word is the product's name, so the titles do not repeat it; the
+ * other language at the foot.
  */
 export function AuthFrame({
   title,
@@ -20,7 +21,7 @@ export function AuthFrame({
     <div className="auth">
       <BackendWarning />
       <main className="auth-col">
-        <Logo size={30} className="auth-logo" />
+        <Logo size={22} className="auth-logo" />
         <h1 className="auth-title">{title}</h1>
         {intro && <p className="auth-intro">{intro}</p>}
         {children}

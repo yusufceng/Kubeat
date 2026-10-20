@@ -1615,8 +1615,8 @@
     align-self: center;
   }
   .auth-logo {
+    flex: none;
     margin-bottom: 10px;
-    font-size: 19px;
   }
   .auth-title {
     font-size: 26px;

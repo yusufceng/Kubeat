@@ -27,7 +27,7 @@ TARGET_ALLOW_CIDRS ?= 127.0.0.0/8,::1/128
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.39.0
+VERSION ?= 0.39.1
 CHART := deploy/helm/kubeat
 # Ek helm ayarları, örn. HELM_ARGS="--set prometheus.url=http://..."
 HELM_ARGS ?=

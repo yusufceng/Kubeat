@@ -18,7 +18,7 @@ export const auth = defineMessages(
     "auth.creating": "Oluşturuluyor…",
     "auth.adminsOnly": "Bu sayfa yöneticilere açıktır.",
     // Signing in.
-    "login.title": "kubeat'e giriş yapın",
+    "login.title": "Giriş yapın",
     "login.expired": "Oturumunuz sona erdi; yeniden giriş yapın.",
     "login.oidc.signIn": "{name} ile giriş yap",
     "login.orAccount": "ya da hesapla",
@@ -39,7 +39,7 @@ export const auth = defineMessages(
     "login.refusal.invalid": "Geçersiz değer: {message}",
     "login.refusal.backend": "Backend'e ulaşılamadı. Biraz sonra tekrar deneyin.",
     // The first account.
-    "setup.title": "kubeat'e hoş geldiniz",
+    "setup.title": "Hoş geldiniz",
     "setup.intro": "Henüz bir hesap yok. İlk yönetici hesabını oluşturun; diğer hesapları sonra bu hesapla açarsınız.",
     "setup.next":
       "Ardından Kubeat'e neyi izleyeceğini gösterin: bir namespace'i tarayın, nesnelere kubeat.io/monitor annotation'ı ekleyin ya da adresleri elle ekleyin.",
@@ -179,7 +179,7 @@ export const auth = defineMessages(
     "auth.role.viewer": "Viewer",
     "auth.creating": "Creating…",
     "auth.adminsOnly": "This page is for administrators.",
-    "login.title": "Sign in to kubeat",
+    "login.title": "Sign in",
     "login.expired": "Your session has expired; sign in again.",
     "login.oidc.signIn": "Sign in with {name}",
     "login.orAccount": "or with an account",
@@ -199,7 +199,7 @@ export const auth = defineMessages(
     "login.refusal.exists": "An account exists already; sign in.",
     "login.refusal.invalid": "Invalid value: {message}",
     "login.refusal.backend": "The backend cannot be reached. Try again in a little while.",
-    "setup.title": "Welcome to kubeat",
+    "setup.title": "Welcome",
     "setup.intro": "There is no account yet. Create the first administrator account; you will open the other accounts with it later.",
     "setup.next":
       "Then show Kubeat what to watch: scan a namespace, annotate objects with kubeat.io/monitor, or add addresses by hand.",

@@ -13,7 +13,7 @@ export default async function NotFound() {
   return (
     <div className="auth">
       <main className="auth-col">
-        <Logo size={30} className="auth-logo" />
+        <Logo size={22} className="auth-logo" />
         <p className="pg-mono text-ink-3">404</p>
         <h1 className="auth-title">{t("notFound.title")}</h1>
         <p className="auth-intro mt-0">{t("notFound.body")}</p>

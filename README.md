@@ -1,4 +1,9 @@
-# Kubeat
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kubeat-lockup-dark.svg">
+    <img alt="Kubeat" src="docs/assets/kubeat-lockup.svg" height="44">
+  </picture>
+</h1>
 
 OCP/Kubernetes ortamlarındaki servisler için uptime monitoring aracı.
 Go + Next.js + SQLite.
@@ -1007,6 +1012,9 @@ biri de listeyi okuyabilir.
   girilen değerleri okuyarak ne olacağını söyler.
 - **Tema**: menünün altındaki düğme sistem, açık ve koyu arasında geçer;
   seçim tarayıcıda saklanır.
+- **Logo**: kelimenin kendisidir, k'si işarettir (menüdeki mavi karo,
+  sekmedeki k). k hep vurgu mavisindedir, hiçbir zaman bir durum renginde
+  değil. Dosyalar ve kurallar: [docs/assets](docs/assets/README.md).
 
 ## Durum sayfaları
 

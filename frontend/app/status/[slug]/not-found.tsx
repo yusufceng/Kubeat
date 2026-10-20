@@ -1,6 +1,6 @@
 import { getT } from "@/lib/i18n/server";
 import { LanguageToggle } from "@/app/ui/language-toggle";
-import { LogoMark, Wordmark } from "@/app/ui/logo";
+import { Wordmark } from "@/app/ui/logo";
 import { StatusPagesIcon } from "@/app/ui/icons";
 import { SystemTheme } from "@/app/ui/theme-toggle";
 
@@ -23,13 +23,10 @@ export default async function NotFound() {
         <p className="pg-empty-body">{t("statusPage.notFound.body")}</p>
       </section>
       <footer className="sp-foot">
-        <span className="inline-flex items-center gap-2">
-          <LogoMark size={14} />
-          <span>
-            {before}
-            <Wordmark className="text-ink-2" />
-            {after}
-          </span>
+        <span>
+          {before}
+          <Wordmark className="text-ink-2" />
+          {after}
         </span>
         <span aria-hidden>·</span>
         <LanguageToggle variant="inline" />
