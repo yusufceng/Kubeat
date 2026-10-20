@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/csv"
 	"fmt"
 	"net/http"
 	"sort"
@@ -26,10 +25,18 @@ type namespaceReport struct {
 	Namespace string `json:"namespace"`
 	// Uptime is the share of successful checks over the namespace's
 	// monitors, 0..100; null when none ran.
-	Uptime          *float64        `json:"uptime"`
-	Outages         int             `json:"outages"`
-	DowntimeSeconds int             `json:"downtime_seconds"`
-	Monitors        []monitorReport `json:"monitors"`
+	Uptime          *float64 `json:"uptime"`
+	Outages         int      `json:"outages"`
+	DowntimeSeconds int      `json:"downtime_seconds"`
+	// MonitoredSeconds adds up how long each monitor was checked; MTTR and
+	// MTBF are over all of them (see reliability), null without outages.
+	MonitoredSeconds int64           `json:"monitored_seconds"`
+	MTTRSeconds      *int64          `json:"mttr_seconds"`
+	MTBFSeconds      *int64          `json:"mtbf_seconds"`
+	Monitors         []monitorReport `json:"monitors"`
+
+	// The exact sums the figures above are made from; not sent.
+	downtime, monitored time.Duration
 }
 
 type monitorReport struct {
@@ -46,6 +53,11 @@ type monitorReport struct {
 	DowntimeSeconds      int      `json:"downtime_seconds"`
 	LongestOutageSeconds int      `json:"longest_outage_seconds"`
 	OpenOutage           bool     `json:"open_outage"`
+	// MonitoredSeconds is how long the monitor was checked in the period;
+	// MTTRSeconds and MTBFSeconds are null when it had no outage.
+	MonitoredSeconds int64  `json:"monitored_seconds"`
+	MTTRSeconds      *int64 `json:"mttr_seconds"`
+	MTBFSeconds      *int64 `json:"mtbf_seconds"`
 }
 
 func percent(up, checks int) *float64 {
@@ -56,21 +68,50 @@ func percent(up, checks int) *float64 {
 	return &v
 }
 
-// report summarizes the monitors the caller may see over the last N days,
-// as JSON or, with format=csv, one row per monitor.
-func (h *handler) report(w http.ResponseWriter, r *http.Request) {
-	days := 30
+// seconds is a duration in whole seconds, rounded.
+func seconds(d time.Duration) int64 {
+	return int64(d.Round(time.Second) / time.Second)
+}
+
+// reliability is MTTR and MTBF over a period, in seconds. MTTR, the mean
+// time to recovery, is the downtime per outage; MTBF, the mean time
+// between failures, the time up per outage, where time up is what of the
+// monitored time was not downtime. Outages are the "down" incidents that
+// overlapped the period, clipped to it. Without one both are nil: there
+// was no failure to measure from, which the UI calls "no failures".
+func reliability(outages int, downtime, monitored time.Duration) (mttr, mtbf *int64) {
+	if outages == 0 {
+		return nil, nil
+	}
+	repair := seconds(downtime / time.Duration(outages))
+	between := seconds(max(monitored-downtime, 0) / time.Duration(outages))
+	return &repair, &between
+}
+
+// reportPeriod reads ?days= (1..maxReportDays, def when absent) and returns
+// the period of that many days that ends with the current hour, in whole
+// hours so that the hourly rollups line up with it.
+func reportPeriod(r *http.Request, def int) (from, to time.Time, days int, err error) {
+	days = def
 	if v := r.URL.Query().Get("days"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > maxReportDays {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("days must be between 1 and %d", maxReportDays))
-			return
+			return from, to, 0, fmt.Errorf("days must be between 1 and %d", maxReportDays)
 		}
 		days = n
 	}
-	// Whole hours, so that the rollups line up with the period.
-	to := time.Now().UTC().Truncate(time.Hour).Add(time.Hour)
-	from := to.Add(-time.Duration(days) * 24 * time.Hour)
+	to = time.Now().UTC().Truncate(time.Hour).Add(time.Hour)
+	return to.Add(-time.Duration(days) * 24 * time.Hour), to, days, nil
+}
+
+// report summarizes the monitors the caller may see over the last N days,
+// as JSON or, with format=csv, one row per monitor.
+func (h *handler) report(w http.ResponseWriter, r *http.Request) {
+	from, to, days, err := reportPeriod(r, 30)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	rows, err := h.opts.Store.Report(r.Context(), from, to)
 	if err != nil {
@@ -90,15 +131,19 @@ func (h *handler) report(w http.ResponseWriter, r *http.Request) {
 			g = &namespaceReport{Namespace: row.Namespace, Monitors: []monitorReport{}}
 			groups[row.Namespace] = g
 		}
+		mttr, mtbf := reliability(row.Outages, row.Downtime, row.Monitored)
 		g.Monitors = append(g.Monitors, monitorReport{
 			ID: row.ID, Name: row.Name, Type: string(row.Type), Target: row.Target, Enabled: row.Enabled,
 			Checks: row.Checks, UpChecks: row.UpChecks, Uptime: percent(row.UpChecks, row.Checks),
 			AvgLatencyMS: row.AvgLatency.Milliseconds(),
 			Outages:      row.Outages, DowntimeSeconds: int(row.Downtime / time.Second),
 			LongestOutageSeconds: int(row.LongestOutage / time.Second), OpenOutage: row.OpenOutage,
+			MonitoredSeconds: seconds(row.Monitored), MTTRSeconds: mttr, MTBFSeconds: mtbf,
 		})
 		g.Outages += row.Outages
 		g.DowntimeSeconds += int(row.Downtime / time.Second)
+		g.downtime += row.Downtime
+		g.monitored += row.Monitored
 	}
 	resp := reportResponse{From: from, To: to, Days: days, Namespaces: make([]namespaceReport, 0, len(groups))}
 	for _, g := range groups {
@@ -107,6 +152,8 @@ func (h *handler) report(w http.ResponseWriter, r *http.Request) {
 			checks, up = checks+m.Checks, up+m.UpChecks
 		}
 		g.Uptime = percent(up, checks)
+		g.MonitoredSeconds = seconds(g.monitored)
+		g.MTTRSeconds, g.MTBFSeconds = reliability(g.Outages, g.downtime, g.monitored)
 		// Worst first within a namespace: the report is for finding trouble.
 		sort.SliceStable(g.Monitors, func(i, j int) bool {
 			a, b := g.Monitors[i], g.Monitors[j]
@@ -129,24 +176,34 @@ func (h *handler) report(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// optionalSeconds is a cell for a figure that may be missing: empty then.
+func optionalSeconds(v *int64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatInt(*v, 10)
+}
+
 func writeReportCSV(w http.ResponseWriter, resp reportResponse) {
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="kubeat-report-%dd-%s.csv"`, resp.Days, resp.To.Format("2006-01-02")))
-	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"namespace", "monitor", "type", "target", "enabled", "checks", "up_checks", "uptime_percent", "avg_latency_ms", "outages", "downtime_seconds", "longest_outage_seconds", "open_outage", "from", "to"})
+	out := newCSVDownload(w, fmt.Sprintf("kubeat-report-%dd-%s.csv", resp.Days, resp.To.Format("2006-01-02")))
+	// The columns added later go last, where a reader of the older ones
+	// does not see them move.
+	out.row("namespace", "monitor", "type", "target", "enabled", "checks", "up_checks", "uptime_percent", "avg_latency_ms", "outages",
+		"downtime_seconds", "longest_outage_seconds", "open_outage", "from", "to", "monitored_seconds", "mttr_seconds", "mtbf_seconds")
 	for _, g := range resp.Namespaces {
 		for _, m := range g.Monitors {
 			uptime := ""
 			if m.Uptime != nil {
 				uptime = strconv.FormatFloat(*m.Uptime, 'f', 3, 64)
 			}
-			_ = cw.Write([]string{
+			out.row(
 				g.Namespace, m.Name, m.Type, m.Target, strconv.FormatBool(m.Enabled),
 				strconv.Itoa(m.Checks), strconv.Itoa(m.UpChecks), uptime, strconv.FormatInt(m.AvgLatencyMS, 10),
 				strconv.Itoa(m.Outages), strconv.Itoa(m.DowntimeSeconds), strconv.Itoa(m.LongestOutageSeconds), strconv.FormatBool(m.OpenOutage),
 				resp.From.Format(time.RFC3339), resp.To.Format(time.RFC3339),
-			})
+				strconv.FormatInt(m.MonitoredSeconds, 10), optionalSeconds(m.MTTRSeconds), optionalSeconds(m.MTBFSeconds),
+			)
 		}
 	}
-	cw.Flush()
+	out.flush()
 }

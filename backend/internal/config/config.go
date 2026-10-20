@@ -131,6 +131,14 @@ type Config struct {
 	RollupInterval      time.Duration // UPTIME_ROLLUP_INTERVAL
 	RollupRetention     time.Duration // UPTIME_ROLLUP_RETENTION
 	SeriesPoints        int           // UPTIME_SERIES_POINTS
+	// DeliveryRetention is how long the delivery log is kept: which channel
+	// was told what about an incident, and whether it took it. It is pruned
+	// with the check results, every RetentionInterval; the incidents stay.
+	DeliveryRetention time.Duration // UPTIME_DELIVERY_RETENTION
+	// IncidentTimelineLimit bounds the failed checks an incident's page
+	// shows, and separately its notifications: of more, the first and the
+	// last halves. At least 2, so that there is room for both ends.
+	IncidentTimelineLimit int // UPTIME_INCIDENT_TIMELINE_LIMIT
 
 	HTTPInsecureSkipVerify bool // UPTIME_HTTP_INSECURE_SKIP_VERIFY
 	KeywordBodyLimit       int  // UPTIME_KEYWORD_BODY_LIMIT_BYTES
@@ -322,6 +330,7 @@ func Load() (Config, error) {
 		{&cfg.RetentionInterval, "UPTIME_RETENTION_INTERVAL", time.Hour},
 		{&cfg.RollupInterval, "UPTIME_ROLLUP_INTERVAL", time.Minute},
 		{&cfg.RollupRetention, "UPTIME_ROLLUP_RETENTION", 365 * 24 * time.Hour},
+		{&cfg.DeliveryRetention, "UPTIME_DELIVERY_RETENTION", 365 * 24 * time.Hour},
 		{&cfg.MinCheckInterval, "UPTIME_MIN_CHECK_INTERVAL", 5 * time.Second},
 		{&cfg.EventWindow, "UPTIME_EVENT_WINDOW", 2 * time.Hour},
 		{&cfg.EventCache, "UPTIME_EVENT_CACHE", 10 * time.Second},
@@ -372,6 +381,7 @@ func Load() (Config, error) {
 		{&cfg.KeywordBodyLimit, "UPTIME_KEYWORD_BODY_LIMIT_BYTES", 1 << 20},
 		{&cfg.DefaultFailureThreshold, "UPTIME_DEFAULT_FAILURE_THRESHOLD", 3},
 		{&cfg.EventLimit, "UPTIME_EVENT_LIMIT", 20},
+		{&cfg.IncidentTimelineLimit, "UPTIME_INCIDENT_TIMELINE_LIMIT", 100},
 		{&cfg.RecoveryThreshold, "UPTIME_RECOVERY_THRESHOLD", 1},
 		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 100},
 		{&cfg.NotifyAttempts, "UPTIME_NOTIFY_ATTEMPTS", 3},
@@ -400,6 +410,10 @@ func Load() (Config, error) {
 	if cfg.MinCheckInterval < time.Second {
 		// Intervals are stored in whole seconds.
 		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL: must be at least 1s, got %s", cfg.MinCheckInterval)
+	}
+	if cfg.IncidentTimelineLimit < 2 {
+		// One for how the incident began and one for how it ended.
+		return Config{}, fmt.Errorf("UPTIME_INCIDENT_TIMELINE_LIMIT: must be at least 2, got %d", cfg.IncidentTimelineLimit)
 	}
 	if cfg.ReminderInterval, err = envDurationOrZero("UPTIME_REMINDER_INTERVAL", 0); err != nil {
 		return Config{}, err

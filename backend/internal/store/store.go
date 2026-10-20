@@ -260,10 +260,108 @@ type Incident struct {
 	// LastNotifiedAt is when a notification about the incident was last
 	// sent; zero if unknown.
 	LastNotifiedAt time.Time
+	// OpenedAt is when Kubeat opened the incident: the check that reached
+	// the failure threshold, while StartedAt is the first failure of that
+	// streak. Zero for incidents opened before it was recorded.
+	OpenedAt time.Time
 }
 
 // Open reports whether the incident is still ongoing.
 func (i Incident) Open() bool { return i.ResolvedAt.IsZero() }
+
+// IncidentSort is what a list of incidents is ordered by.
+type IncidentSort string
+
+const (
+	SortByStart    IncidentSort = "started_at" // when they began
+	SortByDuration IncidentSort = "duration"   // how long they lasted, or have lasted so far
+	SortByMonitor  IncidentSort = "monitor"    // the name of their monitor
+)
+
+// IncidentSorts lists every order.
+var IncidentSorts = []IncidentSort{SortByStart, SortByDuration, SortByMonitor}
+
+// IncidentFilter selects incidents and orders them. Its zero value selects
+// every incident, oldest first.
+type IncidentFilter struct {
+	// Namespaces, unless nil, limits the incidents to those of monitors in
+	// these namespaces or groups ("" for monitors without one). Empty but
+	// not nil, it selects none: that is what a user whose scope and filter
+	// do not meet may see.
+	Namespaces []string
+	MonitorID  int64        // 0 for every monitor
+	Kind       IncidentKind // "" for both kinds
+	// Open selects the open incidents (true) or the resolved ones (false);
+	// nil selects both.
+	Open *bool
+	// MonitorName selects the monitors whose name contains it, whatever
+	// the case of its ASCII letters.
+	MonitorName string
+	// From and To select the incidents that overlap [From, To); a zero
+	// bound leaves that side open.
+	From, To time.Time
+	// Sort is SortByStart when empty; Desc puts the largest first. Ties
+	// are broken by start, newest first, so that pages do not shift.
+	Sort IncidentSort
+	Desc bool
+	// Limit and Offset page through the list; a zero Limit has no bound.
+	Limit, Offset int
+	// Now is where open incidents end when they are ordered by duration.
+	Now time.Time
+}
+
+// Delivery is one attempt to tell a channel about an incident, as it ended
+// after its retries: who heard what about it, and when.
+type Delivery struct {
+	ID         int64
+	IncidentID int64
+	// MonitorID is the incident's monitor; written from the incident.
+	MonitorID int64
+	// The channel, as it was: the record outlives a channel deleted later.
+	ChannelID   int64
+	ChannelName string
+	ChannelType ChannelType
+	// Event is what the message reported (down, up, reminder,
+	// cert_expiring or cert_renewed), EventAt when that happened as Kubeat
+	// saw it. GroupSize is how many monitors the message was about: more
+	// than one for a grouped message, which is a row for each of them.
+	Event     string
+	EventAt   time.Time
+	GroupSize int
+	// At is when the attempt ended. Error says why it failed, redacted of
+	// the channel's address and secret; empty when Delivered.
+	At        time.Time
+	Delivered bool
+	Error     string
+}
+
+// Ends splits keep between the oldest and the newest of total entries: all
+// of them when they fit, otherwise the oldest half of keep (rounded up) and
+// the newest half. A long outage is told by how it began and how it ended;
+// the rest is left out between the two.
+func Ends(total, keep int) (oldest, newest int) {
+	if total <= keep {
+		return total, 0
+	}
+	oldest = (keep + 1) / 2
+	return oldest, keep - oldest
+}
+
+// IncidentNote is a note someone left on an incident.
+type IncidentNote struct {
+	ID         int64
+	IncidentID int64
+	// AuthorID is the account that wrote the note: zero for the API token,
+	// and once the account is deleted. Author is its username then.
+	AuthorID int64
+	Author   string
+	Text     string
+	// ShowOnStatusPage lets the status pages that show the incident's
+	// monitor show the note too.
+	ShowOnStatusPage bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
 
 // ChannelType is the kind of destination a notification channel sends to.
 type ChannelType string
@@ -368,12 +466,17 @@ type MonitorReport struct {
 	// AvgLatency is over successful checks; zero if none.
 	AvgLatency time.Duration
 	// Outages counts the "down" incidents that overlapped the period;
-	// Downtime is the part of them inside the period, LongestOutage the
-	// longest such part. OpenOutage says one is still going.
+	// Downtime is the part of them inside the period, up to now for one
+	// still going, LongestOutage the longest such part. OpenOutage says one
+	// is still going.
 	Outages       int
 	Downtime      time.Duration
 	LongestOutage time.Duration
 	OpenOutage    bool
+	// Monitored is how long the monitor was being checked in the period:
+	// the hours with checks, from its creation and up to now. Time up is
+	// what of it was not downtime; a paused monitor is not up, nor down.
+	Monitored time.Duration
 }
 
 // SeriesSource selects which table a series is read from.
@@ -570,6 +673,11 @@ type Store interface {
 	SummarizeChecks(ctx context.Context, monitorID int64, from, to time.Time) (CheckSummary, error)
 	// ListFailedChecks returns up to limit failed checks in [from, to), newest first.
 	ListFailedChecks(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]CheckResult, error)
+	// FailedChecksEnds returns the failed checks in [from, to), oldest
+	// first, and how many there are. Of more than keep, it returns the
+	// oldest half of keep (rounded up) and the newest half: how an outage
+	// began and how it ended.
+	FailedChecksEnds(ctx context.Context, monitorID int64, from, to time.Time, keep int) ([]CheckResult, int, error)
 	// RecentCheckResults returns up to limit results, newest first, for each
 	// of the given monitors, keyed by monitor ID.
 	RecentCheckResults(ctx context.Context, monitorIDs []int64, limit int) (map[int64][]CheckResult, error)
@@ -602,11 +710,43 @@ type Store interface {
 	// ListIncidentsBetween returns the incidents of a monitor overlapping
 	// [from, to), newest first, at most limit.
 	ListIncidentsBetween(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]Incident, error)
+	// GetIncident returns ErrNotFound for an unknown id.
+	GetIncident(ctx context.Context, id int64) (Incident, error)
+	// FilterIncidents returns the incidents f selects, in its order and
+	// page; CountIncidents how many it selects over all pages.
+	FilterIncidents(ctx context.Context, f IncidentFilter) ([]Incident, error)
+	CountIncidents(ctx context.Context, f IncidentFilter) (int, error)
+
+	// RecordDeliveries adds delivery attempts to the log, in one
+	// transaction. An attempt about an incident that is gone (its monitor
+	// was deleted meanwhile) is left out: there is no page to show it on.
+	RecordDeliveries(ctx context.Context, deliveries []Delivery) error
+	// DeliveriesEnds returns the delivery log of an incident, oldest first,
+	// and how long it is; of more than keep entries, the oldest half of
+	// keep (rounded up) and the newest half.
+	DeliveriesEnds(ctx context.Context, incidentID int64, keep int) ([]Delivery, int, error)
+	// DeleteDeliveriesBefore removes log entries older than cutoff and
+	// reports how many rows were deleted.
+	DeleteDeliveriesBefore(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// CreateIncidentNote returns ErrNotFound when the incident is gone.
+	CreateIncidentNote(ctx context.Context, n IncidentNote) (IncidentNote, error)
+	GetIncidentNote(ctx context.Context, id int64) (IncidentNote, error)
+	// ListIncidentNotes returns up to limit notes of an incident, oldest first.
+	ListIncidentNotes(ctx context.Context, incidentID int64, limit int) ([]IncidentNote, error)
+	// UpdateIncidentNote changes the text and the status page flag of the
+	// note with n.ID, and marks it updated now.
+	UpdateIncidentNote(ctx context.Context, n IncidentNote) (IncidentNote, error)
+	DeleteIncidentNote(ctx context.Context, id int64) error
 
 	CreateMaintenance(ctx context.Context, m Maintenance) (Maintenance, error)
 	// ListMaintenance returns up to limit windows: the repeating ones, then
 	// the others, latest start first.
 	ListMaintenance(ctx context.Context, limit int) ([]Maintenance, error)
+	// ListMaintenanceBetween returns the windows that may have an
+	// occurrence overlapping [from, to): every repeating one, and the
+	// others that overlap it. Maintenance.Occurrences tells which do.
+	ListMaintenanceBetween(ctx context.Context, from, to time.Time) ([]Maintenance, error)
 	DeleteMaintenance(ctx context.Context, id int64) error
 	// InMaintenance reports whether a window covers the monitor at the
 	// given time.

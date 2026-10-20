@@ -505,7 +505,7 @@ parolayla açılmak ya da `/setup`'ı ilk gelene açık bırakmak yerine durur.
 | Rol | Görür | Değiştirir |
 | --- | --- | --- |
 | Yönetici (`admin`) | Her şeyi | Her şeyi; kullanıcıları, LDAP eşlemelerini, kapsamsız kanalları |
-| Editör (`editor`) | Kapsamındaki monitor'ları, olayları, bakım pencerelerini; yalnızca kapsamıyla sınırlı kanalları ve durum sayfalarını | Kapsamında monitor ekler, düzenler, siler, susturur, keşiften içe aktarır; kapsamıyla sınırlı kanal, bakım penceresi ve durum sayfası açar |
+| Editör (`editor`) | Kapsamındaki monitor'ları, olayları, bakım pencerelerini; yalnızca kapsamıyla sınırlı kanalları ve durum sayfalarını | Kapsamında monitor ekler, düzenler, siler, susturur, keşiften içe aktarır, olaylara not ekler; kapsamıyla sınırlı kanal, bakım penceresi ve durum sayfası açar |
 | İzleyici (`viewer`) | Kapsamındaki monitor'ları (push monitor'larının rapor adresi ve HTTP monitor'larının istek gövdesi hariç) ve olayları; kapsamını ilgilendiren bakım pencerelerini | Hiçbir şeyi |
 
 Elle eklenen bir monitor'un "grubu" kapsam açısından namespace gibidir: `shop`
@@ -1043,8 +1043,14 @@ eklenmelidir.
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
 | `POST` | `/api/v1/discovery/import` | Seçilen hedefleri monitor'a çevirir |
 | `POST` | `/api/v1/discovery/restore` | Silinmiş bir annotation monitor'ünü yeniden izlemeye alır: `{namespace, source}` |
-| `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye |
-| `GET` | `/api/v1/reports?days=30&namespace=shop&format=csv` | Namespace başına uptime, kesinti sayısı ve süresi; `format=csv` ile indirilebilir |
+| `GET` | `/api/v1/incidents?monitor_id=1&limit=100` | Olaylar, yeniden eskiye. Süzgeçler `namespace` (tekrarlanabilir), `kind`, `state`, `monitor_id`, `q`, `from`, `to`; sıralama `sort`, `order`; sayfa `limit`, `offset` (toplam `X-Total-Count` başlığında); `format=csv` ile indirilebilir. Bkz. "Olay sayfası" |
+| `GET` | `/api/v1/incidents/{id}` | Olay, monitor'ü ve zaman çizelgesi: başarısız kontroller, açılış, bildirimler, hatırlatmalar, notlar, cluster olayları, bakım pencereleri, kapanış |
+| `GET` | `/api/v1/incidents/{id}/notes` | Olayın notları, eskiden yeniye |
+| `POST` | `/api/v1/incidents/{id}/notes` | Not ekler: `{"text", "show_on_status_page"}` |
+| `PATCH` | `/api/v1/incidents/{id}/notes/{note}` | Notu düzenler; verilmeyen alanlar değişmez. Yalnızca yazarı ya da yönetici |
+| `DELETE` | `/api/v1/incidents/{id}/notes/{note}` | Notu siler; yalnızca yazarı ya da yönetici |
+| `GET` | `/api/v1/reports?days=30&namespace=shop&format=csv` | Namespace ve monitor başına uptime, kesinti sayısı ve süresi, MTTR ve MTBF; `format=csv` ile indirilebilir |
+| `GET` | `/api/v1/stats?days=7` | Görülebilen monitor'ların özeti: uptime, kesinti sayısı ve süresi, MTTR, MTBF, açık olaylar; `namespace` (tekrarlanabilir) ile daraltılır |
 | `GET` | `/api/v1/maintenance` | Bakım pencereleri, en son başlayan önce |
 | `POST` | `/api/v1/maintenance` | Pencere ekler: `name`, `duration_seconds` ya da `ends_at`, isteğe bağlı `starts_at`, `namespace` ya da `monitor_id`, `repeat` ve `timezone` |
 | `DELETE` | `/api/v1/maintenance/{id}` | Pencereyi siler; süren pencereyi bitirir |
@@ -1377,9 +1383,9 @@ Yakınlaştırınca grafik o aralığı, iki yanında birer pay bırakarak göst
 yeniden sürükleyerek daha da yakınlaşılır. Tarayıcının geri düğmesi bir
 adım uzaklaştırır, grafiğin üstündeki bağlantı son 24 saat gibi hazır
 görünüme döner. Aralık adrese yazılır (`/monitors/7?from=…&to=…`), yani
-paylaşılabilir; bildirimlerdeki "Kubeat'te aç" bağlantısı da doğrudan
-kesintinin aralığına açılır. Grafiğin altında **Seçilen aralık** paneli
-(`GET /api/v1/monitors/{id}/window?from=&to=`) belirir:
+paylaşılabilir. (Bildirimlerdeki "Kubeat'te aç" bağlantısı olayın kendi
+sayfasına açılır; bkz. "Olay sayfası".) Grafiğin altında **Seçilen aralık**
+paneli (`GET /api/v1/monitors/{id}/window?from=&to=`) belirir:
 
 - o aralıktaki kontrol sayısı, kaçının başarısız olduğu, ortalama ve en
   yüksek yanıt süresi (ham kayıtlar `UPTIME_RETENTION` boyunca tutulur;
@@ -1421,13 +1427,36 @@ sonuçlardan hesaplanır, yani `UPTIME_RETENTION` kadar geriye gider.
 
 **Raporlar** sayfası (`GET /api/v1/reports?days=30`) son 1, 7, 30 ya da 90
 günü namespace başına özetler: uptime, kontrol sayısı, ortalama yanıt,
-kesinti sayısı, toplam ve en uzun kesinti süresi; her namespace'te en
-düşük uptime'lı monitor en üsttedir. Hesap saatlik özetlerden ve `down`
-türündeki olaylardan yapılır; döneme taşan kesintilerin yalnızca dönem
-içindeki kısmı sayılır, süren kesinti dönemin sonuna kadar sayılır.
+kesinti sayısı, toplam ve en uzun kesinti süresi, MTTR ve MTBF; her
+namespace'te en düşük uptime'lı monitor en üsttedir. Hesap saatlik
+özetlerden ve `down` türündeki olaylardan yapılır; döneme taşan kesintilerin
+yalnızca dönem içindeki kısmı sayılır, süren kesinti şu ana kadar sayılır.
 Kullanıcı yalnızca kapsamındaki namespace'leri görür. `format=csv` (sayfada
 "CSV indir") monitor başına bir satır verir; ekiplere giden aylık rapora
-eklenmek için.
+eklenmek için. Sonradan eklenen sütunlar (`monitored_seconds`,
+`mttr_seconds`, `mtbf_seconds`) sondadır, eski sütunların yeri değişmez.
+
+**MTTR ve MTBF.** MTTR (ortalama düzelme süresi) dönemdeki toplam kesinti
+süresinin kesinti sayısına, MTBF (arızalar arası ortalama süre) çalışır
+geçen sürenin kesinti sayısına bölümüdür. Çalışır geçen süre, monitor'ün
+kontrol edildiği sürenin (`monitored_seconds`: dönemde kontrolü olan
+saatler; monitor oluşturulmadan önceki ve durdurulmuşken geçen süre
+sayılmaz, içinde bulunulan saat şu ana kadar sayılır) kesinti dışında kalan
+kısmıdır. Kesinti yoksa ikisi de `null` döner: ölçülecek arıza yoktur
+("arıza yok"). Namespace değerleri namespace'in bütün monitor'larının
+toplamlarından hesaplanır, monitor değerlerinin ortalamasından değil.
+
+**Genel özet.** `GET /api/v1/stats?days=7` aynı hesabı kullanıcının
+görebildiği bütün monitor'lar için tek bir özet olarak verir; genel bakış
+içindir: uptime, kesinti sayısı ve süresi, MTTR, MTBF ve şu an açık olaylar
+(`open_incidents`; ayrıca `open_outages` ve `open_cert_warnings`).
+`namespace` (tekrarlanabilir; boş değer grupsuz monitor'lar) ile daraltılır.
+`days` 1 ile 365 arasındadır, varsayılanı 7.
+
+Rapor ve olay listesi CSV'lerinde `=`, `+`, `-`, `@`, sekme ya da satır başı
+karakteriyle başlayan hücrelerin önüne `'` konur: monitor adları, hedefler
+ve hata metinleri kullanıcıların ve izlenen servislerin yazdığıdır; dosyayı
+açan tablo programı onları formül olarak çalıştırmamalıdır.
 
 ## Pod'lar ve kaynak kullanımı
 
@@ -1814,10 +1843,10 @@ renk şeridi, başlık ve alanlar içeren bir attachment; Teams renkli bir
 Adaptive Card ve "Kubeat'te aç" düğmesi; Discord renkli bir embed; Google
 Chat bir card; Telegram kalın başlıklı HTML; Gotify markdown; ntfy
 tıklanabilir bir eylem; PagerDuty olayda `client_url`; webhook gövdesinde
-`url` alanı; e-posta son satırında bağlantı. Bağlantı tek monitor'da
-monitor sayfasına, gruplanmış mesajda namespace sayfasına gider ve
-`UPTIME_PUBLIC_URL` (chart'ta `publicURL`, Route/Ingress host'undan
-türetilir) ayarlı değilse hiç konmaz.
+`url` alanı; e-posta son satırında bağlantı. Bağlantı tek bir olayda
+olayın sayfasına (`/incidents/<id>`; bkz. "Olay sayfası"), gruplanmış
+mesajda namespace sayfasına gider ve `UPTIME_PUBLIC_URL` (chart'ta
+`publicURL`, Route/Ingress host'undan türetilir) ayarlı değilse hiç konmaz.
 
 Monitor adları, hedefler ve hata metinleri (push raporunun mesajı dahil)
 yazıldığı gibi görünür. Slack, Mattermost ve Google Chat'te `&`, `<` ve `>`
@@ -1865,6 +1894,74 @@ okunabilir özettir.
 
 `event` değeri `down`, `up`, `reminder`, `cert_expiring`, `cert_renewed` ya
 da `test` olur; `incident.kind` ise `down` ya da `cert`.
+
+### Olay sayfası
+
+Her olayın kendi sayfası vardır (`/incidents/<id>`; API'de
+`GET /api/v1/incidents/{id}`); bildirimlerdeki "Kubeat'te aç" bağlantısı
+buraya açılır. Sayfa olayı, monitor'ünü (adı, namespace'i, tipi, hedefi,
+kaynağı ve izlediği nesnenin türü: `service`, `ingress`, `route`,
+`deployment`, `statefulset`, `daemonset`) ve olayın hikâyesini tek bir zaman
+çizelgesinde, eskiden yeniye gösterir:
+
+- serinin ilk başarısız kontrolü ve olay sürerken başarısız olanlar, hata
+  metinleriyle; `UPTIME_INCIDENT_TIMELINE_LIMIT`'ten (100) fazlaysa baştan
+  ve sondan yarısı gösterilir, aradaki atlananların sayısı yazılır;
+- olayın açıldığı an: alarm eşiğine ulaşan kontrol (ilk başarısız
+  kontrolden sonradır; bu kayıttan önce açılmış olaylarda ilk başarısız
+  kontrol);
+- her kanala yapılan her bildirim denemesi (aşağıda); bunlar da aynı
+  sınırı aşarsa aynı biçimde kısaltılır;
+- hatırlatmalar ve o ana kadar kesintinin ne kadar sürdüğü;
+- notlar;
+- cluster'ın monitor'ün pod'ları ve onları yöneten nesneler hakkındaki
+  olayları, kesintinin başından bir kontrol aralığı önce başlayarak
+  ("Kesinti anına gitmek"teki gibi; cluster olayları birkaç saat tutar);
+- monitor'ü kapsayan bakım pencereleri;
+- kapanış ve toplam süre.
+
+Kontroller ham sonuçlardan (`UPTIME_RETENTION`), bildirimler bildirim
+kaydından (`UPTIME_DELIVERY_RETENTION`) okunur; eski bir olayda yalnızca
+kalanlar görünür. Sertifika olaylarında başarısız kontrol ve cluster olayı
+yoktur. Kullanıcı yalnızca okuyabildiği namespace'lerin olaylarını görür;
+diğerleri için sayfa 404'tür.
+
+**Bildirim kaydı.** Alarm motoru her kanala yaptığı her gönderimi, yeniden
+denemeler bittikten sonra olayın kaydına yazar: kanalın adı ve türü (kanal
+sonradan silinse de kalır), bildirilen olay (`down`, `up`, `reminder`,
+`cert_expiring`, `cert_renewed`) ve olduğu an, gönderimin bittiği an ve
+iletilip iletilmediği. Gruplanmış bir mesaj, kapsadığı her olaya ayrı yazılır
+ve kaç monitor'ü kapsadığı da kaydedilir. Hata metni yazılmadan önce kanalın
+adresinden ve token'ından arındırılır; sayfada yalnızca kanalı
+yönetebilenlere (yöneticiler ve kanalı kendi namespace'leriyle sınırlı
+editörler; kanal silinmişse yalnızca yöneticiler) gösterilir, diğerleri
+yalnızca iletilmediğini görür. Kayıt `UPTIME_DELIVERY_RETENTION` (1 yıl)
+boyunca tutulur ve `UPTIME_RETENTION_INTERVAL` sıklığıyla temizlenir; olay
+silinince (monitor'üyle birlikte) kaydı da silinir.
+
+**Notlar.** Monitor'ü değiştirebilen herkes olaya not ekler ("geri alındı,
+14:05", "bilinen: veritabanı göçü"), çözülmüş olaylara da: notlar olay
+sonrası değerlendirmenin kaydıdır. Bir not en çok 4000 karakterdir ve satır
+sonları korunur. Notu yalnızca yazarı ya da bir yönetici düzenler veya
+siler; yazarın hesabı silinirse not kalır, yalnızca yöneticiler değiştirir.
+Ekleme, düzenleme ve silme **Kayıt**'a yazılır. `show_on_status_page`
+işaretli notlar, monitor'ü gösteren durum sayfalarında gösterilmek içindir.
+
+**Olay listesi.** `GET /api/v1/incidents` süzgeçleri birlikte uygular:
+
+- `namespace`: tekrarlanabilir (`namespace=shop&namespace=billing`); boş
+  değer grupsuz monitor'ları seçer. Kullanıcı yalnızca kapsamındakileri
+  görür; kapsamı dışındaki bir namespace boş sonuç verir.
+- `kind`: `down` ya da `cert`; `state`: `open` ya da `resolved`;
+  `monitor_id`; `q`: monitor adında geçen metin (harf büyüklüğü önemsiz).
+- `from`, `to` (RFC 3339): bu aralıkla kesişen olaylar.
+
+Sıralama `sort` ile: `started_at` (varsayılan, yeniden eskiye), `duration`
+(en uzun önce; süren olay şu ana kadar) ya da `monitor` (A'dan Z'ye);
+`order=asc` ya da `desc` yönü değiştirir. Sayfa `limit` (varsayılanı ve
+üst sınırı `UPTIME_MAX_RESULTS`) ve `offset` ile seçilir; eşleşen olayların
+toplamı `X-Total-Count` başlığındadır. `format=csv` eşleşen olayların
+hepsini (`limit` verilmedikçe) dosya olarak verir.
 
 ## Yapılandırma
 
@@ -1933,6 +2030,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_RETENTION_INTERVAL` | `1h` | Eski sonuçların silinme sıklığı |
 | `UPTIME_ROLLUP_INTERVAL` | `1m` | Saatlik özetlerin güncellenme sıklığı |
 | `UPTIME_ROLLUP_RETENTION` | `8760h` | Saatlik özetlerin saklanma süresi; grafik ve uptime en fazla bu kadar geriye gider |
+| `UPTIME_DELIVERY_RETENTION` | `8760h` | Bildirim kaydının (hangi kanala hangi olay için ne gitti, iletildi mi) saklanma süresi; `UPTIME_RETENTION_INTERVAL` sıklığıyla temizlenir, olaylar kalır |
+| `UPTIME_INCIDENT_TIMELINE_LIMIT` | `100` | Olay sayfasında gösterilen en fazla başarısız kontrol sayısı, ayrıca en fazla bildirim sayısı; fazlası varsa baştan ve sondan yarısı gösterilir. En az 2 |
 | `UPTIME_SERIES_POINTS` | `120` | Bir grafikteki yaklaşık nokta sayısı |
 | `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | TLS kullanan tüm kontrollerde (HTTP, TCP, gRPC, WebSocket) sertifika doğrulamasını kapatır |
 | `UPTIME_KEYWORD_BODY_LIMIT_BYTES` | `1048576` | Keyword ya da JSON değeri aranırken yanıt gövdesinin okunan kısmı |

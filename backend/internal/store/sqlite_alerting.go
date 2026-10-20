@@ -10,38 +10,48 @@ import (
 	"time"
 )
 
-const incidentColumns = "i.id, i.monitor_id, i.kind, m.name, m.namespace, i.started_at, i.resolved_at, i.cause, i.last_notified_at"
+const incidentColumns = "i.id, i.monitor_id, i.kind, m.name, m.namespace, i.started_at, i.resolved_at, i.cause, i.last_notified_at, i.opened_at"
 
 func scanIncident(row rowScanner) (Incident, error) {
 	var (
-		i            Incident
-		startedAt    int64
-		resolvedAt   sql.NullInt64
-		lastNotified sql.NullInt64
+		i                    Incident
+		startedAt            int64
+		resolvedAt           sql.NullInt64
+		lastNotified, opened sql.NullInt64
 	)
-	if err := row.Scan(&i.ID, &i.MonitorID, &i.Kind, &i.MonitorName, &i.MonitorNamespace, &startedAt, &resolvedAt, &i.Cause, &lastNotified); err != nil {
+	if err := row.Scan(&i.ID, &i.MonitorID, &i.Kind, &i.MonitorName, &i.MonitorNamespace, &startedAt, &resolvedAt, &i.Cause, &lastNotified, &opened); err != nil {
 		return Incident{}, err
 	}
 	i.StartedAt = time.UnixMilli(startedAt).UTC()
 	i.LastNotifiedAt = unixMilliOrZero(lastNotified)
+	i.OpenedAt = unixMilliOrZero(opened)
 	if resolvedAt.Valid {
 		i.ResolvedAt = time.UnixMilli(resolvedAt.Int64).UTC()
 	}
 	return i, nil
 }
 
+// nullMilli is the stored form of a time that may be unknown: NULL for the
+// zero time, Unix milliseconds otherwise. It also returns the time as it
+// reads back.
+func nullMilli(t time.Time) (sql.NullInt64, time.Time) {
+	if t.IsZero() {
+		return sql.NullInt64{}, time.Time{}
+	}
+	t = t.UTC().Truncate(time.Millisecond)
+	return sql.NullInt64{Int64: t.UnixMilli(), Valid: true}, t
+}
+
 func (s *SQLite) OpenIncident(ctx context.Context, i Incident) (Incident, error) {
 	if i.Kind == "" {
 		i.Kind = IncidentDown
 	}
-	var lastNotified sql.NullInt64
-	if !i.LastNotifiedAt.IsZero() {
-		i.LastNotifiedAt = i.LastNotifiedAt.UTC().Truncate(time.Millisecond)
-		lastNotified = sql.NullInt64{Int64: i.LastNotifiedAt.UnixMilli(), Valid: true}
-	}
+	var lastNotified, opened sql.NullInt64
+	lastNotified, i.LastNotifiedAt = nullMilli(i.LastNotifiedAt)
+	opened, i.OpenedAt = nullMilli(i.OpenedAt)
 	res, err := s.write.ExecContext(ctx,
-		"INSERT INTO incidents (monitor_id, kind, started_at, cause, last_notified_at) VALUES (?, ?, ?, ?, ?)",
-		i.MonitorID, i.Kind, i.StartedAt.UnixMilli(), i.Cause, lastNotified)
+		"INSERT INTO incidents (monitor_id, kind, started_at, cause, last_notified_at, opened_at) VALUES (?, ?, ?, ?, ?, ?)",
+		i.MonitorID, i.Kind, i.StartedAt.UnixMilli(), i.Cause, lastNotified, opened)
 	if isUniqueViolation(err) {
 		return Incident{}, ErrConflict
 	}
@@ -96,6 +106,18 @@ func (s *SQLite) GetOpenIncident(ctx context.Context, monitorID int64, kind Inci
 	}
 	if err != nil {
 		return Incident{}, fmt.Errorf("get open incident: %w", err)
+	}
+	return i, nil
+}
+
+func (s *SQLite) GetIncident(ctx context.Context, id int64) (Incident, error) {
+	i, err := scanIncident(s.read.QueryRowContext(ctx,
+		"SELECT "+incidentColumns+" FROM incidents i JOIN monitors m ON m.id = i.monitor_id WHERE i.id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Incident{}, ErrNotFound
+	}
+	if err != nil {
+		return Incident{}, fmt.Errorf("get incident: %w", err)
 	}
 	return i, nil
 }

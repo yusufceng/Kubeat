@@ -72,7 +72,7 @@ func TestSlackSenderPostsTextAndAnAttachment(t *testing.T) {
 	}
 	attachment := got["attachments"].([]any)[0].(map[string]any)
 	if attachment["color"] != colorDown || attachment["title"] != "ödeme-api" ||
-		attachment["title_link"] != "https://kubeat.example/monitors/7?from=2026-10-12T12%3A00%3A00Z" || attachment["footer"] != "Kubeat" {
+		attachment["title_link"] != "https://kubeat.example/incidents/4" || attachment["footer"] != "Kubeat" {
 		t.Errorf("attachment = %v", attachment)
 	}
 	var titles []string
@@ -118,7 +118,7 @@ func TestGoogleChatSenderPostsACard(t *testing.T) {
 	}
 	button := widgets[len(widgets)-1].(map[string]any)["buttonList"].(map[string]any)["buttons"].([]any)[0].(map[string]any)
 	if button["text"] != "Kubeat'te aç" ||
-		button["onClick"].(map[string]any)["openLink"].(map[string]any)["url"] != "https://kubeat.example/monitors/7?from=2026-10-12T12%3A00%3A00Z" {
+		button["onClick"].(map[string]any)["openLink"].(map[string]any)["url"] != "https://kubeat.example/incidents/4" {
 		t.Errorf("button = %v", button)
 	}
 
@@ -468,9 +468,12 @@ func TestSlackTextIsEscaped(t *testing.T) {
 		}
 	}
 
-	// Kubeat's own link stays a link: its "&" is not escaped.
+	// Kubeat's own link stays a link: its "&" is not escaped. Without an
+	// incident id to link to, the link is the monitor's chart over the
+	// span, the one with a "&" in it.
 	up := injected()
 	up.Event, up.Incident.ResolvedAt = EventUp, up.Incident.StartedAt.Add(time.Minute)
+	up.Incident.ID = 0
 	for _, esc := range []func(string) string{chatEscaper.Replace, mattermostEscaper.Replace} {
 		link := newSlackBody(up, time.Now(), esc).Attachments[0].TitleLink
 		if link != URL(up) || !strings.Contains(link, "&to=") {

@@ -27,17 +27,28 @@ func TestURLOfANotification(t *testing.T) {
 	if got := URL(grouped); got != "https://kubeat.example/namespaces/a%2Fb%20c" {
 		t.Errorf("namespace needing escaping = %q", got)
 	}
-	// With an incident the link lands on its span: an open one from its
-	// start, a resolved one from start to end.
+	// About an incident, the link is the incident's page, open or resolved.
 	started := time.Date(2026, 10, 13, 11, 4, 1, 0, time.UTC)
 	withIncident := single
 	withIncident.Incident = store.Incident{ID: 3, StartedAt: started}
-	if got := URL(withIncident); got != "https://kubeat.example/monitors/7?from=2026-10-13T11%3A04%3A01Z" {
+	if got := URL(withIncident); got != "https://kubeat.example/incidents/3" {
 		t.Errorf("open incident = %q", got)
 	}
 	withIncident.Incident.ResolvedAt = started.Add(5 * time.Minute)
-	if got := URL(withIncident); got != "https://kubeat.example/monitors/7?from=2026-10-13T11%3A04%3A01Z&to=2026-10-13T11%3A09%3A01Z" {
+	if got := URL(withIncident); got != "https://kubeat.example/incidents/3" {
 		t.Errorf("resolved incident = %q", got)
+	}
+	// A span without an incident to name lands on the monitor's chart,
+	// with the span selected: an open one from its start, a resolved one
+	// from start to end.
+	span := single
+	span.Incident = store.Incident{StartedAt: started}
+	if got := URL(span); got != "https://kubeat.example/monitors/7?from=2026-10-13T11%3A04%3A01Z" {
+		t.Errorf("open span = %q", got)
+	}
+	span.Incident.ResolvedAt = started.Add(5 * time.Minute)
+	if got := URL(span); got != "https://kubeat.example/monitors/7?from=2026-10-13T11%3A04%3A01Z&to=2026-10-13T11%3A09%3A01Z" {
+		t.Errorf("resolved span = %q", got)
 	}
 
 	// Without a public address there is no link rather than a broken one.

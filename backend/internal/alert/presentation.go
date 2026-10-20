@@ -59,10 +59,11 @@ func Emoji(n Notification) string {
 	}
 }
 
-// URL is where the notification is best looked at in Kubeat: the monitor's
-// page, or for a grouped notification the namespace it is about. Empty
-// when no public address is configured (UPTIME_PUBLIC_URL), in which case
-// the channels leave the link out rather than show a broken one.
+// URL is where the notification is best looked at in Kubeat: the page of
+// the incident it is about, or for a grouped notification the namespace it
+// is about. Empty when no public address is configured (UPTIME_PUBLIC_URL),
+// in which case the channels leave the link out rather than show a broken
+// one.
 func URL(n Notification) string {
 	base := strings.TrimSuffix(n.PublicURL, "/")
 	if base == "" {
@@ -77,6 +78,11 @@ func URL(n Notification) string {
 			slug = url.PathEscape(n.Monitor.Namespace)
 		}
 		return base + "/namespaces/" + slug
+	}
+	// The incident's page tells the whole story: how it began, who was
+	// told, what the cluster saw and what people noted.
+	if n.Incident.ID != 0 {
+		return base + "/incidents/" + strconv.FormatInt(n.Incident.ID, 10)
 	}
 	if n.Monitor.ID == 0 {
 		return base

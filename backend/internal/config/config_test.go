@@ -42,6 +42,9 @@ func TestLoadDefaults(t *testing.T) {
 		RollupRetention:     365 * 24 * time.Hour,
 		SeriesPoints:        120,
 
+		DeliveryRetention:     365 * 24 * time.Hour,
+		IncidentTimelineLimit: 100,
+
 		KeywordBodyLimit: 1 << 20,
 
 		MinCheckInterval: 5 * time.Second,
@@ -248,6 +251,21 @@ func TestLoadRejectsSubSecondMinInterval(t *testing.T) {
 	t.Setenv("UPTIME_MIN_CHECK_INTERVAL", "500ms")
 	if _, err := Load(); err == nil {
 		t.Error("UPTIME_MIN_CHECK_INTERVAL=500ms was accepted")
+	}
+}
+
+// An incident's timeline shows how it began and how it ended: that takes
+// room for two entries at least.
+func TestIncidentTimelineLimit(t *testing.T) {
+	t.Setenv("UPTIME_INCIDENT_TIMELINE_LIMIT", "1")
+	if _, err := Load(); err == nil {
+		t.Error("UPTIME_INCIDENT_TIMELINE_LIMIT=1 was accepted")
+	}
+	t.Setenv("UPTIME_INCIDENT_TIMELINE_LIMIT", "2")
+	t.Setenv("UPTIME_DELIVERY_RETENTION", "720h")
+	got, err := Load()
+	if err != nil || got.IncidentTimelineLimit != 2 || got.DeliveryRetention != 30*24*time.Hour {
+		t.Errorf("Load() = limit %d, retention %s, %v", got.IncidentTimelineLimit, got.DeliveryRetention, err)
 	}
 }
 

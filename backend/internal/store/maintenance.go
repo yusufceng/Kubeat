@@ -98,6 +98,29 @@ func (w Maintenance) Occurrence(at time.Time) (start, end time.Time, ok bool) {
 	return time.Time{}, time.Time{}, false
 }
 
+// Span is a stretch of time: one occurrence of a maintenance window.
+type Span struct {
+	Start, End time.Time
+}
+
+// Occurrences returns the occurrences of the window that overlap
+// [from, to), oldest first and at most limit: one that began before from
+// but was still going on counts. A daily window over a week-long outage
+// has seven.
+func (w Maintenance) Occurrences(from, to time.Time, limit int) []Span {
+	var out []Span
+	for at := from; len(out) < limit; {
+		start, end, ok := w.Occurrence(at)
+		if !ok || !start.Before(to) {
+			break
+		}
+		out = append(out, Span{Start: start, End: end})
+		// The next one: Occurrence moves past any that ends at or before at.
+		at = end
+	}
+	return out
+}
+
 // ActiveUntil reports whether the window covers at and, if so, when the
 // occurrence that does ends.
 func (w Maintenance) ActiveUntil(at time.Time) (time.Time, bool) {

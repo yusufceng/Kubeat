@@ -70,6 +70,20 @@ func (s *SQLite) ListMaintenance(ctx context.Context, limit int) ([]Maintenance,
 	return windows, nil
 }
 
+func (s *SQLite) ListMaintenanceBetween(ctx context.Context, from, to time.Time) ([]Maintenance, error) {
+	rows, err := s.read.QueryContext(ctx,
+		maintenanceQuery+`WHERE w.repeat != '' OR (w.starts_at < ?2 AND w.ends_at > ?1) ORDER BY w.starts_at, w.id`,
+		from.UnixMilli(), to.UnixMilli())
+	if err != nil {
+		return nil, fmt.Errorf("list maintenance between: %w", err)
+	}
+	windows, err := scanMaintenance(rows)
+	if err != nil {
+		return nil, fmt.Errorf("list maintenance between: %w", err)
+	}
+	return windows, nil
+}
+
 // activeMaintenance returns the windows that cover at, each with the end
 // of the occurrence that does. When a repeating window is due is worked
 // out here, not in SQL: it depends on the calendar of a time zone.

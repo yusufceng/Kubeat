@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,51 +16,32 @@ import (
 )
 
 type incidentResponse struct {
-	ID          int64      `json:"id"`
-	MonitorID   int64      `json:"monitor_id"`
-	MonitorName string     `json:"monitor_name"`
-	Kind        string     `json:"kind"` // "down" or "cert"
-	StartedAt   time.Time  `json:"started_at"`
-	ResolvedAt  *time.Time `json:"resolved_at"` // null while open
-	Cause       string     `json:"cause"`
+	ID          int64  `json:"id"`
+	MonitorID   int64  `json:"monitor_id"`
+	MonitorName string `json:"monitor_name"`
+	// MonitorNamespace is the monitor's namespace or group; empty for one
+	// entered by hand without a group.
+	MonitorNamespace string `json:"monitor_namespace"`
+	Kind             string `json:"kind"` // "down" or "cert"
+	// StartedAt is the first failed check of the streak that opened the
+	// incident; OpenedAt the check that reached the failure threshold and
+	// so opened it, null for incidents from before it was recorded.
+	StartedAt  time.Time  `json:"started_at"`
+	OpenedAt   *time.Time `json:"opened_at"`
+	ResolvedAt *time.Time `json:"resolved_at"` // null while open
+	Cause      string     `json:"cause"`
 }
 
 func toIncidentResponse(i store.Incident) incidentResponse {
-	resp := incidentResponse{ID: i.ID, MonitorID: i.MonitorID, MonitorName: i.MonitorName, Kind: string(i.Kind), StartedAt: i.StartedAt, Cause: i.Cause}
+	resp := incidentResponse{ID: i.ID, MonitorID: i.MonitorID, MonitorName: i.MonitorName, MonitorNamespace: i.MonitorNamespace,
+		Kind: string(i.Kind), StartedAt: i.StartedAt, Cause: i.Cause}
+	if !i.OpenedAt.IsZero() {
+		resp.OpenedAt = &i.OpenedAt
+	}
 	if !i.Open() {
 		resp.ResolvedAt = &i.ResolvedAt
 	}
 	return resp
-}
-
-func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
-	limit, err := h.limit(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var monitorID int64
-	if v := r.URL.Query().Get("monitor_id"); v != "" {
-		if monitorID, err = strconv.ParseInt(v, 10, 64); err != nil || monitorID < 1 {
-			writeError(w, http.StatusBadRequest, "monitor_id must be a positive integer")
-			return
-		}
-	}
-
-	incidents, err := h.opts.Store.ListIncidents(r.Context(), monitorID, limit)
-	if err != nil {
-		h.internalError(w, r, err)
-		return
-	}
-	p := principal(r)
-	resp := make([]incidentResponse, 0, len(incidents))
-	for _, i := range incidents {
-		if !p.CanRead(i.MonitorNamespace) {
-			continue
-		}
-		resp = append(resp, toIncidentResponse(i))
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 const (
@@ -101,19 +81,10 @@ type deliveryResponse struct {
 	Error     string    `json:"error,omitempty"`
 }
 
-// maskURL keeps the scheme and host and hides the path, query and user info.
-func maskURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "…"
-	}
-	return u.Scheme + "://" + u.Host + "/…"
-}
-
 // shownTarget is a channel's target as responses carry it.
 func shownTarget(c store.Channel) string {
 	if strings.Contains(c.Target, "://") {
-		return maskURL(c.Target)
+		return alert.MaskURL(c.Target)
 	}
 	return c.Target // addresses, a chat: nothing that lets one post
 }
@@ -551,13 +522,7 @@ func (h *handler) testChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // redact removes the channel's URL and secret from an error text, should
-// anything have put them there.
+// anything have put them there; the delivery log is redacted alike.
 func redact(msg string, ch store.Channel) string {
-	if strings.Contains(ch.Target, "://") {
-		msg = strings.ReplaceAll(msg, ch.Target, maskURL(ch.Target))
-	}
-	if ch.Secret != "" {
-		msg = strings.ReplaceAll(msg, ch.Secret, maskedValue)
-	}
-	return msg
+	return alert.Redact(msg, ch)
 }

@@ -59,8 +59,26 @@ func TestReport(t *testing.T) {
 	if a.Outages != 3 || a.Downtime != 150*time.Minute || a.LongestOutage != time.Hour || !a.OpenOutage {
 		t.Errorf("outages = %d downtime=%s longest=%s open=%v", a.Outages, a.Downtime, a.LongestOutage, a.OpenOutage)
 	}
-	if q := got[1]; q.ID != quiet.ID || q.Checks != 0 || q.Outages != 0 || q.OpenOutage {
+	// Two hours of the period have checks.
+	if a.Monitored != 2*time.Hour {
+		t.Errorf("monitored = %s, want 2h", a.Monitored)
+	}
+	if q := got[1]; q.ID != quiet.ID || q.Checks != 0 || q.Outages != 0 || q.OpenOutage || q.Monitored != 0 {
 		t.Errorf("quiet = %+v", q)
+	}
+
+	// An outage still going is downtime up to now, not to the end of the
+	// period, which may lie in the future.
+	now := time.Now()
+	if _, err := db.write.ExecContext(ctx, `UPDATE incidents SET started_at = ? WHERE resolved_at IS NULL AND monitor_id = 2`, now.Add(-30*time.Minute).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	later, err := db.Report(ctx, now.Add(-time.Hour), now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := later[1]; !q.OpenOutage || q.Downtime < 29*time.Minute || q.Downtime > 31*time.Minute {
+		t.Errorf("open outage of 30 minutes in a period ending in two hours: downtime %s, open %v", q.Downtime, q.OpenOutage)
 	}
 }
 

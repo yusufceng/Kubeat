@@ -143,9 +143,17 @@ export type Incident = {
   id: number;
   monitor_id: number;
   monitor_name: string;
+  /** The monitor's namespace or group; "" for none. Missing before API revision 25. */
+  monitor_namespace?: string;
   /** An outage, or a certificate close to its expiry. */
   kind: "down" | "cert";
+  /** The first failed check of the streak that opened the incident. */
   started_at: string;
+  /**
+   * The check that reached the failure threshold and opened it; null for
+   * incidents opened before this was recorded. Missing before API revision 25.
+   */
+  opened_at?: string | null;
   /** null while the incident is open */
   resolved_at: string | null;
   cause: string;
@@ -417,7 +425,7 @@ export type NamespaceReport = {
   downtime_seconds: number;
   /** Worst first. */
   monitors: MonitorReport[];
-};
+} & Reliability;
 
 export type MonitorReport = {
   id: number;
@@ -433,6 +441,49 @@ export type MonitorReport = {
   downtime_seconds: number;
   longest_outage_seconds: number;
   open_outage: boolean;
+} & Reliability;
+
+/**
+ * MTTR and MTBF over a period (API revision 25; missing before). MTTR is the
+ * downtime per outage, MTBF the time up per outage, where time up is the
+ * monitored time that was not downtime. Both are null without an outage:
+ * there was no failure to measure ("no failures").
+ */
+export type Reliability = {
+  /** How long the monitors were checked: the hours with checks, from creation up to now. */
+  monitored_seconds?: number;
+  mttr_seconds?: number | null;
+  mtbf_seconds?: number | null;
+};
+
+/** The fleet in figures over the last days: GET /stats, for the overview. */
+export type Stats = {
+  from: string;
+  to: string;
+  days: number;
+  /** How many monitors the figures cover: those the user may see, or of the namespaces asked for. */
+  monitors: number;
+  checks: number;
+  up_checks: number;
+  /** Share of successful checks, 0..100; null when none ran. */
+  uptime: number | null;
+  /** The outages ("down" incidents) that overlapped the period, and the part of them inside it. */
+  outages: number;
+  downtime_seconds: number;
+  monitored_seconds: number;
+  mttr_seconds: number | null;
+  mtbf_seconds: number | null;
+  /** Open now, whatever the period: both kinds, then outages and certificate warnings apart. */
+  open_incidents: number;
+  open_outages: number;
+  open_cert_warnings: number;
+};
+
+/** namespaces narrows the figures to these; "" stands for the monitors without one. */
+export const getStats = (days: number, namespaces?: string[]) => {
+  const params = new URLSearchParams({ days: String(days) });
+  for (const ns of namespaces ?? []) params.append("namespace", ns);
+  return request<Stats>(`/stats?${params}`);
 };
 
 export const getReport = (days: number, namespace?: string) =>
@@ -442,6 +493,164 @@ export const getReport = (days: number, namespace?: string) =>
 
 export const listIncidents = (limit: number, monitorId?: number) =>
   request<Incident[]>(`/incidents?limit=${limit}${monitorId ? `&monitor_id=${monitorId}` : ""}`);
+
+/** Which incidents a list selects, how it orders them and which page it is (API revision 25). */
+export type IncidentQuery = {
+  /** Only these namespaces; "" selects the monitors without one. Outside the user's scope, none. */
+  namespaces?: string[];
+  kind?: "down" | "cert";
+  state?: "open" | "resolved";
+  monitorId?: number;
+  /** Text the monitor's name contains, whatever its case; at most 100 characters. */
+  q?: string;
+  /** RFC 3339; the incidents that overlap [from, to). */
+  from?: string;
+  to?: string;
+  /** started_at (default, newest first), duration (longest first) or monitor (A to Z). */
+  sort?: "started_at" | "duration" | "monitor";
+  /** Turns the default direction of the sort around. */
+  order?: "asc" | "desc";
+  /** At most, and by default, UPTIME_MAX_RESULTS. */
+  limit?: number;
+  offset?: number;
+};
+
+/**
+ * The query string of an incident list: for queryIncidents, and with
+ * format=csv for the export, which a route handler fetches like the report's
+ * (it has every matching incident unless limit is set). The backend sends
+ * the number of all matching incidents in the X-Total-Count header.
+ */
+export function incidentQueryParams(query: IncidentQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const ns of query.namespaces ?? []) params.append("namespace", ns);
+  if (query.kind) params.set("kind", query.kind);
+  if (query.state) params.set("state", query.state);
+  if (query.monitorId) params.set("monitor_id", String(query.monitorId));
+  if (query.q) params.set("q", query.q);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.order) params.set("order", query.order);
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.offset) params.set("offset", String(query.offset));
+  return params;
+}
+
+export const queryIncidents = (query: IncidentQuery) =>
+  request<Incident[]>(`/incidents?${incidentQueryParams(query)}`);
+
+/** The monitor an incident is about, as it is set now. */
+export type IncidentMonitor = {
+  id: number;
+  name: string;
+  namespace: string;
+  type: MonitorType;
+  target: string;
+  source: string;
+  /** The kind of cluster object it follows: service, ingress, route, deployment, statefulset, daemonset; "" for none. */
+  kind: string;
+  managed: boolean;
+  interval_seconds: number;
+  failure_threshold: number;
+};
+
+export type IncidentNote = {
+  id: number;
+  incident_id: number;
+  /** The username of whoever wrote it ("api-token" for the API token). */
+  author: string;
+  text: string;
+  /** Whether the status pages showing the monitor may show it. */
+  show_on_status_page: boolean;
+  created_at: string;
+  updated_at: string;
+  /** Whether the signed-in user may change or delete it: its author or an administrator, who may change the monitor. */
+  can_edit: boolean;
+};
+
+/** One attempt to tell a channel about the incident, as it ended after its retries. */
+export type IncidentNotification = {
+  /** What the message reported, and when that happened (a grouped message waited after it). */
+  event: "down" | "up" | "reminder" | "cert_expiring" | "cert_renewed";
+  event_at: string;
+  /** The channel as it was then; channel_deleted says it is gone since. */
+  channel_id: number;
+  channel_name: string;
+  channel_type: ChannelType;
+  channel_deleted: boolean;
+  /** One message about group_size monitors of the namespace, this one among them. */
+  grouped: boolean;
+  group_size: number;
+  delivered: boolean;
+  /** Why it failed, redacted; only for those who may manage the channel. Others see delivered: false alone. */
+  error?: string;
+};
+
+/** Entries left out of a long list, all between from and to. */
+export type TimelineGap = { count: number; from: string; to: string };
+
+/** One occurrence of a maintenance window covering the monitor. */
+export type TimelineMaintenance = {
+  id: number;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  repeat: MaintenanceRepeat;
+  /** Scope: one monitor, one namespace, or (both empty) every monitor. */
+  namespace: string;
+  monitor_id: number | null;
+};
+
+/** One step of an incident's story; kind says which, and which field it carries. */
+export type TimelineItem = { at: string } & (
+  | { kind: "check_failed"; check: CheckResult }
+  | { kind: "checks_omitted" | "notifications_omitted"; omitted: TimelineGap }
+  /** The check that reached the failure threshold; failure_threshold is 0 for a certificate incident. */
+  | { kind: "opened"; opened: { failure_threshold: number; cause: string } }
+  | { kind: "notification"; notification: IncidentNotification }
+  | { kind: "reminder"; reminder: { down_for_seconds: number } }
+  | { kind: "note"; note: IncidentNote }
+  | { kind: "cluster_event"; event: ClusterEvent }
+  /** At the occurrence's start, which may precede the incident. */
+  | { kind: "maintenance"; maintenance: TimelineMaintenance }
+  /** The first successful check of the recovery. */
+  | { kind: "resolved"; resolved: { duration_seconds: number } }
+);
+
+/** An incident's page: GET /incidents/{id} (API revision 25). */
+export type IncidentPage = {
+  /** duration_seconds: how long it lasted, or has lasted so far. */
+  incident: Incident & { duration_seconds: number };
+  monitor: IncidentMonitor;
+  /** The checks from its start to its end; null for a certificate incident or one before the raw retention. */
+  checks: { total: number; failed: number; avg_latency_ms: number; max_latency_ms: number; partial: boolean } | null;
+  /** Oldest first. */
+  timeline: TimelineItem[];
+  /** The cluster had more events than shown (the oldest are); events_reason says why there are none when it could not be asked. */
+  events_truncated: boolean;
+  events_reason?: string;
+  /** Whether the signed-in user may add notes. */
+  can_note: boolean;
+};
+
+export const getIncident = (id: number) => request<IncidentPage>(`/incidents/${id}`);
+
+export const listIncidentNotes = (incidentId: number) =>
+  request<IncidentNote[]>(`/incidents/${incidentId}/notes`);
+
+/** text: at most 4000 characters, line breaks kept. */
+export type NoteSettings = { text: string; show_on_status_page: boolean };
+
+export const createIncidentNote = (incidentId: number, note: Pick<NoteSettings, "text"> & Partial<NoteSettings>) =>
+  request<IncidentNote>(`/incidents/${incidentId}/notes`, { method: "POST", body: JSON.stringify(note) });
+
+/** The fields left out stay as they are. */
+export const updateIncidentNote = (incidentId: number, noteId: number, changes: Partial<NoteSettings>) =>
+  request<IncidentNote>(`/incidents/${incidentId}/notes/${noteId}`, { method: "PATCH", body: JSON.stringify(changes) });
+
+export const deleteIncidentNote = (incidentId: number, noteId: number) =>
+  request<void>(`/incidents/${incidentId}/notes/${noteId}`, { method: "DELETE" });
 
 export const listChannels = () => request<Channel[]>("/channels");
 

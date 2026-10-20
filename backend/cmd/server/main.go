@@ -278,6 +278,11 @@ func main() {
 	background.Add(1)
 	go func() {
 		defer background.Done()
+		scheduler.RunDeliveryRetention(ctx, db, cfg.DeliveryRetention, cfg.RetentionInterval, logger)
+	}()
+	background.Add(1)
+	go func() {
+		defer background.Done()
 		runSessionCleanup(ctx, db, cfg.AuditRetention, logger)
 	}()
 	throttle := &auth.Throttle{MaxFailures: cfg.LoginMaxFailures, Lockout: cfg.LoginLockout, MaxKeys: cfg.LoginThrottleMaxKeys, Logger: logger}
@@ -346,6 +351,7 @@ func main() {
 			PodMetrics:               podMetrics,
 			EventWindow:              cfg.EventWindow,
 			EventLimit:               cfg.EventLimit,
+			TimelineLimit:            cfg.IncidentTimelineLimit,
 			DiscoveryStatus:          discoveryStatus,
 			Logger:                   logger,
 

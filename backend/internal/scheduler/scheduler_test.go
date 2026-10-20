@@ -330,6 +330,36 @@ func TestRetentionRunsImmediatelyAndRepeats(t *testing.T) {
 	}
 }
 
+func (r *recordingPruner) DeleteDeliveriesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	return r.DeleteCheckResultsBefore(ctx, cutoff)
+}
+
+// The delivery log is pruned like the results: at start, then every
+// interval, by its own retention.
+func TestDeliveryRetentionRunsImmediatelyAndRepeats(t *testing.T) {
+	p := &recordingPruner{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	started := time.Now()
+	go func() {
+		defer close(done)
+		RunDeliveryRetention(ctx, p, 30*24*time.Hour, 5*time.Millisecond, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}()
+
+	waitFor(t, "repeated cleanups", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return len(p.cutoffs) >= 3
+	})
+	cancel()
+	<-done
+
+	want := started.Add(-30 * 24 * time.Hour)
+	if d := p.cutoffs[0].Sub(want); d < 0 || d > 5*time.Second {
+		t.Errorf("cutoff = %v, want about %v", p.cutoffs[0], want)
+	}
+}
+
 func TestOnResultsSeesOnlyStoredResults(t *testing.T) {
 	st := &fakeStore{rejectID: 2}
 	st.setMonitors(monitor(1, 5*time.Millisecond), monitor(2, 5*time.Millisecond))

@@ -672,7 +672,7 @@ var statusQuery = `
 SELECT ` + monitorColumnsOf("m") + `,
        r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.detail, r.cert_expires_at,
        COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.up_latency_sum_ms, 0),
-       i.id, i.started_at, i.cause, c.id IS NOT NULL
+       i.id, i.started_at, i.cause, i.opened_at, c.id IS NOT NULL
 FROM monitors m
 LEFT JOIN incidents i ON i.monitor_id = m.id AND i.kind = 'down' AND i.resolved_at IS NULL
 LEFT JOIN incidents c ON c.monitor_id = m.id AND c.kind = 'cert' AND c.resolved_at IS NULL
@@ -731,12 +731,13 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			upLatencySumMS            int64
 			incidentID, incidentStart sql.NullInt64
 			incidentCause             sql.NullString
+			incidentOpened            sql.NullInt64
 			certExpires               sql.NullInt64
 		)
 		err := rows.Scan(append(row.dest(),
 			&checkedAt, &up, &latencyMS, &statusCode, &errText, &detail, &certExpires,
 			&st.Checks, &st.UpChecks, &upLatencySumMS,
-			&incidentID, &incidentStart, &incidentCause, &st.CertWarning)...)
+			&incidentID, &incidentStart, &incidentCause, &incidentOpened, &st.CertWarning)...)
 		if err != nil {
 			return nil, err
 		}
@@ -773,6 +774,9 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 				MonitorName: st.Name,
 				StartedAt:   time.UnixMilli(incidentStart.Int64).UTC(),
 				Cause:       incidentCause.String,
+
+				MonitorNamespace: st.Namespace,
+				OpenedAt:         unixMilliOrZero(incidentOpened),
 			}
 		}
 		statuses = append(statuses, st)
@@ -968,25 +972,34 @@ func scanCheckResults(rows *sql.Rows) ([]CheckResult, error) {
 	return results, nil
 }
 
-// deleteChunk is how many results one retention statement removes. After
+// deleteChunk is how many rows one retention statement removes. After
 // downtime there can be millions to delete; in one statement that would
 // hold the write connection, and with it the storing of new results, for
 // the whole time.
 const deleteChunk = 20000
 
 func (s *SQLite) DeleteCheckResultsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	n, err := s.deleteBefore(ctx, "check_results", "checked_at", cutoff)
+	if err != nil {
+		return n, fmt.Errorf("delete check results: %w", err)
+	}
+	return n, nil
+}
+
+// deleteBefore deletes the rows of a table whose time column is before
+// cutoff, deleteChunk at a time, and reports how many went. The table and
+// the column are names from this package, never input.
+func (s *SQLite) deleteBefore(ctx context.Context, table, column string, cutoff time.Time) (int64, error) {
+	query := "DELETE FROM " + table + " WHERE id IN (SELECT id FROM " + table + " WHERE " + column + " < ? LIMIT ?)"
 	var total int64
 	for {
-		res, err := s.write.ExecContext(ctx,
-			`DELETE FROM check_results WHERE id IN (
-			     SELECT id FROM check_results WHERE checked_at < ? LIMIT ?)`,
-			cutoff.UnixMilli(), deleteChunk)
+		res, err := s.write.ExecContext(ctx, query, cutoff.UnixMilli(), deleteChunk)
 		if err != nil {
-			return total, fmt.Errorf("delete check results: %w", err)
+			return total, err
 		}
 		n, err := res.RowsAffected()
 		if err != nil {
-			return total, fmt.Errorf("delete check results: %w", err)
+			return total, err
 		}
 		total += n
 		if n < deleteChunk {

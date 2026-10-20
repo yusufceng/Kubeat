@@ -42,11 +42,22 @@ type Store interface {
 	Series(ctx context.Context, monitorID int64, source store.SeriesSource, from, to time.Time, bucket time.Duration) ([]store.SeriesPoint, error)
 	ListIncidents(ctx context.Context, monitorID int64, limit int) ([]store.Incident, error)
 	ListIncidentsBetween(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]store.Incident, error)
+	GetIncident(ctx context.Context, id int64) (store.Incident, error)
+	FilterIncidents(ctx context.Context, f store.IncidentFilter) ([]store.Incident, error)
+	CountIncidents(ctx context.Context, f store.IncidentFilter) (int, error)
+	FailedChecksEnds(ctx context.Context, monitorID int64, from, to time.Time, keep int) ([]store.CheckResult, int, error)
+	DeliveriesEnds(ctx context.Context, incidentID int64, keep int) ([]store.Delivery, int, error)
+	CreateIncidentNote(ctx context.Context, n store.IncidentNote) (store.IncidentNote, error)
+	GetIncidentNote(ctx context.Context, id int64) (store.IncidentNote, error)
+	ListIncidentNotes(ctx context.Context, incidentID int64, limit int) ([]store.IncidentNote, error)
+	UpdateIncidentNote(ctx context.Context, n store.IncidentNote) (store.IncidentNote, error)
+	DeleteIncidentNote(ctx context.Context, id int64) error
 	DismissSource(ctx context.Context, d store.DismissedSource) error
 	RestoreSource(ctx context.Context, namespace, source string) error
 	Report(ctx context.Context, from, to time.Time) ([]store.MonitorReport, error)
 	CreateMaintenance(ctx context.Context, m store.Maintenance) (store.Maintenance, error)
 	ListMaintenance(ctx context.Context, limit int) ([]store.Maintenance, error)
+	ListMaintenanceBetween(ctx context.Context, from, to time.Time) ([]store.Maintenance, error)
 	DeleteMaintenance(ctx context.Context, id int64) error
 	CreateChannel(ctx context.Context, c store.Channel) (store.Channel, error)
 	RecordChannelDelivery(ctx context.Context, id int64, at time.Time, deliveryError string) error
@@ -186,14 +197,19 @@ type Options struct {
 	// monitor's pods reach; EventLimit how many at most.
 	EventWindow time.Duration
 	EventLimit  int
-	Logger      *slog.Logger
+	// TimelineLimit bounds the failed checks an incident's timeline shows,
+	// and separately its notifications: of more, the first and the last
+	// halves, with the number left out between them. Below 2 (which leaves
+	// no room for both ends) it is 100.
+	TimelineLimit int
+	Logger        *slog.Logger
 }
 
 // Revision identifies the shape of the API. Increase it whenever a response
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 25
+const Revision = 26
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -246,7 +262,13 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("POST /api/v1/discovery/import", h.discoveryImport)
 	mux.HandleFunc("POST /api/v1/discovery/restore", h.discoveryRestore)
 	mux.HandleFunc("GET /api/v1/incidents", h.listIncidents)
+	mux.HandleFunc("GET /api/v1/incidents/{id}", h.getIncident)
+	mux.HandleFunc("GET /api/v1/incidents/{id}/notes", h.listIncidentNotes)
+	mux.HandleFunc("POST /api/v1/incidents/{id}/notes", h.createIncidentNote)
+	mux.HandleFunc("PATCH /api/v1/incidents/{id}/notes/{note}", h.updateIncidentNote)
+	mux.HandleFunc("DELETE /api/v1/incidents/{id}/notes/{note}", h.deleteIncidentNote)
 	mux.HandleFunc("GET /api/v1/reports", h.report)
+	mux.HandleFunc("GET /api/v1/stats", h.stats)
 	mux.HandleFunc("GET /api/v1/maintenance", h.listMaintenance)
 	mux.HandleFunc("POST /api/v1/maintenance", h.createMaintenance)
 	mux.HandleFunc("DELETE /api/v1/maintenance/{id}", h.deleteMaintenance)
@@ -286,6 +308,9 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/audit", h.listAudit)
 	if h.opts.Throttle == nil {
 		h.opts.Throttle = &auth.Throttle{MaxFailures: 10, Lockout: 15 * time.Minute}
+	}
+	if h.opts.TimelineLimit < 2 {
+		h.opts.TimelineLimit = 100
 	}
 	return h.authenticate(mux)
 }

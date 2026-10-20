@@ -36,7 +36,11 @@ type Notification struct {
 	Incident store.Incident
 	// CertExpiresAt is set for the certificate events.
 	CertExpiresAt time.Time
-	// At is the moment a reminder refers to.
+	// At is when what the notification reports happened, as Kubeat saw
+	// it: the check that confirmed the outage or the recovery or that saw
+	// the certificate, and for a reminder the moment it fell due. A
+	// reminder's text counts the outage up to it; the delivery log keeps
+	// it, so that the incident's page can tell the event from its delivery.
 	At time.Time
 	// Language is what the texts are written in (LanguageEnglish or
 	// LanguageTurkish); the engine sets it from its options. PublicURL is
@@ -80,6 +84,7 @@ type Store interface {
 	MarkIncidentNotified(ctx context.Context, id int64, at time.Time) error
 	ListChannels(ctx context.Context) ([]store.Channel, error)
 	RecordChannelDelivery(ctx context.Context, id int64, at time.Time, deliveryError string) error
+	RecordDeliveries(ctx context.Context, deliveries []store.Delivery) error
 	InMaintenance(ctx context.Context, m store.Monitor, at time.Time) (bool, error)
 }
 
@@ -248,6 +253,7 @@ func (e *Engine) evaluateCert(ctx context.Context, m store.Monitor, quiet bool) 
 			MonitorID: m.ID,
 			Kind:      store.IncidentCert,
 			StartedAt: result.CheckedAt,
+			OpenedAt:  result.CheckedAt,
 			Cause:     "certificate expires on " + result.CertExpiresAt.Format(time.RFC3339),
 		})
 		if err != nil {
@@ -255,7 +261,7 @@ func (e *Engine) evaluateCert(ctx context.Context, m store.Monitor, quiet bool) 
 		}
 		incident.MonitorName = m.Name
 		e.opts.Logger.Warn("certificate expiring", "monitor", m.Name, "incident_id", incident.ID, "expires_at", result.CertExpiresAt)
-		e.enqueue(Notification{Event: EventCertExpiring, Monitor: m, Incident: incident, CertExpiresAt: result.CertExpiresAt})
+		e.enqueue(Notification{Event: EventCertExpiring, Monitor: m, Incident: incident, CertExpiresAt: result.CertExpiresAt, At: result.CheckedAt})
 		return nil
 	case err != nil:
 		return err
@@ -269,7 +275,7 @@ func (e *Engine) evaluateCert(ctx context.Context, m store.Monitor, quiet bool) 
 		return err
 	}
 	e.opts.Logger.Info("certificate renewed", "monitor", m.Name, "incident_id", incident.ID, "expires_at", result.CertExpiresAt)
-	e.enqueue(Notification{Event: EventCertRenewed, Monitor: m, Incident: incident, CertExpiresAt: result.CertExpiresAt})
+	e.enqueue(Notification{Event: EventCertRenewed, Monitor: m, Incident: incident, CertExpiresAt: result.CertExpiresAt, At: result.CheckedAt})
 	return nil
 }
 
@@ -282,6 +288,7 @@ func (e *Engine) maybeOpen(ctx context.Context, m store.Monitor, at time.Time) e
 	incident, err := e.store.OpenIncident(ctx, store.Incident{
 		MonitorID: m.ID,
 		StartedAt: streak[len(streak)-1].CheckedAt, // the first failure of the streak
+		OpenedAt:  streak[0].CheckedAt,             // the one that reached the threshold
 		Cause:     streak[0].Error,                 // the most recent error
 
 		LastNotifiedAt: at,
@@ -291,7 +298,7 @@ func (e *Engine) maybeOpen(ctx context.Context, m store.Monitor, at time.Time) e
 	}
 	incident.MonitorName = m.Name
 	e.opts.Logger.Warn("incident opened", "monitor", m.Name, "incident_id", incident.ID, "cause", incident.Cause)
-	e.enqueue(Notification{Event: EventDown, Monitor: m, Incident: incident})
+	e.enqueue(Notification{Event: EventDown, Monitor: m, Incident: incident, At: incident.OpenedAt})
 	return nil
 }
 
@@ -308,7 +315,9 @@ func (e *Engine) maybeResolve(ctx context.Context, m store.Monitor, incident sto
 	}
 	e.opts.Logger.Info("incident resolved", "monitor", m.Name, "incident_id", incident.ID,
 		"duration", incident.ResolvedAt.Sub(incident.StartedAt).String())
-	e.enqueue(Notification{Event: EventUp, Monitor: m, Incident: incident})
+	// At is the check that confirmed the recovery, which with a recovery
+	// threshold above one comes after the first success, ResolvedAt.
+	e.enqueue(Notification{Event: EventUp, Monitor: m, Incident: incident, At: streak[0].CheckedAt})
 	return true, nil
 }
 
@@ -530,7 +539,8 @@ func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(sto
 }
 
 // send delivers one notification (single or grouped) to one channel, with
-// retries, and records the outcome.
+// retries, and records the outcome: on the channel, and in the delivery
+// log of every incident the message was about.
 func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
 	err := e.sendWithRetry(ctx, ch, n)
 	e.opts.Metrics.Notification(string(ch.Type), string(n.Event), err == nil)
@@ -538,8 +548,12 @@ func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
 	if err != nil {
 		deliveryError = err.Error()
 	}
-	if recordErr := e.store.RecordChannelDelivery(context.WithoutCancel(ctx), ch.ID, time.Now().UTC(), deliveryError); recordErr != nil {
+	now := time.Now().UTC()
+	if recordErr := e.store.RecordChannelDelivery(context.WithoutCancel(ctx), ch.ID, now, deliveryError); recordErr != nil {
 		e.opts.Logger.Error("channel delivery not recorded", "channel", ch.Name, "error", recordErr)
+	}
+	if logErr := e.store.RecordDeliveries(context.WithoutCancel(ctx), deliveryLog(ch, n, now, deliveryError)); logErr != nil {
+		e.opts.Logger.Error("delivery log not written", "channel", ch.Name, "event", n.Event, "error", logErr)
 	}
 	what := n.Monitor.Name
 	if len(n.Group) > 1 {
@@ -550,6 +564,35 @@ func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
 		return
 	}
 	e.opts.Logger.Info("notification sent", "channel", ch.Name, "event", n.Event, "monitor", what)
+}
+
+// deliveryLog is the delivery log's record of one attempt: an entry for
+// each incident the message was about, which for a grouped message is each
+// of its monitors' and otherwise the one. A test is about no incident and
+// leaves none. The error is redacted now, while the channel is at hand to
+// redact it against: the entry outlives changes to the channel.
+func deliveryLog(ch store.Channel, n Notification, at time.Time, deliveryError string) []store.Delivery {
+	about := n.Group
+	if len(about) <= 1 {
+		about = []Notification{n}
+	}
+	var out []store.Delivery
+	for _, a := range about {
+		if a.Incident.ID == 0 {
+			continue
+		}
+		eventAt := a.At
+		if eventAt.IsZero() {
+			eventAt = at
+		}
+		out = append(out, store.Delivery{
+			IncidentID: a.Incident.ID, MonitorID: a.Monitor.ID,
+			ChannelID: ch.ID, ChannelName: ch.Name, ChannelType: ch.Type,
+			Event: string(a.Event), EventAt: eventAt, GroupSize: len(about),
+			At: at, Delivered: deliveryError == "", Error: Redact(deliveryError, ch),
+		})
+	}
+	return out
 }
 
 func (e *Engine) sendWithRetry(ctx context.Context, ch store.Channel, n Notification) error {

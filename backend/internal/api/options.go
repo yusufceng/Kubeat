@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/yusufceng/Kubeat/backend/internal/alert"
 	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -23,8 +24,9 @@ const (
 	// maskedValue stands in for a secret in responses: header values and
 	// the password or token of an HTTP check. Sent back unchanged in an
 	// update, it means "keep the stored value", as long as the secret goes
-	// to the same server as before (see keptSecrets).
-	maskedValue = "********"
+	// to the same server as before (see keptSecrets). It is the mask of a
+	// redacted error too.
+	maskedValue = alert.SecretMask
 )
 
 var headerName = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+.^_|~-]+$`)
