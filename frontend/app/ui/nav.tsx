@@ -102,7 +102,11 @@ function NavView({ pathname, user }: { pathname: string | null; user: ShellUser 
   );
 }
 
-/** A 60px column of icons; each names itself in a tooltip. */
+/**
+ * A 60px column of icons; each names itself in a tooltip. Sticky, the rail
+ * is a stacking context of its own: z-40 puts it, and so its tooltips, over
+ * the page beside it, which comes later and would otherwise paint on top.
+ */
 function Rail({ pathname, user }: { pathname: string | null; user: ShellUser | null }) {
   const t = useT();
   const link = (s: Section) => (
@@ -119,7 +123,7 @@ function Rail({ pathname, user }: { pathname: string | null; user: ShellUser | n
   return (
     <nav
       aria-label={t("shell.nav")}
-      className="sticky top-0 hidden h-dvh w-[60px] flex-none flex-col items-center gap-1 border-r border-line bg-panel py-3 lg:flex dark:bg-canvas"
+      className="sticky top-0 z-40 hidden h-dvh w-[60px] flex-none flex-col items-center gap-1 border-r border-line bg-panel py-3 lg:flex dark:bg-canvas"
     >
       <Link href="/" aria-label={t("shell.home")} className="mb-3.5 rounded-md">
         <LogoMark size={32} />
