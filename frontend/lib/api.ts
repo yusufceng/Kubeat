@@ -8,7 +8,7 @@ import { sessionToken } from "@/lib/session";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 25;
+export const REQUIRED_API_REVISION = 26;
 
 export type Health = {
   status: string;
@@ -447,8 +447,20 @@ export class ApiError extends Error {
 async function request<T>(
   path: string,
   init?: RequestInit,
-  { open = false, token }: { open?: boolean; token?: string } = {},
+  options: { open?: boolean; token?: string } = {},
 ): Promise<T> {
+  return (await requestWithHeaders<T>(path, init, options)).body;
+}
+
+/**
+ * request(), with the answer's headers beside its body: for what the
+ * backend says only in a header, such as X-Total-Count.
+ */
+async function requestWithHeaders<T>(
+  path: string,
+  init?: RequestInit,
+  { open = false, token }: { open?: boolean; token?: string } = {},
+): Promise<{ body: T; headers: Headers }> {
   const bearer = token ?? (open ? null : await sessionToken());
   if (!open && !bearer) throw new ApiError(401, "no session");
   let res: Response;
@@ -470,7 +482,7 @@ async function request<T>(
     const body = await res.json().catch(() => null);
     throw new ApiError(res.status, body?.error ?? `backend responded with ${res.status}`);
   }
-  return res.status === 204 ? (undefined as T) : res.json();
+  return { body: res.status === 204 ? (undefined as T) : await res.json(), headers: res.headers };
 }
 
 // Also shown on the sign-in page, and the backend serves it to anyone.
@@ -679,6 +691,21 @@ export function incidentQueryParams(query: IncidentQuery): URLSearchParams {
 
 export const queryIncidents = (query: IncidentQuery) =>
   request<Incident[]>(`/incidents?${incidentQueryParams(query)}`);
+
+/**
+ * One page of an incident list, and how many incidents match the query on
+ * all its pages together (the backend's X-Total-Count; API revision 25).
+ * A backend without the header gives what can be told from the page.
+ */
+export async function queryIncidentsPage(query: IncidentQuery): Promise<{ incidents: Incident[]; total: number }> {
+  const { body, headers } = await requestWithHeaders<Incident[]>(`/incidents?${incidentQueryParams(query)}`);
+  const total = Number(headers.get("X-Total-Count"));
+  return { incidents: body, total: Number.isInteger(total) && total >= 0 ? total : (query.offset ?? 0) + body.length };
+}
+
+/** How many incidents match the query; asks for a page of one and reads the total. */
+export const countIncidents = async (query: Omit<IncidentQuery, "limit" | "offset" | "sort" | "order">) =>
+  (await queryIncidentsPage({ ...query, limit: 1 })).total;
 
 /** The monitor an incident is about, as it is set now. */
 export type IncidentMonitor = {

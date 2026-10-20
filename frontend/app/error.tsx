@@ -2,11 +2,13 @@
 
 import { useEffect } from "react";
 import { useT } from "@/lib/i18n/client";
+import { UnplugIcon, WarningIcon } from "@/app/ui/page-icons";
 
 /**
  * What a page shows when rendering it failed, most often because the
  * backend could not be reached while it was starting or restarting. The
- * error itself goes to the console; the visitor gets a way back.
+ * error itself goes to the console; the visitor gets what happened, the
+ * likeliest reason, and a way to try again.
  */
 export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   const t = useT();
@@ -19,22 +21,29 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
   // The hint names the variable; it is set as code.
   const [beforeVariable, afterVariable] = t("error.hint").split("BACKEND_URL");
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-10 sm:px-6">
-      <h1 className="text-xl font-semibold tracking-tight">
-        {unreachable ? t("error.unreachableTitle") : t("error.title")}
-      </h1>
-      <p className="text-sm text-muted">
-        {unreachable ? t("error.unreachableBody") : t("error.body")}{" "}
-        {beforeVariable}
-        <code>BACKEND_URL</code>
-        {afterVariable}
-      </p>
-      <p className="font-mono text-xs text-muted">{error.message}</p>
-      <div>
-        <button type="button" onClick={reset} className="btn btn-primary">
-          {t("error.retry")}
-        </button>
-      </div>
+    <main className="page">
+      <section role="alert" className="panel pg-empty">
+        <span className="pg-empty-icon pg-empty-icon-down" aria-hidden>
+          {unreachable ? <UnplugIcon width={20} height={20} /> : <WarningIcon width={20} height={20} />}
+        </span>
+        <h1 className="pg-empty-title">{unreachable ? t("error.unreachableTitle") : t("error.title")}</h1>
+        <div className="pg-empty-body">
+          <p>{unreachable ? t("error.unreachableBody") : t("error.body")}</p>
+          <p className="mt-2 text-ink-3">
+            {beforeVariable}
+            <code className="pg-code-inline">BACKEND_URL</code>
+            {afterVariable}
+          </p>
+        </div>
+        {(error.message || error.digest) && (
+          <pre className="pg-error-detail">{error.message || error.digest}</pre>
+        )}
+        <div className="pg-empty-action">
+          <button type="button" onClick={reset} className="btn btn-primary">
+            {t("error.retry")}
+          </button>
+        </div>
+      </section>
     </main>
   );
 }

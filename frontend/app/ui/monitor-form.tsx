@@ -5,8 +5,11 @@ import { useState, useTransition } from "react";
 import { saveMonitorAction } from "@/app/actions";
 import type { DnsRecordType, HttpMethod, JsonOperator, Monitor, MonitorType } from "@/lib/api";
 import { MASKED_VALUE } from "@/lib/constants";
+import { duration } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
-import { isDatabaseType, monitorTypeOrder, monitorTypes } from "@/lib/monitor-types";
+import type { T } from "@/lib/i18n/translate";
+import { typeWords } from "@/lib/monitor-page";
+import { isDatabaseType, monitorTypes } from "@/lib/monitor-types";
 
 const httpMethods: HttpMethod[] = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 // The labels are message keys; shown with t().
@@ -27,37 +30,102 @@ const contentTypes = [
   { value: "text/plain", label: "monitorForm.contentType.text" },
 ];
 
+/**
+ * The kinds of check as the picker offers them: what lives in the cluster
+ * first (a workload, then what reaches Services), the databases, and last
+ * the checks that need no cluster at all.
+ */
+const typeOrder: MonitorType[] = [
+  "workload",
+  "http",
+  "tcp",
+  "grpc",
+  "dns",
+  "websocket",
+  "postgres",
+  "mysql",
+  "redis",
+  "ping",
+  "push",
+];
+
 export type MonitorDefaults = { interval: number; timeout: number; failureThreshold: number };
 
+/** A whole number of 1 or more typed into a field, or null. */
+function whole(value: string, min = 1): number | null {
+  const n = Number(value);
+  return value.trim() !== "" && Number.isInteger(n) && n >= min ? n : null;
+}
+
+/** A message with its {values} set in bold: the help that reads the form back. */
+function echo(text: string, values: Record<string, React.ReactNode>): React.ReactNode[] {
+  return text.split(/(\{\w+\})/).map((part, i) => {
+    const name = /^\{(\w+)\}$/.exec(part)?.[1];
+    return name && name in values ? <b key={i}>{values[name]}</b> : part;
+  });
+}
+
+/**
+ * A part of the form: its title and what it is for on the left, its fields
+ * on the right, where the form is wide enough; one above the other where
+ * it is not.
+ */
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <section className="card p-5" aria-label={title}>
-      <h2 className="text-sm font-semibold">{title}</h2>
-      {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
-      <div className="mt-4 grid gap-4 sm:grid-cols-6">{children}</div>
+    <section className="mon-fsec" aria-label={title}>
+      <div className="mon-fsec-intro">
+        <h2>{title}</h2>
+        {hint && <p>{hint}</p>}
+      </div>
+      <div className="mon-fields">
+        <div className="mon-fields-grid">{children}</div>
+      </div>
     </section>
   );
 }
 
+/** Columns of six a field takes where the fields have room. */
+type Span = 2 | 3 | 4 | 6;
+const spans: Record<Span, string> = { 2: "mon-span-2", 3: "mon-span-3", 4: "mon-span-4", 6: "" };
+
 function Field({
   label,
+  optional,
   hint,
   span = 3,
   children,
 }: {
   label: string;
+  /** The words that mark the field optional, set small after the label. */
+  optional?: string;
   hint?: React.ReactNode;
-  /** Columns out of six. */
-  span?: 1 | 2 | 3 | 4 | 6;
+  span?: Span;
   children: React.ReactNode;
 }) {
-  const spans = { 1: "sm:col-span-1", 2: "sm:col-span-2", 3: "sm:col-span-3", 4: "sm:col-span-4", 6: "sm:col-span-6" };
   return (
     <label className={`block ${spans[span]}`}>
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+      <span className="mon-label">
+        {label}
+        {optional && <small>{optional}</small>}
+      </span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
+      {hint && <span className="mon-help">{hint}</span>}
     </label>
+  );
+}
+
+/** A number of seconds, with its unit set inside the field. */
+function Seconds({
+  unit,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { unit: string }) {
+  return (
+    <span className="relative block">
+      <input type="number" inputMode="numeric" {...props} className="field pr-10 tabular-nums" />
+      <span aria-hidden className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-ink-3">
+        {unit}
+      </span>
+    </span>
   );
 }
 
@@ -75,25 +143,100 @@ function Check({
   disabled?: boolean;
 }) {
   return (
-    <label className="flex items-start gap-2.5 text-sm sm:col-span-6">
-      <input
-        type="checkbox"
-        name={name}
-        defaultChecked={defaultChecked}
-        disabled={disabled}
-        className="mt-0.5 h-4 w-4 accent-(--accent)"
-      />
+    <label className="mon-check-field">
+      <input type="checkbox" name={name} defaultChecked={defaultChecked} disabled={disabled} />
       <span>
-        {label}
-        {hint && <span className="block text-xs text-muted">{hint}</span>}
+        <b>{label}</b>
+        {hint && <span className="mon-help mt-0.5">{hint}</span>}
       </span>
     </label>
   );
 }
 
+/** A small set of choices as a segmented control: radios, so the form posts the one picked. */
+function Segmented<V extends string>({
+  name,
+  label,
+  options,
+  value,
+  defaultValue,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  options: { value: V; label: string }[];
+  value?: V;
+  defaultValue?: V;
+  onChange?: (value: V) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="mon-seg flex w-full">
+      {options.map((o) => (
+        <label key={o.value} className="flex-1">
+          <input
+            type="radio"
+            name={name}
+            value={o.value}
+            {...(value !== undefined ? { checked: value === o.value } : { defaultChecked: defaultValue === o.value })}
+            onChange={onChange ? () => onChange(o.value) : undefined}
+          />
+          {o.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+/** The timing of the check read back as sentences, from what is typed now. */
+function TimingEcho({
+  push,
+  interval,
+  timeout,
+  threshold,
+  retry,
+  t,
+}: {
+  push: boolean;
+  interval: string;
+  timeout: string;
+  threshold: string;
+  retry: string;
+  t: T;
+}) {
+  const i = whole(interval);
+  const o = whole(timeout);
+  const n = whole(threshold);
+  const r = whole(retry, 0);
+  if (i === null || o === null || n === null || (!push && r === null)) {
+    return <p className="mon-echo">{t("monitorForm.echo.invalid")}</p>;
+  }
+  const d = (s: number) => duration(s, t);
+  // The plural form as it is written, its {count} still in place for echo().
+  const form = (key: string, count: number) => t(`${key}.${count === 1 ? "one" : "other"}`);
+  return (
+    <p className="mon-echo" aria-live="polite">
+      {push ? (
+        <>
+          {echo(t("monitorForm.echo.push"), { interval: d(i), grace: d(o) })}{" "}
+          {echo(form("monitorForm.echo.pushThreshold", n), { count: n })}
+        </>
+      ) : (
+        <>
+          {echo(t("monitorForm.echo.check"), { interval: d(i), timeout: d(o) })}{" "}
+          {echo(form("monitorForm.echo.threshold", n), { count: n })}{" "}
+          {n > 1 && (r! > 0 ? echo(t("monitorForm.echo.retry"), { retry: d(r!) }) : t("monitorForm.echo.noRetry"))}
+        </>
+      )}
+    </p>
+  );
+}
+
 /**
  * The form of a monitor: every setting of every type. With a monitor it
- * edits that one; without, it creates one of the type chosen at the top.
+ * edits that one; without, it creates one of the type picked at the top.
+ * Each part has its fields on the right and says what it is for on the
+ * left; the timing reads its values back as sentences, and Save stays in
+ * reach at the bottom of the window.
  */
 export function MonitorForm({
   monitor,
@@ -110,17 +253,25 @@ export function MonitorForm({
   const [auth, setAuth] = useState(monitor?.http?.auth ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // The values the help reads back.
+  const [every, setEvery] = useState(String(monitor?.interval_seconds ?? defaults.interval));
+  const [within, setWithin] = useState(String(monitor?.timeout_seconds ?? defaults.timeout));
+  const [threshold, setThreshold] = useState(String(monitor?.failure_threshold ?? defaults.failureThreshold));
+  const [retry, setRetry] = useState(String(monitor?.retry_interval_seconds ?? 0));
+  const [redirects, setRedirects] = useState(String(monitor?.http?.max_redirects ?? 10));
+  const [minReady, setMinReady] = useState(String(monitor?.workload?.min_ready ?? 0));
 
   const info = monitorTypes[type];
   const http = monitor?.http;
+  const push = type === "push";
   // A discovered monitor is named after the object it was made from. One
   // made from an annotation also takes its target and timing from there.
   const discovered = (monitor?.source ?? "") !== "";
   const managed = monitor?.managed ?? false;
   // Only a service port has pods to check one by one.
   const fromService = (monitor?.source ?? "").startsWith("service/") && (type === "http" || type === "tcp");
-  /** A field's label with "(optional)" after it. */
-  const optional = (key: string) => `${t(key)} ${t("common.optional")}`;
+  const optional = t("common.optional");
+  const seconds = t("monitorForm.unit.seconds");
 
   // Submitted by hand instead of through the form's action: React resets a
   // form after its action, which would throw away a rejected form's values.
@@ -134,33 +285,48 @@ export function MonitorForm({
     });
   }
 
-  return (
-    <form onSubmit={submit} className="flex flex-col gap-5">
-      {monitor && <input type="hidden" name="id" value={monitor.id} />}
-      <input type="hidden" name="type" value={type} />
+  const redirectCount = whole(redirects, 0);
+  const minReadyCount = whole(minReady, 0);
 
-      <Section title={t("monitorForm.general.title")}>
+  return (
+    <form onSubmit={submit} className="panel mon-form">
+      {monitor && <input type="hidden" name="id" value={monitor.id} />}
+      {monitor && <input type="hidden" name="type" value={type} />}
+
+      <Section title={t("monitorForm.general.title")} hint={t("monitorForm.general.hint")}>
         {monitor ? (
           <Field label={t("monitorForm.general.type")} span={2}>
             <input defaultValue={t(info.label)} disabled className="field" />
           </Field>
         ) : (
-          <Field label={t("monitorForm.general.type")} span={2} hint={t(info.summary)}>
-            <select value={type} onChange={(e) => setType(e.target.value as MonitorType)} className="field">
-              {monitorTypeOrder.map((mt) => (
-                <option key={mt} value={mt}>
-                  {t(monitorTypes[mt].label)}
-                </option>
+          <fieldset className="min-w-0">
+            <legend className="mon-label">{t("monitorForm.general.type")}</legend>
+            <div className="mon-types">
+              {typeOrder.map((mt) => (
+                <label key={mt} className="mon-type">
+                  <input
+                    type="radio"
+                    name="type"
+                    value={mt}
+                    checked={type === mt}
+                    onChange={() => setType(mt)}
+                  />
+                  <span className="mon-type-word">{typeWords[mt]}</span>
+                  <span className="mon-type-name">{t(monitorTypes[mt].label)}</span>
+                </label>
               ))}
-            </select>
-          </Field>
+            </div>
+            <p className="mon-help" aria-live="polite">
+              {echo(`{type}: ${t(info.summary)}`, { type: t(info.label) })}
+            </p>
+          </fieldset>
         )}
         {discovered ? (
-          <Field label={t("monitorForm.general.name")} span={4} hint={t("monitorForm.general.name.discoveredHint")}>
+          <Field label={t("monitorForm.general.name")} span={monitor ? 4 : 6} hint={t("monitorForm.general.name.discoveredHint")}>
             <input defaultValue={monitor?.name} disabled className="field" />
           </Field>
         ) : (
-          <Field label={t("monitorForm.general.name")} span={4}>
+          <Field label={t("monitorForm.general.name")} span={monitor ? 4 : 6}>
             <input
               name="name"
               required
@@ -182,9 +348,9 @@ export function MonitorForm({
             />
           </Field>
         ) : (
-          <p className="rounded-lg bg-sunken p-3 text-sm text-muted sm:col-span-6">{t("monitorForm.general.pushNote")}</p>
+          <p className="mon-echo">{t("monitorForm.general.pushNote")}</p>
         )}
-        <Field label={optional("monitorForm.general.description")} span={6}>
+        <Field label={t("monitorForm.general.description")} optional={optional} span={6}>
           <input
             name="description"
             defaultValue={monitor?.description}
@@ -195,10 +361,10 @@ export function MonitorForm({
         </Field>
         {discovered ? (
           <Field label={t("monitorForm.general.namespace")} span={3} hint={t("monitorForm.general.namespace.discoveredHint")}>
-            <input defaultValue={monitor?.namespace} disabled className="field" />
+            <input defaultValue={monitor?.namespace} disabled className="field font-mono" />
           </Field>
         ) : (
-          <Field label={optional("monitorForm.general.group")} span={3} hint={t("monitorForm.general.group.hint")}>
+          <Field label={t("monitorForm.general.group")} optional={optional} span={3} hint={t("monitorForm.general.group.hint")}>
             <input
               name="group"
               list="monitor-groups"
@@ -214,7 +380,7 @@ export function MonitorForm({
             </datalist>
           </Field>
         )}
-        <Field label={optional("monitorForm.general.tags")} span={3} hint={t("monitorForm.general.tags.hint")}>
+        <Field label={t("monitorForm.general.tags")} optional={optional} span={3} hint={t("monitorForm.general.tags.hint")}>
           <input
             name="tags"
             defaultValue={monitor?.tags.join(", ")}
@@ -226,69 +392,65 @@ export function MonitorForm({
 
       <Section
         title={t("monitorForm.timing.title")}
-        hint={
-          managed
-            ? t("monitorForm.timing.managedHint")
-            : type === "push"
-              ? t("monitorForm.timing.pushHint")
-              : t("monitorForm.timing.hint")
-        }
+        hint={managed ? t("monitorForm.timing.managedHint") : push ? t("monitorForm.timing.pushHint") : t("monitorForm.timing.hint")}
       >
-        <Field
-          label={type === "push" ? t("monitorForm.timing.reportInterval") : t("monitorForm.timing.interval")}
-          span={type === "push" ? 2 : 1}
-        >
-          <input
+        <Field label={push ? t("monitorForm.timing.reportInterval") : t("monitorForm.timing.interval")} span={push ? 2 : 3}>
+          <Seconds
             name="interval_seconds"
-            type="number"
             min={1}
             required
             readOnly={managed}
-            defaultValue={monitor?.interval_seconds ?? defaults.interval}
-            className="field"
+            value={every}
+            onChange={(e) => setEvery(e.target.value)}
+            unit={seconds}
           />
         </Field>
-        <Field
-          label={type === "push" ? t("monitorForm.timing.gracePeriod") : t("monitorForm.timing.timeout")}
-          span={type === "push" ? 2 : 1}
-        >
-          <input
+        <Field label={push ? t("monitorForm.timing.gracePeriod") : t("monitorForm.timing.timeout")} span={push ? 2 : 3}>
+          <Seconds
             name="timeout_seconds"
-            type="number"
             min={1}
             required
             readOnly={managed}
-            defaultValue={monitor?.timeout_seconds ?? defaults.timeout}
-            className="field"
+            value={within}
+            onChange={(e) => setWithin(e.target.value)}
+            unit={seconds}
           />
         </Field>
-        <Field label={t("monitorForm.timing.threshold")} span={2} hint={t("monitorForm.timing.threshold.hint")}>
-          <input
-            name="failure_threshold"
-            type="number"
-            min={1}
-            required
-            readOnly={managed}
-            defaultValue={monitor?.failure_threshold ?? defaults.failureThreshold}
-            className="field"
-          />
-        </Field>
-        {type !== "push" && (
-          <Field label={t("monitorForm.timing.retryInterval")} span={2} hint={t("monitorForm.timing.retryInterval.hint")}>
+        <Field label={t("monitorForm.timing.threshold")} span={push ? 2 : 3} hint={t("monitorForm.timing.threshold.hint")}>
+          <span className="relative block">
             <input
-              name="retry_interval_seconds"
+              name="failure_threshold"
               type="number"
+              inputMode="numeric"
+              min={1}
+              required
+              readOnly={managed}
+              value={threshold}
+              onChange={(e) => setThreshold(e.target.value)}
+              className="field pr-16 tabular-nums"
+            />
+            <span aria-hidden className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-ink-3">
+              {t("monitorForm.unit.checks")}
+            </span>
+          </span>
+        </Field>
+        {!push && (
+          <Field label={t("monitorForm.timing.retryInterval")} span={3} hint={t("monitorForm.timing.retryInterval.hint")}>
+            <Seconds
+              name="retry_interval_seconds"
               min={0}
-              defaultValue={monitor?.retry_interval_seconds ?? 0}
-              className="field"
+              value={retry}
+              onChange={(e) => setRetry(e.target.value)}
+              unit={seconds}
             />
           </Field>
         )}
+        <TimingEcho push={push} interval={every} timeout={within} threshold={threshold} retry={retry} t={t} />
       </Section>
 
       {type === "http" && (
         <>
-          <Section title={t("monitorForm.request.title")}>
+          <Section title={t("monitorForm.request.title")} hint={t("monitorForm.request.hint")}>
             <Field label={t("monitorForm.request.method")} span={2}>
               <select name="http_method" defaultValue={http?.method ?? "GET"} className="field">
                 {httpMethods.map((m) => (
@@ -308,32 +470,51 @@ export function MonitorForm({
                 className="field font-mono"
               />
             </Field>
-            <Field label={t("monitorForm.request.maxRedirects")} span={2} hint={t("monitorForm.request.maxRedirects.hint")}>
+            <Field
+              label={t("monitorForm.request.maxRedirects")}
+              span={2}
+              hint={
+                redirectCount === null
+                  ? t("monitorForm.request.maxRedirects.hint")
+                  : redirectCount === 0
+                    ? t("monitorForm.echo.redirects.none")
+                    : t.n("monitorForm.echo.redirects", redirectCount)
+              }
+            >
               <input
                 name="http_max_redirects"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 max={20}
-                defaultValue={http?.max_redirects ?? 10}
-                className="field"
+                value={redirects}
+                onChange={(e) => setRedirects(e.target.value)}
+                className="field tabular-nums"
               />
             </Field>
-            <Field label={t("monitorForm.request.auth")} span={2}>
-              <select name="http_auth" value={auth} onChange={(e) => setAuth(e.target.value as typeof auth)} className="field">
-                <option value="">{t("monitorForm.request.auth.none")}</option>
-                <option value="basic">{t("monitorForm.request.auth.basic")}</option>
-                <option value="bearer">{t("monitorForm.request.auth.bearer")}</option>
-              </select>
-            </Field>
+            <div className="mon-span-6">
+              <span className="mon-label">{t("monitorForm.request.auth")}</span>
+              <Segmented
+                name="http_auth"
+                label={t("monitorForm.request.auth")}
+                value={auth}
+                onChange={(v) => setAuth(v)}
+                options={[
+                  { value: "", label: t("monitorForm.request.auth.none") },
+                  { value: "basic", label: t("monitorForm.request.auth.basic") },
+                  { value: "bearer", label: t("monitorForm.request.auth.bearer") },
+                ]}
+              />
+            </div>
             {auth === "basic" && (
-              <Field label={t("monitorForm.request.user")} span={2}>
+              <Field label={t("monitorForm.request.user")} span={3}>
                 <input name="http_auth_user" defaultValue={http?.auth_user} autoComplete="off" className="field" />
               </Field>
             )}
             {auth !== "" && (
               <Field
                 label={auth === "basic" ? t("monitorForm.request.password") : t("monitorForm.request.token")}
-                span={auth === "basic" ? 2 : 4}
+                span={auth === "basic" ? 3 : 6}
                 hint={http?.auth_secret ? t("monitorForm.secret.keptHint") : undefined}
               >
                 <input
@@ -361,7 +542,7 @@ export function MonitorForm({
                 className="field font-mono"
               />
             </Field>
-            <Field label={optional("monitorForm.request.body")} span={4}>
+            <Field label={t("monitorForm.request.body")} optional={optional} span={6}>
               <textarea
                 name="http_body"
                 rows={3}
@@ -370,25 +551,27 @@ export function MonitorForm({
                 className="field font-mono"
               />
             </Field>
-            <Field label={t("monitorForm.request.contentType")} span={2}>
-              <select name="http_content_type" defaultValue={http?.content_type || "application/json"} className="field">
-                {contentTypes.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {t(c.label)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Check
-              name="tls_skip_verify"
-              label={t("monitorForm.tls.skipVerify")}
-              hint={t("monitorForm.tls.skipVerify.hint")}
-              defaultChecked={http?.tls_skip_verify}
-            />
+            <div className="mon-span-6">
+              <span className="mon-label">{t("monitorForm.request.contentType")}</span>
+              <Segmented
+                name="http_content_type"
+                label={t("monitorForm.request.contentType")}
+                defaultValue={http?.content_type || "application/json"}
+                options={contentTypes.map((c) => ({ value: c.value, label: t(c.label) }))}
+              />
+            </div>
+            <div className="mon-span-6">
+              <Check
+                name="tls_skip_verify"
+                label={t("monitorForm.tls.skipVerify")}
+                hint={t("monitorForm.tls.skipVerify.hint")}
+                defaultChecked={http?.tls_skip_verify}
+              />
+            </div>
           </Section>
 
           <Section title={t("monitorForm.response.title")} hint={t("monitorForm.response.hint")}>
-            <Field label={t("monitorForm.response.keyword")} span={4}>
+            <Field label={t("monitorForm.response.keyword")} optional={optional} span={6}>
               <input
                 name="http_keyword"
                 defaultValue={http?.keyword}
@@ -396,13 +579,19 @@ export function MonitorForm({
                 className="field font-mono"
               />
             </Field>
-            <Field label={t("monitorForm.response.condition")} span={2}>
-              <select name="http_invert_keyword" defaultValue={http?.invert_keyword ? "on" : ""} className="field">
-                <option value="">{t("monitorForm.response.condition.present")}</option>
-                <option value="on">{t("monitorForm.response.condition.absent")}</option>
-              </select>
-            </Field>
-            <Field label={t("monitorForm.response.jsonPath")} span={2} hint={t("monitorForm.response.jsonPath.hint")}>
+            <div className="mon-span-6">
+              <span className="mon-label">{t("monitorForm.response.condition")}</span>
+              <Segmented
+                name="http_invert_keyword"
+                label={t("monitorForm.response.condition")}
+                defaultValue={http?.invert_keyword ? "on" : ""}
+                options={[
+                  { value: "", label: t("monitorForm.response.condition.present") },
+                  { value: "on", label: t("monitorForm.response.condition.absent") },
+                ]}
+              />
+            </div>
+            <Field label={t("monitorForm.response.jsonPath")} optional={optional} span={2} hint={t("monitorForm.response.jsonPath.hint")}>
               <input
                 name="http_json_path"
                 defaultValue={http?.json_path}
@@ -432,19 +621,21 @@ export function MonitorForm({
       )}
 
       {type === "tcp" && (
-        <Section title={t("monitorForm.tcp.title")}>
-          <Check
-            name="tcp_tls"
-            label={t("monitorForm.tcp.tls")}
-            hint={t("monitorForm.tcp.tls.hint")}
-            defaultChecked={monitor?.tcp?.tls}
-          />
-          <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.tcp?.tls_skip_verify} />
+        <Section title={t("monitorForm.tcp.title")} hint={t("monitorForm.tcp.hint")}>
+          <div className="mon-span-6 flex flex-col gap-4">
+            <Check
+              name="tcp_tls"
+              label={t("monitorForm.tcp.tls")}
+              hint={t("monitorForm.tcp.tls.hint")}
+              defaultChecked={monitor?.tcp?.tls}
+            />
+            <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.tcp?.tls_skip_verify} />
+          </div>
         </Section>
       )}
 
       {type === "dns" && (
-        <Section title={t("monitorForm.dns.title")}>
+        <Section title={t("monitorForm.dns.title")} hint={t("monitorForm.dns.hint")}>
           <Field label={t("monitorForm.dns.recordType")} span={2}>
             <select name="dns_record_type" defaultValue={monitor?.dns?.record_type ?? "A"} className="field">
               {dnsRecordTypes.map((rt) => (
@@ -452,7 +643,7 @@ export function MonitorForm({
               ))}
             </select>
           </Field>
-          <Field label={optional("monitorForm.dns.resolver")} span={4} hint={t("monitorForm.dns.resolver.hint")}>
+          <Field label={t("monitorForm.dns.resolver")} optional={optional} span={4} hint={t("monitorForm.dns.resolver.hint")}>
             <input
               name="dns_resolver"
               defaultValue={monitor?.dns?.resolver}
@@ -460,7 +651,7 @@ export function MonitorForm({
               className="field font-mono"
             />
           </Field>
-          <Field label={optional("monitorForm.dns.expected")} span={6} hint={t("monitorForm.dns.expected.hint")}>
+          <Field label={t("monitorForm.dns.expected")} optional={optional} span={6} hint={t("monitorForm.dns.expected.hint")}>
             <input
               name="dns_expected"
               defaultValue={monitor?.dns?.expected}
@@ -472,8 +663,8 @@ export function MonitorForm({
       )}
 
       {type === "grpc" && (
-        <Section title={t("monitorForm.grpc.title")}>
-          <Field label={optional("monitorForm.grpc.service")} span={6} hint={t("monitorForm.grpc.service.hint")}>
+        <Section title={t("monitorForm.grpc.title")} hint={t("monitorForm.grpc.hint")}>
+          <Field label={t("monitorForm.grpc.service")} optional={optional} span={6} hint={t("monitorForm.grpc.service.hint")}>
             <input
               name="grpc_service"
               defaultValue={monitor?.grpc?.service}
@@ -481,8 +672,10 @@ export function MonitorForm({
               className="field font-mono"
             />
           </Field>
-          <Check name="grpc_tls" label={t("monitorForm.tls.use")} defaultChecked={monitor?.grpc?.tls} />
-          <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.grpc?.tls_skip_verify} />
+          <div className="mon-span-6 flex flex-col gap-4">
+            <Check name="grpc_tls" label={t("monitorForm.tls.use")} defaultChecked={monitor?.grpc?.tls} />
+            <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.grpc?.tls_skip_verify} />
+          </div>
         </Section>
       )}
 
@@ -491,10 +684,7 @@ export function MonitorForm({
           title={t("monitorForm.credentials.title")}
           hint={type === "redis" ? t("monitorForm.credentials.redisHint") : t("monitorForm.credentials.hint")}
         >
-          <Field
-            label={type === "redis" ? optional("monitorForm.credentials.user") : t("monitorForm.credentials.user")}
-            span={3}
-          >
+          <Field label={t("monitorForm.credentials.user")} optional={type === "redis" ? optional : undefined} span={3}>
             <input
               name="db_username"
               required={type !== "redis"}
@@ -519,7 +709,7 @@ export function MonitorForm({
           </Field>
           {type !== "redis" && (
             <>
-              <Field label={optional("monitorForm.credentials.database")} span={2}>
+              <Field label={t("monitorForm.credentials.database")} optional={optional} span={2}>
                 <input
                   name="db_database"
                   defaultValue={monitor?.database?.database}
@@ -537,29 +727,44 @@ export function MonitorForm({
               </Field>
             </>
           )}
-          <Check name="db_tls" label={t("monitorForm.tls.use")} defaultChecked={monitor?.database?.tls} />
-          <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.database?.tls_skip_verify} />
+          <div className="mon-span-6 flex flex-col gap-4">
+            <Check name="db_tls" label={t("monitorForm.tls.use")} defaultChecked={monitor?.database?.tls} />
+            <Check name="tls_skip_verify" label={t("monitorForm.tls.skipVerify")} defaultChecked={monitor?.database?.tls_skip_verify} />
+          </div>
         </Section>
       )}
 
       {type === "workload" && (
         <Section title={t("monitorForm.workload.title")} hint={t("monitorForm.workload.hint")}>
-          <Field label={t("monitorForm.workload.minReady")} span={3} hint={t("monitorForm.workload.minReady.hint")}>
+          <Field
+            label={t("monitorForm.workload.minReady")}
+            span={3}
+            hint={
+              minReadyCount === null
+                ? t("monitorForm.workload.minReady.hint")
+                : minReadyCount === 0
+                  ? t("monitorForm.echo.minReady.all")
+                  : t.n("monitorForm.echo.minReady", minReadyCount)
+            }
+          >
             <input
               name="workload_min_ready"
               type="number"
+              inputMode="numeric"
               min={0}
-              defaultValue={monitor?.workload?.min_ready ?? 0}
-              className="field"
+              value={minReady}
+              onChange={(e) => setMinReady(e.target.value)}
+              className="field tabular-nums"
             />
           </Field>
         </Section>
       )}
 
       {type === "websocket" && (
-        <Section title={t("monitorForm.websocket.title")}>
+        <Section title={t("monitorForm.websocket.title")} hint={t("monitorForm.websocket.hint")}>
           <Field
-            label={optional("monitorForm.websocket.subprotocol")}
+            label={t("monitorForm.websocket.subprotocol")}
+            optional={optional}
             span={6}
             hint={t("monitorForm.websocket.subprotocol.hint")}
           >
@@ -570,46 +775,52 @@ export function MonitorForm({
               className="field font-mono"
             />
           </Field>
-          <Check
-            name="tls_skip_verify"
-            label={t("monitorForm.tls.skipVerify")}
-            defaultChecked={monitor?.websocket?.tls_skip_verify}
-          />
-        </Section>
-      )}
-
-      {type !== "push" && (
-        <Section title={t("monitorForm.advanced.title")}>
-          {fromService && (
+          <div className="mon-span-6">
             <Check
-              name="each_pod"
-              label={t("monitorForm.advanced.eachPod")}
-              hint={managed ? t("monitorForm.advanced.eachPod.managedHint") : t("monitorForm.advanced.eachPod.hint")}
-              defaultChecked={monitor?.each_pod}
-              disabled={managed}
+              name="tls_skip_verify"
+              label={t("monitorForm.tls.skipVerify")}
+              defaultChecked={monitor?.websocket?.tls_skip_verify}
             />
-          )}
-          <Check
-            name="inverted"
-            label={t("monitorForm.advanced.inverted")}
-            hint={t("monitorForm.advanced.inverted.hint")}
-            defaultChecked={monitor?.inverted}
-          />
+          </div>
         </Section>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" disabled={pending} className="btn btn-primary px-5">
-          {pending ? t("common.saving") : monitor ? t("common.save") : t("monitorForm.create")}
-        </button>
-        <Link href={monitor ? `/monitors/${monitor.id}` : "/"} className="btn">
-          {t("common.cancel")}
-        </Link>
+      {!push && (
+        <Section title={t("monitorForm.advanced.title")} hint={t("monitorForm.advanced.hint")}>
+          <div className="mon-span-6 flex flex-col gap-4">
+            {fromService && (
+              <Check
+                name="each_pod"
+                label={t("monitorForm.advanced.eachPod")}
+                hint={managed ? t("monitorForm.advanced.eachPod.managedHint") : t("monitorForm.advanced.eachPod.hint")}
+                defaultChecked={monitor?.each_pod}
+                disabled={managed}
+              />
+            )}
+            <Check
+              name="inverted"
+              label={t("monitorForm.advanced.inverted")}
+              hint={t("monitorForm.advanced.inverted.hint")}
+              defaultChecked={monitor?.inverted}
+            />
+          </div>
+        </Section>
+      )}
+
+      <div className="mon-savebar">
         {error && (
-          <p role="alert" className="text-sm text-down">
+          <p role="alert" className="min-w-0 flex-1 text-[13px] text-down-ink">
             {error}
           </p>
         )}
+        <div className="mon-savebar-end">
+          <Link href={monitor ? `/monitors/${monitor.id}` : "/"} className="btn btn-ghost">
+            {t("common.cancel")}
+          </Link>
+          <button type="submit" disabled={pending} className="btn btn-primary px-5">
+            {pending ? t("common.saving") : monitor ? t("common.save") : t("monitorForm.create")}
+          </button>
+        </div>
       </div>
     </form>
   );

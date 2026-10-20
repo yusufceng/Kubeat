@@ -6,6 +6,12 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
+/** A percentage above 0 and at most 100, such as 99.9. */
+function percent(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return value?.trim() && Number.isFinite(n) && n > 0 && n <= 100 ? n : fallback;
+}
+
 /** positiveInt for settings where zero means "off". */
 function nonNegativeInt(value: string | undefined, fallback: number): number {
   const n = Number(value);
@@ -48,6 +54,23 @@ function durationList(value: string | undefined, fallback: string): number[] {
       .split(",")
       .map(durationSeconds)
       .filter((n): n is number => n !== null && n > 0);
+  const parsed = parse(value ?? "");
+  return parsed.length > 0 ? parsed : parse(fallback);
+}
+
+/**
+ * A comma-separated list of whole days from 1 to 365 (what the backend's
+ * reports accept); invalid entries and repeats are dropped.
+ */
+function dayList(value: string | undefined, fallback: string): number[] {
+  const parse = (v: string) => [
+    ...new Set(
+      v
+        .split(",")
+        .map((d) => Number(d.trim()))
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= 365),
+    ),
+  ];
   const parsed = parse(value ?? "");
   return parsed.length > 0 ? parsed : parse(fallback);
 }
@@ -96,16 +119,34 @@ export const config = {
   /** Number of recent checks drawn in a monitor's heartbeat bar. */
   historyLimit: positiveInt(process.env.HISTORY_LIMIT, 60),
   /** Number of recent checks drawn next to each monitor in the list. */
-  listBeats: positiveInt(process.env.LIST_BEATS, 14),
+  listBeats: positiveInt(process.env.LIST_BEATS, 24),
   /**
    * Up to this many monitors the list shows every namespace opened; above
    * it, namespaces start closed unless something in them is failing.
    */
   dashboardFlatLimit: positiveInt(process.env.DASHBOARD_FLAT_LIMIT, 50),
-  /** Number of recent events listed on the overview. */
+  /** Number of recent events listed on the overview and a namespace's page. */
   overviewEvents: positiveInt(process.env.OVERVIEW_EVENTS, 12),
-  /** Number of certificates listed on the overview, soonest to expire first. */
-  overviewCertificates: positiveInt(process.env.OVERVIEW_CERTIFICATES, 5),
+  /** Number of ongoing outages listed in the overview's summary; the rest are a click away in the list. */
+  overviewOutages: positiveInt(process.env.OVERVIEW_OUTAGES, 5),
+  /**
+   * The fleet strip of the overview and of a namespace: how many hours it
+   * covers, in how many slots (15 minutes each by default).
+   */
+  fleetStrip: {
+    hours: positiveInt(process.env.FLEET_STRIP_HOURS, 24),
+    slots: positiveInt(process.env.FLEET_STRIP_SLOTS, 96),
+  },
+  /** The period, in days, of the reliability figures (MTTR, MTBF, outages) on the overview and a namespace's page; at most 365. */
+  statsDays: Math.min(365, positiveInt(process.env.STATS_DAYS, 7)),
+  /**
+   * Uptime below warnBelow percent is shown in amber, below criticalBelow
+   * in red, in the monitor list and the tables; above, it stays quiet.
+   */
+  uptimeTones: {
+    warnBelow: percent(process.env.WARN_UPTIME_BELOW, 99.9),
+    criticalBelow: percent(process.env.CRITICAL_UPTIME_BELOW, 99),
+  },
   /** What the form of a new monitor starts with. */
   newMonitor: {
     interval: positiveInt(process.env.NEW_MONITOR_INTERVAL_SECONDS, 60),
@@ -114,6 +155,8 @@ export const config = {
   },
   /** Number of recent checks listed on a monitor's page. */
   resultsLimit: positiveInt(process.env.RESULTS_LIMIT, 30),
+  /** Number of incidents a monitor's page lists before the rest wait behind "Show all". */
+  monitorIncidents: positiveInt(process.env.MONITOR_INCIDENTS, 6),
   /** Periods for which a monitor's uptime is shown, in seconds. */
   uptimeWindows: durationList(process.env.UPTIME_WINDOWS, "24h,168h,720h"),
   /** Ranges offered for a monitor's charts, in seconds; the first is the default. */
@@ -124,6 +167,10 @@ export const config = {
   maintenanceLimit: positiveInt(process.env.MAINTENANCE_LIMIT, 50),
   /** Number of incidents listed on a page. */
   incidentsLimit: positiveInt(process.env.INCIDENTS_LIMIT, 100),
+  /** The periods the incident list offers to narrow it to, in seconds, up to now. */
+  incidentRanges: durationList(process.env.INCIDENT_RANGES, "24h,168h,720h,2160h"),
+  /** The periods the reports offer, in whole days; the first is the default. */
+  reportPeriods: dayList(process.env.REPORT_PERIODS, "30,1,7,90"),
   /** Number of audit entries listed. */
   auditLimit: positiveInt(process.env.AUDIT_LIMIT, 200),
 };

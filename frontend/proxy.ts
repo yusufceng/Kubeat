@@ -42,6 +42,10 @@ function route(request: NextRequest, secure: boolean): NextResponse {
   if (pathname.startsWith("/api/push/") || pathname.startsWith("/status/") || pathname.startsWith("/api/badge/") || pathname.startsWith("/auth/")) {
     return NextResponse.next();
   }
+  // The icons of the tab and the home screen (app/icon.svg,
+  // app/apple-icon.png) are the same for everyone, on the sign-in page and
+  // on a public status page too.
+  if (pathname === "/icon.svg" || pathname === "/apple-icon.png") return NextResponse.next();
   const session = sessionCookie(secure);
   const signedIn = Boolean(request.cookies.get(session)?.value);
   if (pathname === "/login" || pathname === "/setup") {

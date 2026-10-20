@@ -5,6 +5,8 @@ import { useMemo, useRef, useState } from "react";
 import type { CheckGrid as Grid, GridCell } from "@/lib/api";
 import { useT } from "@/lib/i18n/client";
 import { useMounted } from "@/lib/use-mounted";
+import { ChevronIcon } from "@/app/ui/icons";
+import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
 
 // Layout, in CSS pixels.
 const CELL = 14;
@@ -19,14 +21,14 @@ function stateOf(cell: GridCell | undefined): State {
   return cell.failed === cell.checks ? "down" : "partial";
 }
 
-// The states are told apart by lightness as well as hue: a calm, dim green
-// for what went well, full amber and red for what did not, an outline for
-// a slot without checks.
-const stateStyle: Record<State, { style: React.CSSProperties; label: string }> = {
-  ok: { style: { background: "var(--viz-good)", opacity: 0.42 }, label: "monitorPage.chart.state.ok" },
-  partial: { style: { background: "var(--viz-warning)" }, label: "monitorPage.chart.state.partial" },
-  down: { style: { background: "var(--viz-critical)" }, label: "monitorPage.chart.state.down" },
-  none: { style: { boxShadow: "inset 0 0 0 1px var(--line)" }, label: "monitorPage.history.state.none" },
+// The fills of the beat strip: a calm green for what went well, so that
+// amber and red stand out; an outline for a slot without checks. The
+// legend draws each state as its glyph.
+const stateStyle: Record<State, { style: React.CSSProperties; glyph: GlyphKind | null; label: string }> = {
+  ok: { style: { background: "var(--ok-bar)" }, glyph: "up", label: "monitorPage.chart.state.ok" },
+  partial: { style: { background: "var(--warn)" }, glyph: "warn", label: "monitorPage.chart.state.partial" },
+  down: { style: { background: "var(--down)" }, glyph: "down", label: "monitorPage.chart.state.down" },
+  none: { style: { boxShadow: "inset 0 0 0 1px var(--line-strong)" }, glyph: null, label: "monitorPage.history.state.none" },
 };
 
 type Slot = { start: number; col: number; row: number };
@@ -107,13 +109,13 @@ export function CheckGrid({
   const byStart = useMemo(() => new Map(grid.cells.map((c) => [new Date(c.start).getTime(), c])), [grid.cells]);
 
   if (!layout) {
-    return <div className="h-52 rounded-lg bg-sunken/60" aria-hidden />;
+    return <div className="h-52 rounded-md bg-well" aria-hidden />;
   }
   const { slots, columns, rows } = layout;
   const width = columns.length * (CELL + GAP);
   const height = rows.length * (CELL + GAP);
 
-  const time = (at: number) => new Date(at).toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit" });
+  const time = (at: number) => new Date(at).toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const span = (slot: Slot) => {
     const end = Math.min(slot.start + bucket, to);
     const day = new Date(slot.start).toLocaleDateString(t.intl, { day: "numeric", month: "short" });
@@ -144,16 +146,15 @@ export function CheckGrid({
     }
   };
 
-  const shown = active ?? pinned;
   const tip = active !== null ? slots[active] : null;
   const detail = pinned !== null ? slots[pinned] : null;
 
   return (
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8">
-      <div className="relative min-w-0 lg:w-[31rem] lg:shrink-0">
+    <div className="flex flex-col gap-5 @min-[52rem]:flex-row @min-[52rem]:items-start @min-[52rem]:gap-8">
+      <div className="relative min-w-0 @min-[52rem]:w-[31rem] @min-[52rem]:shrink-0">
         <div ref={scroller} className="overflow-x-auto pb-1" onScroll={(e) => setScrolled(e.currentTarget.scrollLeft)}>
           <div
-            className="relative inline-block select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--viz-series)]"
+            className="relative inline-block rounded-xs outline-offset-4 select-none"
             tabIndex={0}
             role="group"
             aria-label={t("monitorPage.history.aria")}
@@ -179,7 +180,7 @@ export function CheckGrid({
             }}
           >
             {/* The hours (or, over a week, the hours of the day) above the grid. */}
-            <div className="flex text-[10px] leading-none text-muted" style={{ marginLeft: 44, height: 14 }} aria-hidden>
+            <div className="flex text-[10px] leading-none font-medium text-ink-3" style={{ marginLeft: 44, height: 14 }} aria-hidden>
               {columns.map((label, i) => (
                 <span key={i} style={{ width: CELL + GAP }} className="tabular-nums">
                   {label}
@@ -187,7 +188,7 @@ export function CheckGrid({
               ))}
             </div>
             <div className="flex">
-              <div className="text-[10px] leading-none text-muted" style={{ width: 44 }} aria-hidden>
+              <div className="text-[10px] leading-none font-medium text-ink-3" style={{ width: 44 }} aria-hidden>
                 {rows.map((label, i) => (
                   <div key={i} style={{ height: CELL + GAP, lineHeight: `${CELL}px` }} className="truncate pr-2 text-right tabular-nums">
                     {label}
@@ -213,10 +214,13 @@ export function CheckGrid({
                         // One failed check in a long slot is not an outage:
                         // the more of a slot failed, the stronger its amber.
                         ...(state === "partial" && cell ? { opacity: 0.4 + 0.6 * (cell.failed / cell.checks) } : null),
-                        // The cell in hand is lifted with a ring in the page's ink.
-                        ...(shown === i || pinned === i
-                          ? { outline: "2px solid var(--ink)", outlineOffset: 1, opacity: 1 }
-                          : null),
+                        // The pinned cell is the selection, in the accent;
+                        // the one under the pointer gets a ring of ink.
+                        ...(pinned === i
+                          ? { outline: "2px solid var(--accent)", outlineOffset: 1, opacity: 1 }
+                          : active === i
+                            ? { outline: "2px solid var(--ink-2)", outlineOffset: 1, opacity: 1 }
+                            : null),
                       }}
                     />
                   );
@@ -230,7 +234,7 @@ export function CheckGrid({
         {tip && (
           <div
             role="status"
-            className="pointer-events-none absolute z-10 rounded-lg border border-line bg-panel px-3 py-2 text-xs shadow-lg"
+            className="pop pointer-events-none absolute z-10 px-3 py-2 text-xs"
             style={{
               width: TOOLTIP_WIDTH,
               top: 14 + tip.row * (CELL + GAP) + CELL + 8,
@@ -241,15 +245,19 @@ export function CheckGrid({
           </div>
         )}
 
-        <p className="mt-2 flex select-none flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+        <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-3 select-none">
           {(Object.keys(stateStyle) as State[]).map((s) => (
             <span key={s} className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-[2px]" style={stateStyle[s].style} aria-hidden />
+              {stateStyle[s].glyph ? (
+                <StatusGlyph kind={stateStyle[s].glyph!} />
+              ) : (
+                <span className="h-2.5 w-2.5 rounded-[2px]" style={stateStyle[s].style} aria-hidden />
+              )}
               {t(stateStyle[s].label)}
             </span>
           ))}
         </p>
-        <p className="mt-1 text-xs text-muted">
+        <p className="mt-1.5 text-xs text-ink-3">
           {t(week ? "monitorPage.history.caption.week" : "monitorPage.history.caption.day", {
             minutes: grid.bucket_seconds / 60,
           })}{" "}
@@ -257,30 +265,31 @@ export function CheckGrid({
         </p>
 
         {detail && (
-          <div className="mt-3 rounded-lg border border-line bg-sunken/60 px-3 py-2 text-xs">
+          <div className="mt-3 rounded-md border border-line bg-well px-3 py-2.5 text-xs">
             {cellText(detail)}
             <Link
               href={`${inspectBase}&from=${encodeURIComponent(new Date(detail.start).toISOString())}&to=${encodeURIComponent(
                 new Date(Math.min(detail.start + bucket, to)).toISOString(),
               )}#selected-range`}
-              className="mt-2 inline-block font-medium underline hover:text-ink"
+              className="mt-2 inline-flex items-center gap-1 font-medium text-accent-text hover:underline"
             >
               {t("monitorPage.history.inspect")}
+              <ChevronIcon width={14} height={14} />
             </Link>
           </div>
         )}
       </div>
 
-      <div className="min-w-0 flex-1 lg:min-w-[16rem]">
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{t("monitorPage.history.errors.title")}</h3>
+      <div className="min-w-0 flex-1 @min-[52rem]:min-w-[16rem]">
+        <h3 className="mon-h3">{t("monitorPage.history.errors.title")}</h3>
         {grid.errors.length === 0 ? (
-          <p className="text-sm text-muted">{t("monitorPage.history.errors.none")}</p>
+          <p className="text-[13px] text-ink-3">{t("monitorPage.history.errors.none")}</p>
         ) : (
-          <ul className="divide-y divide-line rounded-lg border border-line text-xs">
+          <ul className="text-xs">
             {grid.errors.map((e) => (
-              <li key={e.error} className="px-3 py-2">
-                <p className="break-words font-mono text-ink">{e.error || t("monitorPage.history.errors.unnamed")}</p>
-                <p className="mt-1 text-muted">
+              <li key={e.error} className="border-t border-line py-2 first:border-t-0 first:pt-0">
+                <p className="font-mono break-words text-ink">{e.error || t("monitorPage.history.errors.unnamed")}</p>
+                <p className="mt-1 text-ink-3 tabular-nums">
                   {t.n("monitorPage.history.errors.count", e.count)} · {fullTime(e.first_at)} – {fullTime(e.last_at)}
                 </p>
               </li>
@@ -292,21 +301,32 @@ export function CheckGrid({
   );
 
   function fullTime(iso: string) {
-    return new Date(iso).toLocaleString(t.intl, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleString(t.intl, {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
   }
 
   /** What a slot holds: when, how it went, and the error its failures gave. */
   function cellText(slot: Slot) {
     const { cell, state, label } = describe(slot);
+    const glyph = stateStyle[state].glyph;
     return (
       <>
-        <div className="text-muted">{span(slot)}</div>
+        <div className="text-ink-3 tabular-nums">{span(slot)}</div>
         <div className="mt-1 flex items-center gap-2">
-          <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={stateStyle[state].style} aria-hidden />
+          {glyph ? (
+            <StatusGlyph kind={glyph} />
+          ) : (
+            <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={stateStyle[state].style} aria-hidden />
+          )}
           <span>
             <span className="font-semibold text-ink">{label}</span>
             {cell && (
-              <span className="text-muted">
+              <span className="text-ink-3">
                 {" · "}
                 {t.n("monitorPage.chart.checks", cell.checks)}
                 {cell.failed > 0 && `, ${t("monitorPage.chart.failed", { count: cell.failed })}`}
@@ -315,7 +335,7 @@ export function CheckGrid({
             )}
           </span>
         </div>
-        {cell?.error && <div className="mt-1 break-words font-mono text-down">{cell.error}</div>}
+        {cell?.error && <div className="mt-1 font-mono break-words text-down-ink">{cell.error}</div>}
       </>
     );
   }

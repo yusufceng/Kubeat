@@ -1,49 +1,41 @@
 import Link from "next/link";
-import { getMonitorChannels, type MonitorChannel } from "@/lib/api";
+import type { MonitorChannel } from "@/lib/api";
 import { channelEventLabels, channelTypes } from "@/lib/channel-types";
-import { getT } from "@/lib/i18n/server";
+import type { T } from "@/lib/i18n/translate";
+import { BellIcon } from "@/app/ui/icons";
+import { Callout } from "@/app/ui/monitor-callout";
+
+/** How many channel names the chip spells out before it counts the rest. */
+const NAMED = 2;
 
 /**
- * Where a monitor's alerts go, so that a monitor nobody would hear about
- * is noticed before it fails.
+ * Where a monitor's alerts go, as a chip of the header's meta row: a bell
+ * and the channels' names; each one's type and events are in its title.
  */
-export async function MonitorChannels({ monitorId, canEdit }: { monitorId: number; canEdit: boolean }) {
-  let channels: MonitorChannel[];
-  try {
-    channels = await getMonitorChannels(monitorId);
-  } catch {
-    return null; // the page itself reports a backend that is away
-  }
-  const t = await getT();
-  if (channels.length === 0) {
-    return (
-      <p className="mt-1.5 text-sm text-warn">
-        {t("monitorPage.channels.none")}
-        {canEdit && (
-          <>
-            {" "}
-            <Link href="/channels" className="underline">
-              {t("monitorPage.channels.add")}
-            </Link>
-            .
-          </>
-        )}
-      </p>
-    );
-  }
-  const describe = (c: MonitorChannel) =>
-    c.events.length === 0 ? "" : ` (${c.events.map((e) => t(channelEventLabels[e]).toLowerCase()).join(", ")})`;
+export function ChannelsChip({ channels, t }: { channels: MonitorChannel[]; t: T }) {
+  const describe = (c: MonitorChannel) => {
+    const events = c.events.map((e) => t(channelEventLabels[e]).toLocaleLowerCase(t.intl)).join(", ");
+    return `${c.name} (${t(channelTypes[c.type]?.label ?? c.type)}${events ? `: ${events}` : ""})`;
+  };
+  const names = channels.slice(0, NAMED).map((c) => c.name);
+  const rest = channels.length - names.length;
   return (
-    <p className="mt-1.5 text-sm text-muted">
-      {t("monitorPage.channels.label")}{" "}
-      {channels.map((c, i) => (
-        <span key={c.id}>
-          {i > 0 && ", "}
-          <span className="text-ink">{c.name}</span>
-          <span className="text-xs"> {t(channelTypes[c.type]?.label ?? c.type)}</span>
-          {describe(c)}
-        </span>
-      ))}
-    </p>
+    <span className="mon-chip" title={t("monitorPage.channels.chip", { list: channels.map(describe).join(", ") })}>
+      <BellIcon width={13} height={13} />
+      <span>
+        <span className="sr-only">{t("monitorPage.channels.label")} </span>
+        {names.join(", ")}
+        {rest > 0 && <span className="text-ink-3"> +{rest}</span>}
+      </span>
+    </span>
+  );
+}
+
+/** A monitor nobody would hear about, said before it fails; editors get the way to fix it. */
+export function NoChannelsCallout({ canEdit, t }: { canEdit: boolean; t: T }) {
+  return (
+    <Callout tone="warn" action={canEdit && <Link href="/channels">{t("monitorPage.channels.add")}</Link>}>
+      {t("monitorPage.channels.none")}
+    </Callout>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { ConfirmForm } from "@/app/ui/confirm";
-import { useActionState, useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import {
   type ChannelTestState,
   deleteChannelAction,
@@ -13,38 +14,118 @@ import type { Channel, ChannelType } from "@/lib/api";
 import { type ChannelEvent, channelEventLabels, channelTypeOrder, channelTypes } from "@/lib/channel-types";
 import { MASKED_VALUE } from "@/lib/constants";
 import { useT } from "@/lib/i18n/client";
+import type { T } from "@/lib/i18n/translate";
+import { ConfirmForm } from "@/app/ui/confirm";
 import { EditIcon, PauseIcon, PlayIcon, TrashIcon } from "@/app/ui/icons";
-import { TimeAgo } from "@/app/ui/time-ago";
+import { CheckIcon, CloseIcon, SendIcon } from "@/app/ui/page-icons";
+import { StatusGlyph } from "@/app/ui/status-glyph";
+import { TableTime } from "@/app/ui/table-time";
+
+const allEvents = Object.keys(channelEventLabels) as ChannelEvent[];
+
+/** Words joined as a sentence would: "a, b ve c" / "a, b and c". */
+function listWords(words: string[], t: T): string {
+  return new Intl.ListFormat(t.intl, { type: "conjunction" }).format(words);
+}
+
+/** Tags as the form takes them: "pager, kritik" -> ["pager", "kritik"]. */
+function tagList(text: string): string[] {
+  return text
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The sentence that reads a channel's routing back: which monitors' which
+ * notifications reach it. No namespace ticked is every monitor, and no
+ * event ticked (or all of them) is every event, as the backend has it.
+ */
+function routing(namespaces: string[], tags: string[], events: ChannelEvent[], t: T): React.ReactNode {
+  const ns = listWords(namespaces, t);
+  // A monitor needs one of the tags, not all of them.
+  const tg = new Intl.ListFormat(t.intl, { type: "disjunction" }).format(tags);
+  const who =
+    namespaces.length > 0 && tags.length > 0
+      ? t.n("channelForm.echo.who.nsTags", namespaces.length, { namespaces: ns, tags: tg })
+      : namespaces.length > 0
+        ? t.n("channelForm.echo.who.ns", namespaces.length, { namespaces: ns })
+        : tags.length > 0
+          ? t("channelForm.echo.who.tags", { tags: tg })
+          : t("channelForm.echo.who.all");
+  const what =
+    events.length === 0 || events.length === allEvents.length
+      ? t("channelForm.echo.what.all")
+      : t("channelForm.echo.what.some", {
+          events: listWords(
+            events.map((e) => t(channelEventLabels[e]).toLocaleLowerCase(t.intl)),
+            t,
+          ),
+        });
+  const [before, middle] = t("channelForm.echo").split("{who}");
+  if (middle !== undefined && before.includes("{what}")) {
+    // English: "This channel gets {what} of {who}."
+    const [lead, rest] = before.split("{what}");
+    return (
+      <>
+        {lead}
+        <b>{what}</b>
+        {rest}
+        <b>{who}</b>
+        {middle}
+      </>
+    );
+  }
+  // Turkish: "Bu kanala {who} {what} gider."
+  const [between, after] = (middle ?? "").split("{what}");
+  return (
+    <>
+      {before}
+      <b>{who}</b>
+      {between}
+      <b>{what}</b>
+      {after}
+    </>
+  );
+}
 
 /**
  * The form of a channel. With a channel it edits that one; without, it
- * creates one of the type chosen at the top.
+ * creates one of the type picked at the top. Its sections are what the
+ * channel is, where it sends, and what it hears about, the last read back
+ * as a sentence. closeHref is where Cancel and a successful save lead.
  */
 export function ChannelForm({
   channel,
   namespaces,
-  onDone,
+  closeHref,
 }: {
   channel?: Channel;
   /** The namespaces a channel can be limited to. */
   namespaces: string[];
-  /** Called after a successful save. */
-  onDone?: () => void;
+  closeHref: string;
 }) {
   const t = useT();
+  const router = useRouter();
   const [type, setType] = useState<ChannelType>(channel?.type ?? "slack");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // What the routing sentence reads, kept as the boxes are ticked.
+  const [chosenNamespaces, setChosenNamespaces] = useState<string[]>(channel?.namespaces ?? []);
+  const [tags, setTags] = useState(channel?.tags.join(", ") ?? "");
+  const [events, setEvents] = useState<ChannelEvent[]>(
+    !channel || channel.events.length === 0 ? allEvents : channel.events,
+  );
   const spec = channelTypes[type];
   // A namespace the channel is limited to may no longer have monitors.
   const offered = [...new Set([...namespaces, ...(channel?.namespaces ?? [])])].sort();
+  const toggle = <V,>(list: V[], value: V) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
 
   // Submitted by hand: React resets a form after its action, which would
   // throw away what was typed into a rejected one.
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = e.currentTarget;
-    const data = new FormData(form);
+    const data = new FormData(e.currentTarget);
     setError(null);
     startTransition(async () => {
       const result = await saveChannelAction(data);
@@ -52,224 +133,372 @@ export function ChannelForm({
         setError(result.error);
         return;
       }
-      if (!channel) form.reset();
-      onDone?.();
+      router.replace(closeHref, { scroll: false });
     });
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-4 sm:grid-cols-6">
+    <form onSubmit={submit} className="pg-form">
       {channel && <input type="hidden" name="id" value={channel.id} />}
       <input type="hidden" name="type" value={type} />
-      <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("channelForm.type.label")}</span>
-        {channel ? (
-          <input defaultValue={t(spec.label)} disabled className="field" />
-        ) : (
-          <select value={type} onChange={(e) => setType(e.target.value as ChannelType)} className="field">
-            {channelTypeOrder.map((kind) => (
-              <option key={kind} value={kind}>
-                {t(channelTypes[kind].label)}
-              </option>
-            ))}
-          </select>
-        )}
-      </label>
-      <label className="sm:col-span-4">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("channelForm.name.label")}</span>
-        <input name="name" required defaultValue={channel?.name} placeholder={t("channelForm.name.placeholder")} className="field" />
-      </label>
-      <p className="-mt-1 text-xs text-muted sm:col-span-6">{t(spec.summary)}</p>
 
-      {spec.target && (
-        <label className={spec.secret ? "sm:col-span-3" : "sm:col-span-6"}>
-          <span className="mb-1 block text-xs font-medium text-muted">{t(spec.target.label)}</span>
-          <input
-            // Remounted per type so a URL typed for one type is not checked
-            // as something else for another.
-            key={type}
-            name="target"
-            // A stored URL is shown masked, which is not a URL.
-            type={channel ? "text" : spec.target.inputType}
-            required
-            defaultValue={channel?.target}
-            placeholder={t(spec.target.placeholder)}
-            className="field font-mono"
-          />
-          <span className="mt-1 block text-xs text-muted">
-            {channel && channel.target.endsWith("…")
-              ? t("channelForm.target.masked")
-              : spec.target.hint && t(spec.target.hint)}
-          </span>
-        </label>
-      )}
-      {spec.secret && (
-        <label className={spec.target ? "sm:col-span-3" : "sm:col-span-6"}>
-          <span className="mb-1 block text-xs font-medium text-muted">{t(spec.secret.label)}</span>
-          <input
-            key={type}
-            name="secret"
-            type="password"
-            required={spec.secret.required}
-            // The stored value never reaches the browser; the mask stands for it.
-            defaultValue={channel?.has_secret ? MASKED_VALUE : ""}
-            placeholder={t(spec.secret.placeholder)}
-            autoComplete="new-password"
-            className="field font-mono"
-          />
-          {channel?.has_secret && (
-            <span className="mt-1 block text-xs text-muted">{t("channelForm.secret.masked")}</span>
+      <div className="pg-sec">
+        <div className="pg-sec-intro">
+          <h2>{t("channelForm.sec.channel")}</h2>
+          <p>{t("channelForm.sec.channelBody")}</p>
+        </div>
+        <div className="pg-fields">
+          {channel ? (
+            <div>
+              <span className="pg-label">{t("channelForm.type.label")}</span>
+              <span className="pg-tag">{t(spec.label)}</span>
+            </div>
+          ) : (
+            <fieldset>
+              <legend className="pg-label">{t("channelForm.type.label")}</legend>
+              <div className="pg-types">
+                {channelTypeOrder.map((kind) => (
+                  <label key={kind} className="pg-type">
+                    <input type="radio" name="channel-type" checked={type === kind} onChange={() => setType(kind)} />
+                    {t(channelTypes[kind].label)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
           )}
-        </label>
+          <label>
+            <span className="pg-label">{t("channelForm.name.label")}</span>
+            <input
+              name="name"
+              required
+              defaultValue={channel?.name}
+              placeholder={t("channelForm.name.placeholder")}
+              className="field"
+            />
+          </label>
+        </div>
+      </div>
+
+      {(spec.target || spec.secret) && (
+        <div className="pg-sec">
+          <div className="pg-sec-intro">
+            <h2>{t("channelForm.sec.target")}</h2>
+            <p>{t(spec.summary)}</p>
+          </div>
+          <div className="pg-fields">
+            {spec.target && (
+              <label>
+                <span className="pg-label">{t(spec.target.label)}</span>
+                <input
+                  // Remounted per type so a URL typed for one type is not checked
+                  // as something else for another.
+                  key={type}
+                  name="target"
+                  // A stored URL is shown masked, which is not a URL.
+                  type={channel ? "text" : spec.target.inputType}
+                  required
+                  defaultValue={channel?.target}
+                  placeholder={t(spec.target.placeholder)}
+                  className="field font-mono"
+                />
+                {(channel?.target.endsWith("…") || spec.target.hint) && (
+                  <span className="pg-help">
+                    {channel?.target.endsWith("…") ? t("channelForm.target.masked") : spec.target.hint && t(spec.target.hint)}
+                  </span>
+                )}
+              </label>
+            )}
+            {spec.secret && (
+              <label>
+                <span className="pg-label">{t(spec.secret.label)}</span>
+                <input
+                  key={type}
+                  name="secret"
+                  type="password"
+                  required={spec.secret.required}
+                  // The stored value never reaches the browser; the mask stands for it.
+                  defaultValue={channel?.has_secret ? MASKED_VALUE : ""}
+                  placeholder={t(spec.secret.placeholder)}
+                  autoComplete="new-password"
+                  className="field font-mono"
+                />
+                {channel?.has_secret && <span className="pg-help">{t("channelForm.secret.masked")}</span>}
+              </label>
+            )}
+          </div>
+        </div>
       )}
 
-      <fieldset className="sm:col-span-6">
-        <legend className="mb-1 text-xs font-medium text-muted">{t("channelForm.scope.legend")}</legend>
-        {offered.length === 0 ? (
-          <p className="text-sm text-muted">{t("channelForm.scope.allMonitors")}</p>
-        ) : (
-          <>
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-              {offered.map((ns) => (
-                <label key={ns} className="flex items-center gap-1.5 text-sm">
+      <div className="pg-sec">
+        <div className="pg-sec-intro">
+          <h2>{t("channelForm.sec.routing")}</h2>
+          <p>{t("channelForm.sec.routingBody")}</p>
+        </div>
+        <div className="pg-fields">
+          <fieldset>
+            <legend className="pg-label">{t("channelForm.scope.legend")}</legend>
+            {offered.length === 0 ? (
+              <p className="pg-help mt-0">{t("channelForm.scope.allMonitors")}</p>
+            ) : (
+              <>
+                <div className="pg-chips">
+                  {offered.map((ns) => (
+                    <label key={ns} className="pg-chip pg-chip-mono">
+                      <input
+                        type="checkbox"
+                        name="namespace"
+                        value={ns}
+                        checked={chosenNamespaces.includes(ns)}
+                        onChange={() => setChosenNamespaces((list) => toggle(list, ns))}
+                      />
+                      {ns}
+                    </label>
+                  ))}
+                </div>
+                <span className="pg-help">{t("channelForm.scope.hint")}</span>
+              </>
+            )}
+          </fieldset>
+          <label>
+            <span className="pg-label">
+              {t("channelForm.tags.label")}
+              <small>{t("form.optional")}</small>
+            </span>
+            <input
+              name="tags"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              placeholder={t("channelForm.tags.placeholder")}
+              className="field"
+            />
+            <span className="pg-help">{t("channelForm.tags.hint")}</span>
+          </label>
+          <fieldset>
+            <legend className="pg-label">{t("channelForm.events.legend")}</legend>
+            <div className="pg-chips">
+              {allEvents.map((event) => (
+                <label key={event} className="pg-chip">
                   <input
                     type="checkbox"
-                    name="namespace"
-                    value={ns}
-                    defaultChecked={channel?.namespaces.includes(ns)}
-                    className="h-4 w-4 accent-(--accent)"
+                    name="event"
+                    value={event}
+                    checked={events.includes(event)}
+                    onChange={() => setEvents((list) => toggle(list, event))}
                   />
-                  {ns}
+                  {t(channelEventLabels[event])}
                 </label>
               ))}
             </div>
-            <p className="mt-1 text-xs text-muted">{t("channelForm.scope.hint")}</p>
-          </>
-        )}
-      </fieldset>
-
-      <label className="sm:col-span-3">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("channelForm.tags.label")}</span>
-        <input
-          name="tags"
-          defaultValue={channel?.tags.join(", ")}
-          placeholder={t("channelForm.tags.placeholder")}
-          className="field"
-        />
-        <span className="mt-1 block text-xs text-muted">{t("channelForm.tags.hint")}</span>
-      </label>
-      <fieldset className="sm:col-span-3">
-        <legend className="mb-1 text-xs font-medium text-muted">{t("channelForm.events.legend")}</legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-          {(Object.keys(channelEventLabels) as ChannelEvent[]).map((event) => (
-            <label key={event} className="flex items-center gap-1.5 text-sm">
-              <input
-                type="checkbox"
-                name="event"
-                value={event}
-                defaultChecked={!channel || channel.events.length === 0 || channel.events.includes(event)}
-                className="h-4 w-4 accent-(--accent)"
-              />
-              {t(channelEventLabels[event])}
-            </label>
-          ))}
-        </div>
-        <span className="mt-1 block text-xs text-muted">{t("channelForm.events.hint")}</span>
-      </fieldset>
-
-      <div className="flex flex-wrap items-center gap-3 sm:col-span-6">
-        <button type="submit" disabled={pending} className="btn btn-primary">
-          {pending ? t("common.saving") : channel ? t("common.save") : t("channelForm.create")}
-        </button>
-        {channel && (
-          <button type="button" onClick={onDone} className="btn">
-            {t("common.cancel")}
-          </button>
-        )}
-        {error && (
-          <p role="alert" className="text-sm text-down">
-            {error}
+            <span className="pg-help">{t("channelForm.events.hint")}</span>
+          </fieldset>
+          <p className="pg-echo" aria-live="polite">
+            {routing(chosenNamespaces, tagList(tags), events, t)}
           </p>
-        )}
+        </div>
+      </div>
+
+      <div className="pg-savebar pg-savebar-sticky">
+        {error && <p role="alert">{error}</p>}
+        <div className="pg-savebar-end">
+          <Link href={closeHref} scroll={false} className="btn btn-ghost">
+            {t("common.cancel")}
+          </Link>
+          <button type="submit" disabled={pending} className="btn btn-primary">
+            {pending ? t("common.saving") : channel ? t("common.save") : t("channelForm.create")}
+          </button>
+        </div>
       </div>
     </form>
   );
 }
 
-/** One channel in the list: what it is, and what can be done with it. */
-export function ChannelRow({ channel, namespaces }: { channel: Channel; namespaces: string[] }) {
+/**
+ * Sends a test notification through a channel. The channel keeps the
+ * attempt as its last delivery, so the row is read again afterwards; the
+ * button says for a moment how it went.
+ */
+function TestButton({ channel }: { channel: Channel }) {
   const t = useT();
-  const [editing, setEditing] = useState(false);
-  const [test, testAction, testing] = useActionState<ChannelTestState, FormData>(testChannelAction, null);
+  const router = useRouter();
+  const [result, action, testing] = useActionState<ChannelTestState, FormData>(testChannelAction, null);
+  // The outcome is shown until a few seconds have passed since it came.
+  const [faded, setFaded] = useState<ChannelTestState>(null);
+  const shown = result && result !== faded ? result : null;
+
+  useEffect(() => {
+    if (!result) return;
+    router.refresh();
+    const id = setTimeout(() => setFaded(result), 4000);
+    return () => clearTimeout(id);
+  }, [result, router]);
+
+  const said = shown
+    ? shown.delivered
+      ? t("channelRow.test.delivered")
+      : t("channelRow.test.failed", { error: shown.error ?? "" })
+    : "";
+  return (
+    <form action={action} className="contents">
+      <input type="hidden" name="id" value={channel.id} />
+      <button
+        type="submit"
+        disabled={testing}
+        className={`pg-icon-btn ${shown ? (shown.delivered ? "text-up-ink" : "text-down-ink") : ""}`}
+        aria-label={`${t("channelRow.test.send")}: ${channel.name}`}
+        title={said || (testing ? t("channelRow.test.sending") : t("channelRow.test.send"))}
+      >
+        {shown ? shown.delivered ? <CheckIcon /> : <CloseIcon /> : <SendIcon />}
+      </button>
+      <span role="status" className="sr-only">
+        {said}
+      </span>
+    </form>
+  );
+}
+
+/** Which monitors and which events a channel hears about, in one short line. */
+function routingLine(channel: Channel, t: T): string {
+  const parts = [
+    channel.namespaces.length === 0 ? t("channelRow.allMonitors") : channel.namespaces.map((ns) => `ns/${ns}`).join(", "),
+  ];
+  if (channel.tags.length > 0) parts.push(t("channelRow.tags", { tags: channel.tags.join(", ") }));
+  parts.push(
+    channel.events.length === 0
+      ? t("channelRow.allEvents")
+      : listWords(
+          channel.events.map((e) => t(channelEventLabels[e]).toLocaleLowerCase(t.intl)),
+          t,
+        ),
+  );
+  return parts.join(" · ");
+}
+
+/**
+ * One channel as a row of the table: its name and type, where it sends,
+ * what it hears about, how its last delivery went, and what can be done
+ * with it. While it is edited (editHref leads back out), its form opens
+ * in a row of its own under it.
+ */
+export function ChannelRow({
+  channel,
+  namespaces,
+  canEdit,
+  editing,
+}: {
+  channel: Channel;
+  namespaces: string[];
+  canEdit: boolean;
+  editing: boolean;
+}) {
+  const t = useT();
   const spec = channelTypes[channel.type];
+  const typeName = t(spec?.label ?? channel.type);
+  const last = channel.last_delivery;
+  const routes = routingLine(channel, t);
 
   return (
-    <li className="px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            <span className={channel.enabled ? "" : "text-muted line-through"}>{channel.name}</span>
-            <span className="rounded bg-sunken px-1.5 py-0.5 text-xs font-normal">{t(spec?.label ?? channel.type)}</span>
+    <>
+      <tr className={editing ? "pg-row-open" : undefined}>
+        <td className="pg-grow">
+          <span className="flex min-w-0 items-center gap-x-2 gap-y-1 max-sm:flex-wrap">
+            <span className={`pg-trunc pg-name ${channel.enabled ? "" : "text-ink-3"}`} title={channel.name}>
+              {channel.name}
+            </span>
+            <span className="pg-tag flex-none">{typeName}</span>
             {!channel.enabled && (
-              <span className="rounded bg-sunken px-1.5 py-0.5 text-xs font-normal text-muted">{t("channelRow.paused")}</span>
+              <span className="pg-state flex-none text-ink-3">
+                <StatusGlyph kind="paused" />
+                {t("channelRow.paused")}
+              </span>
             )}
-          </div>
-          <div className="mt-0.5 truncate text-xs text-muted">
-            {channel.target && <span className="font-mono">{channel.target} · </span>}
-            {channel.namespaces.length === 0
-              ? t("channelRow.allMonitors")
-              : t("channelRow.onlyNamespaces", { namespaces: channel.namespaces.join(", ") })}
-            {channel.tags.length > 0 && ` · ${t("channelRow.tags", { tags: channel.tags.join(", ") })}`}
-            {channel.events.length > 0 && ` · ${channel.events.map((e) => t(channelEventLabels[e]).toLowerCase()).join(", ")}`}
-          </div>
-          {channel.last_delivery && (
-            <div className={`mt-0.5 text-xs ${channel.last_delivery.delivered ? "text-muted" : "font-medium text-down"}`}>
-              {channel.last_delivery.delivered ? t("channelRow.lastDelivery.ok") : t("channelRow.lastDelivery.failed")}{" "}
-              <TimeAgo iso={channel.last_delivery.at} />
-              {!channel.last_delivery.delivered && channel.last_delivery.error && (
-                <span className="font-mono font-normal"> · {channel.last_delivery.error}</span>
+          </span>
+        </td>
+        {/* Between a phone and a wide screen, the masked address gives way to the name. */}
+        <td className="pg-shrink sm:max-xl:hidden">
+          <span className="pg-trunc pg-mono max-w-60 text-ink-2" title={channel.target || undefined}>
+            {channel.target || t("common.none")}
+          </span>
+        </td>
+        <td className="pg-shrink">
+          <span className="pg-trunc max-w-48 text-ink-2 xl:max-w-72" title={routes}>
+            {routes}
+          </span>
+        </td>
+        <td className="pg-shrink">
+          {last ? (
+            <span
+              className={`pg-state max-w-64 ${last.delivered ? "text-ink-2" : "text-down-ink"}`}
+              title={last.delivered ? undefined : last.error}
+            >
+              <StatusGlyph kind={last.delivered ? "up" : "down"} />
+              <span className="tabular-nums">
+                <TableTime iso={last.at} />
+              </span>
+              {!last.delivered && (
+                <span className="pg-trunc pg-mono font-normal">{last.error || t("channelRow.failed")}</span>
               )}
-            </div>
+            </span>
+          ) : (
+            <span className="text-ink-3">{t("channelRow.never")}</span>
           )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <form action={testAction}>
-            <input type="hidden" name="id" value={channel.id} />
-            <button type="submit" disabled={testing} className="btn">
-              {testing ? t("channelRow.test.sending") : t("channelRow.test.send")}
-            </button>
-          </form>
-          <form action={setChannelEnabledAction}>
-            <input type="hidden" name="id" value={channel.id} />
-            <input type="hidden" name="enabled" value={String(!channel.enabled)} />
-            <button type="submit" className="btn" title={channel.enabled ? t("channelRow.pause.title") : t("channelRow.resume.title")}>
-              {channel.enabled ? <PauseIcon /> : <PlayIcon />}
-              <span className="sr-only">{channel.enabled ? t("channelRow.pause") : t("channelRow.resume")}</span>
-            </button>
-          </form>
-          <button type="button" onClick={() => setEditing((v) => !v)} aria-expanded={editing} className="btn" title={t("common.edit")}>
-            <EditIcon />
-            <span className="sr-only">{t("common.edit")}</span>
-          </button>
-          <ConfirmForm action={deleteChannelAction} question={t("channelRow.delete.confirm", { name: channel.name })}>
-            <input type="hidden" name="id" value={channel.id} />
-            <button type="submit" className="btn btn-danger" title={t("common.delete")}>
-              <TrashIcon />
-              <span className="sr-only">{t("common.delete")}</span>
-            </button>
-          </ConfirmForm>
-        </div>
-      </div>
-      {test && !testing && (
-        <p role="status" className={`mt-2 text-xs ${test.delivered ? "text-up" : "text-down"}`}>
-          {test.delivered ? t("channelRow.test.delivered") : t("channelRow.test.failed", { error: test.error ?? "" })}
-        </p>
-      )}
+        </td>
+        {canEdit && (
+          <td className="pg-actions">
+            <span className="pg-row-actions">
+              <TestButton channel={channel} />
+              <form action={setChannelEnabledAction} className="contents">
+                <input type="hidden" name="id" value={channel.id} />
+                <input type="hidden" name="enabled" value={String(!channel.enabled)} />
+                <button
+                  type="submit"
+                  className="pg-icon-btn"
+                  aria-label={`${channel.enabled ? t("channelRow.pause") : t("channelRow.resume")}: ${channel.name}`}
+                  title={channel.enabled ? t("channelRow.pause.title") : t("channelRow.resume.title")}
+                >
+                  {channel.enabled ? <PauseIcon /> : <PlayIcon />}
+                </button>
+              </form>
+              <Link
+                href={editing ? "/channels" : `/channels?edit=${channel.id}`}
+                scroll={false}
+                className="pg-icon-btn"
+                aria-label={`${t("common.edit")}: ${channel.name}`}
+                aria-expanded={editing}
+                title={t("common.edit")}
+              >
+                <EditIcon />
+              </Link>
+              <ConfirmForm
+                action={deleteChannelAction}
+                className="contents"
+                title={t("channelRow.delete.title", { name: channel.name })}
+                question={t("channelRow.delete.body")}
+                items={[`${channel.name} · ${typeName}${channel.target ? ` · ${channel.target}` : ""}`]}
+                icon={<TrashIcon />}
+              >
+                <input type="hidden" name="id" value={channel.id} />
+                <button
+                  type="submit"
+                  className="pg-icon-btn pg-icon-btn-danger"
+                  aria-label={`${t("common.delete")}: ${channel.name}`}
+                  title={t("common.delete")}
+                >
+                  <TrashIcon />
+                </button>
+              </ConfirmForm>
+            </span>
+          </td>
+        )}
+      </tr>
       {editing && (
-        <div className="mt-3 rounded-lg bg-sunken/60 p-4">
-          <ChannelForm channel={channel} namespaces={namespaces} onDone={() => setEditing(false)} />
-        </div>
+        <tr className="pg-row-form">
+          <td colSpan={canEdit ? 5 : 4}>
+            <div className="pg-inline-form">
+              <ChannelForm channel={channel} namespaces={namespaces} closeHref="/channels" />
+            </div>
+          </td>
+        </tr>
       )}
-    </li>
+    </>
   );
 }

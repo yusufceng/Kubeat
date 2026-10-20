@@ -1,0 +1,935 @@
+/* The monitor page and the monitor form, on Kubeat Signal. Every class here
+   starts with mon-. The page lays itself out by its own width (a container),
+   not the window's: the monitor list beside it takes a share of the screen
+   that changes with the window. */
+
+@layer components {
+  .mon {
+    container: mon / inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+  }
+
+  /* ---------- The header ---------- */
+  .mon-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px 24px;
+  }
+  .mon-head-main {
+    min-width: 0;
+    flex: 1 1 26rem;
+  }
+  .mon-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+  }
+  .mon-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* What the monitor is in the cluster, as kubectl says it, and the type of
+     its check: "svc/pricing:8080 | http". */
+  .mon-kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 100%;
+    height: 22px;
+    padding: 0 7px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    background: var(--well);
+    color: var(--ink-2);
+    font: 500 11.5px/1 var(--font-plex), ui-monospace, monospace;
+    white-space: nowrap;
+  }
+  .mon-kind > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* The type of check is short and always shown whole; the object gives way. */
+  .mon-kind > span:last-child {
+    flex: none;
+  }
+  .mon-kind > i {
+    flex: none;
+    align-self: stretch;
+    width: 1px;
+    margin: 5px 0;
+    background: var(--line-strong);
+  }
+  .mon-desc {
+    margin-top: 4px;
+    color: var(--ink-2);
+  }
+  .mon-stline {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-width: 0;
+  }
+  .mon-error {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--ink-2);
+    font: 400 12px/16px var(--font-plex), ui-monospace, monospace;
+    letter-spacing: -0.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mon-meta {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    min-width: 0;
+  }
+  .mon-target {
+    min-width: 0;
+    margin-right: 4px;
+    color: var(--ink-3);
+    font: 400 12px/16px var(--font-plex), ui-monospace, monospace;
+    letter-spacing: -0.01em;
+    /* An address breaks where the line ends, so no letter is left alone. */
+    word-break: break-all;
+  }
+  .mon-target b {
+    color: var(--ink-2);
+    font-weight: 500;
+  }
+  /* A neutral chip of the meta row: a tag, the channels, "each pod". */
+  .mon-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    color: var(--ink-2);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .mon-chip > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mon-chip > svg {
+    flex: none;
+    color: var(--ink-3);
+  }
+  .mon-acts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+  }
+  @container mon (width < 42rem) {
+    .mon-acts {
+      margin-left: -10px;
+    }
+  }
+
+  /* The item in hand of a menu: the hover fill, the ring kept inside it. */
+  .mon-menu .menu-item:focus-visible {
+    outline-offset: -2px;
+    background: var(--hover);
+  }
+
+  /* A line that asks for attention, in a state's soft color. */
+  .mon-callout {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .mon-callout > .glyph {
+    margin-top: 4px;
+  }
+  .mon-callout p {
+    min-width: 0;
+    flex: 1;
+  }
+  .mon-callout a {
+    color: var(--accent-text);
+    font-weight: 550;
+    white-space: nowrap;
+  }
+  .mon-callout a:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .mon-callout-warn {
+    background: var(--warn-soft);
+    box-shadow: inset 0 0 0 1px var(--warn-line);
+  }
+  .mon-callout-down {
+    background: var(--down-soft);
+    box-shadow: inset 0 0 0 1px var(--down-line);
+  }
+  .mon-callout-maint {
+    background: var(--maint-soft);
+    box-shadow: inset 0 0 0 1px var(--maint-line);
+  }
+  .mon-callout-muted {
+    background: var(--hover);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+
+  /* ---------- Panels ---------- */
+  .mon-ph {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 14px 16px 0;
+  }
+  .mon-ph > h2 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .mon-sub {
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .mon-ph-end {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  /* A small heading inside a panel. */
+  .mon-h3 {
+    margin-bottom: 6px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+  }
+  /* Panels side by side where there is room. */
+  .mon-split {
+    display: grid;
+    gap: 20px;
+    align-items: start;
+  }
+  @container mon (width >= 56rem) {
+    .mon-split {
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    }
+  }
+
+  /* The selected range: its incidents beside the cluster's events. */
+  .mon-window-cols {
+    display: grid;
+    column-gap: 16px;
+  }
+  .mon-window-cols > * + * {
+    border-top: 1px solid var(--line);
+  }
+  @container mon (width >= 56rem) {
+    .mon-window-cols {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .mon-window-cols > * + * {
+      border-top: 0;
+      border-left: 1px solid var(--line);
+    }
+  }
+
+  /* A segmented control: links (aria-current) or radios in labels. */
+  .mon-seg {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--well);
+  }
+  .mon-seg > * {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-xs);
+    color: var(--ink-2);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    font-stretch: 95%;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 120ms var(--ease-signal),
+      color 120ms var(--ease-signal);
+  }
+  .mon-seg > *:hover {
+    color: var(--ink);
+  }
+  .mon-seg > [aria-current="true"],
+  .mon-seg > :has(input:checked) {
+    background: var(--raised);
+    color: var(--ink);
+    box-shadow: 0 0 0 1px var(--line-strong);
+  }
+  :root[data-theme="dark"] .mon-seg > [aria-current="true"],
+  :root[data-theme="dark"] .mon-seg > :has(input:checked) {
+    background: var(--hover);
+  }
+  .mon-seg input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .mon-seg > :has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* ---------- The strip of recent checks ---------- */
+  .mon-strip-cap {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 2px 16px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+  }
+  .mon-detail {
+    margin-top: 10px;
+    color: var(--ink-3);
+    font: 400 12px/16px var(--font-plex), ui-monospace, monospace;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------- Why it failed ---------- */
+  .mon-why-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 14px 16px 0;
+  }
+  .mon-why-head > h2 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .mon-why-body {
+    display: grid;
+    gap: 18px 32px;
+    padding: 10px 16px 16px;
+  }
+  @container mon (width >= 50rem) {
+    .mon-why-body.mon-why-2 {
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    }
+  }
+  .mon-why-explain {
+    color: var(--ink);
+    font-size: 15px;
+    line-height: 22px;
+    font-weight: 500;
+    text-wrap: pretty;
+  }
+  .mon-why-note {
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .mon-why-error {
+    margin-top: 8px;
+    color: var(--down-ink);
+    font: 400 12px/16px var(--font-plex), ui-monospace, monospace;
+    overflow-wrap: anywhere;
+  }
+  /* Facts: a label and a value per row, between hairlines. */
+  .mon-facts {
+    margin-top: 12px;
+  }
+  .mon-fact {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, max-content) minmax(0, 1fr);
+    gap: 2px 14px;
+    padding: 7px 0;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .mon-fact > dt {
+    color: var(--ink-3);
+  }
+  .mon-fact > dd {
+    min-width: 0;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+  .mon-mono {
+    font-family: var(--font-plex), ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: -0.01em;
+  }
+  .mon-fact small {
+    margin-left: 6px;
+    color: var(--ink-3);
+    font-family: var(--font-mona), ui-sans-serif, system-ui, sans-serif;
+    font-size: 12px;
+  }
+
+  /* The timing waterfall: a step per row, on a shared axis from the start
+     of the request to the end of the check. */
+  .mon-wf {
+    display: grid;
+    grid-template-columns: max-content minmax(4rem, 1fr) max-content;
+    align-items: center;
+    gap: 7px 12px;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .mon-wf dt {
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .mon-wf-track {
+    position: relative;
+    height: 10px;
+  }
+  .mon-wf-track::before {
+    content: "";
+    position: absolute;
+    inset: 4.5px 0 auto;
+    height: 1px;
+    background: var(--line);
+  }
+  .mon-wf-bar {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    min-width: 2px;
+    border-radius: 1px;
+    background: var(--series);
+  }
+  .mon-wf-total {
+    top: 3px;
+    bottom: 3px;
+    background: var(--ink-3);
+  }
+  .mon-wf-fail {
+    background: repeating-linear-gradient(135deg, var(--down) 0 2px, transparent 2px 4px);
+    box-shadow: inset 0 0 0 1px var(--down-line);
+  }
+  .mon-wf dd {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .mon-wf dd small {
+    margin-left: 2px;
+    color: var(--ink-3);
+    font-size: 11px;
+  }
+  .mon-wf .mon-wf-skip {
+    color: var(--ink-3);
+  }
+  .mon-wf-sep {
+    grid-column: 1 / -1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  /* ---------- Incidents as a timeline ---------- */
+  .mon-tl {
+    padding: 4px 8px 10px;
+  }
+  .mon-tl-item {
+    position: relative;
+  }
+  .mon-tl-item::before {
+    content: "";
+    position: absolute;
+    left: 14.5px;
+    top: 26px;
+    bottom: -6px;
+    width: 1px;
+    background: var(--line);
+  }
+  .mon-tl-item:last-child::before {
+    display: none;
+  }
+  .mon-tl-row {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: var(--radius-sm);
+    transition: background-color 120ms var(--ease-signal);
+  }
+  a.mon-tl-row:hover {
+    background: var(--hover);
+  }
+  .mon-tl-row > .glyph {
+    justify-self: center;
+    margin-top: 4px;
+  }
+  .mon-tl-w1 {
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .mon-tl-w1 b {
+    font-weight: 600;
+  }
+  .mon-tl-w2 {
+    margin-top: 2px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    overflow-wrap: anywhere;
+  }
+  .mon-more {
+    padding: 0 16px 14px;
+  }
+  .mon-more > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-2);
+    font-size: 12px;
+    font-weight: 550;
+    line-height: 16px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .mon-more > summary::-webkit-details-marker {
+    display: none;
+  }
+  .mon-more > summary:hover {
+    color: var(--ink);
+  }
+  .mon-more > summary > svg {
+    transition: rotate 120ms var(--ease-signal);
+  }
+  .mon-more[open] > summary > svg {
+    rotate: 90deg;
+  }
+
+  /* ---------- Tables: hairline rows ---------- */
+  .mon-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .mon-table th {
+    height: 32px;
+    padding: 0 12px;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .mon-table td {
+    height: 36px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--line);
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .mon-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The pods' table gives up its node column where its panel is narrow;
+     the node then joins the line under the pod's name. */
+  .mon-pods {
+    container: pods / inline-size;
+  }
+  .mon-pods-node-inline {
+    display: none;
+  }
+  @container pods (width < 36rem) {
+    .mon-pods .mon-pods-node {
+      display: none;
+    }
+    .mon-pods .mon-pods-node-inline {
+      display: inline;
+    }
+  }
+
+  /* ---------- Checks, one per row; a failed one opens to its details ---------- */
+  .mon-checks {
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .mon-check {
+    display: grid;
+    grid-template-columns: 14px minmax(7.5rem, max-content) minmax(6rem, max-content) 4.5rem minmax(0, 1fr);
+    align-items: center;
+    gap: 2px 12px;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-top: 1px solid var(--line);
+  }
+  .mon-check-head {
+    min-height: 32px;
+    border-top: 0;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .mon-check .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .mon-check .mon-mono {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink-3);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mon-checks details > summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  .mon-checks details > summary::-webkit-details-marker {
+    display: none;
+  }
+  .mon-checks details > summary:hover {
+    background: var(--hover);
+  }
+  .mon-checks details > summary > svg {
+    color: var(--ink-3);
+    transition: rotate 120ms var(--ease-signal);
+  }
+  .mon-checks details[open] > summary > svg {
+    rotate: 90deg;
+  }
+  .mon-check-diag {
+    padding: 2px 12px 14px 38px;
+  }
+  .mon-check-diag > .mon-why-body {
+    padding: 0;
+  }
+  @container mon (width < 40rem) {
+    .mon-check {
+      grid-template-columns: 14px minmax(0, 1fr) max-content;
+    }
+    .mon-check > :nth-child(3) {
+      display: none;
+    }
+    .mon-check > :nth-child(5) {
+      grid-column: 2 / -1;
+    }
+    .mon-check-head > :nth-child(5) {
+      display: none;
+    }
+    .mon-check-diag {
+      padding-left: 12px;
+    }
+  }
+
+  /* ---------- Settings: a definition list between hairlines ---------- */
+  .mon-dl {
+    display: grid;
+    column-gap: 32px;
+    padding: 6px 16px 10px;
+  }
+  .mon-dl > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    min-width: 0;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .mon-dl > div:first-child {
+    border-top: 0;
+  }
+  .mon-dl dt {
+    flex: none;
+    color: var(--ink-3);
+  }
+  .mon-dl dd {
+    min-width: 0;
+    color: var(--ink);
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+  @container mon (width >= 44rem) {
+    .mon-dl.mon-dl-2 {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .mon-dl.mon-dl-2 > div:nth-child(2) {
+      border-top: 0;
+    }
+  }
+
+  /* ---------- The push address ---------- */
+  .mon-copy {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .mon-copy > code {
+    min-width: 0;
+    flex: 1;
+    overflow-x: auto;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--well);
+    color: var(--ink);
+    font: 400 12px/18px var(--font-plex), ui-monospace, monospace;
+    white-space: nowrap;
+  }
+
+  /* ---------- The monitor form ---------- */
+  .mon-form {
+    container: monform / inline-size;
+    overflow: clip;
+  }
+  .mon-fsec {
+    display: grid;
+    gap: 14px 40px;
+    padding: 20px;
+    border-top: 1px solid var(--line);
+  }
+  .mon-fsec:first-of-type {
+    border-top: 0;
+  }
+  @container monform (width >= 46rem) {
+    .mon-fsec {
+      grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+      padding: 24px;
+    }
+  }
+  .mon-fsec-intro > h2 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .mon-fsec-intro > p {
+    margin-top: 4px;
+    color: var(--ink-3);
+    font-size: 13px;
+    line-height: 18px;
+    text-wrap: pretty;
+  }
+  .mon-fields {
+    container: monfields / inline-size;
+    min-width: 0;
+  }
+  .mon-fields-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .mon-fields-grid > * {
+    grid-column: span 6;
+    min-width: 0;
+  }
+  @container monfields (width >= 30rem) {
+    .mon-fields-grid > .mon-span-2 {
+      grid-column: span 2;
+    }
+    .mon-fields-grid > .mon-span-3 {
+      grid-column: span 3;
+    }
+    .mon-fields-grid > .mon-span-4 {
+      grid-column: span 4;
+    }
+  }
+  .mon-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 600;
+  }
+  .mon-label > small {
+    margin-left: 4px;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 450;
+  }
+  .mon-help {
+    display: block;
+    margin-top: 6px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    text-wrap: pretty;
+  }
+  /* A sentence that reads the section's values back. */
+  .mon-echo {
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--well);
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 19px;
+  }
+  .mon-echo b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .mon-check-field {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .mon-check-field input {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+    accent-color: var(--accent);
+  }
+  .mon-check-field b {
+    display: block;
+    font-weight: 550;
+  }
+  /* The kinds of check, as cards to pick from. */
+  .mon-types {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8.75rem, 1fr));
+    gap: 6px;
+  }
+  .mon-type {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    cursor: pointer;
+    transition:
+      border-color 120ms var(--ease-signal),
+      background-color 120ms var(--ease-signal);
+  }
+  .mon-type:hover {
+    border-color: var(--line-strong);
+  }
+  .mon-type:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .mon-type:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .mon-type input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .mon-type-word {
+    color: var(--ink-3);
+    font: 500 11px/14px var(--font-plex), ui-monospace, monospace;
+  }
+  .mon-type:has(input:checked) .mon-type-word {
+    color: var(--accent-text);
+  }
+  .mon-type-name {
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 550;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* The bar that keeps Save in reach while the form scrolls by. */
+  .mon-savebar {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--line);
+    background: color-mix(in oklab, var(--panel) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  @container monform (width >= 46rem) {
+    .mon-savebar {
+      padding: 12px 24px;
+    }
+  }
+  @media (width < 64rem) {
+    /* Above the phone's tab bar. */
+    .mon-savebar {
+      bottom: calc(62px + env(safe-area-inset-bottom));
+    }
+  }
+  .mon-savebar-end {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+  }
+}
+
+/* The chart's line draws itself in once, when the chart first appears. */
+@keyframes mon-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes mon-fade {
+  from {
+    opacity: 0;
+  }
+}
+.mon-intro .mon-line {
+  stroke-dasharray: 1;
+  animation: mon-draw 400ms var(--ease-signal) both;
+}
+.mon-intro .mon-area {
+  animation: mon-fade 400ms var(--ease-signal) both;
+}

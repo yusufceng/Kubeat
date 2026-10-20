@@ -23,3 +23,20 @@ export function Tag({ name }: { name: string }) {
     </span>
   );
 }
+
+/**
+ * A tag the Kubeat Signal way: a neutral outlined chip, its hue only in a
+ * small dot, so that tags never read as a state.
+ */
+export function TagChip({ name }: { name: string }) {
+  return (
+    <span className="inline-flex h-[22px] max-w-full items-center gap-1.5 rounded-xs border border-line px-2 text-xs leading-none font-medium whitespace-nowrap text-ink-2">
+      <span
+        aria-hidden
+        className="h-1.5 w-1.5 flex-none rounded-full"
+        style={{ backgroundColor: `oklch(0.65 0.13 ${hueOf(name)})` }}
+      />
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}

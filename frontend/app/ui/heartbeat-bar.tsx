@@ -1,42 +1,39 @@
 "use client";
 
 import type { HistoryPoint } from "@/lib/api";
+import { milliseconds } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
-import { useMounted } from "@/lib/use-mounted";
+import { BeatStrip } from "@/app/ui/beat-strip";
 
 /**
- * The recent checks of a monitor as one bar each, oldest on the left; empty
- * slots pad the left side so the newest check is always at the right edge.
+ * The recent checks of a monitor, one slot each, newest on the right; a
+ * monitor with fewer checks than slots shows no data on the left. Hovering
+ * a slot tells when it ran and what it came to.
  */
-export function HeartbeatBar({ results, slots }: { results: HistoryPoint[]; slots: number }) {
+export function HeartbeatBar({
+  results,
+  slots,
+  height = 30,
+}: {
+  /** Newest first, as the API lists them. */
+  results: HistoryPoint[];
+  slots: number;
+  height?: number;
+}) {
   const t = useT();
-  // Hover titles carry the time in the viewer's zone, which only the browser
-  // knows; until mounted they show the outcome alone.
-  const mounted = useMounted();
-  const shown = results.slice(0, slots).reverse();
-  const empty = Math.max(0, slots - shown.length);
+  const shown = results.slice(0, slots).toReversed();
   const failed = shown.filter((r) => !r.up).length;
-
   return (
-    <div
-      className="flex h-9 items-stretch gap-[3px]"
-      role="img"
-      aria-label={t("monitorPage.heartbeat.summary", { shown: shown.length, failed })}
-    >
-      {Array.from({ length: empty }, (_, i) => (
-        <span key={`e${i}`} className="min-w-[2px] flex-1 rounded-full bg-sunken" />
-      ))}
-      {shown.map((r) => (
-        <span
-          key={r.t}
-          title={`${mounted ? `${new Date(r.t).toLocaleString(t.intl)} · ` : ""}${
-            r.up ? `${r.ms} ms` : (r.error ?? t("monitorPage.heartbeat.failed"))
-          }`}
-          className={`min-w-[2px] flex-1 rounded-full transition-transform hover:scale-y-110 ${
-            r.up ? "bg-up" : "bg-down"
-          }`}
-        />
-      ))}
-    </div>
+    <BeatStrip
+      beats={shown.map((r) => ({
+        state: r.up ? "ok" : "down",
+        at: r.t,
+        text: r.up ? milliseconds(r.ms, t) : t("monitorPage.heartbeat.failed"),
+        detail: r.up ? undefined : r.error,
+      }))}
+      slots={slots}
+      height={height}
+      label={t("monitorPage.heartbeat.summary", { shown: shown.length, failed })}
+    />
   );
 }

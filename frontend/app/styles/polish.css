@@ -1,0 +1,1687 @@
+/* The section pages on Kubeat Signal: status pages, notifications,
+   maintenance, discovery, users, the account and the audit log, with
+   their tables, forms and dialogs; then the public status page (sp-) and
+   the sign-in and first-run pages (auth-). Classes of the section pages
+   start with pg-, of dialogs with dlg-. */
+
+@layer components {
+  /* ---------- The head of a page ---------- */
+  .pg-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px 24px;
+  }
+  .pg-head-main {
+    min-width: 0;
+    flex: 1 1 28rem;
+  }
+  .pg-title {
+    font-size: 28px;
+    line-height: 34px;
+    font-weight: 660;
+    font-stretch: 112.5%;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .pg-intro {
+    margin-top: 6px;
+    max-width: 46rem;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+    text-wrap: pretty;
+  }
+  .pg-head-actions {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  /* While the page shows an empty state, its one action is there: the
+     head does not offer the same thing twice. Nor while the form it
+     opens is already open. */
+  .page:has(> .pg-empty) .pg-head-new,
+  .page:has(> .pg-create) .pg-head-new {
+    display: none;
+  }
+  @media (width < 40rem) {
+    .pg-title {
+      font-size: 24px;
+      line-height: 28px;
+    }
+  }
+
+  /* A heading inside a page, over a table or a group of settings. */
+  .pg-section-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    margin-bottom: 10px;
+  }
+  .pg-section-head > h2 {
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .pg-section-head > p {
+    color: var(--ink-3);
+    font-size: 12.5px;
+    line-height: 18px;
+  }
+  .pg-section-head > .pg-section-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+  }
+
+  /* ---------- Tables ---------- */
+  /* The panel around a table clips the rows to its corners without
+     becoming a scroll container, so that the header row can stick to the
+     top of the page as it scrolls. */
+  .pg-table-panel {
+    overflow: clip;
+  }
+  .pg-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .pg-table th {
+    position: sticky;
+    top: 52px; /* under the context bar, while the window scrolls */
+    z-index: 2;
+    height: 32px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+  }
+  @media (width >= 64rem) {
+    /* On a wide screen the page scrolls in its own pane, under the bar. */
+    .pg-table th {
+      top: 0;
+    }
+  }
+  .pg-table td {
+    height: 36px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .pg-table th:first-child,
+  .pg-table td:first-child {
+    padding-left: 16px;
+  }
+  .pg-table th:last-child,
+  .pg-table td:last-child {
+    padding-right: 10px;
+  }
+  .pg-table > tbody > tr:last-child > td {
+    border-bottom: 0;
+  }
+  .pg-table > tbody > tr:not(.pg-row-form):hover > td {
+    background: var(--hover);
+  }
+  /* A row that is being edited, and the form under it. */
+  .pg-table > tbody > tr.pg-row-open > td {
+    background: var(--hover);
+    border-bottom-color: transparent;
+  }
+  .pg-table > tbody > tr.pg-row-form > td {
+    height: auto;
+    padding: 0 10px 12px;
+    background: var(--hover);
+    white-space: normal;
+  }
+  /* The column that takes what the others leave, and cuts its text short;
+     never so short that a name is gone. */
+  .pg-table .pg-grow {
+    width: 100%;
+    min-width: 10rem;
+    max-width: 0;
+  }
+  .pg-trunc {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pg-table .pg-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .pg-table .pg-time {
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .pg-table .pg-shrink {
+    width: 1%;
+  }
+  .pg-table .pg-actions {
+    width: 1%;
+    text-align: right;
+  }
+  .pg-row-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+    vertical-align: middle;
+  }
+  .pg-name {
+    font-weight: 530;
+    color: var(--ink);
+  }
+  .pg-sub {
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .pg-mono {
+    font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: -0.01em;
+  }
+  /* A kind, a type or a role: small, square, neutral. Never a candy pill. */
+  .pg-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 20px;
+    padding: 0 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    background: var(--well);
+    color: var(--ink-2);
+    font-size: 11.5px;
+    line-height: 1;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .pg-tag-mono {
+    font-family: var(--font-plex), ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  /* A state beside its glyph: "Sürüyor", "Başarısız". */
+  .pg-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    font-weight: 550;
+    white-space: nowrap;
+  }
+
+  /* A table on a phone: each row a short block. The first line holds the
+     row's title (its first cell, after a tick box) and its actions; the
+     other cells follow as words that wrap, each with its column's name in
+     front where the value alone would not say what it is. */
+  @media (width < 40rem) {
+    .pg-table,
+    .pg-table > tbody,
+    .pg-table > caption {
+      display: block;
+    }
+    .pg-table > thead {
+      display: none;
+    }
+    .pg-table > tbody > tr {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 3px 12px;
+      padding: 10px 10px 11px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .pg-table > tbody > tr:last-child {
+      border-bottom: 0;
+    }
+    /* After the first line, a break. */
+    .pg-table > tbody > tr::after {
+      content: "";
+      order: 2;
+      flex-basis: 100%;
+      height: 0;
+    }
+    .pg-table > tbody > tr > td {
+      order: 3;
+      display: block;
+      height: auto;
+      padding: 0 !important;
+      border: 0;
+      background: none !important;
+      color: var(--ink-2);
+      font-size: 12.5px;
+      line-height: 18px;
+      text-align: left;
+    }
+    /* The widths that size the columns of the wide table do not apply. */
+    .pg-table > tbody > tr > td.pg-grow,
+    .pg-table > tbody > tr > td.pg-shrink,
+    .pg-table > tbody > tr > td.pg-actions,
+    .pg-table > tbody > tr > td.pg-check-cell {
+      width: auto;
+      max-width: none;
+    }
+    .pg-table > tbody > tr > td:first-child:not(.pg-check-cell),
+    .pg-table > tbody > tr > td.pg-check-cell + td {
+      order: 1;
+      flex: 1 1 0;
+      min-width: 0;
+      color: var(--ink);
+      font-size: 13px;
+    }
+    .pg-table > tbody > tr > td.pg-check-cell {
+      order: 0;
+      flex: none;
+    }
+    .pg-table > tbody > tr > td.pg-actions {
+      order: 2;
+      flex: none;
+      margin: -6px -2px -6px 0;
+    }
+    .pg-table > tbody > tr > td[data-label] {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 4px;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .pg-table > tbody > tr > td[data-label]::before {
+      content: attr(data-label);
+      flex: none;
+      color: var(--ink-3);
+    }
+    .pg-table > tbody > tr.pg-row-open {
+      border-bottom: 0;
+      background: var(--hover);
+    }
+    .pg-table > tbody > tr.pg-row-form {
+      display: block;
+      padding: 0 6px 10px;
+      background: var(--hover);
+    }
+    .pg-table > tbody > tr.pg-row-form::after {
+      display: none;
+    }
+    .pg-table > tbody > tr.pg-row-form > td {
+      display: block;
+    }
+
+    /* A table whose short cells run on as one line (the audit log): all
+       of them side by side, and the one that grows under them. */
+    .pg-table.pg-table-inline > tbody > tr > td,
+    .pg-table.pg-table-inline > tbody > tr > td:first-child {
+      order: 1;
+      flex: none;
+      color: var(--ink-2);
+      font-size: 12.5px;
+    }
+    .pg-table.pg-table-inline > tbody > tr > td.pg-grow {
+      order: 3;
+      flex: 1 1 100%;
+      min-width: 0;
+    }
+  }
+
+  /* How many rows a table shows, over it. */
+  .pg-count {
+    margin-bottom: 8px;
+    color: var(--ink-3);
+    font-size: 12.5px;
+    line-height: 18px;
+  }
+
+  /* What an entry of the audit log did, with its icon. */
+  .pg-audit-what {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink);
+  }
+  .pg-audit-what > svg {
+    flex: none;
+    color: var(--ink-3);
+  }
+  .pg-audit-warn,
+  .pg-audit-warn > svg {
+    color: var(--warn-ink);
+  }
+  .pg-audit-down,
+  .pg-audit-down > svg {
+    color: var(--down-ink);
+  }
+
+  /* ---------- Buttons with an icon alone ---------- */
+  .pg-icon-btn {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-sm);
+    color: var(--ink-3);
+    transition:
+      background-color 120ms var(--ease-signal),
+      color 120ms var(--ease-signal);
+  }
+  .pg-icon-btn:hover,
+  .pg-icon-btn[aria-expanded="true"],
+  .pg-icon-btn[aria-current="true"] {
+    background: color-mix(in oklab, var(--ink) 7%, transparent);
+    color: var(--ink);
+  }
+  .pg-icon-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .pg-icon-btn-danger:hover {
+    background: var(--down-soft);
+    color: var(--down-ink);
+  }
+
+  /* ---------- A page, or a part of one, with nothing in it yet ---------- */
+  .pg-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 28px;
+  }
+  .pg-empty-icon {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+  .pg-empty-title {
+    margin-top: 16px;
+    font-size: 20px;
+    line-height: 26px;
+    font-weight: 620;
+    text-wrap: balance;
+  }
+  .pg-empty-body {
+    margin-top: 6px;
+    max-width: 38rem;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+    text-wrap: pretty;
+  }
+  .pg-empty-action {
+    margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  @media (width < 40rem) {
+    .pg-empty {
+      padding: 20px;
+    }
+  }
+
+  /* A page that could not be shown: the tile in the color of what failed. */
+  .pg-empty-icon-down {
+    background: var(--down-soft);
+    color: var(--down-ink);
+  }
+  /* What the failure said, as it said it. */
+  .pg-error-detail {
+    max-width: 100%;
+    max-height: 8rem;
+    margin-top: 14px;
+    padding: 8px 12px;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--well);
+    color: var(--ink-2);
+    font: 400 12px/18px var(--font-plex), ui-monospace, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  /* A thin bar over everything: the backend is older than this interface. */
+  .pg-warning-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 7px 16px;
+    border-bottom: 1px solid var(--warn-line);
+    background: color-mix(in oklab, var(--warn) 9%, var(--panel));
+    color: var(--ink);
+    font-size: 12.5px;
+    line-height: 18px;
+    text-align: center;
+  }
+  .pg-warning-bar > svg {
+    flex: none;
+    color: var(--warn-ink);
+  }
+
+  /* The three ways to the first monitor, cluster first. */
+  .pg-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 12px;
+    width: 100%;
+    margin-top: 20px;
+    counter-reset: pg-step;
+  }
+  .pg-steps > li {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    counter-increment: pg-step;
+  }
+  .pg-steps > li::before {
+    content: counter(pg-step);
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    margin-bottom: 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-xs);
+    color: var(--ink-3);
+    font: 600 11px/1 var(--font-plex), ui-monospace, monospace;
+  }
+  .pg-steps > li > p {
+    flex: 1;
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .pg-steps > li > :last-child {
+    margin-top: 8px;
+  }
+
+  /* A line to copy into a manifest, in mono, with its copy button. */
+  .pg-code {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 4px 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--well);
+  }
+  .pg-code > code {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    color: var(--ink);
+    font: 500 12px/20px var(--font-plex), ui-monospace, monospace;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+
+  /* ---------- Callouts: something the reader should know here ---------- */
+  .pg-callout {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--panel);
+    font-size: 13px;
+    line-height: 19px;
+  }
+  .pg-callout-icon {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    background: var(--hover);
+    color: var(--ink-2);
+  }
+  .pg-callout-body {
+    min-width: 0;
+    flex: 1;
+    padding-top: 4px;
+    color: var(--ink-2);
+  }
+  .pg-callout-body > b,
+  .pg-callout-title {
+    display: block;
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .pg-callout-down {
+    border-color: var(--down-line);
+    background: color-mix(in oklab, var(--down) 5%, var(--panel));
+  }
+  .pg-callout-down .pg-callout-icon {
+    background: var(--down-soft);
+    color: var(--down-ink);
+  }
+  .pg-callout-warn {
+    border-color: var(--warn-line);
+    background: color-mix(in oklab, var(--warn) 6%, var(--panel));
+  }
+  .pg-callout-warn .pg-callout-icon {
+    background: var(--warn-soft);
+    color: var(--warn-ink);
+  }
+  .pg-callout a,
+  .pg-link {
+    color: var(--accent-text);
+    font-weight: 550;
+    text-underline-offset: 2px;
+  }
+  .pg-callout a:hover,
+  .pg-link:hover {
+    text-decoration: underline;
+  }
+
+  /* ---------- Forms: two columns per section where there is room ---------- */
+  .pg-form {
+    container: pgform / inline-size;
+  }
+  .pg-sec {
+    display: grid;
+    gap: 14px 40px;
+    padding: 20px;
+    border-top: 1px solid var(--line);
+  }
+  .pg-sec:first-child {
+    border-top: 0;
+  }
+  @container pgform (width >= 46rem) {
+    .pg-sec {
+      grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+      padding: 22px 24px;
+    }
+  }
+  .pg-sec-intro > h2,
+  .pg-sec-intro > h3 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .pg-sec-intro > p {
+    margin-top: 4px;
+    color: var(--ink-3);
+    font-size: 13px;
+    line-height: 18px;
+    text-wrap: pretty;
+  }
+  .pg-fields {
+    container: pgfields / inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  .pg-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .pg-grid > * {
+    grid-column: span 6;
+    min-width: 0;
+  }
+  @container pgfields (width >= 30rem) {
+    .pg-grid > .pg-span-2 {
+      grid-column: span 2;
+    }
+    .pg-grid > .pg-span-3 {
+      grid-column: span 3;
+    }
+    .pg-grid > .pg-span-4 {
+      grid-column: span 4;
+    }
+  }
+  .pg-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 600;
+  }
+  .pg-label > small {
+    margin-left: 4px;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 450;
+  }
+  .pg-help {
+    display: block;
+    margin-top: 6px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    text-wrap: pretty;
+  }
+  /* A field with a fixed part in front, such as the /status/ of an address. */
+  .pg-affix {
+    display: flex;
+    align-items: stretch;
+  }
+  .pg-affix > span {
+    display: flex;
+    flex: none;
+    align-items: center;
+    padding: 0 9px;
+    border: 1px solid var(--line);
+    border-right: 0;
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+    background: var(--hover);
+    color: var(--ink-3);
+    font: 500 12px/1 var(--font-plex), ui-monospace, monospace;
+  }
+  .pg-affix > .field {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+  /* A field with its unit inside, at the right: "60 sn". */
+  .pg-unit {
+    position: relative;
+  }
+  .pg-unit > .field {
+    padding-right: 42px;
+    font-variant-numeric: tabular-nums;
+  }
+  .pg-unit > span {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    translate: 0 -50%;
+    color: var(--ink-3);
+    font-size: 12px;
+    pointer-events: none;
+  }
+  /* A sentence that reads the values back: what saving will do. */
+  .pg-echo {
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--well);
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 19px;
+    text-wrap: pretty;
+  }
+  .pg-echo b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .pg-echo code {
+    color: var(--ink);
+    font: 500 12px/1 var(--font-plex), ui-monospace, monospace;
+  }
+  /* A choice of a few, side by side. */
+  .pg-seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--well);
+  }
+  .pg-seg > label {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: var(--radius-xs);
+    color: var(--ink-2);
+    font-size: 12.5px;
+    line-height: 16px;
+    font-weight: 500;
+    font-stretch: 95%;
+    text-align: center;
+    cursor: pointer;
+    transition:
+      background-color 120ms var(--ease-signal),
+      color 120ms var(--ease-signal);
+  }
+  .pg-seg > label:hover {
+    color: var(--ink);
+  }
+  .pg-seg > label:has(input:checked) {
+    background: var(--raised);
+    color: var(--ink);
+    box-shadow: 0 0 0 1px var(--line-strong);
+  }
+  :root[data-theme="dark"] .pg-seg > label:has(input:checked) {
+    background: var(--hover);
+  }
+  .pg-seg > label:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .pg-seg input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* Choices that can be ticked together, as chips: namespaces, events. */
+  .pg-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .pg-chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px 0 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    color: var(--ink-2);
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+      border-color 120ms var(--ease-signal),
+      background-color 120ms var(--ease-signal);
+  }
+  .pg-chip:hover {
+    border-color: var(--line-strong);
+  }
+  .pg-chip input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+  .pg-chip:has(input:checked),
+  .pg-chip[aria-pressed="true"] {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
+  .pg-chip-mono {
+    font-family: var(--font-plex), ui-monospace, monospace;
+    font-size: 12px;
+  }
+  /* A kind to pick from a few, as small cards: the type of a channel. */
+  .pg-types {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+    gap: 6px;
+  }
+  .pg-type {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      border-color 120ms var(--ease-signal),
+      background-color 120ms var(--ease-signal);
+  }
+  .pg-type:hover {
+    border-color: var(--line-strong);
+  }
+  .pg-type:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .pg-type:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .pg-type input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* The monitors a status page can show, grouped by namespace; a name for
+     the page opens beside each one ticked. */
+  .pg-picker {
+    max-height: 24rem;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+  }
+  .pg-picker-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--hover);
+    color: var(--ink-2);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 550;
+  }
+  .pg-picker-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    min-height: 40px;
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .pg-picker > div:last-child > .pg-picker-row:last-child {
+    border-bottom: 0;
+  }
+  .pg-picker-pick {
+    display: flex;
+    flex: 1 1 12rem;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    font-size: 13px;
+  }
+  .pg-picker-pick > input {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+  }
+  .field.pg-picker-name {
+    flex: 1 1 14rem;
+    max-width: 20rem;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    font-size: 12.5px;
+  }
+
+  /* The badge addresses of a page's services, under its form. */
+  .pg-badges {
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: 12.5px;
+  }
+  .pg-badges > summary {
+    cursor: pointer;
+    font-weight: 550;
+  }
+  .pg-badges > ul {
+    display: grid;
+    gap: 4px;
+    margin-top: 10px;
+  }
+  .pg-badges li {
+    display: grid;
+    grid-template-columns: minmax(6rem, 12rem) auto auto;
+    gap: 12px;
+    align-items: baseline;
+  }
+  .pg-badges code {
+    color: var(--ink);
+    font: 400 12px/18px var(--font-plex), ui-monospace, monospace;
+  }
+  @media (width < 40rem) {
+    .pg-badges li {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+    }
+  }
+
+  /* A tick box with its words beside it. */
+  .pg-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .pg-check > input {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+    accent-color: var(--accent);
+  }
+  .pg-check b {
+    display: block;
+    font-weight: 550;
+  }
+  .pg-check small {
+    display: block;
+    margin-top: 2px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  /* The bar under a form: its buttons, and why saving did not work. On a
+     long form it keeps Save in reach while the form scrolls by. */
+  .pg-savebar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--line);
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    background: var(--panel);
+  }
+  .pg-savebar-sticky {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    background: color-mix(in oklab, var(--panel) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  @media (width < 64rem) {
+    /* Above the phone's tab bar. */
+    .pg-savebar-sticky {
+      bottom: calc(62px + env(safe-area-inset-bottom));
+    }
+  }
+  @container pgform (width >= 46rem) {
+    .pg-savebar {
+      padding: 12px 24px;
+    }
+  }
+  .pg-savebar-end {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .pg-savebar [role="alert"] {
+    min-width: 0;
+    flex: 1 1 16rem;
+    color: var(--down-ink);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  /* A form that edits a row opens under it, as a panel of its own. */
+  .pg-inline-form {
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--panel);
+    box-shadow: var(--shadow-pop);
+  }
+
+  /* ---------- Discovery ---------- */
+  /* The choice of a namespace and the button that scans it, side by side. */
+  .pg-scan {
+    display: flex;
+    gap: 8px;
+    width: min(100%, 26rem);
+  }
+  .pg-scan .field {
+    min-width: 12rem;
+  }
+  .pg-results-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+  }
+  .pg-results-head > h2 {
+    font-size: 15px;
+  }
+  /* Code in a sentence: a manifest line, a setting. */
+  .pg-code-inline {
+    padding: 1px 5px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    background: var(--well);
+    color: var(--ink);
+    font: 500 11.5px/18px var(--font-plex), ui-monospace, monospace;
+    white-space: nowrap;
+  }
+  /* A table's own title, over its header row. */
+  .pg-caption {
+    padding: 12px 16px 2px;
+    color: var(--ink-2);
+    font-size: 12.5px;
+    line-height: 18px;
+    font-weight: 600;
+  }
+  /* A row of something already done: monitored already, so not to pick. */
+  .pg-table > tbody > tr.pg-row-quiet > td {
+    color: var(--ink-3);
+  }
+  .pg-table > tbody > tr.pg-row-quiet .pg-mono.text-ink {
+    color: var(--ink-2);
+  }
+  .pg-table .pg-check-cell {
+    width: 1%;
+    padding-right: 4px;
+  }
+  .pg-check-cell input {
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    accent-color: var(--accent);
+  }
+  @media (width < 40rem) {
+    /* A row already monitored has nothing to tick. */
+    .pg-candidates > tbody > tr > td.pg-check-cell:empty {
+      display: none;
+    }
+  }
+  /* The bar under the candidates: the checks' settings, read back, and the import. */
+  .pg-importbar {
+    align-items: flex-end;
+    gap: 10px 20px;
+  }
+  .pg-importbar-fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(7rem, 9rem));
+    gap: 10px;
+  }
+  .pg-importbar-fields .pg-label {
+    margin-bottom: 4px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 550;
+    color: var(--ink-2);
+  }
+  .pg-importbar-echo {
+    min-width: 0;
+    flex: 1 1 18rem;
+    color: var(--ink-2);
+    font-size: 12.5px;
+    line-height: 18px;
+    text-wrap: pretty;
+  }
+  .pg-importbar-echo b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .pg-importbar-done {
+    color: var(--up-ink);
+    font-size: 13px;
+  }
+  @media (width < 40rem) {
+    .pg-importbar-fields {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      width: 100%;
+    }
+    /* On a phone the bar would cover half the screen: it waits at the end. */
+    .pg-importbar.pg-savebar-sticky {
+      position: static;
+      backdrop-filter: none;
+    }
+  }
+
+  /* ---------- A way of signing in (SSO, LDAP), with whether it works ---------- */
+  .pg-provider-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 16px;
+    padding: 14px 20px 0;
+  }
+  .pg-provider-head > h3 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .pg-provider-body {
+    max-width: 62rem;
+    padding: 6px 20px 16px;
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 19px;
+    text-wrap: pretty;
+  }
+
+  /* ---------- A definition list in hairline rows ---------- */
+  .pg-dl {
+    display: grid;
+    grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+  }
+  .pg-dl > dt,
+  .pg-dl > dd {
+    padding: 9px 0;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .pg-dl > dt {
+    padding-right: 16px;
+    color: var(--ink-3);
+  }
+  .pg-dl > dt:first-of-type,
+  .pg-dl > dt:first-of-type + dd {
+    border-top: 0;
+  }
+  @media (width < 40rem) {
+    .pg-dl {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .pg-dl > dd {
+      padding-top: 0;
+      border-top: 0;
+    }
+  }
+
+  /* ---------- Dialogs ---------- */
+  .dlg {
+    width: min(30rem, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    margin: auto;
+    padding: 0;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--raised);
+    color: var(--ink);
+    box-shadow: var(--shadow-pop);
+    /* A dialog opened from a table row would inherit the cell's alignment
+       and its unbroken lines. */
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 430;
+    text-align: start;
+    white-space: normal;
+  }
+  .dlg[open] {
+    animation: dlg-in 140ms var(--ease-signal);
+  }
+  .dlg::backdrop {
+    background: color-mix(in oklab, var(--canvas) 70%, transparent);
+    backdrop-filter: blur(3px);
+  }
+  .dlg-inner {
+    padding: 20px;
+  }
+  .dlg-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .dlg-icon {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+  .dlg-icon-danger {
+    background: var(--down-soft);
+    color: var(--down-ink);
+  }
+  .dlg-title {
+    min-width: 0;
+    padding-top: 3px;
+    font-size: 17px;
+    line-height: 24px;
+    font-weight: 620;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+  .dlg-text {
+    margin-top: 10px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+    text-wrap: pretty;
+  }
+  .dlg-items {
+    max-height: 10rem;
+    margin-top: 14px;
+    padding: 7px 12px;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--well);
+    color: var(--ink);
+    font: 400 12px/20px var(--font-plex), ui-monospace, monospace;
+  }
+  .dlg-items > li {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dlg-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+  }
+}
+
+@keyframes dlg-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+
+/* ---------- The public status page ---------- */
+@layer components {
+  .sp-page {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 880px;
+    min-height: 100dvh;
+    margin: 0 auto;
+    padding: 40px 24px 28px;
+  }
+  @media (width < 40rem) {
+    .sp-page {
+      padding: 24px 16px 20px;
+    }
+  }
+  .sp-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px 24px;
+  }
+  /* The title takes the line; the countdown goes under it where both do not fit. */
+  .sp-head-main {
+    flex: 1 1 22rem;
+    min-width: 0;
+  }
+  .sp-title {
+    font-size: 30px;
+    line-height: 34px;
+    font-weight: 660;
+    font-stretch: 112.5%;
+    letter-spacing: -0.02em;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+  .sp-desc {
+    margin-top: 6px;
+    max-width: 40rem;
+    color: var(--ink-2);
+    font-size: 14px;
+    line-height: 20px;
+    text-wrap: pretty;
+  }
+  @media (width < 40rem) {
+    .sp-title {
+      font-size: 25px;
+      line-height: 30px;
+    }
+  }
+
+  .sp-announce {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 24px;
+    padding: 14px 16px;
+  }
+  .sp-announce-title {
+    padding-top: 4px;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 600;
+  }
+  .sp-announce-text {
+    margin-top: 2px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+
+  /* The state of the page, over a soft light of its color. */
+  .sp-hero {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 32px;
+    margin-top: 24px;
+    padding: 24px;
+    overflow: hidden;
+  }
+  .sp-aura {
+    position: absolute;
+    top: -180px;
+    left: -120px;
+    width: 520px;
+    height: 420px;
+    background: radial-gradient(closest-side, color-mix(in oklab, var(--aura) 16%, transparent), transparent);
+    pointer-events: none;
+  }
+  .sp-hero-main {
+    position: relative;
+    display: flex;
+    flex: 1 1 24rem;
+    align-items: flex-start;
+    gap: 16px;
+    min-width: 0;
+  }
+  .sp-hero-main > .glyph {
+    margin-top: 10px;
+  }
+  .sp-state {
+    font-size: 32px;
+    line-height: 36px;
+    font-weight: 660;
+    font-stretch: 112.5%;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .sp-summary {
+    margin-top: 6px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+    text-wrap: pretty;
+  }
+  .sp-kpi {
+    position: relative;
+    flex: none;
+    text-align: right;
+  }
+  .sp-kpi-value {
+    font-size: 34px;
+    line-height: 38px;
+    font-weight: 700;
+    font-stretch: 88%;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  .sp-kpi-unit {
+    margin: 0 1px;
+    color: var(--ink-3);
+    font-size: 16px;
+    font-weight: 600;
+    font-stretch: 100%;
+  }
+  .sp-kpi-label {
+    margin-top: 2px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  @media (width < 40rem) {
+    .sp-hero {
+      padding: 18px;
+    }
+    .sp-hero-main {
+      gap: 12px;
+    }
+    .sp-hero-main > .glyph {
+      margin-top: 6px;
+    }
+    .sp-state {
+      font-size: 24px;
+      line-height: 28px;
+    }
+    .sp-kpi {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding-left: 28px;
+      text-align: left;
+    }
+    .sp-kpi-value {
+      font-size: 24px;
+      line-height: 28px;
+    }
+    .sp-kpi-unit {
+      font-size: 13px;
+    }
+  }
+
+  /* One row per service, with its days as a strip. */
+  .sp-services {
+    margin-top: 16px;
+  }
+  .sp-service {
+    display: grid;
+    /* One column that may be narrower than a long name, which then ends in an ellipsis. */
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid var(--line);
+  }
+  .sp-service:first-child {
+    border-top: 0;
+  }
+  .sp-service-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .sp-service-name {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sp-service-state {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 600;
+  }
+  .sp-axis {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--ink-3);
+    font-size: 11.5px;
+    line-height: 16px;
+    font-weight: 500;
+  }
+  .sp-axis-uptime {
+    color: var(--ink-2);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  @media (width < 40rem) {
+    .sp-service {
+      padding: 14px 16px;
+    }
+  }
+
+  .sp-section-title {
+    margin: 28px 0 8px;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  /* A quiet line where there is nothing to report. */
+  .sp-calm {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+  }
+  /* The outages as a thread of glyphs. */
+  .sp-timeline {
+    padding: 6px 16px;
+  }
+  .sp-event {
+    position: relative;
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 10px;
+    padding: 9px 0;
+  }
+  .sp-event::before {
+    content: "";
+    position: absolute;
+    top: 27px;
+    bottom: -9px;
+    left: 7.5px;
+    width: 1px;
+    background: var(--line);
+  }
+  .sp-event:last-child::before {
+    display: none;
+  }
+  .sp-event > .glyph {
+    justify-self: center;
+    margin-top: 5px;
+  }
+  .sp-event-what {
+    font-size: 13.5px;
+    line-height: 20px;
+  }
+  .sp-event-what > b {
+    font-weight: 600;
+  }
+  .sp-event-when {
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sp-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px 10px;
+    margin-top: auto;
+    padding-top: 40px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  /* ---------- Signing in and the first account ---------- */
+  /* The warning bar when there is one, the column in the middle, the foot
+     at the bottom: each in its row, whether the bar is there or not. */
+  .auth {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    min-height: 100dvh;
+  }
+  .auth > .pg-warning-bar {
+    grid-row: 1;
+  }
+  .auth-col {
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: min(360px, 100% - 32px);
+    margin: 0 auto;
+    padding: 48px 0 32px;
+    align-self: center;
+  }
+  .auth-logo {
+    margin-bottom: 10px;
+    font-size: 19px;
+  }
+  .auth-title {
+    font-size: 26px;
+    line-height: 30px;
+    font-weight: 660;
+    font-stretch: 112.5%;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .auth-intro {
+    margin-top: -6px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+    text-wrap: pretty;
+  }
+  .auth-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 20px;
+  }
+  /* "or with an account", between the provider's button and the fields. */
+  .auth-or {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: -2px 0;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .auth-or::before,
+  .auth-or::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid var(--line);
+  }
+  .auth-next {
+    color: var(--ink-3);
+    font-size: 12.5px;
+    line-height: 18px;
+    text-wrap: pretty;
+  }
+  .auth-foot {
+    grid-row: 3;
+    display: flex;
+    justify-content: center;
+    padding: 0 16px 24px;
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+
+  /* The frame of the page while it is read. */
+  .sp-skeleton {
+    display: flex;
+    flex-direction: column;
+  }
+  .sp-skeleton > span {
+    display: block;
+    border-radius: var(--radius-sm);
+    background: var(--hover);
+  }
+  .sp-skeleton > span.panel {
+    border-radius: var(--radius-md);
+    background: var(--panel);
+  }
+}

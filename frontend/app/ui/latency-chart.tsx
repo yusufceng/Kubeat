@@ -1,20 +1,26 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Series, SeriesPoint } from "@/lib/api";
 import { duration } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
+import { ChevronIcon } from "@/app/ui/icons";
+import { CloseIcon, ZoomInIcon } from "@/app/ui/monitor-icons";
+import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
 
-// Layout, in CSS pixels.
-const HEIGHT = 236;
-const LEFT = 48;
-const RIGHT = 12;
-const TOP = 12;
-const PLOT_HEIGHT = 160;
-const STRIP_TOP = TOP + PLOT_HEIGHT + 10;
-const STRIP_HEIGHT = 10;
-const TOOLTIP_WIDTH = 220;
+// Layout, in CSS pixels: the plot, then the availability strip under it,
+// then the time axis.
+const LEFT = 44;
+const RIGHT = 8;
+const TOP = 18;
+const PLOT_HEIGHT = 200;
+const STRIP_TOP = TOP + PLOT_HEIGHT + 8;
+const STRIP_HEIGHT = 8;
+const HEIGHT = STRIP_TOP + STRIP_HEIGHT + 24;
+const TOOLTIP_WIDTH = 224;
+/** How long the line takes to draw itself in, the first time the chart appears. */
+const INTRO_MS = 450;
 
 type State = "ok" | "partial" | "down";
 
@@ -23,12 +29,12 @@ function stateOf(p: SeriesPoint): State {
   return p.up_checks === 0 ? "down" : "partial";
 }
 
-const stateStyle: Record<State, { color: string; height: number; label: string }> = {
+const stateStyle: Record<State, { color: string; height: number; glyph: GlyphKind; label: string }> = {
   // Problems are taller as well as differently colored, so the strip does
   // not rely on hue alone.
-  ok: { color: "var(--viz-good)", height: 4, label: "monitorPage.chart.state.ok" },
-  partial: { color: "var(--viz-warning)", height: STRIP_HEIGHT, label: "monitorPage.chart.state.partial" },
-  down: { color: "var(--viz-critical)", height: STRIP_HEIGHT, label: "monitorPage.chart.state.down" },
+  ok: { color: "var(--ok-bar)", height: 4, glyph: "up", label: "monitorPage.chart.state.ok" },
+  partial: { color: "var(--warn)", height: STRIP_HEIGHT, glyph: "warn", label: "monitorPage.chart.state.partial" },
+  down: { color: "var(--down)", height: STRIP_HEIGHT, glyph: "down", label: "monitorPage.chart.state.down" },
 };
 
 /** A round upper bound and tick step for an axis that starts at zero. */
@@ -58,21 +64,28 @@ export function LatencyChart({
   baseHref,
   selection,
   incidents,
+  maintenance = [],
 }: {
   series: Series;
   /** The page's address with its query; a timeframe's from and to are added to it. */
   baseHref: string;
   /** The timeframe the chart is zoomed into, carried in the page's URL. */
   selection: Span | null;
-  /** The monitor's incidents, so that clicking an outage selects its whole span. */
+  /** The monitor's outages: drawn as bands, and clicking one selects its whole span. */
   incidents: Span[];
+  /** The maintenance that covered the monitor, drawn hatched. */
+  maintenance?: { from: number; to: number }[];
 }) {
   const t = useT();
   const router = useRouter();
+  // The ids of the gradient and the hatching, safe inside url(#…).
+  const ids = `chart${useId().replace(/[^\w-]/g, "")}`;
   const wrapper = useRef<HTMLDivElement>(null);
   // Measured on the client; until then a placeholder of the same height is
   // rendered, which also keeps times in the viewer's zone, not the server's.
   const [width, setWidth] = useState<number | null>(null);
+  // The line draws itself in once, when the chart first gets its width.
+  const [intro, setIntro] = useState(true);
   const [hovered, setActive] = useState<number | null>(null);
   // What the pointer is doing: drawing a new span (pixels from the
   // wrapper's left edge) or dragging one edge of the drawn one.
@@ -91,6 +104,13 @@ export function LatencyChart({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  const measured = width !== null;
+  useEffect(() => {
+    if (!measured) return;
+    const id = setTimeout(() => setIntro(false), INTRO_MS + 100);
+    return () => clearTimeout(id);
+  }, [measured]);
 
   const { points } = series;
   // The point in hand; a series that changed under it (a zoom) lets go.
@@ -138,24 +158,24 @@ export function LatencyChart({
     return { plotWidth, x, y, centers, segments, yTicks, xTicks, barWidth };
   }, [width, points, from, to, bucket]);
 
-  const timeLabel = (at: number) =>
-    new Date(at).toLocaleString(
-      t.intl,
-      longRange
-        ? { day: "numeric", month: "short" }
-        : { hour: "2-digit", minute: "2-digit" },
-    );
+  const clock = (at: number, seconds = false) =>
+    new Date(at).toLocaleTimeString(t.intl, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      ...(seconds && { second: "2-digit" }),
+    });
+  const day = (at: number) => new Date(at).toLocaleDateString(t.intl, { day: "numeric", month: "short" });
+  const timeLabel = (at: number) => (longRange ? day(at) : clock(at));
   const bucketLabel = (p: SeriesPoint) => {
-    const start = new Date(p.start);
-    const end = new Date(Math.min(start.getTime() + bucket, to));
-    const day = start.toLocaleDateString(t.intl, { day: "numeric", month: "short" });
-    const time = (d: Date) => d.toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit" });
-    return `${day} ${time(start)} – ${time(end)}`;
+    const start = new Date(p.start).getTime();
+    const end = Math.min(start + bucket, to);
+    return `${day(start)} ${clock(start)} – ${clock(end)}`;
   };
 
   if (points.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-line p-8 text-center text-sm text-muted">
+      <p className="rounded-md border border-dashed border-line p-8 text-center text-[13px] text-ink-3">
         {t("monitorPage.chart.empty")}
       </p>
     );
@@ -227,16 +247,23 @@ export function LatencyChart({
   // The timeframe the page is zoomed into, as a quiet band inside its margins.
   const applied: [number, number] | null = selection ? [Math.max(selection.from, from), Math.min(selection.to ?? to, to)] : null;
 
-  const clock = (at: number) => new Date(at).toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit", ...(bucket < 60_000 && { second: "2-digit" }) });
-  const day = (at: number) => new Date(at).toLocaleDateString(t.intl, { day: "numeric", month: "short" });
-  const spanLabel = ([a, b]: [number, number]) =>
-    `${day(a)} ${clock(a)} – ${day(a) === day(b) ? "" : day(b) + " "}${clock(b)} · ${duration(Math.round((b - a) / 1000), t)}`;
+  const spanLabel = ([a, b]: [number, number]) => {
+    const seconds = bucket < 60_000;
+    return `${day(a)} ${clock(a, seconds)} – ${day(a) === day(b) ? "" : day(b) + " "}${clock(b, seconds)} · ${duration(Math.round((b - a) / 1000), t)}`;
+  };
+
+  // The outages and maintenance that show within the chart's span.
+  const within = (s: { from: number; to: number | null }) => s.from < to && (s.to ?? to) > from;
+  const outageBands = incidents.filter(within);
+  const maintenanceBands = maintenance.filter(within);
+  const pattern = `${ids}-maint`;
+  const gradient = `${ids}-area`;
 
   return (
     <figure>
       <div
         ref={wrapper}
-        className="relative select-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--viz-series)]"
+        className={`relative select-none rounded-sm outline-offset-4 ${intro ? "mon-intro" : ""}`}
         // Horizontal drags select; vertical ones still scroll the page.
         style={{ height: HEIGHT, touchAction: "pan-y", cursor: overEdge || gesture?.kind === "edge" ? "ew-resize" : "crosshair" }}
         tabIndex={0}
@@ -246,9 +273,10 @@ export function LatencyChart({
           if (e.button !== 0 || !geometry || gesture) return;
           // The toolbar's buttons are not part of the plot.
           if ((e.target as HTMLElement).closest("[data-selection-toolbar]")) return;
-          // No native text selection while dragging; keep keyboard focus.
+          // No native text selection while dragging; keep keyboard focus,
+          // without the ring that a pointer does not need.
           e.preventDefault();
-          e.currentTarget.focus();
+          e.currentTarget.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
           const px = pixel(e.clientX);
           const edge = edgeAt(px);
           setGesture(
@@ -315,7 +343,21 @@ export function LatencyChart({
         }}
       >
         {geometry && (
-          <svg width={width!} height={HEIGHT} className="block" aria-hidden>
+          <svg width={width!} height={HEIGHT} className="block overflow-visible" aria-hidden>
+            <defs>
+              <linearGradient id={gradient} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0" stopColor="var(--series)" stopOpacity={0.22} />
+                <stop offset="1" stopColor="var(--series)" stopOpacity={0} />
+              </linearGradient>
+              <pattern id={pattern} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="6" height="6" fill="var(--maint)" fillOpacity={0.07} />
+                <line x1="0" y1="0" x2="0" y2="6" stroke="var(--maint)" strokeOpacity={0.45} strokeWidth={1.5} />
+              </pattern>
+            </defs>
+
+            <text x={LEFT - 8} y={TOP - 8} textAnchor="end" fontSize={10} fill="var(--ink-3)">
+              {t("monitorPage.chart.unit")}
+            </text>
             {geometry.yTicks.map((v) => (
               <g key={v}>
                 <line
@@ -323,7 +365,8 @@ export function LatencyChart({
                   x2={LEFT + geometry.plotWidth}
                   y1={geometry.y(v)}
                   y2={geometry.y(v)}
-                  stroke={v === 0 ? "var(--viz-axis)" : "var(--viz-grid)"}
+                  stroke={v === 0 ? "var(--line-strong)" : "var(--line)"}
+                  strokeDasharray={v === 0 ? undefined : "2 4"}
                   strokeWidth={1}
                 />
                 <text
@@ -332,13 +375,42 @@ export function LatencyChart({
                   dy="0.32em"
                   textAnchor="end"
                   fontSize={11}
-                  fill="var(--viz-muted)"
+                  fill="var(--ink-3)"
                   style={{ fontVariantNumeric: "tabular-nums" }}
                 >
                   {v.toLocaleString(t.intl)}
                 </text>
               </g>
             ))}
+
+            {/* Maintenance, hatched, under everything else. */}
+            {maintenanceBands.map((m) => {
+              const a = geometry.x(Math.max(m.from, from));
+              const b = geometry.x(Math.min(m.to, to));
+              return (
+                <rect
+                  key={`m${m.from}`}
+                  x={a}
+                  y={TOP}
+                  width={Math.max(b - a, 2)}
+                  height={PLOT_HEIGHT}
+                  fill={`url(#${pattern})`}
+                />
+              );
+            })}
+
+            {/* Outages: a red wash with a cap along the top. */}
+            {outageBands.map((o) => {
+              const a = geometry.x(Math.max(o.from, from));
+              const b = geometry.x(Math.min(o.to ?? to, to));
+              const w = Math.max(b - a, 2);
+              return (
+                <g key={`o${o.from}`}>
+                  <rect x={a} y={TOP} width={w} height={PLOT_HEIGHT} fill="var(--down)" fillOpacity={0.1} />
+                  <rect x={a} y={TOP} width={w} height={2} fill="var(--down)" />
+                </g>
+              );
+            })}
 
             {applied && applied[1] > applied[0] && (
               <g>
@@ -347,8 +419,8 @@ export function LatencyChart({
                   y={TOP}
                   width={Math.max(geometry.x(applied[1]) - geometry.x(applied[0]), 1)}
                   height={STRIP_TOP + STRIP_HEIGHT - TOP}
-                  fill="var(--viz-series)"
-                  opacity={0.08}
+                  fill="var(--accent)"
+                  fillOpacity={0.06}
                 />
                 {applied.map((edge) => (
                   <line
@@ -357,7 +429,8 @@ export function LatencyChart({
                     x2={geometry.x(edge)}
                     y1={TOP}
                     y2={STRIP_TOP + STRIP_HEIGHT}
-                    stroke="var(--viz-series)"
+                    stroke="var(--accent)"
+                    strokeOpacity={0.7}
                     strokeWidth={1}
                     strokeDasharray="3 3"
                   />
@@ -365,46 +438,8 @@ export function LatencyChart({
               </g>
             )}
 
-            {marked && marked[1] > marked[0] && (
-              <g>
-                <rect
-                  x={geometry.x(Math.max(marked[0], from))}
-                  y={TOP}
-                  width={Math.max(geometry.x(Math.min(marked[1], to)) - geometry.x(Math.max(marked[0], from)), 1)}
-                  height={STRIP_TOP + STRIP_HEIGHT - TOP}
-                  fill="var(--viz-series)"
-                  opacity={0.2}
-                />
-                {[Math.max(marked[0], from), Math.min(marked[1], to)].map((edge) => (
-                  <g key={edge}>
-                    <line
-                      x1={geometry.x(edge)}
-                      x2={geometry.x(edge)}
-                      y1={TOP}
-                      y2={STRIP_TOP + STRIP_HEIGHT}
-                      stroke="var(--viz-series)"
-                      strokeWidth={2}
-                    />
-                    {/* The grip an edge is dragged by. */}
-                    <rect
-                      x={geometry.x(edge) - 3}
-                      y={TOP + PLOT_HEIGHT / 2 - 14}
-                      width={6}
-                      height={28}
-                      rx={3}
-                      fill="var(--viz-series)"
-                      stroke="var(--background)"
-                      strokeWidth={1}
-                    />
-                  </g>
-                ))}
-              </g>
-            )}
-
             {geometry.segments.map((segment) => {
-              const coords = segment.map(
-                (i) => `${geometry.centers[i]},${geometry.y(points[i].avg_latency_ms!)}`,
-              );
+              const coords = segment.map((i) => `${geometry.centers[i]},${geometry.y(points[i].avg_latency_ms!)}`);
               const first = geometry.centers[segment[0]];
               const last = geometry.centers[segment[segment.length - 1]];
               const base = geometry.y(0);
@@ -412,33 +447,32 @@ export function LatencyChart({
                 <g key={segment[0]}>
                   {segment.length > 1 && (
                     <path
+                      className="mon-area"
                       d={`M${first},${base} L${coords.join(" L")} L${last},${base} Z`}
-                      fill="var(--viz-series)"
-                      opacity={0.1}
+                      fill={`url(#${gradient})`}
                     />
                   )}
                   {segment.length > 1 ? (
                     <path
+                      className="mon-line"
+                      pathLength={1}
                       d={`M${coords.join(" L")}`}
                       fill="none"
-                      stroke="var(--viz-series)"
-                      strokeWidth={2}
+                      stroke="var(--series)"
+                      strokeWidth={1.6}
                       strokeLinejoin="round"
                       strokeLinecap="round"
                     />
                   ) : (
                     // A lone measurement between gaps would otherwise be invisible.
-                    <circle
-                      cx={first}
-                      cy={geometry.y(points[segment[0]].avg_latency_ms!)}
-                      r={2}
-                      fill="var(--viz-series)"
-                    />
+                    <circle cx={first} cy={geometry.y(points[segment[0]].avg_latency_ms!)} r={2} fill="var(--series)" />
                   )}
                 </g>
               );
             })}
 
+            {/* The availability strip: no data is the baseline alone. */}
+            <rect x={LEFT} y={STRIP_TOP + STRIP_HEIGHT - 2} width={geometry.plotWidth} height={2} fill="var(--line)" />
             {points.map((p, i) => {
               const style = stateStyle[stateOf(p)];
               const gap = geometry.barWidth > 5 ? 2 : geometry.barWidth > 2 ? 1 : 0;
@@ -458,17 +492,62 @@ export function LatencyChart({
               );
             })}
 
-            {geometry.xTicks.map((t, i) => (
+            {marked && marked[1] > marked[0] && (
+              <g>
+                <rect
+                  x={geometry.x(Math.max(marked[0], from))}
+                  y={TOP}
+                  width={Math.max(geometry.x(Math.min(marked[1], to)) - geometry.x(Math.max(marked[0], from)), 1)}
+                  height={STRIP_TOP + STRIP_HEIGHT - TOP}
+                  fill="var(--accent)"
+                  fillOpacity={0.1}
+                />
+                {[Math.max(marked[0], from), Math.min(marked[1], to)].map((edge) => (
+                  <g key={edge}>
+                    <line
+                      x1={geometry.x(edge)}
+                      x2={geometry.x(edge)}
+                      y1={TOP}
+                      y2={STRIP_TOP + STRIP_HEIGHT}
+                      stroke="var(--accent)"
+                      strokeWidth={1}
+                    />
+                    {/* The grip an edge is dragged by. */}
+                    <rect
+                      x={geometry.x(edge) - 4}
+                      y={TOP + PLOT_HEIGHT / 2 - 14}
+                      width={8}
+                      height={28}
+                      rx={4}
+                      fill="var(--accent)"
+                      stroke="var(--panel)"
+                      strokeWidth={1.5}
+                    />
+                    <line
+                      x1={geometry.x(edge)}
+                      x2={geometry.x(edge)}
+                      y1={TOP + PLOT_HEIGHT / 2 - 6}
+                      y2={TOP + PLOT_HEIGHT / 2 + 6}
+                      stroke="var(--accent-ink)"
+                      strokeWidth={1}
+                      strokeLinecap="round"
+                    />
+                  </g>
+                ))}
+              </g>
+            )}
+
+            {geometry.xTicks.map((at, i) => (
               <text
-                key={t}
-                x={geometry.x(t)}
-                y={HEIGHT - 6}
+                key={at}
+                x={geometry.x(at)}
+                y={HEIGHT - 4}
                 textAnchor={i === 0 ? "start" : i === geometry.xTicks.length - 1 ? "end" : "middle"}
                 fontSize={11}
-                fill="var(--viz-muted)"
+                fill="var(--ink-3)"
                 style={{ fontVariantNumeric: "tabular-nums" }}
               >
-                {timeLabel(t)}
+                {timeLabel(at)}
               </text>
             ))}
 
@@ -479,16 +558,17 @@ export function LatencyChart({
                   x2={geometry.centers[active]}
                   y1={TOP}
                   y2={STRIP_TOP + STRIP_HEIGHT}
-                  stroke="var(--viz-muted)"
+                  stroke="var(--ink-3)"
+                  strokeDasharray="2 3"
                   strokeWidth={1}
                 />
                 {points[active].avg_latency_ms !== null && (
                   <circle
                     cx={geometry.centers[active]}
                     cy={geometry.y(points[active].avg_latency_ms!)}
-                    r={5}
-                    fill="var(--viz-series)"
-                    stroke="var(--background)"
+                    r={4}
+                    fill="var(--series)"
+                    stroke="var(--panel)"
                     strokeWidth={2}
                   />
                 )}
@@ -500,7 +580,7 @@ export function LatencyChart({
         {geometry && marked && marked[1] > marked[0] && (
           <div
             data-selection-toolbar
-            className="absolute z-20 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-lg border border-line bg-panel py-1 pl-3 pr-1 text-xs shadow-lg"
+            className="pop absolute z-20 flex -translate-x-1/2 items-center gap-2 py-1 pr-1 pl-3 text-xs whitespace-nowrap"
             style={{
               top: 2,
               // Centred on the span, kept inside the chart.
@@ -511,20 +591,21 @@ export function LatencyChart({
               cursor: "default",
             }}
           >
-            <span className="tabular-nums">{spanLabel(marked)}</span>
+            <span className="tabular-nums text-ink-2">{spanLabel(marked)}</span>
             {draft && !gesture && (
               <>
-                <button type="button" className="btn btn-primary px-2.5 py-1 text-xs" onClick={() => zoom(draft)}>
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => zoom(draft)}>
+                  <ZoomInIcon width={14} height={14} />
                   {t("monitorPage.chart.zoom")}
                 </button>
                 <button
                   type="button"
-                  className="rounded-md px-1.5 py-1 text-muted hover:bg-sunken hover:text-ink"
+                  className="btn btn-ghost btn-sm px-1.5"
                   aria-label={t("monitorPage.chart.dropSelection")}
                   title={t("monitorPage.chart.dropSelection")}
                   onClick={() => setDraft(null)}
                 >
-                  ✕
+                  <CloseIcon width={14} height={14} />
                 </button>
               </>
             )}
@@ -534,7 +615,7 @@ export function LatencyChart({
         {geometry && point && active !== null && !gesture && (
           <div
             role="status"
-            className="pointer-events-none absolute z-10 rounded-lg border border-line bg-panel px-3 py-2 text-xs shadow-md"
+            className="pop pointer-events-none absolute z-10 px-3 py-2.5 text-xs"
             style={{
               top: marked ? 44 : 8,
               width: TOOLTIP_WIDTH,
@@ -545,28 +626,23 @@ export function LatencyChart({
                   : geometry.centers[active] + 12,
             }}
           >
-            <div className="text-muted">{bucketLabel(point)}</div>
-            <div className="mt-1 flex items-center gap-2">
-              <span className="h-0.5 w-3 rounded bg-[var(--viz-series)]" aria-hidden />
-              <span className="text-sm font-semibold">
+            <div className="text-ink-3 tabular-nums">{bucketLabel(point)}</div>
+            <div className="mt-1.5 flex items-baseline gap-1.5 whitespace-nowrap">
+              <span className="text-[13px] font-semibold tabular-nums text-ink">
                 {point.avg_latency_ms !== null ? ms(point.avg_latency_ms, t.intl) : t("monitorPage.chart.noResponse")}
               </span>
-              <span className="text-muted">{t("monitorPage.chart.average")}</span>
+              {point.avg_latency_ms !== null && <span className="text-ink-3">{t("monitorPage.chart.average")}</span>}
             </div>
             {point.max_latency_ms !== null && (
-              <div className="mt-0.5 text-muted">
-                {t("monitorPage.chart.max")} <span className="text-foreground">{ms(point.max_latency_ms, t.intl)}</span>
+              <div className="mt-0.5 whitespace-nowrap text-ink-3">
+                {t("monitorPage.chart.max")} <span className="tabular-nums text-ink-2">{ms(point.max_latency_ms, t.intl)}</span>
               </div>
             )}
-            <div className="mt-1 flex items-center gap-2 border-t border-line pt-1">
-              <span
-                className="h-2 w-2 rounded-sm"
-                style={{ background: stateStyle[stateOf(point)].color }}
-                aria-hidden
-              />
+            <div className="mt-2 flex items-center gap-2 border-t border-line pt-2">
+              <StatusGlyph kind={stateStyle[stateOf(point)].glyph} />
               <span>
-                <span className="font-semibold">{t(stateStyle[stateOf(point)].label)}</span>
-                <span className="text-muted">
+                <span className="font-semibold text-ink">{t(stateStyle[stateOf(point)].label)}</span>
+                <span className="text-ink-3">
                   {" · "}
                   {t.n("monitorPage.chart.checks", point.checks)}
                   {point.checks > point.up_checks && `, ${t("monitorPage.chart.failed", { count: point.checks - point.up_checks })}`}
@@ -577,47 +653,58 @@ export function LatencyChart({
         )}
       </div>
 
-      <figcaption className="mt-2 flex select-none flex-wrap items-center gap-x-4 gap-y-1 pl-12 text-xs text-muted">
-        <span>{t("monitorPage.chart.availability")}</span>
+      <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 pl-11 text-xs text-ink-3 select-none">
+        <span className="font-medium text-ink-2">{t("monitorPage.chart.availability")}</span>
         {(Object.keys(stateStyle) as State[]).map((s) => (
           <span key={s} className="inline-flex items-center gap-1.5">
             <span
-              className="w-2 rounded-sm"
+              className="w-2.5 rounded-[1px]"
               style={{ background: stateStyle[s].color, height: stateStyle[s].height }}
               aria-hidden
             />
             {t(stateStyle[s].label)}
           </span>
         ))}
+        {outageBands.length > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 border-t-2 border-down bg-down/10" aria-hidden />
+            {t("monitorPage.chart.band.outage")}
+          </span>
+        )}
+        {maintenanceBands.length > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="slot-maint h-2.5 w-2.5 rounded-[1px]" aria-hidden />
+            {t("monitorPage.chart.band.maintenance")}
+          </span>
+        )}
         <span className="basis-full">{t("monitorPage.chart.selectHint")}</span>
       </figcaption>
 
-      <details className="mt-3 text-sm">
-        <summary className="cursor-pointer text-xs text-muted">{t("monitorPage.chart.showTable")}</summary>
-        <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-line">
-          <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 border-b border-line bg-background text-muted">
+      <details className="mon-more mt-3 px-0 pb-0">
+        <summary>
+          <ChevronIcon width={14} height={14} />
+          {t("monitorPage.chart.showTable")}
+        </summary>
+        <div className="mt-2 max-h-72 overflow-auto rounded-md border border-line">
+          <table className="mon-table text-xs">
+            <thead className="sticky top-0 bg-panel">
               <tr>
-                <th className="px-3 py-2 font-medium">{t("monitorPage.chart.table.bucket")}</th>
-                <th className="px-3 py-2 text-right font-medium">{t("monitorPage.chart.table.avg")}</th>
-                <th className="px-3 py-2 text-right font-medium">{t("monitorPage.chart.table.max")}</th>
-                <th className="px-3 py-2 text-right font-medium">{t("monitorPage.chart.table.checks")}</th>
-                <th className="px-3 py-2 text-right font-medium">{t("monitorPage.chart.table.failed")}</th>
+                <th>{t("monitorPage.chart.table.bucket")}</th>
+                <th className="num">{t("monitorPage.chart.table.avg")}</th>
+                <th className="num">{t("monitorPage.chart.table.max")}</th>
+                <th className="num">{t("monitorPage.chart.table.checks")}</th>
+                <th className="num">{t("monitorPage.chart.table.failed")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-line tabular-nums">
+            <tbody>
               {width !== null &&
                 points.map((p) => (
                   <tr key={p.start}>
-                    <td className="px-3 py-1.5">{bucketLabel(p)}</td>
-                    <td className="px-3 py-1.5 text-right">
-                      {p.avg_latency_ms !== null ? ms(p.avg_latency_ms, t.intl) : "–"}
-                    </td>
-                    <td className="px-3 py-1.5 text-right">
-                      {p.max_latency_ms !== null ? ms(p.max_latency_ms, t.intl) : "–"}
-                    </td>
-                    <td className="px-3 py-1.5 text-right">{p.checks}</td>
-                    <td className="px-3 py-1.5 text-right">{p.checks - p.up_checks}</td>
+                    <td className="tabular-nums">{bucketLabel(p)}</td>
+                    <td className="num">{p.avg_latency_ms !== null ? ms(p.avg_latency_ms, t.intl) : "–"}</td>
+                    <td className="num">{p.max_latency_ms !== null ? ms(p.max_latency_ms, t.intl) : "–"}</td>
+                    <td className="num">{p.checks}</td>
+                    <td className={`num ${p.checks > p.up_checks ? "text-down-ink" : ""}`}>{p.checks - p.up_checks}</td>
                   </tr>
                 ))}
             </tbody>

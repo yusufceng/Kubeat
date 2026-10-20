@@ -961,28 +961,52 @@ CA); ikisi birlikte verilirse kurulum notları uyarır.
 
 ## Arayüz
 
-Arayüz bir çalışma alanıdır: solda tüm monitor'ların listesi, sağda genel
-bakış ya da açılan monitor.
+Arayüz bir çalışma alanıdır: en solda bölümlerin dar menüsü, yanında tüm
+monitor'ların listesi, sağda genel bakış ya da açılan monitor. Üst çubuk
+bulunulan yeri, filonun nabzını (çalışan ve kesintideki monitor sayısı) ve
+"Yeni monitor"u gösterir. Telefonda menü alta iner.
 
-Arayüz İngilizce ve Türkçe'dir: tarayıcının istediği dil kullanılır, üst
-çubuktaki düğme değiştirir ve seçim bir çerezde kalır; ikisi de yoksa
+Arayüz İngilizce ve Türkçe'dir: tarayıcının istediği dil kullanılır, menünün
+altındaki düğme değiştirir ve seçim bir çerezde kalır; ikisi de yoksa
 `DEFAULT_LOCALE` geçerlidir. Bildirim metinlerinin dili backend'de ayrıdır
 (`UPTIME_LANGUAGE`); chart'ta ikisini birden `language` değeri ayarlar.
 
+Durum her yerde renkle olduğu kadar şekille de okunur: çalışan daire, kesinti
+elmas, sorunlu yarım daire, bakım taralı, duraklatılmış içi boş; renk körü
+biri de listeyi okuyabilir.
+
 - **Liste**: namespace'e ya da gruba göre toplanır; ada, adrese, gruba ya da
-  etikete göre aranır; duruma (sorunlu, çalışıyor, pasif), tipe ve etikete göre
-  süzülür. Her satırda durum, 24 saatlik uptime ve son kontroller görünür.
-- **Toplu işlem**: listedeki "Seç" ile birden çok monitor işaretlenip birlikte
-  durdurulur, devam ettirilir ya da silinir; grup başlığındaki kutu o gruptaki
-  görünenlerin hepsini seçer.
-- **Genel bakış**: durum sayıları, devam eden kesintiler, son olaylar,
-  namespace bazında dağılım ve süresi en yakın sertifikalar.
-- **Monitor sayfası**: son kontrollerin çubuğu, yanıt süresi ve uptime
-  özetleri, grafik, pod'lar, olaylar, kontrol geçmişi ve ayarların özeti.
-  Buradan durdurulur, düzenlenir, kopyalanır ya da silinir.
-- **Yeni monitor / düzenle**: tipe göre değişen tek form.
-- **Tema**: sağ üstteki düğme sistem, açık ve koyu arasında geçer; seçim
-  tarayıcıda saklanır.
+  etikete göre aranır; duruma göre (hepsi, çalışan, kesinti, sorunlu, pasif)
+  süzülür, tip ve etiket süzgeçleri menüdedir. Her satır tek satırdır:
+  durum, ad, kubectl kısaltmasıyla tür (`svc`, `route`, `deploy`...), son
+  24 kontrol ve uptime; uptime yalnızca eşiklerin altındayken renklenir
+  (`WARN_UPTIME_BELOW`, `CRITICAL_UPTIME_BELOW`). Sertifikasının bitmesine
+  14 gün ya da daha az kalanlar satırında işaretlenir.
+- **Toplu işlem**: satırın üzerine gelince çıkan kutularla birden çok
+  monitor seçilir; alttaki çubuk onları birlikte durdurur, devam ettirir ya
+  da siler. Grup başlığındaki kutu o gruptaki görünenlerin hepsini seçer.
+- **Genel bakış**: filonun durumunu bir cümleyle söyler, son 24 saatin
+  kesinti şeridini ve devam eden kesintileri gösterir; altında sayılar
+  (çalışan, kesinti, bakım, MTTR...), her monitor'un bir kare olduğu cluster
+  haritası ve gün gün etkinlik akışı vardır. Namespace sayfası aynısını tek
+  namespace için gösterir.
+- **Komut paleti**: `⌘K` (Windows ve Linux'ta `Ctrl+K`) bir monitor'a, bir
+  namespace'e ya da bir sayfaya gider, yeni monitor açar; yalnızca klavyeyle
+  kullanılır.
+- **Monitor sayfası**: durum ve ne kadar süredir sürdüğü ("Erişilemiyor · 4
+  gün 1 sa", "Çalışıyor · 5 gün 14 sa"), son 60 kontrol, yanıt süresi ve
+  uptime özetleri, kesinti ve bakım bantlı grafik, pod'lar, olaylar, kontrol
+  geçmişi ve ayarların özeti. Son kontrol başarısızsa **Neden?** bölümü
+  hatanın ne anlama geldiğini, bağlantının hangi adımda (DNS, bağlantı, TLS,
+  ilk bayt) takıldığını, ulaşılan adresi ve sertifikayı gösterir (bkz.
+  "Başarısız kontrolün ayrıntıları"). Buradan durdurulur, susturulur,
+  düzenlenir, kopyalanır ya da silinir.
+- **Olay sayfası**: bir kesintinin baştan sona hikâyesi; bkz. "Olay
+  sayfası".
+- **Yeni monitor / düzenle**: tipe göre değişen tek form; yardım metinleri
+  girilen değerleri okuyarak ne olacağını söyler.
+- **Tema**: menünün altındaki düğme sistem, açık ve koyu arasında geçer;
+  seçim tarayıcıda saklanır.
 
 ## Durum sayfaları
 
@@ -1525,7 +1549,7 @@ hatayı yazar.
 ### Raporlar
 
 **Raporlar** sayfası (`GET /api/v1/reports?days=30`) son 1, 7, 30 ya da 90
-günü namespace başına özetler: uptime, kontrol sayısı, ortalama yanıt,
+günü (`REPORT_PERIODS`) namespace başına özetler: uptime, kontrol sayısı, ortalama yanıt,
 kesinti sayısı, toplam ve en uzun kesinti süresi, MTTR ve MTBF; her
 namespace'te en düşük uptime'lı monitor en üsttedir. Hesap saatlik
 özetlerden ve `down` türündeki olaylardan yapılır; döneme taşan kesintilerin
@@ -2064,6 +2088,12 @@ Sıralama `sort` ile: `started_at` (varsayılan, yeniden eskiye), `duration`
 toplamı `X-Total-Count` başlığındadır. `format=csv` eşleşen olayların
 hepsini (`limit` verilmedikçe) dosya olarak verir.
 
+Arayüzdeki **Olaylar** listesi bu süzgeçleri adreste tutar (bir süzgeçli
+liste bağlantı olarak paylaşılabilir); zaman süzgecinin "son …" seçenekleri
+`INCIDENT_RANGES`, sayfa uzunluğu `INCIDENTS_LIMIT` ile ayarlanır. "CSV
+indir" o an seçili süzgeçle eşleşen bütün olayları, listenin sırasıyla
+indirir.
+
 ## Yapılandırma
 
 Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
@@ -2199,16 +2229,24 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `STATUS_PAGE_REFRESH_MS` | `30000` | Açık bir durum sayfasının yenilenme aralığı (ms) |
 | `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar monitor listesinde tüm namespace'ler açık gelir; üzerinde yalnızca sorunlu olanlar açılır |
-| `LIST_BEATS` | `14` | Monitor listesinde her satırda gösterilen son kontrol sayısı |
+| `LIST_BEATS` | `24` | Monitor listesinde ve namespace tablosunda her satırda gösterilen son kontrol sayısı |
+| `WARN_UPTIME_BELOW` | `99.9` | Listede ve tablolarda uptime bu yüzdenin altındaysa kehribar renkte gösterilir; üstündeyse sessiz kalır |
+| `CRITICAL_UPTIME_BELOW` | `99` | Uptime bu yüzdenin altındaysa kırmızı gösterilir |
 | `HISTORY_LIMIT` | `60` | Monitor sayfasındaki kalp atışı çubuğunda gösterilen kontrol sayısı |
 | `RESULTS_LIMIT` | `30` | Monitor sayfasında listelenen kontrol sayısı |
-| `OVERVIEW_EVENTS` | `12` | Genel bakışta listelenen son olay sayısı |
-| `OVERVIEW_CERTIFICATES` | `5` | Genel bakışta listelenen, süresi en yakın sertifika sayısı |
+| `MONITOR_INCIDENTS` | `6` | Monitor sayfasının olay panelinde "Tümünü göster"den önce listelenen olay sayısı |
+| `OVERVIEW_EVENTS` | `12` | Genel bakışta ve namespace sayfasında listelenen son olay sayısı |
+| `OVERVIEW_OUTAGES` | `5` | Genel bakışın özetinde satır satır gösterilen devam eden kesinti sayısı; fazlası listede süzülerek açılır |
+| `FLEET_STRIP_HOURS` | `24` | Genel bakıştaki ve namespace sayfasındaki kesinti şeridinin kapsadığı saat |
+| `FLEET_STRIP_SLOTS` | `96` | Bu şeridin çubuk sayısı (varsayılanla her çubuk 15 dakika) |
+| `STATS_DAYS` | `7` | Genel bakışta ve namespace sayfasında MTTR, kesinti sayısı ve uptime gibi rakamların kapsadığı gün (en çok 365) |
 | `NEW_MONITOR_INTERVAL_SECONDS` | `60` | Yeni monitor formunun başlangıçtaki kontrol aralığı |
 | `NEW_MONITOR_TIMEOUT_SECONDS` | `10` | Yeni monitor formunun başlangıçtaki zaman aşımı |
 | `NEW_MONITOR_FAILURE_THRESHOLD` | `3` | Yeni monitor formunun başlangıçtaki alarm eşiği |
 | `PUSH_INTERNAL_URL` | `BACKEND_URL` | Push monitor'larında "cluster içinden" gösterilen rapor adresinin kökü |
 | `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |
+| `INCIDENT_RANGES` | `24h,168h,720h,2160h` | Olay listesinin zaman süzgecinde sunulan "son …" dönemleri |
+| `REPORT_PERIODS` | `30,1,7,90` | Raporlarda sunulan dönemler, gün olarak (1–365); ilki varsayılandır |
 | `AUDIT_LIMIT` | `200` | Kayıt sayfasında listelenen girdi sayısı |
 | `MAINTENANCE_DURATIONS` | `30m,1h,2h,4h,8h,24h` | Susturma ve bakım için sunulan süreler |
 | `MAINTENANCE_LIMIT` | `50` | Listelenen bakım penceresi sayısı |

@@ -1,9 +1,10 @@
 import type { T } from "@/lib/i18n/translate";
 
-/** "12 sn önce" / "12 s ago", "3 dk önce" / "3 min ago", ... relative to now. */
+/** "12 sn önce" / "12 s ago", "3 dk önce" / "3 min ago", ... relative to now; "şimdi" / "just now" under a second. */
 export function timeAgo(iso: string, now: number, t: T): string {
   const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   const ago = (duration: string) => t("format.ago", { duration });
+  if (seconds < 1) return t("format.justNow");
   if (seconds < 60) return ago(t("format.seconds", { count: seconds }));
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return ago(t("format.minutes", { count: minutes }));
@@ -29,15 +30,34 @@ export function uptime(percent: number | null, t: T): string {
   return t("format.percent", { value: floored.toLocaleString(t.intl, { minimumFractionDigits: 2 }) });
 }
 
-/** Length of a period: 6000 -> "6 sn" / "6 s", 200000 -> "3 dk 20 sn" / "3 min 20 s", 9000000 -> "2 sa 30 dk" / "2 h 30 min". */
+/** Two digits, for the smaller unit of a span: 5 -> "05", as a clock would. */
+const twoDigits = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * Length of a period in its largest unit and the one below it, the way a
+ * table writes it: 6000 -> "6 sn" / "6s", 200000 -> "3 dk 20 sn" /
+ * "3m 20s", 3900000 -> "1 sa 05 dk" / "1h 05m", 482400000 -> "5 gün 14 sa"
+ * / "5d 14h". A smaller unit that is zero is left out (120000 -> "2 dk" /
+ * "2m"), and nothing is ever "0 sn": under half a second it is "<1 sn" /
+ * "<1s".
+ */
 export function span(ms: number, t: T): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return t("format.seconds", { count: seconds });
+  if (seconds === 0) return t("format.span.lessThanSecond");
+  if (seconds < 60) return t("format.span.s", { count: seconds });
+  const both = (larger: string, smaller: string, rest: number) => (rest === 0 ? larger : `${larger} ${smaller}`);
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${t("format.minutes", { count: minutes })} ${t("format.seconds", { count: seconds % 60 })}`;
+  if (minutes < 60) {
+    const rest = seconds % 60;
+    return both(t("format.span.m", { count: minutes }), t("format.span.s", { count: twoDigits(rest) }), rest);
+  }
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${t("format.hours", { count: hours })} ${t("format.minutes", { count: minutes % 60 })}`;
-  return `${t.n("format.days", Math.floor(hours / 24))} ${t("format.hours", { count: hours % 24 })}`;
+  if (hours < 24) {
+    const rest = minutes % 60;
+    return both(t("format.span.h", { count: hours }), t("format.span.m", { count: twoDigits(rest) }), rest);
+  }
+  const rest = hours % 24;
+  return both(t("format.span.d", { count: Math.floor(hours / 24) }), t("format.span.h", { count: rest }), rest);
 }
 
 /** CPU in Kubernetes units: 0.25 -> "250m", 1.5 -> "1,5" / "1.5", 0.0002 -> "<1m". */
@@ -57,4 +77,32 @@ export function memory(bytes: number, t: T): string {
 /** A response time: 0 -> "<1 ms" (it took some time, just not a whole millisecond), 1234 -> "1.234 ms" / "1,234 ms". */
 export function milliseconds(ms: number, t: T): string {
   return ms < 1 ? "<1 ms" : `${Math.round(ms).toLocaleString(t.intl)} ms`;
+}
+
+/** Whole calendar days from b to a, in the zone the code runs in (the viewer's, in a browser). */
+export function dayDistance(a: Date, b: Date): number {
+  const day = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((day(a) - day(b)) / 86_400_000);
+}
+
+/** The time of day on a 24-hour clock: "19:11", in Turkish and English alike. */
+export function clock(date: Date, t: T): string {
+  return date.toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+}
+
+/**
+ * A moment as a table row writes it, in as few characters as stay clear:
+ * "19:11" on the day of now, "Çar 19:11" / "Wed 19:11" within a week of
+ * it either way, "14 Eki 19:11" / "Oct 14 19:11" further off, and with the
+ * year once it is not now's. Read in the zone the code runs in, so call it
+ * in the browser.
+ */
+export function compactTime(date: Date, now: Date, t: T): string {
+  const time = clock(date, t);
+  const days = Math.abs(dayDistance(date, now));
+  if (days === 0) return time;
+  if (days < 7) return `${date.toLocaleDateString(t.intl, { weekday: "short" })} ${time}`;
+  const sameYear = date.getFullYear() === now.getFullYear();
+  const day = date.toLocaleDateString(t.intl, { day: "numeric", month: "short", ...(!sameYear && { year: "numeric" }) });
+  return `${day} ${time}`;
 }

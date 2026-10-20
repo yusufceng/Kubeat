@@ -1,148 +1,377 @@
 @import "tailwindcss";
+@import "./styles/polish.css";
+@import "./styles/fleet.css";
+@import "./styles/monitor.css";
+@import "./styles/incidents.css";
 
 /* The theme is chosen by data-theme on <html>, set before the first paint by
    the script in the root layout: the viewer's choice, or the system's. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* Surfaces, text and the colors that carry a monitor's state. The dark
-   values are steps of their own, chosen for the dark surface. */
+/* Kubeat Signal. Surfaces are cool graphite and carry no meaning; the
+   saturated hues are kept for a monitor's health; one blue accent marks
+   what can be acted on and never stands for a state. Every state color has
+   an -ink step for text, which reads on panel and canvas alike. */
 :root {
-  --bg: #f4f6f8;
+  --canvas: #f2f4f7;
   --panel: #ffffff;
-  --sunken: #eef1f4;
-  --line: #dfe3e8;
-  --ink: #14181d;
-  --muted: #65707c;
-  --accent: #0d8f62;
-  --accent-ink: #ffffff;
+  /* Menus, tooltips and dialogs, which float with --shadow-pop. */
+  --raised: #ffffff;
+  /* Inputs and sunken areas. */
+  --well: #f0f3f6;
+  --hover: #edeff3;
+  --line: #dfe2e7;
+  --line-strong: #cdd1d8;
 
-  --up: #12a06c;
-  --down: #d93d3d;
-  --warn: #c98206;
-  --maint: #2f74d0;
-  --idle: #a3acb6;
+  --ink: #151b23;
+  --ink-2: #474e57;
+  --ink-3: #666c75;
+
+  --accent: #2f65db;
+  --accent-hover: #1e52c6;
+  --accent-ink: #ffffff;
+  /* Links and accent words on panel or canvas. */
+  --accent-text: #2358cd;
+
+  --up: #0c994f;
+  --up-ink: #05773b;
+  /* Degraded: verifying, recovering, a partial day. */
+  --warn: #e78d02;
+  --warn-ink: #a45e00;
+  --down: #e4312f;
+  --down-ink: #c51e21;
+  /* Text on a solid down fill, such as the button that deletes. */
+  --on-down: #ffffff;
+  --maint: #7487a5;
+  --maint-ink: #4c5f7a;
+  --idle: #bbbec3;
+
+  --series: #2f65db;
+  /* Healthy slots of strips and grids: a calm green, so that failures stand out. */
+  --ok-bar: color-mix(in oklab, var(--up) 62%, var(--panel));
+
+  --shadow-pop: 0 1px 0 rgba(16, 24, 40, 0.04), 0 12px 32px -12px rgba(16, 24, 40, 0.22);
+
   /* How light the text of a tag is; its hue comes from the tag's name. */
   --tag-ink: 0.48;
-
-  /* Used by the pages that predate the tokens above. */
-  --background: var(--bg);
-  --foreground: var(--ink);
-
-  /* Chart colors: one series hue plus the reserved status colors. */
-  --viz-series: #2a78d6;
-  --viz-grid: #e1e4e8;
-  --viz-axis: #c3c8ce;
-  --viz-muted: #878f98;
-  --viz-good: var(--up);
-  --viz-warning: var(--warn);
-  --viz-critical: var(--down);
 
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --bg: #0c0f13;
-  --panel: #14191f;
-  --sunken: #1b2129;
-  --line: #262e38;
-  --ink: #e8ebef;
-  --muted: #8a94a0;
-  --accent: #2fbf8a;
-  --accent-ink: #06130e;
+  --canvas: #0a0c10;
+  --panel: #101317;
+  --raised: #191c21;
+  --well: #0c0e12;
+  --hover: #161a1f;
+  --line: #24282e;
+  --line-strong: #34383f;
 
-  --up: #2fbf8a;
-  --down: #f0605f;
-  --warn: #efb03a;
-  --maint: #5b9bf0;
-  --idle: #566070;
+  --ink: #eaedf1;
+  --ink-2: #b6bbc2;
+  --ink-3: #878d95;
+
+  --accent: #6294fa;
+  --accent-hover: #7ba9ff;
+  --accent-ink: #070d1a;
+  --accent-text: #85b0ff;
+
+  --up: #41d686;
+  --up-ink: #56db8f;
+  --warn: #fabb41;
+  --warn-ink: #fbc456;
+  --down: #ff5b58;
+  --down-ink: #ff7a73;
+  --on-down: #1c0707;
+  --maint: #7c94b7;
+  --maint-ink: #98accb;
+  --idle: #44484e;
+
+  --series: #72a2ff;
+  --ok-bar: color-mix(in oklab, var(--up) 58%, var(--panel));
+
+  --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+
   --tag-ink: 0.8;
-
-  --viz-series: #4a94ec;
-  --viz-grid: #232a33;
-  --viz-axis: #323b46;
-  --viz-muted: #7d8793;
 
   color-scheme: dark;
 }
 
+/* Derived steps, worked out from whichever theme is active: a soft
+   background (12%) and a line (35%) for each state and for the accent. */
+:root {
+  --up-soft: color-mix(in oklab, var(--up) 12%, transparent);
+  --up-line: color-mix(in oklab, var(--up) 35%, transparent);
+  --warn-soft: color-mix(in oklab, var(--warn) 12%, transparent);
+  --warn-line: color-mix(in oklab, var(--warn) 35%, transparent);
+  --down-soft: color-mix(in oklab, var(--down) 12%, transparent);
+  --down-line: color-mix(in oklab, var(--down) 35%, transparent);
+  --maint-soft: color-mix(in oklab, var(--maint) 12%, transparent);
+  --maint-line: color-mix(in oklab, var(--maint) 35%, transparent);
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in oklab, var(--accent) 35%, transparent);
+
+  /* Chart colors, under the names the chart and the check grid still use. */
+  --viz-series: var(--series);
+  --viz-grid: var(--line);
+  --viz-axis: var(--line-strong);
+  --viz-muted: var(--ink-3);
+  --viz-good: var(--up);
+  --viz-warning: var(--warn);
+  --viz-critical: var(--down);
+
+  /* Motion: quick to start, soft to land. */
+  --ease-signal: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-bg: var(--bg);
+  --color-canvas: var(--canvas);
   --color-panel: var(--panel);
-  --color-sunken: var(--sunken);
+  --color-raised: var(--raised);
+  --color-well: var(--well);
+  --color-hover: var(--hover);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
-  --color-muted: var(--muted);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-ink: var(--accent-ink);
+  --color-accent-text: var(--accent-text);
   --color-up: var(--up);
-  --color-down: var(--down);
+  --color-up-ink: var(--up-ink);
   --color-warn: var(--warn);
+  --color-warn-ink: var(--warn-ink);
+  --color-down: var(--down);
+  --color-down-ink: var(--down-ink);
   --color-maint: var(--maint);
+  --color-maint-ink: var(--maint-ink);
   --color-idle: var(--idle);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-series: var(--series);
+  --color-ok-bar: var(--ok-bar);
+
+  /* Older names, kept working until every page uses the ones above:
+     bg is the canvas, sunken a hover-level fill, muted the third ink. */
+  --color-bg: var(--canvas);
+  --color-sunken: var(--hover);
+  --color-muted: var(--ink-3);
+
+  --font-sans: var(--font-mona), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@theme {
+  /* xs for chips, kind tags and kbd; sm for buttons and inputs; md for
+     panels, menus and tooltips; lg for dialogs. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --ease-signal: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 body {
-  background: var(--bg);
+  background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-mona), ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 430;
+  /* Figures are proportional in running text. Mona Sans's tabular figures
+     are a set of their own, with a slashed zero and a footed one, so
+     tabular-nums is kept for figures that must line up or tick: readouts
+     (type-kpi), table columns, counters and timers. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Panes scroll on their own; a thin bar keeps them from looking boxed in. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 24%, transparent);
+}
+
+/* One focus mark everywhere: the accent, set off from the control. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The type scale. Mona Sans is a variable font: the display sizes widen it,
+   the figures of the readouts narrow it. Nothing is set in capitals. */
+@utility type-display-l {
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: 660;
+  font-stretch: 112.5%;
+  letter-spacing: -0.02em;
+}
+@utility type-display {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 660;
+  font-stretch: 112.5%;
+  letter-spacing: -0.02em;
+}
+/* The display style at phone size, and for a hero inside a page. */
+@utility type-display-s {
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 660;
+  font-stretch: 112.5%;
+  letter-spacing: -0.02em;
+}
+@utility type-title {
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 620;
+}
+@utility type-heading {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+@utility type-body {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 430;
+}
+@utility type-dense {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 450;
+}
+@utility type-caption {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+@utility type-micro {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+}
+@utility type-kpi {
+  font-size: 26px;
+  line-height: 30px;
+  font-weight: 700;
+  font-stretch: 88%;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+@utility type-kpi-l {
+  font-size: 34px;
+  line-height: 38px;
+  font-weight: 700;
+  font-stretch: 88%;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+/* Targets, errors, kinds and namespaces. */
+@utility type-mono {
+  font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: -0.01em;
+}
+@utility type-mono-s {
+  font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 14px;
 }
 
 @layer components {
-  /* A raised surface: the unit most of the interface is built from. */
+  /* A page's column of content: left-aligned, never wider than reads well.
+     Tables take the full width with .page-wide. */
+  .page {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+    max-width: 1240px;
+    padding: 24px 28px 48px;
+  }
+  .page-wide {
+    max-width: none;
+  }
+  @media (width < 64rem) {
+    .page {
+      padding: 16px 16px 32px;
+    }
+  }
+
+  /* A group of a page: flat, a hairline on the canvas, no shadow. */
+  .panel,
   .card {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 0.75rem;
+    border-radius: var(--radius-md);
+  }
+
+  /* Floating surfaces: menus, popovers, tooltips. */
+  .pop {
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-pop);
   }
 
   .field {
     width: 100%;
-    border-radius: 0.5rem;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--line);
-    background: var(--panel);
-    padding: 0.5rem 0.75rem;
-    font-size: 0.875rem;
-    line-height: 1.25rem;
-    outline: none;
+    background: var(--well);
+    color: var(--ink);
+    /* 34px tall with the border, without fixing the height of a textarea. */
+    padding: 7px 10px;
+    font-size: 13px;
+    line-height: 18px;
   }
-  .field:focus {
+  .field::placeholder {
+    color: var(--ink-3);
+  }
+  .field:hover:not(:disabled, :focus) {
+    border-color: var(--line-strong);
+  }
+  .field:focus-visible {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+    outline-offset: -1px;
   }
   .field:disabled {
-    background: var(--sunken);
-    color: var(--muted);
+    background: var(--hover);
+    color: var(--ink-3);
   }
 
   .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
+    gap: 7px;
     white-space: nowrap;
-    border-radius: 0.5rem;
-    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line-strong);
     background: var(--panel);
-    padding: 0.4rem 0.8rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-    line-height: 1.25rem;
+    color: var(--ink);
+    /* 32px tall; a smaller padding or text size makes the small button. */
+    padding: 7px 12px;
+    font-size: 13px;
+    font-weight: 550;
+    line-height: 16px;
+    transition:
+      background-color 120ms var(--ease-signal),
+      border-color 120ms var(--ease-signal);
   }
   .btn:hover {
-    background: var(--sunken);
+    background: var(--hover);
   }
   .btn:disabled {
-    opacity: 0.6;
+    opacity: 0.55;
+    cursor: not-allowed;
   }
   .btn-primary {
     border-color: transparent;
@@ -150,22 +379,296 @@ body {
     color: var(--accent-ink);
   }
   .btn-primary:hover {
-    background: color-mix(in srgb, var(--accent) 88%, var(--ink));
+    background: var(--accent-hover);
+  }
+  /* For the second and third actions of a header or a row. */
+  .btn-ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--ink-2);
+  }
+  .btn-ghost:hover {
+    background: var(--hover);
+    color: var(--ink);
   }
   .btn-danger {
-    border-color: color-mix(in srgb, var(--down) 40%, transparent);
-    color: var(--down);
+    border-color: var(--down-line);
+    color: var(--down-ink);
   }
   .btn-danger:hover {
-    background: color-mix(in srgb, var(--down) 10%, transparent);
+    background: var(--down-soft);
   }
   /* The button that carries out something that cannot be undone. */
   .btn-danger-solid {
     border-color: transparent;
     background: var(--down);
-    color: #fff;
+    color: var(--on-down);
   }
   .btn-danger-solid:hover {
-    background: color-mix(in srgb, var(--down) 86%, #000);
+    background: color-mix(in oklab, var(--down) 88%, var(--ink));
+  }
+  .btn-sm {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  /* A section of the rail: an icon in a 40px tile. The current one is an
+     accent tile with a bar at the rail's edge. */
+  .rail-item {
+    position: relative;
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    color: var(--ink-3);
+    transition:
+      background-color 120ms var(--ease-signal),
+      color 120ms var(--ease-signal);
+  }
+  .rail-item:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .rail-item[aria-current="page"] {
+    background: color-mix(in oklab, var(--accent) 14%, transparent);
+    color: var(--accent-text);
+  }
+  .rail-item[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: -10px;
+    top: 10px;
+    bottom: 10px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+  /* The name of a rail item, beside it on hover and on keyboard focus. */
+  .rail-tip {
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    z-index: 60;
+    translate: -4px -50%;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    padding: 5px 9px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--raised);
+    box-shadow: var(--shadow-pop);
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+    transition:
+      opacity 120ms var(--ease-signal),
+      translate 120ms var(--ease-signal);
+  }
+  .rail-item:hover .rail-tip,
+  .rail-item:focus-visible .rail-tip {
+    opacity: 1;
+    translate: 0 -50%;
+  }
+
+  /* A menu that floats (a popover): fades in and rises 4px. Where it sits
+     is up to the markup (inset-auto plus a side and an edge). */
+  .menu {
+    position: fixed;
+    margin: 0;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--raised);
+    box-shadow: var(--shadow-pop);
+    color: var(--ink);
+    opacity: 0;
+    translate: 0 4px;
+    transition:
+      opacity 160ms var(--ease-signal),
+      translate 160ms var(--ease-signal),
+      overlay 160ms allow-discrete,
+      display 160ms allow-discrete;
+  }
+  .menu:popover-open {
+    opacity: 1;
+    translate: 0 0;
+  }
+  @starting-style {
+    .menu:popover-open {
+      opacity: 0;
+      translate: 0 4px;
+    }
+  }
+  .menu-item {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 10px;
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--ink);
+  }
+  .menu-item:hover {
+    background: var(--hover);
+  }
+  .menu-item > svg {
+    flex: none;
+    color: var(--ink-3);
+  }
+  .menu-item[aria-current="page"] {
+    color: var(--accent-text);
+  }
+  .menu-item[aria-current="page"] > svg {
+    color: currentColor;
+  }
+  .menu-sep {
+    margin: 4px -4px;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  /* A section of the phone's tab bar: an icon over a short name. */
+  .tab {
+    display: grid;
+    min-width: 0;
+    justify-items: center;
+    align-content: center;
+    gap: 4px;
+    height: 62px;
+    color: var(--ink-3);
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 1;
+  }
+  .tab[aria-current="page"],
+  .tab[data-active] {
+    color: var(--accent-text);
+  }
+
+  /* A key the viewer can press. */
+  .kbd {
+    display: inline-block;
+    border: 1px solid var(--line-strong);
+    border-bottom-width: 2px;
+    border-radius: var(--radius-xs);
+    padding: 1px 5px;
+    font: 500 11px/14px var(--font-plex), ui-monospace, monospace;
+    color: var(--ink-3);
+  }
+
+  /* StatusGlyph: a monitor's state as a shape and a color, so that it
+     reads without the color too. --g is its size. */
+  .glyph {
+    position: relative;
+    display: inline-block;
+    flex: none;
+    width: var(--g, 10px);
+    height: var(--g, 10px);
+    border-radius: 50%;
+  }
+  .glyph-up {
+    background: var(--up);
+  }
+  .glyph-down {
+    background: var(--down);
+    border-radius: 1.5px;
+    transform: rotate(45deg) scale(0.86);
+  }
+  /* An outage that is still going on wears a ring that pulses. */
+  .glyph-down.glyph-live::after {
+    content: "";
+    position: absolute;
+    inset: calc(var(--g, 10px) * -0.32);
+    border: 1.5px solid var(--down);
+    border-radius: 2px;
+    opacity: 0.45;
+    animation: glyph-pulse 1.6s var(--ease-signal) infinite;
+  }
+  .glyph-warn {
+    background: linear-gradient(90deg, var(--warn) 50%, transparent 50%);
+    box-shadow: inset 0 0 0 1.5px var(--warn);
+  }
+  .glyph-maint {
+    background: repeating-linear-gradient(135deg, var(--maint) 0 1.5px, transparent 1.5px 3px);
+    box-shadow: inset 0 0 0 1.5px var(--maint);
+  }
+  .glyph-paused {
+    box-shadow: inset 0 0 0 1.5px var(--ink-3);
+  }
+  .glyph-paused::after {
+    content: "";
+    position: absolute;
+    left: 33%;
+    top: 30%;
+    width: 34%;
+    height: 40%;
+    border-left: 1.3px solid var(--ink-3);
+    border-right: 1.3px solid var(--ink-3);
+  }
+  .glyph-pending {
+    border: 1.5px dashed var(--ink-3);
+  }
+
+  /* BeatStrip: checks, buckets or days as slots, newest on the right. A
+     slot without data is a baseline, never a grey bar that looks like one. */
+  .beat-strip {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+  }
+  .slot {
+    flex: none;
+    height: 100%;
+    border-radius: 1px;
+    background: var(--ok-bar);
+  }
+  .slot-down {
+    background: var(--down);
+  }
+  .slot-partial {
+    background: var(--warn);
+  }
+  .slot-maint {
+    background: repeating-linear-gradient(135deg, var(--maint) 0 1px, transparent 1px 3px);
+    box-shadow: inset 0 0 0 1px var(--maint-line);
+  }
+  .slot-none {
+    height: 2px;
+    border-radius: 0;
+    background: var(--line-strong);
+  }
+}
+
+@keyframes glyph-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  to {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+/* Motion is a courtesy: without it, the pulse stands still as a ring and
+   nothing tweens. */
+@media (prefers-reduced-motion: reduce) {
+  .glyph-down.glyph-live::after {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
   }
 }

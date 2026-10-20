@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { getHealth, type Health, REQUIRED_API_REVISION } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
+import { WarningIcon } from "@/app/ui/page-icons";
 
 /**
  * Says so when the backend is older than this frontend expects, which
@@ -25,11 +26,9 @@ async function RevisionCheck() {
   const t = await getT();
 
   return (
-    <p
-      role="alert"
-      className="border-b border-warn/40 bg-warn/12 px-4 py-2 text-center text-sm text-warn"
-    >
-      {t("backend.outdated")}
+    <p role="alert" className="pg-warning-bar">
+      <WarningIcon width={14} height={14} aria-hidden />
+      <span>{t("backend.outdated")}</span>
     </p>
   );
 }

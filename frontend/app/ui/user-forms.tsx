@@ -1,6 +1,7 @@
 "use client";
 
-import { ConfirmForm } from "@/app/ui/confirm";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useActionState, useState, useTransition } from "react";
 import {
   changePasswordAction,
@@ -12,9 +13,12 @@ import {
   updateUserAction,
 } from "@/app/actions";
 import type { GroupRole, Role, User } from "@/lib/api";
-import { EditIcon, TrashIcon } from "@/app/ui/icons";
-import { LocalTime } from "@/app/ui/local-time";
 import { useT } from "@/lib/i18n/client";
+import type { T } from "@/lib/i18n/translate";
+import { ConfirmForm } from "@/app/ui/confirm";
+import { EditIcon, TrashIcon } from "@/app/ui/icons";
+import { StatusGlyph } from "@/app/ui/status-glyph";
+import { TableTime } from "@/app/ui/table-time";
 
 export const roleLabels: Record<Role, string> = { admin: "auth.role.admin", editor: "auth.role.editor", viewer: "auth.role.viewer" };
 
@@ -24,209 +28,387 @@ const roleHints: Record<Role, string> = {
   viewer: "users.roleHint.viewer",
 };
 
-function RoleFields({
+const roles = Object.keys(roleLabels) as Role[];
+
+/** "shop, billing" -> ["shop", "billing"], as the server reads the field. */
+function namespaceList(text: string): string[] {
+  return text
+    .split(",")
+    .map((ns) => ns.trim())
+    .filter(Boolean);
+}
+
+/** What an account may see and do, as a sentence: the role and the namespaces read back. */
+function accessSentence(name: string, role: Role, namespaces: string[], t: T): React.ReactNode {
+  const who = name.trim() || t("users.echo.someone");
+  if (role === "admin") return t("users.echo.admin", { name: who });
+  if (namespaces.length === 0) return t("users.echo.noScope");
+  const scope = namespaces.includes("*")
+    ? t("users.echo.scope.all")
+    : t.n("users.echo.scope.some", namespaces.length, {
+        namespaces: new Intl.ListFormat(t.intl, { type: "conjunction" }).format(namespaces),
+      });
+  const [before, middle] = t(role === "editor" ? "users.echo.editor" : "users.echo.viewer", { name: who }).split("{scope}");
+  return (
+    <>
+      {before}
+      <b>{scope}</b>
+      {middle}
+    </>
+  );
+}
+
+/**
+ * The role of an account and, for all but administrators, the namespaces
+ * it covers. The namespaces that have monitors are offered as chips that
+ * add themselves to the field.
+ */
+function AccessFields({
   role,
   namespaces,
   known,
   onRole,
+  onNamespaces,
 }: {
   role: Role;
   namespaces: string;
   /** The namespaces and groups that have monitors, as a hint. */
   known: string[];
   onRole: (role: Role) => void;
+  onNamespaces: (value: string) => void;
 }) {
   const t = useT();
+  const listed = namespaceList(namespaces);
+  const add = (ns: string) => onNamespaces([...listed.filter((n) => n !== ns), ns].join(", "));
   return (
     <>
-      <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("auth.role")}</span>
-        <select name="role" value={role} onChange={(e) => onRole(e.target.value as Role)} className="field">
-          {(Object.keys(roleLabels) as Role[]).map((r) => (
-            <option key={r} value={r}>
+      <fieldset>
+        <legend className="pg-label">{t("auth.role")}</legend>
+        <div className="pg-seg">
+          {roles.map((r) => (
+            <label key={r}>
+              <input type="radio" name="role" value={r} checked={role === r} onChange={() => onRole(r)} />
               {t(roleLabels[r])}
-            </option>
+            </label>
           ))}
-        </select>
-        <span className="mt-1 block text-xs text-muted">{t(roleHints[role])}</span>
-      </label>
+        </div>
+        <span className="pg-help">{t(roleHints[role])}</span>
+      </fieldset>
       {role !== "admin" && (
-        <label className="sm:col-span-4">
-          <span className="mb-1 block text-xs font-medium text-muted">{t("users.namespaces.label")}</span>
-          <input name="namespaces" required defaultValue={namespaces} placeholder={t("users.namespaces.placeholder")} className="field font-mono" />
-          <span className="mt-1 block text-xs text-muted">
+        <label>
+          <span className="pg-label">{t("users.namespaces.label")}</span>
+          <input
+            name="namespaces"
+            required
+            value={namespaces}
+            onChange={(e) => onNamespaces(e.target.value)}
+            placeholder={t("users.namespaces.placeholder")}
+            className="field font-mono"
+          />
+          <span className="pg-help">
             {t("users.namespaces.hintBefore")} <code className="font-mono">*</code> {t("users.namespaces.hintAfter")}
-            {known.length > 0 && ` ${t("users.namespaces.known", { list: known.join(", ") })}`}
           </span>
         </label>
+      )}
+      {role !== "admin" && known.length > 0 && (
+        <div className="pg-chips" role="group" aria-label={t("users.namespaces.add")}>
+          {["*", ...known].map((ns) => (
+            <button
+              key={ns}
+              type="button"
+              className="pg-chip pg-chip-mono"
+              aria-pressed={listed.includes(ns)}
+              onClick={() => add(ns)}
+              title={t("users.namespaces.addOne", { namespace: ns })}
+            >
+              {ns === "*" ? `* ${t("users.namespaces.allChip")}` : ns}
+            </button>
+          ))}
+        </div>
       )}
     </>
   );
 }
 
-/** Creates a local account. */
-export function NewUserForm({ known }: { known: string[] }) {
-  const [role, setRole] = useState<Role>("viewer");
+/**
+ * The form of an account. Without a user it creates a local account; with
+ * one it edits it, and an account that signs in elsewhere (LDAP, SSO)
+ * keeps the role and password its directory gives it. closeHref is where
+ * Cancel and a successful save lead.
+ */
+export function UserForm({
+  user,
+  self = false,
+  known,
+  closeHref,
+}: {
+  user?: User;
+  self?: boolean;
+  known: string[];
+  closeHref: string;
+}) {
+  const t = useT();
+  const router = useRouter();
+  const [role, setRole] = useState<Role>(user?.role ?? "viewer");
+  const [namespaces, setNamespaces] = useState(user?.namespaces.join(", ") ?? "");
+  // Who the sentence under the access fields speaks of.
+  const [username, setUsername] = useState(user?.username ?? "");
+  const [displayName, setDisplayName] = useState(user?.display_name ?? "");
+  const name = displayName.trim() || username;
+  const [enabled, setEnabled] = useState(user?.enabled ?? true);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const t = useT();
-
-  function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const data = new FormData(form);
-    setError(null);
-    startTransition(async () => {
-      const result = await createUserAction(data);
-      if (result?.error) setError(result.error);
-      else form.reset();
-    });
-  }
-
-  return (
-    <form onSubmit={submit} className="grid gap-4 sm:grid-cols-6">
-      <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("auth.username")}</span>
-        <input name="username" required autoComplete="off" placeholder={t("users.new.usernamePlaceholder")} className="field" />
-      </label>
-      <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("auth.displayName")}</span>
-        <input name="display_name" placeholder={t("users.new.displayNamePlaceholder")} className="field" />
-      </label>
-      <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("auth.email")}</span>
-        <input name="email" type="email" className="field" />
-      </label>
-      <label className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("auth.password")}</span>
-        <input name="password" type="password" required minLength={8} autoComplete="new-password" className="field" />
-      </label>
-      <RoleFields role={role} namespaces="" known={known} onRole={setRole} />
-      <div className="flex flex-wrap items-center gap-3 sm:col-span-6">
-        <button type="submit" disabled={pending} className="btn btn-primary">
-          {pending ? t("auth.creating") : t("users.new.submit")}
-        </button>
-        {error && (
-          <p role="alert" className="text-sm text-down">
-            {error}
-          </p>
-        )}
-      </div>
-    </form>
-  );
-}
-
-/** One account in the list, with its editing form. */
-export function UserRow({ user, self, known }: { user: User; self: boolean; known: string[] }) {
-  const [editing, setEditing] = useState(false);
-  const [role, setRole] = useState<Role>(user.role);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-  const t = useT();
   // Accounts that sign in elsewhere: their role and password are not ours to set.
-  const ldap = user.source !== "local";
-  const sourceBadge = user.source === "ldap" ? t("users.row.ldap") : user.source === "oidc" ? t("users.row.sso") : null;
+  const external = user !== undefined && user.source !== "local";
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     setError(null);
     startTransition(async () => {
-      const result = await updateUserAction(data);
-      if (result?.error) setError(result.error);
-      else setEditing(false);
+      const result = user ? await updateUserAction(data) : await createUserAction(data);
+      if (result?.error) {
+        setError(result.error);
+        return;
+      }
+      router.replace(closeHref, { scroll: false });
     });
   }
 
   return (
-    <li className="px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            <span className={user.enabled ? "" : "text-muted line-through"}>{user.display_name || user.username}</span>
-            <span className="rounded bg-sunken px-1.5 py-0.5 text-xs font-normal">{t(roleLabels[user.role])}</span>
-            {sourceBadge && <span className="rounded bg-maint/12 px-1.5 py-0.5 text-xs font-normal text-maint">{sourceBadge}</span>}
-            {!user.enabled && <span className="rounded bg-sunken px-1.5 py-0.5 text-xs font-normal text-muted">{t("users.row.disabled")}</span>}
-            {self && <span className="text-xs font-normal text-muted">{t("users.row.you")}</span>}
-          </div>
-          <div className="mt-0.5 text-xs text-muted">
-            <span className="font-mono">{user.username}</span>
-            {user.email && ` · ${user.email}`}
-            {user.role !== "admin" && ` · ${user.namespaces.join(", ") || t("common.none")}`}
-            {" · "}
-            {user.last_login_at ? (
-              <>
-                {t("users.row.lastSignIn")} <LocalTime iso={user.last_login_at} seconds={false} />
-              </>
-            ) : (
-              t("users.row.neverSignedIn")
+    <form onSubmit={submit} className="pg-form">
+      {user && <input type="hidden" name="id" value={user.id} />}
+      <div className="pg-sec">
+        <div className="pg-sec-intro">
+          <h2>{t("users.sec.account")}</h2>
+          <p>{user ? t("users.sec.accountEdit") : t("users.new.hint")}</p>
+        </div>
+        <div className="pg-fields">
+          <div className="pg-grid">
+            {!user && (
+              <label className="pg-span-3">
+                <span className="pg-label">{t("auth.username")}</span>
+                <input
+                  name="username"
+                  required
+                  autoComplete="off"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={t("users.new.usernamePlaceholder")}
+                  className="field font-mono"
+                />
+              </label>
+            )}
+            <label className="pg-span-3">
+              <span className="pg-label">
+                {t("auth.displayName")}
+                <small>{t("form.optional")}</small>
+              </span>
+              <input
+                name="display_name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder={t("users.new.displayNamePlaceholder")}
+                className="field"
+              />
+            </label>
+            <label className="pg-span-3">
+              <span className="pg-label">
+                {t("auth.email")}
+                <small>{t("form.optional")}</small>
+              </span>
+              <input name="email" type="email" defaultValue={user?.email} className="field" />
+            </label>
+            {!external && (
+              <label className="pg-span-3">
+                <span className="pg-label">
+                  {user ? t("account.newPassword") : t("auth.password")}
+                  {user && <small>{t("users.row.passwordKept")}</small>}
+                </span>
+                <input name="password" type="password" required={!user} minLength={8} autoComplete="new-password" className="field" />
+                <span className="pg-help">{t("users.passwordHint")}</span>
+              </label>
             )}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setEditing((v) => !v)} aria-expanded={editing} className="btn" title={t("common.edit")}>
-            <EditIcon />
-            <span className="sr-only">{t("common.edit")}</span>
-          </button>
-          {!self && (
-            <ConfirmForm action={deleteUserAction} question={t("users.row.confirmDelete", { username: user.username })}>
-              <input type="hidden" name="id" value={user.id} />
-              <button type="submit" className="btn btn-danger" title={t("common.delete")}>
-                <TrashIcon />
-                <span className="sr-only">{t("common.delete")}</span>
-              </button>
-            </ConfirmForm>
-          )}
         </div>
       </div>
-      {editing && (
-        <form onSubmit={submit} className="mt-3 grid gap-4 rounded-lg bg-sunken/60 p-4 sm:grid-cols-6">
-          <input type="hidden" name="id" value={user.id} />
-          <label className="sm:col-span-3">
-            <span className="mb-1 block text-xs font-medium text-muted">{t("auth.displayName")}</span>
-            <input name="display_name" defaultValue={user.display_name} className="field" />
-          </label>
-          <label className="sm:col-span-3">
-            <span className="mb-1 block text-xs font-medium text-muted">{t("auth.email")}</span>
-            <input name="email" type="email" defaultValue={user.email} className="field" />
-          </label>
-          {ldap ? (
-            <p className="text-xs text-muted sm:col-span-6">{t("users.row.external")}</p>
+
+      <div className="pg-sec">
+        <div className="pg-sec-intro">
+          <h2>{t("users.sec.access")}</h2>
+          <p>{t("users.sec.accessBody")}</p>
+        </div>
+        <div className="pg-fields">
+          {external ? (
+            <p className="pg-help mt-0">{t("users.row.external")}</p>
           ) : (
-            <>
-              <RoleFields role={role} namespaces={user.namespaces.join(", ")} known={known} onRole={setRole} />
-              <label className="sm:col-span-3">
-                <span className="mb-1 block text-xs font-medium text-muted">{t("users.row.newPassword")}</span>
-                <input name="password" type="password" minLength={8} autoComplete="new-password" className="field" />
-              </label>
-            </>
+            <AccessFields role={role} namespaces={namespaces} known={known} onRole={setRole} onNamespaces={setNamespaces} />
           )}
-          <label className="flex items-center gap-2 text-sm sm:col-span-3">
-            <input type="checkbox" name="enabled" defaultChecked={user.enabled} disabled={self} className="h-4 w-4 accent-(--accent)" />
-            {t("users.row.enabled")}
-          </label>
-          <div className="flex flex-wrap items-center gap-3 sm:col-span-6">
-            <button type="submit" disabled={pending} className="btn btn-primary">
-              {pending ? t("common.saving") : t("common.save")}
-            </button>
-            <button type="button" onClick={() => setEditing(false)} className="btn">
-              {t("common.cancel")}
-            </button>
-            {error && (
-              <p role="alert" className="text-sm text-down">
-                {error}
-              </p>
-            )}
+          <p className="pg-echo" aria-live="polite">
+            {accessSentence(name, external ? user.role : role, external ? user.namespaces : namespaceList(namespaces), t)}
+          </p>
+        </div>
+      </div>
+
+      {user && (
+        <div className="pg-sec">
+          <div className="pg-sec-intro">
+            <h2>{t("users.sec.state")}</h2>
           </div>
-        </form>
+          <div className="pg-fields">
+            <label className="pg-check">
+              <input
+                type="checkbox"
+                name="enabled"
+                checked={enabled}
+                disabled={self}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              <span>
+                <b>{t("users.row.enabled")}</b>
+                <small>{self ? t("users.row.selfEnabled") : enabled ? t("users.row.enabledOn") : t("users.row.enabledOff")}</small>
+              </span>
+            </label>
+            {/* A box that cannot be changed is not sent; the account stays enabled. */}
+            {self && <input type="hidden" name="enabled" value="on" />}
+          </div>
+        </div>
       )}
-    </li>
+
+      <div className="pg-savebar">
+        {error && <p role="alert">{error}</p>}
+        <div className="pg-savebar-end">
+          <Link href={closeHref} scroll={false} className="btn btn-ghost">
+            {t("common.cancel")}
+          </Link>
+          <button type="submit" disabled={pending} className="btn btn-primary">
+            {pending ? (user ? t("common.saving") : t("auth.creating")) : user ? t("common.save") : t("users.new.submit")}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+/** Creates a local account. */
+export function NewUserForm({ known }: { known: string[] }) {
+  return <UserForm known={known} closeHref="/users" />;
+}
+
+/**
+ * One account as a row of the table: who it is, its role and scope, where
+ * it signs in, when it last did, and what can be done with it. While it is
+ * edited, its form opens in a row of its own under it.
+ */
+export function UserRow({
+  user,
+  self,
+  known,
+  editing = false,
+}: {
+  user: User;
+  self: boolean;
+  known: string[];
+  editing?: boolean;
+}) {
+  const t = useT();
+  const source = user.source === "ldap" ? t("users.row.ldap") : user.source === "oidc" ? t("users.row.sso") : t("account.source.local");
+  const scope =
+    user.role === "admin"
+      ? t("users.row.everything")
+      : user.namespaces.includes("*")
+        ? t("users.row.allNamespaces")
+        : user.namespaces.join(", ") || t("common.none");
+  const name = user.display_name || user.username;
+
+  return (
+    <>
+      <tr className={editing ? "pg-row-open" : undefined}>
+        <td className="pg-grow">
+          <span className="flex min-w-0 items-baseline gap-x-2 gap-y-1 max-sm:flex-wrap">
+            <span className={`pg-trunc pg-name ${user.enabled ? "" : "text-ink-3"}`} title={name}>
+              {name}
+            </span>
+            {user.display_name && (
+              <span className="pg-trunc pg-mono flex-none max-w-48 text-ink-3" title={user.username}>
+                {user.username}
+              </span>
+            )}
+            {self && <span className="pg-tag flex-none">{t("users.row.you")}</span>}
+            {!user.enabled && (
+              <span className="pg-state flex-none text-ink-3">
+                <StatusGlyph kind="paused" />
+                {t("users.row.disabled")}
+              </span>
+            )}
+          </span>
+        </td>
+        <td className="pg-shrink" data-label={`${t("auth.role")}:`}>
+          {t(roleLabels[user.role])}
+        </td>
+        <td className="pg-shrink" data-label={`${t("users.col.scope")}:`}>
+          <span className={`pg-trunc max-w-60 ${user.role === "admin" ? "text-ink-2" : "pg-mono text-ink-2"}`} title={scope}>
+            {scope}
+          </span>
+        </td>
+        <td className="pg-shrink text-ink-2" data-label={`${t("users.col.source")}:`}>
+          {source}
+        </td>
+        <td className="pg-time pg-shrink" data-label={`${t("users.col.lastSignIn")}:`}>
+          {user.last_login_at ? <TableTime iso={user.last_login_at} /> : <span className="text-ink-3">{t("users.row.neverSignedIn")}</span>}
+        </td>
+        <td className="pg-actions">
+          <span className="pg-row-actions">
+            <Link
+              href={editing ? "/users" : `/users?edit=${user.id}`}
+              scroll={false}
+              className="pg-icon-btn"
+              aria-label={`${t("common.edit")}: ${name}`}
+              aria-expanded={editing}
+              title={t("common.edit")}
+            >
+              <EditIcon />
+            </Link>
+            {!self && (
+              <ConfirmForm
+                action={deleteUserAction}
+                className="contents"
+                title={t("users.row.deleteTitle", { username: user.username })}
+                question={t("users.row.deleteBody")}
+                items={[`${user.username} · ${t(roleLabels[user.role])} · ${source}`]}
+                icon={<TrashIcon />}
+              >
+                <input type="hidden" name="id" value={user.id} />
+                <button
+                  type="submit"
+                  className="pg-icon-btn pg-icon-btn-danger"
+                  aria-label={`${t("common.delete")}: ${name}`}
+                  title={t("common.delete")}
+                >
+                  <TrashIcon />
+                </button>
+              </ConfirmForm>
+            )}
+          </span>
+        </td>
+      </tr>
+      {editing && (
+        <tr className="pg-row-form">
+          <td colSpan={6}>
+            <div className="pg-inline-form">
+              <UserForm user={user} self={self} known={known} closeHref="/users" />
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
 /** Maps a directory group to a role. */
 export function GroupRoleForm({ known }: { known: string[] }) {
   const [role, setRole] = useState<Role>("viewer");
+  const [namespaces, setNamespaces] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const t = useT();
@@ -238,81 +420,129 @@ export function GroupRoleForm({ known }: { known: string[] }) {
     setError(null);
     startTransition(async () => {
       const result = await createGroupRoleAction(data);
-      if (result?.error) setError(result.error);
-      else form.reset();
+      if (result?.error) {
+        setError(result.error);
+        return;
+      }
+      form.reset();
+      setNamespaces("");
+      setRole("viewer");
     });
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-4 sm:grid-cols-6">
-      <label className="sm:col-span-6">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("users.group.dn")}</span>
-        <input name="group_dn" required placeholder={t("users.group.dnPlaceholder")} className="field font-mono" />
-      </label>
-      <RoleFields role={role} namespaces="" known={known} onRole={setRole} />
-      <div className="flex flex-wrap items-center gap-3 sm:col-span-6">
-        <button type="submit" disabled={pending} className="btn btn-primary">
-          {pending ? t("users.group.adding") : t("users.group.submit")}
-        </button>
-        {error && (
-          <p role="alert" className="text-sm text-down">
-            {error}
-          </p>
-        )}
+    <form onSubmit={submit} className="pg-form">
+      <div className="pg-sec">
+        <div className="pg-sec-intro">
+          <h3>{t("users.group.title")}</h3>
+          <p>{t("users.group.body")}</p>
+        </div>
+        <div className="pg-fields">
+          <label>
+            <span className="pg-label">{t("users.group.dn")}</span>
+            <input name="group_dn" required placeholder={t("users.group.dnPlaceholder")} className="field font-mono" />
+          </label>
+          <AccessFields role={role} namespaces={namespaces} known={known} onRole={setRole} onNamespaces={setNamespaces} />
+        </div>
+      </div>
+      <div className="pg-savebar">
+        {error && <p role="alert">{error}</p>}
+        <div className="pg-savebar-end">
+          <button type="submit" disabled={pending} className="btn btn-primary">
+            {pending ? t("users.group.adding") : t("users.group.submit")}
+          </button>
+        </div>
       </div>
     </form>
   );
 }
 
+/** One group mapping as a row: the group's DN, the role it gives, and its scope. */
 export function GroupRoleRow({ group }: { group: GroupRole }) {
   const t = useT();
+  const scope = group.role === "admin" ? t("users.row.everything") : group.namespaces.join(", ");
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-      <div className="min-w-0">
-        <div className="truncate font-mono text-sm">{group.group_dn}</div>
-        <div className="mt-0.5 text-xs text-muted">
-          {t(roleLabels[group.role])}
-          {group.role !== "admin" && ` · ${group.namespaces.join(", ")}`}
-        </div>
-      </div>
-      <ConfirmForm action={deleteGroupRoleAction} question={t("users.group.confirmDelete")}>
-        <input type="hidden" name="id" value={group.id} />
-        <button type="submit" className="btn btn-danger" title={t("common.delete")}>
-          <TrashIcon />
-          <span className="sr-only">{t("common.delete")}</span>
-        </button>
-      </ConfirmForm>
-    </li>
+    <tr>
+      <td className="pg-grow">
+        <span className="pg-trunc pg-mono" title={group.group_dn}>
+          {group.group_dn}
+        </span>
+      </td>
+      <td className="pg-shrink" data-label={`${t("auth.role")}:`}>
+        {t(roleLabels[group.role])}
+      </td>
+      <td className="pg-shrink" data-label={`${t("users.col.scope")}:`}>
+        <span className={`pg-trunc max-w-60 text-ink-2 ${group.role === "admin" ? "" : "pg-mono"}`} title={scope}>
+          {scope}
+        </span>
+      </td>
+      <td className="pg-actions">
+        <span className="pg-row-actions">
+          <ConfirmForm
+            action={deleteGroupRoleAction}
+            className="contents"
+            title={t("users.group.deleteTitle")}
+            question={t("users.group.confirmDelete")}
+            items={[group.group_dn]}
+            icon={<TrashIcon />}
+          >
+            <input type="hidden" name="id" value={group.id} />
+            <button
+              type="submit"
+              className="pg-icon-btn pg-icon-btn-danger"
+              aria-label={`${t("common.delete")}: ${group.group_dn}`}
+              title={t("common.delete")}
+            >
+              <TrashIcon />
+            </button>
+          </ConfirmForm>
+        </span>
+      </td>
+    </tr>
   );
 }
 
-/** Changes the signed-in user's own password. */
+/** Changes the signed-in user's own password, in a section of its own. */
 export function PasswordForm() {
   const [state, action, pending] = useActionState<Outcome, FormData>(changePasswordAction, undefined);
   const t = useT();
   return (
-    <form action={action} className="flex max-w-sm flex-col gap-4">
-      <label>
-        <span className="mb-1 block text-xs font-medium text-muted">{t("account.currentPassword")}</span>
-        <input name="current_password" type="password" required autoComplete="current-password" className="field" />
-      </label>
-      <label>
-        <span className="mb-1 block text-xs font-medium text-muted">{t("account.newPassword")}</span>
-        <input name="new_password" type="password" required minLength={8} autoComplete="new-password" className="field" />
-      </label>
-      <label>
-        <span className="mb-1 block text-xs font-medium text-muted">{t("account.newPasswordAgain")}</span>
-        <input name="new_password_again" type="password" required minLength={8} autoComplete="new-password" className="field" />
-      </label>
-      <div className="flex items-center gap-3">
-        <button type="submit" disabled={pending} className="btn btn-primary">
-          {pending ? t("common.saving") : t("account.changePassword")}
-        </button>
-        {state && !pending && (
-          <p role="status" className={`text-sm ${state.error ? "text-down" : "text-up"}`}>
-            {state.error || t("account.passwordChanged")}
+    <form action={action} className="pg-form">
+      <div className="pg-sec">
+        <div className="pg-sec-intro">
+          <h2>{t("auth.password")}</h2>
+          <p>{t("account.passwordBody")}</p>
+        </div>
+        <div className="pg-fields">
+          <label className="max-w-sm">
+            <span className="pg-label">{t("account.currentPassword")}</span>
+            <input name="current_password" type="password" required autoComplete="current-password" className="field" />
+          </label>
+          <div className="pg-grid">
+            <label className="pg-span-3">
+              <span className="pg-label">{t("account.newPassword")}</span>
+              <input name="new_password" type="password" required minLength={8} autoComplete="new-password" className="field" />
+              <span className="pg-help">{t("users.passwordHint")}</span>
+            </label>
+            <label className="pg-span-3">
+              <span className="pg-label">{t("account.newPasswordAgain")}</span>
+              <input name="new_password_again" type="password" required minLength={8} autoComplete="new-password" className="field" />
+            </label>
+          </div>
+        </div>
+      </div>
+      <div className="pg-savebar">
+        {state && !pending && state.error && <p role="alert">{state.error}</p>}
+        {state && !pending && !state.error && (
+          <p role="status" className="min-w-0 flex-1 text-[13px] text-up-ink">
+            {t("account.passwordChanged")}
           </p>
         )}
+        <div className="pg-savebar-end">
+          <button type="submit" disabled={pending} className="btn btn-primary">
+            {pending ? t("common.saving") : t("account.changePassword")}
+          </button>
+        </div>
       </div>
     </form>
   );

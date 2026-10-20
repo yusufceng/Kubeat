@@ -1,5 +1,8 @@
 import type { Monitor } from "@/lib/api";
 import type { T } from "@/lib/i18n/translate";
+import { LiveDuration } from "@/app/ui/live-duration";
+import { StateChip } from "@/app/ui/state-chip";
+import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
 
 /**
  * What the UI shows for a monitor. It combines the latest check with the
@@ -26,38 +29,60 @@ export function displayState(
   return m.status === "down" ? "verifying" : m.status;
 }
 
-/** The classes of each state; label is the message key of its name, shown with t(). */
-export const stateStyles: Record<DisplayState, { dot: string; text: string; soft: string; label: string }> = {
-  up: { dot: "bg-up", text: "text-up", soft: "bg-up/12 text-up", label: "monitorState.up" },
-  down: { dot: "bg-down", text: "text-down", soft: "bg-down/12 text-down", label: "monitorState.down" },
-  verifying: { dot: "bg-warn", text: "text-warn", soft: "bg-warn/15 text-warn", label: "monitorState.verifying" },
-  recovering: { dot: "bg-warn", text: "text-warn", soft: "bg-warn/15 text-warn", label: "monitorState.recovering" },
-  maintenance: { dot: "bg-maint", text: "text-maint", soft: "bg-maint/12 text-maint", label: "monitorState.maintenance" },
-  pending: { dot: "bg-idle", text: "text-muted", soft: "bg-sunken text-muted", label: "monitorState.pending" },
-  paused: { dot: "bg-idle", text: "text-muted", soft: "bg-sunken text-muted", label: "monitorState.paused" },
+/**
+ * How each state is drawn: its glyph (verifying and recovering share the
+ * degraded one) and the class of its text. label is the message key of its
+ * name, shown with t().
+ */
+export const stateStyles: Record<DisplayState, { glyph: GlyphKind; text: string; label: string }> = {
+  up: { glyph: "up", text: "text-up-ink", label: "monitorState.up" },
+  down: { glyph: "down", text: "text-down-ink", label: "monitorState.down" },
+  verifying: { glyph: "warn", text: "text-warn-ink", label: "monitorState.verifying" },
+  recovering: { glyph: "warn", text: "text-warn-ink", label: "monitorState.recovering" },
+  maintenance: { glyph: "maint", text: "text-maint-ink", label: "monitorState.maintenance" },
+  pending: { glyph: "pending", text: "text-ink-3", label: "monitorState.pending" },
+  paused: { glyph: "paused", text: "text-ink-3", label: "monitorState.paused" },
 };
 
 /**
  * The badges render on the server and on the client alike, so they are
  * handed the translator of wherever they are: getT() or useT().
+ *
+ * The state as its glyph and name. live marks the monitor's state right
+ * now, so that an ongoing outage pulses; a past event leaves it off.
  */
-export function StatusBadge({ state, t }: { state: DisplayState; t: T }) {
+export function StatusBadge({ state, t, live = false }: { state: DisplayState; t: T; live?: boolean }) {
   const s = stateStyles[state];
   return (
     <span className={`inline-flex items-center gap-2 text-sm font-medium ${s.text}`}>
-      <span className={`h-2.5 w-2.5 rounded-full ${s.dot}`} aria-hidden />
+      <StatusGlyph kind={s.glyph} live={live && state === "down"} />
       {t(s.label)}
     </span>
   );
 }
 
-/** The state as a filled pill, for headers. */
-export function StatusPill({ state, t }: { state: DisplayState; t: T }) {
+/**
+ * The state as a chip, for headers: always the current state, so an outage
+ * pulses. With since (an outage's start), the chip counts how long it has
+ * lasted.
+ */
+export function StatusPill({ state, t, since }: { state: DisplayState; t: T; since?: string }) {
   const s = stateStyles[state];
+  const name = t(s.label);
+  if (!since) {
+    return (
+      <StateChip kind={s.glyph} live={state === "down"}>
+        {name}
+      </StateChip>
+    );
+  }
+  // The duration is a component, so the sentence is split around its placeholder.
+  const [before, after] = t("stateChip.for", { state: name }).split("{duration}");
   return (
-    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ${s.soft}`}>
-      <span className={`h-2 w-2 rounded-full ${s.dot}`} aria-hidden />
-      {t(s.label)}
-    </span>
+    <StateChip kind={s.glyph} live={state === "down"}>
+      {before}
+      <LiveDuration since={since} />
+      {after}
+    </StateChip>
   );
 }

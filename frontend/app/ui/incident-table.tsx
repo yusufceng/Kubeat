@@ -1,72 +1,154 @@
 import Link from "next/link";
 import type { Incident } from "@/lib/api";
 import { span } from "@/lib/format";
+import type { IncidentSort } from "@/lib/incident-filter";
 import { getT } from "@/lib/i18n/server";
+import type { T } from "@/lib/i18n/translate";
+import { MANUAL_LABEL } from "@/lib/namespaces";
+import { ArrowDownIcon, ArrowUpIcon, SortIcon } from "@/app/ui/incident-icons";
+import { CompactTime } from "@/app/ui/incident-time";
 import { LiveDuration } from "@/app/ui/live-duration";
-import { LocalTime } from "@/app/ui/local-time";
+import { StatusGlyph } from "@/app/ui/status-glyph";
 
+/** How the list is sorted, and the address of each way of sorting it. */
+export type TableSort = {
+  by: IncidentSort;
+  order: "asc" | "desc";
+  /** The list sorted by a column: in its own direction, or the other way round if it is the current one. */
+  href: (by: IncidentSort, order?: "asc" | "desc") => string;
+};
+
+/** An incident's glyph and what it says: an outage still going on pulses, a closed one is healthy again. */
+export function incidentGlyph(i: Pick<Incident, "kind" | "resolved_at">, t: T) {
+  if (i.resolved_at) return { kind: "up" as const, live: false, label: t("incidents.state.closed") };
+  if (i.kind === "cert") return { kind: "warn" as const, live: false, label: t("incidents.state.cert.open") };
+  return { kind: "down" as const, live: true, label: t("incidents.state.down.open") };
+}
+
+/**
+ * Incidents as a table of 36px rows, each opening the incident's page: the
+ * state as a glyph, the monitor and its namespace, when it began, how long
+ * it lasted (counting while it goes on) and its cause. Names never wrap;
+ * what does not fit ends in an ellipsis with the whole in its title. With
+ * sort, the monitor, start and duration headings sort the list. On a phone
+ * each row folds into a short block of three lines.
+ */
 export async function IncidentTable({
   incidents,
   showMonitor,
+  sort,
+  footer,
 }: {
   incidents: Incident[];
+  /** Off where the monitor is known (its own page): the kind is shown instead. */
   showMonitor: boolean;
+  sort?: TableSort;
+  /** Under the rows, inside the panel: the pages of a long list. */
+  footer?: React.ReactNode;
 }) {
   const t = await getT();
+
+  const heading = (label: string, by: IncidentSort | null, className = "") => {
+    if (!sort || !by) {
+      return (
+        <th role="columnheader" scope="col" className={className}>
+          {label}
+        </th>
+      );
+    }
+    const active = sort.by === by;
+    const Arrow = !active ? SortIcon : sort.order === "asc" ? ArrowUpIcon : ArrowDownIcon;
+    return (
+      <th
+        role="columnheader"
+        scope="col"
+        className={className}
+        aria-sort={active ? (sort.order === "asc" ? "ascending" : "descending") : undefined}
+      >
+        <Link
+          href={active ? sort.href(by, sort.order === "asc" ? "desc" : "asc") : sort.href(by)}
+          className="inc-sort"
+          data-active={active || undefined}
+          title={t("incidents.sortBy", { column: label })}
+          scroll={false}
+        >
+          {label}
+          <Arrow width={13} height={13} />
+        </Link>
+      </th>
+    );
+  };
+
   return (
-    <div className="card overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-line text-xs text-muted">
-          <tr>
-            {showMonitor && <th className="px-4 py-2 font-medium">Monitor</th>}
-            <th className="px-4 py-2 font-medium">{t("incidentTable.kind")}</th>
-            <th className="px-4 py-2 font-medium">{t("incidentTable.status")}</th>
-            <th className="px-4 py-2 font-medium">{t("incidentTable.started")}</th>
-            <th className="px-4 py-2 text-right font-medium">{t("incidentTable.duration")}</th>
-            <th className="px-4 py-2 font-medium">{t("incidentTable.cause")}</th>
+    <div className="panel inc-panel">
+      <table role="table" className={`inc-table ${showMonitor ? "" : "inc-table-own"}`} aria-label={t("incidents.table")}>
+        <thead role="rowgroup">
+          <tr role="row">
+            {showMonitor ? (
+              <>
+                {heading(t("incidents.col.monitor"), "monitor", "inc-c-name")}
+                <th role="columnheader" scope="col" className="inc-c-ns">
+                  {t("incidents.col.namespace")}
+                </th>
+              </>
+            ) : (
+              heading(t("incidents.col.kind"), null, "inc-c-name")
+            )}
+            {heading(t("incidents.col.started"), "started_at", "inc-c-start")}
+            {heading(t("incidents.col.duration"), "duration", "inc-c-dur")}
+            <th role="columnheader" scope="col" className="inc-c-cause">
+              {t("incidents.col.cause")}
+            </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-line">
-          {incidents.map((i) => (
-            <tr key={i.id}>
-              {showMonitor && (
-                <td className="px-4 py-2">
-                  <Link href={`/monitors/${i.monitor_id}`} className="font-medium hover:underline">
-                    {i.monitor_name}
+        <tbody role="rowgroup">
+          {incidents.map((i) => {
+            const glyph = incidentGlyph(i, t);
+            const open = !i.resolved_at;
+            const name = showMonitor ? i.monitor_name : t(i.kind === "cert" ? "incident.kind.cert" : "incident.kind.down");
+            return (
+              <tr role="row" key={i.id} data-open={open || undefined}>
+                <td role="cell" className="inc-c-name">
+                  <StatusGlyph kind={glyph.kind} live={glyph.live} label={glyph.label} />
+                  <Link href={`/incidents/${i.id}`} className="inc-row-link" title={name}>
+                    {name}
                   </Link>
+                  {showMonitor && i.kind === "cert" && <span className="inc-tag">{t("incidents.certTag")}</span>}
                 </td>
-              )}
-              <td className="whitespace-nowrap px-4 py-2">
-                {t(i.kind === "cert" ? "channelEvent.cert" : "channelEvent.down")}
-              </td>
-              <td className="whitespace-nowrap px-4 py-2">
-                {i.resolved_at ? (
-                  <span className="text-muted">{t("incidentTable.resolved")}</span>
-                ) : (
-                  <span
-                    className={`font-medium ${
-                      i.kind === "cert"
-                        ? "text-warn"
-                        : "text-down"
-                    }`}
-                  >
-                    {t("incidentTable.ongoing")}
-                  </span>
+                {showMonitor && (
+                  <td role="cell" className="inc-c-ns">
+                    {i.monitor_namespace ? (
+                      <span className="inc-mono" title={i.monitor_namespace}>
+                        {i.monitor_namespace}
+                      </span>
+                    ) : (
+                      <span className="inc-manual">{t(MANUAL_LABEL)}</span>
+                    )}
+                  </td>
                 )}
-              </td>
-              <td className="whitespace-nowrap px-4 py-2 tabular-nums"><LocalTime iso={i.started_at} /></td>
-              <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums">
-                {i.resolved_at ? (
-                  span(new Date(i.resolved_at).getTime() - new Date(i.started_at).getTime(), t)
-                ) : (
-                  <LiveDuration since={i.started_at} />
-                )}
-              </td>
-              <td className="px-4 py-2 font-mono text-xs text-muted">{i.cause}</td>
-            </tr>
-          ))}
+                <td role="cell" className="inc-c-start">
+                  <CompactTime iso={i.started_at} />
+                </td>
+                <td
+                  role="cell"
+                  className="inc-c-dur"
+                  style={open ? { color: i.kind === "cert" ? "var(--warn-ink)" : "var(--down-ink)" } : undefined}
+                >
+                  {open ? (
+                    <LiveDuration since={i.started_at} />
+                  ) : (
+                    span(Date.parse(i.resolved_at!) - Date.parse(i.started_at), t)
+                  )}
+                </td>
+                <td role="cell" className="inc-c-cause">
+                  <span title={i.cause}>{i.cause || t("common.none")}</span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+      {footer}
     </div>
   );
 }

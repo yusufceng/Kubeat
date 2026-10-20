@@ -1,0 +1,1392 @@
+/* The incident list, an incident's page and the reports, on Kubeat Signal.
+   Classes start with inc- (incidents) or rep- (reports). */
+
+@layer components {
+  /* ---------- Shared bits ---------- */
+
+  /* The pages hold what they place out of sight (a screen reader's words)
+     themselves, so that it scrolls with them instead of making the window
+     scroll under the app's frame. */
+  .inc-list,
+  .inc-page,
+  .rep-page {
+    position: relative;
+  }
+
+  .inc-mono {
+    font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: -0.01em;
+  }
+  /* A neutral outline chip: "sertifika", "durum sayfalarında". */
+  .inc-tag {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    height: 18px;
+    padding: 0 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-xs);
+    color: var(--ink-2);
+    font-size: 11px;
+    font-weight: 550;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .inc-lead {
+    margin-top: 4px;
+    max-width: 72ch;
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .inc-hint {
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  /* ---------- The list ---------- */
+
+  .inc-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px 24px;
+  }
+  .inc-list-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  /* While the next list loads, the one on screen steps back. */
+  .inc-results {
+    transition: opacity 160ms var(--ease-signal);
+  }
+  .inc-list-body[aria-busy="true"] .inc-results {
+    opacity: 0.55;
+  }
+
+  .inc-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .inc-filters-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px 12px;
+  }
+  .inc-search {
+    position: relative;
+    flex: 1 1 18rem;
+    max-width: 30rem;
+  }
+  .inc-search .field {
+    padding-left: 32px;
+    padding-right: 34px;
+  }
+  .inc-search .field::-webkit-search-cancel-button {
+    display: none;
+  }
+  .inc-search-icon {
+    position: absolute;
+    left: 10px;
+    top: 9px;
+    color: var(--ink-3);
+    pointer-events: none;
+  }
+  .inc-search-kbd {
+    position: absolute;
+    right: 9px;
+    top: 8px;
+    pointer-events: none;
+  }
+  .inc-search:focus-within .inc-search-kbd {
+    display: none;
+  }
+
+  /* A segmented control: All 83 / Ongoing 3 / Resolved 80. */
+  .inc-seg {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--well);
+  }
+  .inc-seg > a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 11px;
+    border-radius: 4px;
+    color: var(--ink-2);
+    font-size: 12.5px;
+    font-weight: 500;
+    font-stretch: 95%;
+    white-space: nowrap;
+    transition: background-color 120ms var(--ease-signal);
+  }
+  .inc-seg > a:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .inc-seg > a b {
+    color: var(--ink-3);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .inc-seg > a[aria-current="page"] {
+    background: var(--raised);
+    color: var(--ink);
+    box-shadow: 0 0 0 1px var(--line-strong);
+  }
+  :root[data-theme="dark"] .inc-seg > a[aria-current="page"] {
+    background: var(--hover);
+  }
+
+  .inc-select {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .inc-select > label {
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+  }
+  .inc-select > .field {
+    width: auto;
+    min-width: 10rem;
+    max-width: 16rem;
+    height: 34px;
+  }
+  .inc-dates {
+    display: contents;
+  }
+  .inc-dates .field {
+    min-width: 9.5rem;
+  }
+  .inc-clear {
+    margin-left: auto;
+  }
+  /* The phone's way to the rest of the filter. */
+  .btn.inc-more {
+    display: none;
+    height: 34px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+  .inc-more > b {
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: var(--radius-xs);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: 11px;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
+  }
+  .inc-more[aria-expanded="true"] {
+    background: var(--hover);
+  }
+
+  @media (width < 40rem) {
+    .inc-search {
+      flex-basis: 100%;
+      max-width: none;
+    }
+    /* A phone has no key to press. */
+    .kbd.inc-search-kbd {
+      display: none;
+    }
+    .inc-search .field {
+      padding-right: 10px;
+    }
+    .inc-filters-row:first-child {
+      flex-wrap: wrap;
+      align-items: stretch;
+    }
+    .inc-seg {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .btn.inc-more {
+      display: inline-flex;
+    }
+    .inc-seg > a {
+      flex: 1 1 0;
+      justify-content: center;
+      padding: 0 6px;
+    }
+    .inc-selects {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .inc-select > .field {
+      width: 100%;
+      min-width: 0;
+      max-width: none;
+    }
+    .inc-clear {
+      grid-column: 1 / -1;
+      margin-left: 0;
+      justify-self: start;
+    }
+  }
+
+  /* ---------- The table ---------- */
+
+  .inc-panel {
+    overflow: hidden;
+  }
+  .inc-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .inc-table th {
+    height: 32px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .inc-table td {
+    height: 36px;
+    padding: 0 12px;
+    border-top: 1px solid var(--line);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .inc-table tbody tr:first-child td {
+    border-top: 0;
+  }
+  .inc-table tbody tr {
+    position: relative;
+    transition: background-color 120ms var(--ease-signal);
+  }
+  .inc-table tbody tr:hover {
+    background: var(--hover);
+  }
+  .inc-table th:first-child,
+  .inc-table td:first-child {
+    padding-left: 16px;
+  }
+  .inc-table th:last-child,
+  .inc-table td:last-child {
+    padding-right: 16px;
+  }
+  .inc-c-name {
+    width: 26%;
+  }
+  .inc-c-ns {
+    width: 15%;
+  }
+  .inc-c-start {
+    width: 9.5rem;
+  }
+  .inc-c-dur {
+    width: 8.5rem;
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
+  }
+  .inc-table th.inc-c-dur .inc-sort {
+    margin-left: auto;
+  }
+  .inc-c-cause {
+    width: auto;
+  }
+  .inc-table-own .inc-c-name {
+    width: 12rem;
+  }
+  td.inc-c-name {
+    /* The glyph, the name and a tag in a row, the name giving way. */
+    display: table-cell;
+  }
+  td.inc-c-name > * {
+    vertical-align: middle;
+  }
+  td.inc-c-name .glyph {
+    margin-right: 10px;
+  }
+  td.inc-c-name .inc-tag {
+    margin-left: 8px;
+  }
+  /* The name opens the incident; the whole row is its target. */
+  .inc-row-link {
+    font-weight: 530;
+    color: var(--ink);
+  }
+  .inc-row-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+  .inc-row-link:focus-visible {
+    outline: none;
+  }
+  .inc-row-link:focus-visible::after {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: var(--radius-sm);
+  }
+  td.inc-c-ns .inc-mono {
+    color: var(--ink-2);
+  }
+  .inc-manual {
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+  td.inc-c-start {
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  td.inc-c-dur {
+    font-weight: 500;
+  }
+  td.inc-c-cause {
+    color: var(--ink-3);
+    font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: -0.01em;
+  }
+
+  /* A heading that sorts: the label, and an arrow that says which way. */
+  .inc-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0 -4px;
+    padding: 3px 4px;
+    border-radius: var(--radius-xs);
+    color: var(--ink-3);
+  }
+  .inc-sort:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .inc-sort > svg {
+    opacity: 0.55;
+  }
+  .inc-sort[data-active] {
+    color: var(--ink);
+  }
+  .inc-sort[data-active] > svg {
+    opacity: 1;
+  }
+
+  .inc-pages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+    min-height: 44px;
+    padding: 6px 12px 6px 16px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-3);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .inc-pages-links {
+    display: flex;
+    gap: 6px;
+  }
+  .inc-pages-links [aria-disabled="true"] {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  /* On a phone a row folds into three lines: the glyph and the name with
+     how long it lasted; the namespace and when it began; the cause. */
+  @media (width < 40rem) {
+    .inc-table,
+    .inc-table tbody {
+      display: block;
+    }
+    .inc-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    .inc-table tbody tr {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "name dur"
+        "ns start"
+        "cause cause";
+      column-gap: 12px;
+      row-gap: 2px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line);
+    }
+    .inc-table tbody tr:first-child {
+      border-top: 0;
+    }
+    .inc-table td {
+      display: block;
+      width: auto;
+      min-width: 0;
+      height: auto;
+      padding: 0 !important;
+      border: 0;
+    }
+    td.inc-c-name {
+      grid-area: name;
+      display: block;
+    }
+    td.inc-c-ns {
+      grid-area: ns;
+      padding-left: 20px !important;
+    }
+    td.inc-c-start {
+      grid-area: start;
+      text-align: right;
+      font-size: 12px;
+    }
+    td.inc-c-dur {
+      grid-area: dur;
+    }
+    td.inc-c-cause {
+      grid-area: cause;
+      padding-left: 20px !important;
+      font-size: 11px;
+    }
+    .inc-table-own tbody tr {
+      grid-template-areas:
+        "name dur"
+        "start start"
+        "cause cause";
+    }
+    .inc-table-own td.inc-c-start {
+      padding-left: 20px !important;
+      text-align: left;
+    }
+    .inc-pages {
+      padding-left: 16px;
+    }
+  }
+
+  /* Nothing to list. */
+  .inc-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 28px 24px;
+  }
+  .inc-empty > p {
+    max-width: 60ch;
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .inc-empty > .btn {
+    margin-top: 6px;
+  }
+  .inc-empty-tile {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    margin-bottom: 6px;
+    place-items: center;
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  /* ---------- An incident's page ---------- */
+
+  .inc-hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px 24px;
+  }
+  .inc-hero-main {
+    min-width: 0;
+    flex: 1 1 28rem;
+  }
+  .inc-number {
+    margin-bottom: 6px;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+  }
+  .inc-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+  }
+  .inc-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* What the monitor is in the cluster, as kubectl says it, and the type of
+     its check: "svc/pricing:8080 | http". */
+  .inc-kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 100%;
+    height: 22px;
+    padding: 0 7px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    background: var(--well);
+    color: var(--ink-2);
+    font: 500 11.5px/1 var(--font-plex), ui-monospace, monospace;
+    white-space: nowrap;
+  }
+  .inc-kind > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .inc-kind > span:last-child {
+    flex: none;
+  }
+  .inc-kind > i {
+    flex: none;
+    align-self: stretch;
+    width: 1px;
+    margin: 5px 0;
+    background: var(--line-strong);
+  }
+  .inc-stline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-width: 0;
+    margin-top: 10px;
+  }
+  .inc-cause {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--ink-2);
+    font: 400 12px/16px var(--font-plex), ui-monospace, monospace;
+    letter-spacing: -0.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .inc-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    min-width: 0;
+    margin-top: 10px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .inc-ns {
+    color: var(--ink-2);
+  }
+  .inc-ns:hover {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+  .inc-target {
+    min-width: 0;
+    font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: -0.01em;
+    word-break: break-all;
+  }
+  .inc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .inc-checks-gone {
+    margin-top: -8px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  /* ---------- The timeline ---------- */
+
+  .inc-tl {
+    --time-w: 64px;
+    --mark-w: 20px;
+    --gap: 12px;
+    padding-bottom: 4px;
+  }
+  .inc-tl-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 10px;
+    padding: 14px 16px 4px;
+  }
+  .inc-tl-notice {
+    padding: 2px 16px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .inc-tl-notice .inc-err {
+    color: var(--ink-3);
+  }
+  .inc-tl-empty {
+    padding: 16px;
+    color: var(--ink-3);
+    font-size: 13px;
+  }
+  /* The day stays above its rows while they scroll. */
+  .inc-tl-date {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 12px 16px 6px;
+    background: var(--panel);
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+  }
+  /* What takes the focus stops below the day's heading, not under it. */
+  .inc-tl :is(a, button, summary, textarea, input) {
+    scroll-margin-top: 48px;
+  }
+  @media (width < 64rem) {
+    .inc-tl-date {
+      top: 52px;
+    }
+    .inc-tl :is(a, button, summary, textarea, input) {
+      scroll-margin-top: 100px;
+    }
+  }
+  .inc-tl-list {
+    position: relative;
+    padding: 0 16px 6px;
+  }
+  /* The thread that runs through the marks. */
+  .inc-tl-list::before {
+    content: "";
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: calc(16px + var(--time-w) + var(--gap) + var(--mark-w) / 2);
+    width: 1px;
+    background: var(--line);
+  }
+  .inc-tl-row {
+    display: grid;
+    grid-template-columns: var(--time-w) var(--mark-w) minmax(0, 1fr);
+    column-gap: var(--gap);
+    align-items: start;
+    padding: 6px 0;
+    scroll-margin-top: 96px;
+  }
+  .inc-tl-time {
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 18px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .inc-tl-mark {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: var(--mark-w);
+    height: 18px;
+    background: var(--panel);
+    box-shadow: 0 0 0 3px var(--panel);
+    color: var(--ink-3);
+  }
+  .inc-tl-mark[data-tone="down"] {
+    color: var(--down-ink);
+  }
+  .inc-tl-mark[data-tone="up"] {
+    color: var(--up-ink);
+  }
+  .inc-tl-mark[data-tone="warn"] {
+    color: var(--warn-ink);
+  }
+  .inc-tl-mark[data-tone="maint"] {
+    color: var(--maint-ink);
+  }
+  .inc-tl-body {
+    min-width: 0;
+  }
+  .inc-tl-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    min-width: 0;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .inc-muted-title {
+    color: var(--ink-2);
+  }
+  .inc-tl-detail {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 10px;
+    min-width: 0;
+    margin-top: 2px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  /* A failed check in one line: the parts separated by a dot, the end in an
+     ellipsis when it does not fit. */
+  .inc-oneline {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .inc-oneline > span + span::before {
+    content: "·";
+    margin: 0 6px;
+    color: var(--ink-3);
+    font-family: var(--font-mona), ui-sans-serif, system-ui, sans-serif;
+  }
+  .inc-why {
+    color: var(--ink-2);
+  }
+  .inc-err {
+    font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    letter-spacing: -0.01em;
+    overflow-wrap: anywhere;
+  }
+  .inc-muted {
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+  .inc-sep {
+    color: var(--ink-3);
+  }
+  .inc-channel {
+    max-width: 18rem;
+    overflow: hidden;
+    font-weight: 530;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .inc-result {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .inc-object {
+    max-width: 24rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .inc-event-message {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--ink-2);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  /* A run of the same failure: one line, the checks on request. */
+  .inc-run > summary {
+    display: block;
+    list-style: none;
+    cursor: pointer;
+    border-radius: var(--radius-xs);
+  }
+  .inc-run > summary::-webkit-details-marker {
+    display: none;
+  }
+  .inc-run-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    white-space: nowrap;
+  }
+  .inc-run-toggle {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 18px;
+    border-radius: var(--radius-xs);
+    color: var(--ink-3);
+  }
+  .inc-run > summary:hover .inc-run-toggle {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .inc-run-toggle > svg {
+    transition: rotate 120ms var(--ease-signal);
+  }
+  .inc-run[open] .inc-run-toggle > svg {
+    rotate: 180deg;
+  }
+  .inc-run-list {
+    max-height: 18rem;
+    margin-top: 8px;
+    overflow: auto;
+    padding: 4px 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--well);
+  }
+  .inc-run-list > li {
+    display: grid;
+    grid-template-columns: auto 4.5rem minmax(0, 1fr);
+    gap: 12px;
+    padding: 2px 10px;
+    color: var(--ink-2);
+    font-size: 12px;
+    line-height: 18px;
+    font-variant-numeric: tabular-nums;
+  }
+  .inc-run-ms {
+    color: var(--ink-3);
+    text-align: right;
+  }
+  .inc-run-list .inc-err {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ---------- Notes ---------- */
+
+  /* As wide as its text, so that its tools sit by it. */
+  .inc-note {
+    max-width: 80ch;
+  }
+  .inc-note-tools {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: auto;
+    align-self: center;
+  }
+  .btn.inc-icon-btn {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+  }
+  .inc-note-text {
+    max-width: 80ch;
+    margin-top: 6px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--well);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 20px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .inc-note-edit {
+    display: flex;
+    max-width: 80ch;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .inc-tl-compose {
+    display: grid;
+    grid-template-columns: var(--time-w) var(--mark-w) minmax(0, 1fr);
+    column-gap: var(--gap);
+    align-items: start;
+    margin-top: 6px;
+    padding: 14px 16px;
+    border-top: 1px solid var(--line);
+  }
+  .inc-tl-compose > .inc-tl-mark {
+    grid-column: 2;
+    margin-top: 26px;
+    box-shadow: none;
+  }
+  .inc-composer {
+    display: flex;
+    max-width: 80ch;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .inc-composer-label {
+    color: var(--ink-2);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+  }
+  .field.inc-note-field {
+    min-height: 76px;
+    resize: vertical;
+    font-size: 13px;
+    line-height: 20px;
+  }
+  .inc-note-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 6px 16px;
+  }
+  .inc-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 18px;
+    cursor: pointer;
+  }
+  .inc-check > input {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    margin-top: 2px;
+    accent-color: var(--accent);
+  }
+  .inc-check small {
+    display: block;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .inc-count {
+    flex: none;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 18px;
+    font-variant-numeric: tabular-nums;
+  }
+  .inc-form-error {
+    color: var(--down-ink);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .inc-composer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .inc-tl-foot {
+    margin-top: 6px;
+    padding: 12px 16px 12px calc(16px + var(--time-w) + var(--gap) + var(--mark-w) + var(--gap));
+    border-top: 1px solid var(--line);
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .inc-quote {
+    display: -webkit-box;
+    margin-top: 10px;
+    overflow: hidden;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--well);
+    color: var(--ink-2);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    white-space: pre-wrap;
+  }
+
+  /* ---------- Reports ---------- */
+
+  .rep-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+  }
+  .rep-span {
+    margin-left: auto;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* The namespace the report is narrowed to, and the way back to all. */
+  .rep-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 3px 0 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    color: var(--ink-2);
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .rep-filter-x {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    place-items: center;
+    border-radius: var(--radius-xs);
+    color: var(--ink-3);
+  }
+  .rep-filter-x:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  /* A percent's sign beside the figure, small and muted, on whichever side
+     the language puts it. */
+  .rep-sign {
+    margin: 0 1px;
+    color: var(--ink-3);
+    font-size: 13px;
+    font-weight: 550;
+    font-stretch: 100%;
+    line-height: 1;
+  }
+  .rep-defs {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: -8px;
+    color: var(--ink-3);
+    font-size: 12.5px;
+    line-height: 18px;
+  }
+  .rep-defs > div {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 6px;
+  }
+  .rep-defs dt {
+    display: inline-flex;
+    gap: 6px;
+    color: var(--ink-2);
+  }
+  .rep-defs abbr {
+    color: var(--ink);
+    font-weight: 650;
+    text-decoration: none;
+  }
+
+  /* Positioned, so that what is placed out of sight inside (the screen
+     reader's words) scrolls with the table instead of widening the page. */
+  .rep-panel {
+    position: relative;
+    overflow-x: auto;
+  }
+  .rep-table {
+    width: 100%;
+    min-width: 880px;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .rep-table th,
+  .rep-table td {
+    height: 36px;
+    padding: 0 12px;
+    border-top: 1px solid var(--line);
+    font-weight: 450;
+    white-space: nowrap;
+  }
+  .rep-table thead th {
+    width: 7rem;
+    height: 32px;
+    border-top: 0;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: right;
+  }
+  .rep-table thead th.rep-name {
+    width: auto;
+    text-align: left;
+  }
+  .rep-table thead abbr {
+    text-decoration: none;
+  }
+  .rep-table tbody:first-of-type tr:first-child > * {
+    border-top: 0;
+  }
+  .rep-table th:first-child {
+    padding-left: 16px;
+  }
+  .rep-table th:last-child,
+  .rep-table td:last-child {
+    padding-right: 16px;
+  }
+  .rep-num {
+    overflow: hidden;
+    text-align: right;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+  }
+  th.rep-name {
+    text-align: left;
+  }
+  .rep-name-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .rep-name-line > a {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-weight: 530;
+    text-overflow: ellipsis;
+  }
+  .rep-name-line > a:hover {
+    text-decoration: underline;
+  }
+  .rep-glyph-gap {
+    flex: none;
+    width: 10px;
+  }
+  .rep-type {
+    flex: none;
+    color: var(--ink-3);
+    font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+  }
+  .rep-table tbody tr:not(.rep-ns):hover > * {
+    background: var(--hover);
+  }
+  /* A namespace heads its monitors with its own figures. */
+  .rep-ns > * {
+    height: 34px;
+    background: var(--well);
+    font-weight: 600 !important;
+  }
+  .rep-table tbody + tbody .rep-ns > * {
+    border-top-color: var(--line-strong);
+  }
+  .rep-name-line > a.rep-ns-name {
+    color: var(--ink-2);
+    font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .rep-name-line > a.rep-ns-manual {
+    font-family: var(--font-mona), ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+  }
+  .rep-count {
+    flex: none;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 450;
+  }
+  /* Response times and check counts are the first to go where room is short. */
+  @media (width < 80rem) {
+    .rep-table .rep-wide {
+      display: none;
+    }
+    .rep-table {
+      min-width: 720px;
+    }
+  }
+  /* Where the table is wider than the screen, the names stay in view. */
+  @media (width < 64rem) {
+    .rep-table th.rep-name {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      width: 12rem;
+      background: var(--panel);
+      box-shadow: 1px 0 0 var(--line);
+    }
+    .rep-ns > th.rep-name {
+      background: var(--well);
+    }
+    .rep-table {
+      min-width: 0;
+      width: max-content;
+      table-layout: auto;
+    }
+    .rep-table thead th:not(.rep-name) {
+      width: auto;
+      min-width: 5.5rem;
+    }
+    .rep-table th.rep-name .rep-name-line {
+      max-width: calc(12rem - 28px);
+    }
+  }
+
+  /* On a phone a row folds: the name and the uptime on a line, then what
+     its outages came to, each figure with its name; a row without outages
+     keeps to its first line. */
+  @media (width < 40rem) {
+    .rep-panel {
+      overflow-x: visible;
+    }
+    .rep-table,
+    .rep-table tbody {
+      display: block;
+      width: 100%;
+      min-width: 0;
+    }
+    .rep-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    .rep-table tr {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 2px 12px;
+      padding: 9px 16px 9px 34px;
+      border-top: 1px solid var(--line);
+    }
+    .rep-table tbody:first-of-type tr:first-child {
+      border-top: 0;
+    }
+    .rep-table tbody + tbody tr.rep-ns {
+      border-top-color: var(--line-strong);
+    }
+    .rep-table tr > th,
+    .rep-table tr > td {
+      position: static;
+      display: block;
+      width: auto;
+      height: auto;
+      padding: 0 !important;
+      border: 0;
+      background: transparent !important;
+      box-shadow: none;
+    }
+    .rep-table th.rep-name {
+      position: static;
+      flex: 1 1 auto;
+      min-width: 0;
+      margin-left: -18px;
+      box-shadow: none;
+    }
+    .rep-table th.rep-name .rep-name-line {
+      max-width: none;
+    }
+    .rep-table td.rep-uptime {
+      flex: none;
+      margin-left: auto;
+      text-align: right;
+    }
+    /* A line of its own after the name and the uptime, so that the figures
+       always start the next one. */
+    .rep-table tr::after {
+      content: "";
+      order: 2;
+      flex-basis: 100%;
+      height: 0;
+    }
+    .rep-table td[data-label] {
+      order: 3;
+      flex: none;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 16px;
+    }
+    .rep-table td[data-label]::before {
+      content: attr(data-label) " ";
+      color: var(--ink-3);
+      font-weight: 450;
+    }
+    .rep-table td.rep-none,
+    .rep-table tr[data-calm] > td:not(.rep-uptime) {
+      display: none;
+    }
+    .rep-table tr.rep-ns {
+      background: var(--well);
+    }
+
+    .rep-span {
+      margin-left: 0;
+      flex-basis: 100%;
+      order: 3;
+    }
+    .rep-bar .inc-seg {
+      width: 100%;
+    }
+    .rep-bar .inc-seg > a {
+      flex: 1 1 0;
+      justify-content: center;
+    }
+    .rep-csv {
+      order: 4;
+    }
+  }
+
+  @media (width < 40rem) {
+    .inc-tl {
+      --time-w: 52px;
+      --gap: 8px;
+    }
+    .inc-tl-time {
+      font-size: 11px;
+    }
+    /* No pointer rests on a phone to show the title: the summary takes two lines there. */
+    .inc-oneline {
+      display: -webkit-box;
+      white-space: normal;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .inc-tl-list,
+    .inc-tl-head,
+    .inc-tl-notice,
+    .inc-tl-date {
+      padding-left: 12px;
+      padding-right: 12px;
+    }
+    .inc-tl-list::before {
+      left: calc(12px + var(--time-w) + var(--gap) + var(--mark-w) / 2);
+    }
+    .inc-tl-compose {
+      grid-template-columns: minmax(0, 1fr);
+      padding: 14px 12px;
+    }
+    .inc-tl-compose > .inc-tl-mark {
+      display: none;
+    }
+    .inc-tl-foot {
+      padding-left: 12px;
+    }
+    .inc-run-list > li {
+      grid-template-columns: auto 3.75rem minmax(0, 1fr);
+      gap: 8px;
+    }
+  }
+}

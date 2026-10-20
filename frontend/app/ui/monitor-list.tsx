@@ -1,30 +1,37 @@
 "use client";
 
-import { ConfirmDialog } from "@/app/ui/confirm";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { type BulkAction, bulkMonitorsAction } from "@/app/actions";
 import type { MonitorType } from "@/lib/api";
+import type { FleetItem } from "@/lib/fleet";
 import { useT } from "@/lib/i18n/client";
-import type { T } from "@/lib/i18n/translate";
 import { monitorTypeOrder, typeLabel } from "@/lib/monitor-types";
 import { compareNamespaces, MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
-import type { ListItem } from "@/lib/workspace";
-import { ChevronIcon, PlusIcon, SearchIcon } from "@/app/ui/icons";
-import { type DisplayState, stateStyles } from "@/app/ui/status";
+import { byUrgency } from "@/lib/urgency";
+import { ConfirmDialog } from "@/app/ui/confirm";
+import { CheckIcon, CloseIcon, FilterIcon } from "@/app/ui/fleet-icons";
+import { SearchIcon } from "@/app/ui/icons";
+import type { UptimeTones } from "@/lib/uptime-tone";
+import { Chevron, groupCount, HealthBar, HoverCard, Row } from "@/app/ui/monitor-row";
+import { type ListFilter, useListFilter } from "@/app/ui/shell-state";
+import type { DisplayState } from "@/app/ui/status";
 
-type StateFilter = "all" | "problem" | "up" | "idle";
-
-const problemStates: DisplayState[] = ["down", "recovering", "verifying"];
+const degradedStates: DisplayState[] = ["verifying", "recovering"];
 const idleStates: DisplayState[] = ["paused", "pending", "maintenance"];
 
-function matchesState(item: ListItem, filter: StateFilter): boolean {
+/** How long the pointer rests on a row before its card shows (the design's 400ms). */
+const CARD_DELAY_MS = 400;
+
+function matchesState(item: FleetItem, filter: ListFilter): boolean {
   switch (filter) {
-    case "problem":
-      return problemStates.includes(item.state);
     case "up":
       return item.state === "up";
+    case "down":
+      return item.state === "down";
+    case "degraded":
+      return degradedStates.includes(item.state);
     case "idle":
       return idleStates.includes(item.state);
     default:
@@ -32,60 +39,71 @@ function matchesState(item: ListItem, filter: StateFilter): boolean {
   }
 }
 
-/** Problems first, then by name. */
-function byUrgency(a: ListItem, b: ListItem, locale: string): number {
-  const rank = (i: ListItem) => (problemStates.includes(i.state) ? 0 : 1);
-  return rank(a) - rank(b) || a.name.localeCompare(b.name, locale);
-}
-
-/** What the pill of a row says: the uptime, or why there is none. */
-function pillText(item: ListItem, t: T): string {
-  if (item.state === "paused") return t("monitorsList.list.pill.paused");
-  if (item.uptime === null) return t("common.none");
-  // Floor so that 99.96% is not shown as a perfect 100%.
-  const floored = Math.floor(item.uptime * 10) / 10;
-  return t("format.percent", { value: floored.toLocaleString(t.intl, { maximumFractionDigits: 1 }) });
-}
-
 /**
- * Every monitor, grouped by namespace, with search and filters. The data
- * comes from the server on each refresh; searching and filtering happen
- * here, so they are instant.
+ * Every monitor, grouped by namespace, with a filter, a segmented state
+ * control and, in a menu, the type and tag filters. The data comes from
+ * the server on each refresh; filtering happens here, so it is instant.
+ *
+ * Editors select monitors with the checkbox that takes the glyph's place
+ * on hover (or with x on a focused row, or "Select monitors" in the menu),
+ * and act on them from the bar at the foot of the list. The keyboard moves
+ * between rows with the arrows; / jumps to the filter.
  */
 export function MonitorList({
   items,
   beats,
   openByDefault,
   canEdit,
+  tones,
 }: {
-  items: ListItem[];
+  items: FleetItem[];
   /** How many recent checks a row has room for. */
   beats: number;
   /** Whether namespaces start opened; problems open theirs either way. */
   openByDefault: boolean;
   /** Whether the viewer may create and change monitors. */
   canEdit: boolean;
+  tones: UptimeTones;
 }) {
   const t = useT();
   const pathname = usePathname();
   const activeId = Number(/^\/monitors\/(\d+)/.exec(pathname)?.[1] ?? 0);
+  const search = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const hintId = useId();
 
   const [query, setQuery] = useState("");
-  const [stateFilter, setStateFilter] = useState<StateFilter>("all");
+  // Shared with the fleet pulse of the context bar, which can set it too.
+  const [stateFilter, setStateFilter] = useListFilter();
   const [typeFilter, setTypeFilter] = useState<MonitorType | "">("");
   const [tagFilter, setTagFilter] = useState("");
   // Only what the viewer toggled; everything else follows the default.
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
-  // In selecting mode a row is ticked instead of opened.
+
+  // Selecting: the checkboxes show on every row while anything is ticked,
+  // or once the viewer asked to select.
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [working, startBulk] = useTransition();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const selectMode = canEdit && (selecting || selected.size > 0);
 
   // A monitor that was deleted elsewhere is no longer there to act on.
-  const chosen = useMemo(() => items.filter((i) => selected.has(i.id)).map((i) => i.id), [items, selected]);
+  const chosen = useMemo(() => items.filter((i) => selected.has(i.id)), [items, selected]);
+  // Those kept in step with an annotated object stay deleted until restored.
+  const managedChosen = chosen.filter((i) => i.managed).length;
 
-  function toggle(ids: number[], on: boolean) {
+  const pick = useCallback((id: number, on: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  function pickAll(ids: number[], on: boolean) {
     setSelected((current) => {
       const next = new Set(current);
       for (const id of ids) {
@@ -102,13 +120,8 @@ export function MonitorList({
     setBulkError(null);
   }
 
-  const deletable = useMemo(() => items.filter((i) => selected.has(i.id)), [items, selected]);
-  // Those kept in step with an annotated object stay deleted until restored.
-  const managedChosen = deletable.filter((i) => i.managed).length;
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-
   function bulk(action: BulkAction) {
-    const ids = action === "delete" ? deletable.map((i) => i.id) : chosen;
+    const ids = chosen.map((i) => i.id);
     setBulkError(null);
     startBulk(async () => {
       const { failed } = await bulkMonitorsAction(ids, action);
@@ -117,190 +130,202 @@ export function MonitorList({
     });
   }
 
+  // The card of the row the pointer rests on. Once one shows, moving to
+  // the next row shows that one at once; leaving the list hides it.
+  const [hover, setHover] = useState<{ id: number; row: HTMLElement } | null>(null);
+  const hoverTimer = useRef<number | undefined>(undefined);
+  const cardShown = useRef(false);
+  const onHover = useCallback((id: number | null, row: HTMLElement | null) => {
+    window.clearTimeout(hoverTimer.current);
+    if (id === null || row === null) {
+      hoverTimer.current = window.setTimeout(() => {
+        cardShown.current = false;
+        setHover(null);
+      }, 120);
+      return;
+    }
+    if (cardShown.current) {
+      setHover({ id, row });
+      return;
+    }
+    hoverTimer.current = window.setTimeout(() => {
+      cardShown.current = true;
+      setHover({ id, row });
+    }, CARD_DELAY_MS);
+  }, []);
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
+  const hovered = hover ? items.find((i) => i.id === hover.id) : undefined;
+  // Scrolling moves the rows from under the card: it goes, and the next one waits again.
+  function hideCard() {
+    window.clearTimeout(hoverTimer.current);
+    cardShown.current = false;
+    if (hover) setHover(null);
+  }
+
+  // "/" puts the cursor in the filter, from anywhere but a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable]")) return;
+      const field = search.current;
+      if (!field || field.offsetParent === null) return; // the list is not on screen
+      e.preventDefault();
+      field.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // The monitor that was opened (from the palette, say) comes into view.
+  useEffect(() => {
+    if (!activeId) return;
+    list.current?.querySelector(`[data-row="${activeId}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [activeId]);
+
   const counts = useMemo(
     () => ({
       all: items.length,
-      problem: items.filter((i) => matchesState(i, "problem")).length,
       up: items.filter((i) => matchesState(i, "up")).length,
+      down: items.filter((i) => matchesState(i, "down")).length,
+      degraded: items.filter((i) => matchesState(i, "degraded")).length,
       idle: items.filter((i) => matchesState(i, "idle")).length,
     }),
     [items],
   );
-  const typesInUse = useMemo(
-    () => monitorTypeOrder.filter((t) => items.some((i) => i.type === t)),
-    [items],
-  );
+  const typesInUse = useMemo(() => monitorTypeOrder.filter((type) => items.some((i) => i.type === type)), [items]);
   const tagsInUse = useMemo(() => [...new Set(items.flatMap((i) => i.tags))].sort(), [items]);
-  // A tag that no monitor has any more cannot be filtered on.
+  // A filter on something no monitor has any more filters nothing.
+  const type = typesInUse.includes(typeFilter as MonitorType) ? typeFilter : "";
   const tag = tagsInUse.includes(tagFilter) ? tagFilter : "";
 
   const needle = query.trim().toLocaleLowerCase(t.intl);
-  const filtering = needle !== "" || stateFilter !== "all" || typeFilter !== "" || tag !== "";
+  const filtering = needle !== "" || stateFilter !== "all" || type !== "" || tag !== "";
   const groups = useMemo(() => {
     const shown = items.filter(
       (i) =>
         matchesState(i, stateFilter) &&
-        (typeFilter === "" || i.type === typeFilter) &&
+        (type === "" || i.type === type) &&
         (tag === "" || i.tags.includes(tag)) &&
         (needle === "" ||
-          `${i.name} ${i.target} ${i.namespace} ${i.tags.join(" ")}`.toLocaleLowerCase(t.intl).includes(needle)),
+          `${i.name} ${i.kindShort} ${i.target} ${i.namespace} ${i.tags.join(" ")}`.toLocaleLowerCase(t.intl).includes(needle)),
     );
-    const byNamespace = new Map<string, ListItem[]>();
-    for (const item of shown) {
-      byNamespace.set(item.namespace, [...(byNamespace.get(item.namespace) ?? []), item]);
-    }
+    const byNamespace = new Map<string, FleetItem[]>();
+    for (const item of shown) byNamespace.set(item.namespace, [...(byNamespace.get(item.namespace) ?? []), item]);
+    const order = byUrgency<FleetItem>(t.intl);
     return [...byNamespace.entries()]
       .sort(([a], [b]) => compareNamespaces(a, b))
-      .map(([namespace, group]) => ({ namespace, items: group.sort((a, b) => byUrgency(a, b, t.intl)) }));
-  }, [items, needle, stateFilter, typeFilter, tag, t]);
+      .map(([namespace, group]) => ({ namespace, items: group.sort(order) }));
+  }, [items, needle, stateFilter, type, tag, t]);
 
-  const filters: { key: StateFilter; label: string }[] = [
-    { key: "all", label: t("common.all") },
-    { key: "problem", label: t("monitorsList.state.problem") },
-    { key: "up", label: t("monitorState.up") },
-    { key: "idle", label: t("monitorsList.state.idle") },
+  /** Arrows move between rows, Home and End to the ends, x ticks the row, Escape stops selecting. */
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === "Escape" && selectMode) {
+      stopSelecting();
+      return;
+    }
+    const row = (e.target as HTMLElement).closest<HTMLElement>("a[data-row]");
+    if (!row) return;
+    const rows = [...(list.current?.querySelectorAll<HTMLElement>("a[data-row]") ?? [])];
+    const at = rows.indexOf(row);
+    const go = (i: number) => {
+      e.preventDefault();
+      rows[Math.max(0, Math.min(rows.length - 1, i))]?.focus();
+    };
+    if (e.key === "ArrowDown") go(at + 1);
+    else if (e.key === "ArrowUp") go(at - 1);
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(rows.length - 1);
+    else if (e.key.toLowerCase() === "x" && canEdit) {
+      e.preventDefault();
+      const id = Number(row.dataset.row);
+      pick(id, !selected.has(id));
+    }
+  }
+
+  const filters: { key: ListFilter; label: string }[] = [
+    { key: "all", label: t("monitorsList.filter.all") },
+    { key: "up", label: t("monitorsList.filter.up") },
+    { key: "down", label: t("monitorsList.filter.down") },
+    { key: "degraded", label: t("monitorsList.filter.degraded") },
+    { key: "idle", label: t("monitorsList.filter.idle") },
   ];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-col gap-3 border-b border-line p-3">
-        {canEdit && (
-          <Link href="/monitors/new" className="btn btn-primary w-full">
-            <PlusIcon /> {t("monitorsList.list.newMonitor")}
-          </Link>
-        )}
-        <label className="relative block">
-          <span className="sr-only">{t("monitorsList.list.search.label")}</span>
-          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("monitorsList.list.search.placeholder")}
-            className="field pl-9"
-          />
-        </label>
-        <div className="flex flex-wrap items-center gap-1.5">
+    <div className="fl-list" data-list data-selecting={selectMode || undefined}>
+      {/* With nothing to filter there is no toolbar, only the way to begin. */}
+      <div className="fl-toolbar" hidden={items.length === 0}>
+        <div className="flex items-center gap-2">
+          <label className="fl-search">
+            <span className="sr-only">{t("monitorsList.list.search.label")}</span>
+            <SearchIcon className="pointer-events-none flex-none text-ink-3" />
+            <input
+              ref={search}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("monitorsList.list.search.placeholder")}
+              aria-keyshortcuts="/"
+            />
+            <kbd className="kbd fl-search-kbd" aria-hidden>
+              /
+            </kbd>
+          </label>
+          {(typesInUse.length > 1 || tagsInUse.length > 0 || (canEdit && items.length > 0)) && (
+            <FilterMenu
+              types={typesInUse.length > 1 ? typesInUse : []}
+              tags={tagsInUse}
+              type={type}
+              tag={tag}
+              onType={setTypeFilter}
+              onTag={setTagFilter}
+              onSelect={canEdit && items.length > 0 ? () => setSelecting(true) : undefined}
+            />
+          )}
+        </div>
+        {/* A segmented control; narrow widths and long Turkish names may wrap it. */}
+        <div role="group" aria-label={t("monitorsList.filter.label")} className="fl-seg">
           {filters.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setStateFilter(f.key)}
-              aria-pressed={stateFilter === f.key}
-              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                stateFilter === f.key
-                  ? "bg-ink text-bg"
-                  : f.key === "problem" && counts.problem > 0
-                    ? "bg-down/12 text-down hover:bg-down/20"
-                    : "bg-sunken text-muted hover:text-ink"
-              }`}
-            >
-              {f.label} <span className="tabular-nums opacity-70">{counts[f.key]}</span>
+            <button key={f.key} type="button" onClick={() => setStateFilter(f.key)} aria-pressed={stateFilter === f.key}>
+              {f.label}
+              <span
+                className={`font-semibold tabular-nums ${
+                  f.key === "down" && counts.down > 0
+                    ? "text-down-ink"
+                    : f.key === "degraded" && counts.degraded > 0
+                      ? "text-warn-ink"
+                      : "text-ink-3"
+                }`}
+              >
+                {counts[f.key]}
+              </span>
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {typesInUse.length > 1 && (
-            <select
-              aria-label={t("monitorsList.list.typeFilter.label")}
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value as MonitorType | "")}
-              className="rounded-full border-0 bg-sunken px-2 py-1 text-xs text-muted outline-none"
-            >
-              <option value="">{t("monitorsList.list.typeFilter.all")}</option>
-              {typesInUse.map((type) => (
-                <option key={type} value={type}>
-                  {t(typeLabel(type))}
-                </option>
-              ))}
-            </select>
-          )}
-          {tagsInUse.length > 0 && (
-            <select
-              aria-label={t("monitorsList.list.tagFilter.label")}
-              value={tag}
-              onChange={(e) => setTagFilter(e.target.value)}
-              className="max-w-[9rem] rounded-full border-0 bg-sunken px-2 py-1 text-xs text-muted outline-none"
-            >
-              <option value="">{t("monitorsList.list.tagFilter.all")}</option>
-              {tagsInUse.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          )}
-          {canEdit && items.length > 0 && (
-            <button
-              type="button"
-              onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
-              aria-pressed={selecting}
-              className={`ml-auto rounded-full px-2.5 py-1 text-xs font-medium ${
-                selecting ? "bg-ink text-bg" : "bg-sunken text-muted hover:text-ink"
-              }`}
-            >
-              {selecting ? t("monitorsList.list.select.stop") : t("monitorsList.list.select.start")}
-            </button>
-          )}
-        </div>
-        {selecting && (
-          <div className="flex flex-col gap-2 rounded-lg bg-sunken p-2.5" role="group" aria-label={t("monitorsList.list.bulk.label")}>
-            <p className="text-xs text-muted">
-              {chosen.length === 0 ? t("monitorsList.list.bulk.hint") : t.n("monitorsList.list.bulk.selected", chosen.length)}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              <button type="button" className="btn px-2.5 py-1 text-xs" disabled={chosen.length === 0 || working} onClick={() => bulk("pause")}>
-                {t("monitorsList.list.bulk.pause")}
-              </button>
-              <button type="button" className="btn px-2.5 py-1 text-xs" disabled={chosen.length === 0 || working} onClick={() => bulk("resume")}>
-                {t("monitorsList.list.bulk.resume")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger px-2.5 py-1 text-xs"
-                disabled={chosen.length === 0 || working}
-                onClick={() => setConfirmingDelete(true)}
-              >
-                {t("common.delete")}
-              </button>
-              {confirmingDelete && (
-                <ConfirmDialog
-                  title={t("confirm.title")}
-                  confirmLabel={t.n("monitorsList.list.bulk.deleteCount", deletable.length)}
-                  onCancel={() => setConfirmingDelete(false)}
-                  onConfirm={() => {
-                    setConfirmingDelete(false);
-                    bulk("delete");
-                  }}
-                >
-                  <p>{t.n("monitorsList.list.bulk.confirmDelete", deletable.length)}</p>
-                  <ul className="mt-2 max-h-40 overflow-auto rounded-lg bg-sunken px-3 py-2 text-ink">
-                    {deletable.map((i) => (
-                      <li key={i.id} className="truncate">
-                        {i.name}
-                      </li>
-                    ))}
-                  </ul>
-                  {managedChosen > 0 && <p className="mt-3">{t.n("monitorsList.list.bulk.managedNote", managedChosen)}</p>}
-                </ConfirmDialog>
-              )}
-            </div>
-            {bulkError && (
-              <p role="alert" className="text-xs text-down">
-                {bulkError}
-              </p>
-            )}
+        {(type || tag) && (
+          <div className="flex flex-wrap gap-1.5" aria-label={t("monitorsList.list.filters.active")} role="group">
+            {type && <FilterChip label={t(typeLabel(type))} onRemove={() => setTypeFilter("")} />}
+            {tag && <FilterChip label={tag} onRemove={() => setTagFilter("")} />}
           </div>
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <p id={hintId} className="sr-only">
+        {canEdit ? t("monitorsList.list.keys.edit") : t("monitorsList.list.keys.view")}
+      </p>
+      <div
+        ref={list}
+        className="fl-groups"
+        onKeyDown={onKeyDown}
+        onScroll={hideCard}
+      >
         {items.length === 0 && (
-          <p className="p-4 text-center text-sm text-muted">
+          <p className="px-4 py-6 text-center text-sm text-ink-3">
             {canEdit ? (
               <>
                 {t("monitorsList.list.empty.before")}{" "}
-                <Link href="/discovery" className="text-accent underline">
+                <Link href="/discovery" className="text-accent-text underline">
                   {t("monitorsList.list.empty.link")}
                 </Link>
                 .
@@ -311,49 +336,51 @@ export function MonitorList({
           </p>
         )}
         {items.length > 0 && groups.length === 0 && (
-          <p className="p-4 text-center text-sm text-muted">{t("monitorsList.list.empty.filtered")}</p>
+          <p className="px-4 py-6 text-center text-sm text-ink-3">{t("monitorsList.list.empty.filtered")}</p>
         )}
         {groups.map(({ namespace, items: group }) => {
-          const problems = group.filter((i) => problemStates.includes(i.state)).length;
+          const label = namespace || t(MANUAL_LABEL);
+          const problems = group.some((i) => i.state === "down" || degradedStates.includes(i.state));
           // A search opens what it found; otherwise the viewer's choice, then the default.
-          const open =
-            filtering || (toggled[namespace] ?? (openByDefault || problems > 0 || group.some((i) => i.id === activeId)));
+          const open = filtering || (toggled[namespace] ?? (openByDefault || problems || group.some((i) => i.id === activeId)));
+          const count = groupCount(group, t);
+          const allPicked = group.every((i) => selected.has(i.id));
           return (
-            <section key={namespace} aria-label={namespace || t(MANUAL_LABEL)} className="mb-1">
-              <div className="flex items-center gap-1 rounded-lg px-1 py-1 text-xs text-muted">
-                <button
-                  type="button"
-                  onClick={() => setToggled((t) => ({ ...t, [namespace]: !open }))}
-                  aria-expanded={open}
-                  className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-0.5 text-left font-semibold uppercase tracking-wide hover:text-ink"
-                >
-                  <ChevronIcon
-                    width={12}
-                    height={12}
-                    className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
-                  />
-                  <span className="truncate">{namespace || t(MANUAL_LABEL)}</span>
-                </button>
-                {selecting && (
-                  <input
-                    type="checkbox"
-                    aria-label={t("monitorsList.list.group.selectAll", { group: namespace || t(MANUAL_LABEL) })}
-                    checked={group.every((i) => selected.has(i.id))}
-                    onChange={(e) => toggle(group.map((i) => i.id), e.target.checked)}
-                    className="h-3.5 w-3.5 accent-(--accent)"
-                  />
-                )}
-                {problems > 0 && (
-                  <span className="rounded-full bg-down/12 px-1.5 py-0.5 font-semibold tabular-nums text-down">
-                    {problems}
+            <section
+              key={namespace}
+              aria-label={label}
+              className="fl-group"
+              style={{ containIntrinsicSize: `auto ${30 + (open ? group.length * 34 : 0)}px` }}
+            >
+              <div className="fl-ns">
+                {selectMode && (
+                  <span className="fl-lead">
+                    <input
+                      type="checkbox"
+                      className="fl-pick"
+                      checked={allPicked}
+                      onChange={(e) => pickAll(group.map((i) => i.id), e.target.checked)}
+                      aria-label={t("monitorsList.list.group.selectAll", { group: label })}
+                    />
                   </span>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setToggled((current) => ({ ...current, [namespace]: !open }))}
+                  aria-expanded={open}
+                  className="fl-ns-toggle"
+                >
+                  {!selectMode && <Chevron open={open} />}
+                  <span className={namespace ? "fl-ns-name" : "fl-ns-name fl-ns-manual"}>{label}</span>
+                </button>
+                <HealthBar items={group} />
                 <Link
                   href={namespaceHref(namespace)}
+                  className={`fl-ns-count ${count.tone}`}
                   title={t("monitorsList.list.group.page")}
-                  className="rounded-md px-1.5 py-0.5 tabular-nums hover:bg-sunken hover:text-ink"
+                  aria-label={`${count.text}, ${t("monitorsList.list.group.pageOf", { group: label })}`}
                 >
-                  {group.length}
+                  {count.text}
                 </Link>
               </div>
               {open && (
@@ -362,10 +389,16 @@ export function MonitorList({
                     <Row
                       key={item.id}
                       item={item}
+                      // The keys are told once, at the first row.
+                      describedBy={item === groups[0].items[0] ? hintId : undefined}
                       beats={beats}
                       active={item.id === activeId}
-                      picked={selecting ? selected.has(item.id) : null}
-                      onPick={(on) => toggle([item.id], on)}
+                      picked={selected.has(item.id)}
+                      canPick={canEdit}
+                      selecting={selectMode}
+                      onPick={pick}
+                      tones={tones}
+                      onHover={onHover}
                     />
                   ))}
                 </ul>
@@ -374,93 +407,210 @@ export function MonitorList({
           );
         })}
       </div>
+
+      {selectMode && (
+        <div className="fl-bulk pop" role="group" aria-label={t("monitorsList.list.bulk.label")}>
+          <p className="min-w-0 flex-1 truncate text-xs font-medium tabular-nums" aria-live="polite">
+            {chosen.length === 0 ? t("monitorsList.list.bulk.hint") : t.n("monitorsList.list.bulk.selected", chosen.length)}
+          </p>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={chosen.length === 0 || working} onClick={() => bulk("pause")}>
+            {t("monitorsList.list.bulk.pause")}
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={chosen.length === 0 || working} onClick={() => bulk("resume")}>
+            {t("monitorsList.list.bulk.resume")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm fl-bulk-delete"
+            disabled={chosen.length === 0 || working}
+            onClick={() => setConfirmingDelete(true)}
+          >
+            {t("common.delete")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm fl-icon-btn"
+            onClick={stopSelecting}
+            aria-label={t("monitorsList.list.bulk.clear")}
+            title={t("monitorsList.list.bulk.clear")}
+          >
+            <CloseIcon />
+          </button>
+          {bulkError && (
+            <p role="alert" className="basis-full text-xs text-down-ink">
+              {bulkError}
+            </p>
+          )}
+        </div>
+      )}
+      {confirmingDelete && (
+        <ConfirmDialog
+          title={t.n("monitorsList.list.bulk.deleteTitle", chosen.length)}
+          confirmLabel={t.n("monitorsList.list.bulk.deleteCount", chosen.length)}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => {
+            setConfirmingDelete(false);
+            bulk("delete");
+          }}
+        >
+          <p>{t.n("monitorsList.list.bulk.confirmDelete", chosen.length)}</p>
+          <ul className="type-mono mt-3 max-h-40 overflow-auto rounded-sm border border-line bg-well px-3 py-2 text-ink">
+            {chosen.map((i) => (
+              <li key={i.id} className="truncate">
+                {i.namespace ? `${i.namespace}/` : ""}
+                {i.name}
+              </li>
+            ))}
+          </ul>
+          {managedChosen > 0 && <p className="mt-3">{t.n("monitorsList.list.bulk.managedNote", managedChosen)}</p>}
+        </ConfirmDialog>
+      )}
+      {hover && hovered && <HoverCard item={hovered} anchor={hover.row} />}
     </div>
   );
 }
 
-function Row({
-  item,
-  beats,
-  active,
-  picked,
-  onPick,
-}: {
-  item: ListItem;
-  beats: number;
-  active: boolean;
-  /** Whether the row is ticked; null when rows are not being selected. */
-  picked: boolean | null;
-  onPick: (on: boolean) => void;
-}) {
+/** A filter that is on, with the way to take it off. */
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
   const t = useT();
-  const style = stateStyles[item.state];
-  const content = (
-    <>
-      <span
-        title={t(style.label)}
-        className={`w-14 shrink-0 rounded-full py-0.5 text-center text-xs font-semibold tabular-nums ${style.soft}`}
-      >
-        {pillText(item, t)}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{item.name}</span>
-        <span className="block truncate text-xs text-muted">
-          {item.kind ?? t(typeLabel(item.type))}
-          {item.tags.length > 0 && ` · ${item.tags.join(", ")}`}
-          {item.target && ` · ${item.target}`}
-        </span>
-      </span>
-      <Beats beats={item.beats} slots={beats} />
-    </>
-  );
-  const frame = "flex items-center gap-2.5 rounded-lg px-2 py-2";
-
-  if (picked !== null) {
-    return (
-      <li>
-        <label className={`${frame} cursor-pointer ${picked ? "bg-accent/10" : "hover:bg-sunken/60"}`}>
-          <input
-            type="checkbox"
-            checked={picked}
-            onChange={(e) => onPick(e.target.checked)}
-            aria-label={t("monitorsList.list.row.select", { name: item.name })}
-            className="h-4 w-4 shrink-0 accent-(--accent)"
-          />
-          {content}
-        </label>
-      </li>
-    );
-  }
   return (
-    <li>
-      <Link
-        href={`/monitors/${item.id}`}
-        aria-current={active ? "page" : undefined}
-        className={`${frame} ${active ? "bg-sunken" : "hover:bg-sunken/60"}`}
-      >
-        {content}
-      </Link>
-    </li>
+    <span className="fl-chip">
+      <span className="truncate">{label}</span>
+      <button type="button" onClick={onRemove} aria-label={t("monitorsList.list.filters.remove", { filter: label })}>
+        <CloseIcon width={12} height={12} />
+      </button>
+    </span>
   );
 }
 
-/** The recent checks as small bars, oldest on the left. */
-function Beats({ beats, slots }: { beats: string; slots: number }) {
+/** The menu's width, fixed so that it can be placed before it shows. */
+const MENU_WIDTH = 256;
+
+/**
+ * The filters that are not on view: type and tag, as selects in a menu
+ * under its button; and for editors, the way into selecting monitors
+ * where there is no pointer to hover with.
+ */
+function FilterMenu({
+  types,
+  tags,
+  type,
+  tag,
+  onType,
+  onTag,
+  onSelect,
+}: {
+  types: MonitorType[];
+  tags: string[];
+  type: MonitorType | "";
+  tag: string;
+  onType: (type: MonitorType | "") => void;
+  onTag: (tag: string) => void;
+  onSelect?: () => void;
+}) {
   const t = useT();
-  const shown = beats.slice(-slots);
-  const failed = shown.split("0").length - 1;
+  const id = useId();
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const active = (type ? 1 : 0) + (tag ? 1 : 0);
+
+  // Under the button, with its right edge on the button's, inside the
+  // window; it closes when the page moves under it.
+  useEffect(() => {
+    const el = menu.current;
+    if (!el) return;
+    const place = (e: Event) => {
+      if ((e as ToggleEvent).newState !== "open" || !button.current) return;
+      const r = button.current.getBoundingClientRect();
+      el.style.top = `${r.bottom + 6}px`;
+      el.style.left = `${Math.max(8, Math.min(r.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8))}px`;
+    };
+    const close = (e: Event) => {
+      if (e.type === "scroll" && el.contains(e.target as Node)) return;
+      if (el.matches(":popover-open")) el.hidePopover();
+    };
+    el.addEventListener("beforetoggle", place);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      el.removeEventListener("beforetoggle", place);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, []);
+
+  const label = active > 0 ? t("monitorsList.list.filters.labelActive", { count: active }) : t("monitorsList.list.filters.label");
   return (
-    <span
-      role="img"
-      aria-label={t("monitorsList.list.beats.label", { count: shown.length, failed })}
-      className="hidden h-4 shrink-0 items-stretch gap-px sm:flex"
-    >
-      {Array.from({ length: slots - shown.length }, (_, i) => (
-        <span key={`e${i}`} className="w-1 rounded-full bg-line" />
-      ))}
-      {[...shown].map((beat, i) => (
-        <span key={i} className={`w-1 rounded-full ${beat === "1" ? "bg-up" : "bg-down"}`} />
-      ))}
-    </span>
+    <>
+      <button
+        ref={button}
+        type="button"
+        popoverTarget={id}
+        className="fl-filter-btn"
+        aria-label={label}
+        title={label}
+        data-active={active > 0 || undefined}
+      >
+        <FilterIcon />
+        {active > 0 && <span className="fl-filter-count">{active}</span>}
+      </button>
+      <div id={id} ref={menu} popover="auto" className="menu inset-auto" style={{ width: MENU_WIDTH }}>
+        {types.length > 0 && (
+          <label className="fl-menu-field">
+            <span>{t("monitorsList.list.typeFilter.label")}</span>
+            <select className="field" value={type} onChange={(e) => onType(e.target.value as MonitorType | "")}>
+              <option value="">{t("monitorsList.list.typeFilter.all")}</option>
+              {types.map((value) => (
+                <option key={value} value={value}>
+                  {t(typeLabel(value))}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {tags.length > 0 && (
+          <label className="fl-menu-field">
+            <span>{t("monitorsList.list.tagFilter.label")}</span>
+            <select className="field" value={tag} onChange={(e) => onTag(e.target.value)}>
+              <option value="">{t("monitorsList.list.tagFilter.all")}</option>
+              {tags.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {active > 0 && (
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              onType("");
+              onTag("");
+            }}
+          >
+            <CloseIcon />
+            {t("monitorsList.list.filters.clear")}
+          </button>
+        )}
+        {onSelect && (
+          <>
+            {(types.length > 0 || tags.length > 0) && <hr className="menu-sep" />}
+            <button
+              type="button"
+              className="menu-item"
+              onClick={() => {
+                onSelect();
+                menu.current?.hidePopover();
+              }}
+            >
+              <CheckIcon />
+              {t("monitorsList.list.select.start")}
+            </button>
+          </>
+        )}
+      </div>
+    </>
   );
 }

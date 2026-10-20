@@ -3,6 +3,8 @@ import { Suspense } from "react";
 import { getProviders, type Providers } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import { LoginForm } from "@/app/login/login-form";
+import { AuthFrame } from "@/app/ui/auth-frame";
+import { SignInIcon, WarningIcon } from "@/app/ui/page-icons";
 
 /** What went wrong on the way back from the identity provider. */
 const oidcMessages: Record<string, string> = {
@@ -35,24 +37,32 @@ async function Form({
   return (
     <>
       {params.expired !== undefined && (
-        <p role="status" className="rounded-lg bg-sunken px-3 py-2 text-sm text-muted">
-          {t("login.expired")}
+        <p role="status" className="pg-callout">
+          <span className="pg-callout-body pt-0">{t("login.expired")}</span>
         </p>
       )}
       {oidcProblem && (
-        <p role="alert" className="rounded-lg border border-down/40 bg-down/8 px-3 py-2 text-sm text-down">
-          {t(oidcProblem)}
+        <p role="alert" className="pg-callout pg-callout-down">
+          <span className="pg-callout-icon" aria-hidden>
+            <WarningIcon />
+          </span>
+          <span className="pg-callout-body">{t(oidcProblem)}</span>
         </p>
       )}
-      {oidc && (
-        <>
-          <a href="/auth/oidc" className="btn btn-primary justify-center">
-            {t("login.oidc.signIn", { name: oidc.name })}
-          </a>
-          <p className="text-center text-xs text-muted">{t("login.orAccount")}</p>
-        </>
-      )}
-      <LoginForm next={typeof next === "string" ? next : "/"} ldap={ldap} />
+      <div className="panel auth-panel">
+        {oidc && (
+          <>
+            <a href="/auth/oidc" className="btn w-full">
+              <SignInIcon />
+              {t("login.oidc.signIn", { name: oidc.name })}
+            </a>
+            <p className="auth-or">
+              <span>{t("login.orAccount")}</span>
+            </p>
+          </>
+        )}
+        <LoginForm next={typeof next === "string" ? next : "/"} ldap={ldap} />
+      </div>
     </>
   );
 }
@@ -60,16 +70,10 @@ async function Form({
 export default async function Page({ searchParams }: PageProps<"/login">) {
   const t = await getT();
   return (
-    <main className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center px-4 py-16">
-      <div className="card flex flex-col gap-6 p-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("login.title")}</h1>
-          <p className="mt-1 text-sm text-muted">{t("login.subtitle")}</p>
-        </div>
-        <Suspense fallback={<p className="text-sm text-muted">{t("common.loading")}</p>}>
-          <Form searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </main>
+    <AuthFrame title={t("login.title")}>
+      <Suspense fallback={<div className="panel auth-panel h-[232px]" aria-busy="true" aria-label={t("common.loading")} />}>
+        <Form searchParams={searchParams} />
+      </Suspense>
+    </AuthFrame>
   );
 }

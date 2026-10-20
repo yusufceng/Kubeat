@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { getProviders } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import { SetupForm } from "@/app/setup/setup-form";
+import { AuthFrame } from "@/app/ui/auth-frame";
 
 async function Gate() {
   // Once an account exists this page has nothing to do.
@@ -14,16 +15,11 @@ async function Gate() {
 export default async function Page() {
   const t = await getT();
   return (
-    <main className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center px-4 py-16">
-      <div className="card flex flex-col gap-6 p-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("setup.title")}</h1>
-          <p className="mt-1 text-sm text-muted">{t("setup.intro")}</p>
-        </div>
-        <Suspense fallback={<p className="text-sm text-muted">{t("common.loading")}</p>}>
-          <Gate />
-        </Suspense>
-      </div>
-    </main>
+    <AuthFrame title={t("setup.title")} intro={t("setup.intro")}>
+      <Suspense fallback={<div className="panel auth-panel h-[360px]" aria-busy="true" aria-label={t("common.loading")} />}>
+        <Gate />
+      </Suspense>
+      <p className="auth-next">{t("setup.next")}</p>
+    </AuthFrame>
   );
 }

@@ -1,85 +1,50 @@
-import Link from "next/link";
-import { connection } from "next/server";
-import { Suspense } from "react";
-import { getMe } from "@/lib/api";
-import { sessionToken } from "@/lib/session";
-import { logoutAction } from "@/app/login/actions";
+import { unstable_rethrow } from "next/navigation";
+import { cache, Suspense } from "react";
+import type { Me } from "@/lib/api";
+import { currentUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n/server";
+import { ShellNav } from "@/app/ui/nav";
 
 /**
- * Who is signed in, with the way to their account and out. Rendered per
- * request: the session is request data.
+ * Who is signed in, for the frame. Without a session the visitor is sent to
+ * the sign-in page, as by currentUser(); when the backend cannot answer, the
+ * frame goes without the user's parts and the page says what is wrong.
  */
-export function SessionControls() {
-  return (
-    <Suspense>
-      <Controls />
-    </Suspense>
-  );
-}
-
-async function Controls() {
-  await connection();
-  if (!(await sessionToken())) return null;
-  let me;
+export const shellUser = cache(async (): Promise<Me | null> => {
   try {
-    me = await getMe();
-  } catch {
-    return null; // the page itself will say what is wrong
-  }
-  const t = await getT();
-  const role = t(`role.${me.role}`);
-  return (
-    <div className="flex items-center gap-1">
-      <Link
-        href="/account"
-        className="hidden rounded-lg px-2 py-1.5 text-sm text-muted hover:text-ink sm:block"
-        title={t("session.account", { name: me.username, role })}
-      >
-        {me.display_name || me.username}
-        <span className="ml-1.5 rounded bg-sunken px-1.5 py-0.5 text-xs">{role}</span>
-      </Link>
-      <form action={logoutAction}>
-        <button type="submit" className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">
-          {t("session.signOut")}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-/** The links only administrators have, in the top bar. */
-export function AdminNav() {
-  return (
-    <Suspense>
-      <AdminLinks />
-    </Suspense>
-  );
-}
-
-async function AdminLinks() {
-  await connection();
-  if (!(await sessionToken())) return null;
-  let me;
-  try {
-    me = await getMe();
-  } catch {
+    return await currentUser();
+  } catch (err) {
+    unstable_rethrow(err);
     return null;
   }
-  if (!me.admin) return null;
+});
+
+/**
+ * The navigation with the signed-in user's parts: the administrators'
+ * sections and the account menu. Rendered per request, since the session is
+ * request data; until it is known the navigation shows without them.
+ */
+export function SessionNav() {
+  return (
+    <Suspense fallback={<ShellNav user={null} />}>
+      <NavForUser />
+    </Suspense>
+  );
+}
+
+async function NavForUser() {
+  const me = await shellUser();
   const t = await getT();
   return (
-    <>
-      <li>
-        <Link href="/users" className="block rounded-lg px-3 py-1.5 text-muted hover:text-ink">
-          {t("nav.users")}
-        </Link>
-      </li>
-      <li>
-        <Link href="/audit" className="block rounded-lg px-3 py-1.5 text-muted hover:text-ink">
-          {t("nav.audit")}
-        </Link>
-      </li>
-    </>
+    <ShellNav
+      user={
+        me && {
+          name: me.display_name || me.username,
+          username: me.username,
+          role: t(`role.${me.role}`),
+          admin: me.admin,
+        }
+      }
+    />
   );
 }

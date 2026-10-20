@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { renewPushTokenAction } from "@/app/actions";
-import { ConfirmForm } from "@/app/ui/confirm";
+import { ConfirmDialog } from "@/app/ui/confirm";
 import { useT } from "@/lib/i18n/client";
 import { useMounted } from "@/lib/use-mounted";
 import { CopyIcon, RenewIcon } from "@/app/ui/icons";
@@ -12,21 +12,21 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div>
-      <div className="mb-1 text-xs font-medium text-muted">{label}</div>
-      <div className="flex items-stretch gap-2">
-        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-lg bg-sunken px-3 py-2 font-mono text-xs">
-          {value}
-        </code>
+      <div className="mon-h3 mb-1.5">{label}</div>
+      <div className="mon-copy">
+        <code>{value}</code>
         <button
           type="button"
           className="btn"
+          aria-label={`${t("monitorPage.copy")}: ${label}`}
           onClick={async () => {
             await navigator.clipboard.writeText(value);
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}
         >
-          <CopyIcon /> {copied ? t("monitorPage.copied") : t("monitorPage.copy")}
+          <CopyIcon />
+          <span aria-live="polite">{copied ? t("monitorPage.copied") : t("monitorPage.copy")}</span>
         </button>
       </div>
     </div>
@@ -42,39 +42,53 @@ function CopyRow({ label, value }: { label: string; value: string }) {
 export function PushUrl({ monitorId, token, internalBase }: { monitorId: number; token: string; internalBase: string }) {
   const t = useT();
   const mounted = useMounted();
+  const [renewing, setRenewing] = useState(false);
+  const renewForm = useRef<HTMLFormElement>(null);
   const path = `/api/push/${token}`;
   const external = `${mounted ? window.location.origin : ""}${path}`;
 
   return (
-    <section aria-label={t("monitorPage.pushUrl.title")} className="card flex flex-col gap-4 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">{t("monitorPage.pushUrl.title")}</h2>
-          <p className="mt-0.5 text-xs text-muted">{t("monitorPage.pushUrl.intro")}</p>
-        </div>
-        <ConfirmForm
-          action={renewPushTokenAction}
-          question={t("monitorPage.pushUrl.renew.confirm")}
-          confirmLabel={t("monitorPage.pushUrl.renew.action")}
-        >
-          <input type="hidden" name="id" value={monitorId} />
-          <button type="submit" className="btn">
-            <RenewIcon /> {t("monitorPage.pushUrl.renew")}
+    <section aria-labelledby="mon-push-title" className="panel">
+      <div className="mon-ph">
+        <h2 id="mon-push-title">{t("monitorPage.pushUrl.title")}</h2>
+        <span className="mon-ph-end">
+          <form ref={renewForm} action={renewPushTokenAction}>
+            <input type="hidden" name="id" value={monitorId} />
+          </form>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRenewing(true)}>
+            <RenewIcon width={14} height={14} />
+            {t("monitorPage.pushUrl.renew")}
           </button>
-        </ConfirmForm>
+          {renewing && (
+            <ConfirmDialog
+              title={t("monitorPage.pushUrl.renew.title")}
+              confirmLabel={t("monitorPage.pushUrl.renew.action")}
+              onCancel={() => setRenewing(false)}
+              onConfirm={() => {
+                setRenewing(false);
+                renewForm.current?.requestSubmit();
+              }}
+            >
+              {t("monitorPage.pushUrl.renew.confirm")}
+            </ConfirmDialog>
+          )}
+        </span>
       </div>
-      <CopyRow label={t("monitorPage.pushUrl.external")} value={external} />
-      <CopyRow label={t("monitorPage.pushUrl.internal")} value={`${internalBase}${path}`} />
-      <CopyRow
-        label={t("monitorPage.pushUrl.example")}
-        value={`curl -fsS "${external}?status=up&msg=${t("monitorPage.pushUrl.exampleMessage")}"`}
-      />
-      <p className="text-xs text-muted">
-        {t("monitorPage.pushUrl.params.intro")} <code className="font-mono">status=up|down</code>{" "}
-        {t("monitorPage.pushUrl.params.status")} <code className="font-mono">msg=</code>{" "}
-        {t("monitorPage.pushUrl.params.msg")} <code className="font-mono">ping=</code>{" "}
-        {t("monitorPage.pushUrl.params.ping")}
-      </p>
+      <p className="px-4 pt-1 text-[13px] text-ink-2">{t("monitorPage.pushUrl.intro")}</p>
+      <div className="flex flex-col gap-4 px-4 pt-4 pb-4">
+        <CopyRow label={t("monitorPage.pushUrl.external")} value={external} />
+        <CopyRow label={t("monitorPage.pushUrl.internal")} value={`${internalBase}${path}`} />
+        <CopyRow
+          label={t("monitorPage.pushUrl.example")}
+          value={`curl -fsS "${external}?status=up&msg=${t("monitorPage.pushUrl.exampleMessage")}"`}
+        />
+        <p className="text-xs text-ink-3">
+          {t("monitorPage.pushUrl.params.intro")} <code className="mon-mono text-ink-2">status=up|down</code>{" "}
+          {t("monitorPage.pushUrl.params.status")} <code className="mon-mono text-ink-2">msg=</code>{" "}
+          {t("monitorPage.pushUrl.params.msg")} <code className="mon-mono text-ink-2">ping=</code>{" "}
+          {t("monitorPage.pushUrl.params.ping")}
+        </p>
+      </div>
     </section>
   );
 }
