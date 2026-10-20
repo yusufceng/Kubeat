@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { listMonitors, listStatusPages, type StatusPage } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
-import { getT } from "@/lib/i18n/server";
+import { getT, titled } from "@/lib/i18n/server";
 import { compareNamespaces } from "@/lib/namespaces";
 import { BackendError } from "@/app/ui/backend-error";
 import { EmptyState, NoMonitors } from "@/app/ui/empty-state";
@@ -104,6 +104,8 @@ async function NewPage() {
     </Link>
   );
 }
+
+export const generateMetadata = titled("nav.statusPages");
 
 export default async function Page({ searchParams }: PageProps<"/status-pages">) {
   const t = await getT();

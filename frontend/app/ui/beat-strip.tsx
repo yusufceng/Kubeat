@@ -5,13 +5,20 @@ import { useT } from "@/lib/i18n/client";
 
 /**
  * What a slot shows: healthy, failed, partly failed (a bucket or a day with
- * some failures), in maintenance, or nothing known.
+ * some failures), in maintenance, a check of a monitor since paused (idle,
+ * whatever it came to), or nothing known.
  */
-export type SlotState = "ok" | "down" | "partial" | "maint" | "none";
+export type SlotState = "ok" | "down" | "partial" | "maint" | "idle" | "none";
 
 /** One slot of a strip: a check, a bucket of checks, or a day. */
 export type Beat = {
   state: SlotState;
+  /**
+   * How much of the slot's height its state fills, from 0 to 1, the rest
+   * being healthy: the share of a fleet that was down in it, say. 1 when
+   * left out.
+   */
+  level?: number;
   /** When it ran or began, Unix milliseconds; shown on hover in the viewer's zone. */
   at?: number;
   /** The slot is a whole (UTC) day, so the hover shows its date alone. */
@@ -73,6 +80,8 @@ export function BeatStrip({
     >
       {all.map((beat, i) => {
         const state = beat?.state ?? "none";
+        // A part of a slot: its state from the foot up, healthy above.
+        const part = beat?.level !== undefined && beat.level < 1 && (state === "down" || state === "partial");
         return (
           <span
             key={i}
@@ -82,6 +91,9 @@ export function BeatStrip({
               flex: slotWidth ? undefined : "1 1 0",
               minWidth: slotWidth ? undefined : 2,
               height: state === "none" ? baseline : undefined,
+              background: part
+                ? `linear-gradient(to top, var(--${state === "down" ? "down" : "warn"}) ${Math.round(beat!.level! * 100)}%, var(--ok-bar) 0)`
+                : undefined,
             }}
             onPointerEnter={
               tips && beat && (beat.at !== undefined || beat.text || beat.detail)

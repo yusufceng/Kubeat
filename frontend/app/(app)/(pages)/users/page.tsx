@@ -11,7 +11,7 @@ import {
   type User,
 } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
-import { getT } from "@/lib/i18n/server";
+import { getT, titled } from "@/lib/i18n/server";
 import type { T } from "@/lib/i18n/translate";
 import { workspaceMonitors } from "@/lib/workspace";
 import { BackendError } from "@/app/ui/backend-error";
@@ -185,6 +185,8 @@ async function NewUser() {
     </Link>
   );
 }
+
+export const generateMetadata = titled("nav.users");
 
 export default async function Page({ searchParams }: PageProps<"/users">) {
   const t = await getT();

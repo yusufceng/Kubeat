@@ -63,7 +63,21 @@
   }
   /* While the next list loads, the one on screen steps back. */
   .inc-results {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
     transition: opacity 160ms var(--ease-signal);
+  }
+  /* The outages going on, above the rest, each group under a quiet title with its count. */
+  .inc-group-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 8px 2px;
+    color: var(--ink-2);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 18px;
   }
   .inc-list-body[aria-busy="true"] .inc-results {
     opacity: 0.55;
@@ -1070,31 +1084,6 @@
     font-stretch: 100%;
     line-height: 1;
   }
-  .rep-defs {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: -8px;
-    color: var(--ink-3);
-    font-size: 12.5px;
-    line-height: 18px;
-  }
-  .rep-defs > div {
-    display: flex;
-    flex-wrap: wrap;
-    column-gap: 6px;
-  }
-  .rep-defs dt {
-    display: inline-flex;
-    gap: 6px;
-    color: var(--ink-2);
-  }
-  .rep-defs abbr {
-    color: var(--ink);
-    font-weight: 650;
-    text-decoration: none;
-  }
-
   /* Positioned, so that what is placed out of sight inside (the screen
      reader's words) scrolls with the table instead of widening the page. */
   .rep-panel {

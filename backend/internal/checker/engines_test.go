@@ -331,8 +331,14 @@ func TestPushCheck(t *testing.T) {
 	if got := check(fakePushes{report: store.PushReport{ReceivedAt: ago(65 * time.Second), Up: true}}); !got.Up || got.Latency != 0 {
 		t.Errorf("report within the grace period: %+v", got)
 	}
-	if got := check(fakePushes{report: store.PushReport{ReceivedAt: ago(75 * time.Second), Up: true}}); got.Up || !strings.Contains(got.Error, "no push received for") {
-		t.Errorf("missed report: %+v", got)
+	// A missed report says so in the same words however long ago the last
+	// one came, so that the failures of one silence read as one.
+	missed := check(fakePushes{report: store.PushReport{ReceivedAt: ago(75 * time.Second), Up: true}})
+	if missed.Up || missed.Error != "no push within the expected 1m interval" {
+		t.Errorf("missed report: %+v", missed)
+	}
+	if later := check(fakePushes{report: store.PushReport{ReceivedAt: ago(96 * time.Hour), Up: true}}); later.Error != missed.Error {
+		t.Errorf("a longer silence words it otherwise: %q, then %q", missed.Error, later.Error)
 	}
 	if got := check(fakePushes{report: store.PushReport{ReceivedAt: ago(time.Second), Up: false, Message: "disk dolu"}}); got.Up || !strings.Contains(got.Error, "disk dolu") {
 		t.Errorf("reported failure: %+v", got)

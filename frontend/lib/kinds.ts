@@ -46,13 +46,14 @@ export function objectRef(source: string): string | null {
 }
 
 /**
- * A discovered monitor's name split where the object's own name ends:
- * "pricing:8080" is ["pricing", ":8080"], "web@shop.example.com/" is
- * ["web", "@shop.example.com/"]. The rest, a port or an ingress's host and
- * path, is drawn muted. A name entered by hand is kept whole.
+ * A name that is a cluster object's own, as discovery gives it, split where
+ * the object's name ends: "pricing:8080" is ["pricing", ":8080"],
+ * "web@shop.example.com/" is ["web", "@shop.example.com/"]. The rest, a
+ * port or an ingress's host and path, is drawn muted. A name someone chose
+ * is kept whole.
  */
-export function splitName(name: string, discovered: boolean): [string, string] {
-  if (!discovered) return [name, ""];
+export function splitName(name: string, derived: boolean): [string, string] {
+  if (!derived) return [name, ""];
   const cut = name.search(/[:@]/);
   return cut > 0 ? [name.slice(0, cut), name.slice(cut)] : [name, ""];
 }

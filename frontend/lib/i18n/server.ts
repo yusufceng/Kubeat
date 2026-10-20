@@ -43,3 +43,11 @@ export const getLocale = cache(async (): Promise<Locale> => {
 
 /** The translator of the request. */
 export const getT = cache(async (): Promise<T> => translator(await getLocale()));
+
+/**
+ * A page's generateMetadata that titles it with a message, in the
+ * visitor's language: `export const generateMetadata = titled("nav.audit")`.
+ */
+export function titled(key: string): () => Promise<{ title: string }> {
+  return async () => ({ title: (await getT())(key) });
+}

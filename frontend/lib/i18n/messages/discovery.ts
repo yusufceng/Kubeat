@@ -5,8 +5,7 @@ export const discovery = defineMessages(
   {
     "discovery.what": "Cluster içeriği",
     "discovery.clusterError": "Cluster'dan okunamadı:",
-    "discovery.intro":
-      "Bir namespace'teki Service, Ingress, Route ve workload'ları bulur. Bir Service'in arkasındaki pod HTTP probe tanımlıyorsa aynı yol kontrol edilir; yoksa yalnızca porta bağlanılır.",
+    "discovery.intro": "Bir namespace'teki Service, Ingress, Route ve workload'ları bulur.",
     "discovery.unavailableTitle": "Cluster'a bağlı değil",
     "discovery.unavailable":
       "Keşif ve annotation ile izleme, backend bir cluster'ı okuyabildiğinde çalışır. O zamana dek monitor'ları elle ekleyebilirsiniz.",
@@ -80,8 +79,7 @@ export const discovery = defineMessages(
     "discovery.import.skipped.one": "{count} hedef atlandı",
     "discovery.import.skipped.other": "{count} hedef atlandı",
     "maintenance.what": "Bakım pencereleri",
-    "maintenance.intro":
-      "Bakım penceresi boyunca kapsamdaki monitor'lar kontrol edilmeye devam eder, ama yeni olay açılmaz ve bildirim gitmez. Pencere bittiğinde hedef hâlâ erişilemiyorsa olay o zaman açılır.",
+    "maintenance.intro": "Bakım boyunca kontroller sürer; olay açılmaz, bildirim gitmez.",
     "maintenance.empty": "Planlanmış bakım yok",
     "maintenance.emptyBody":
       "Bir bakım penceresi, planlı bir çalışma sürerken olay açılmasını ve bildirim gitmesini önler; kontroller sürmeye devam eder.",
@@ -120,7 +118,7 @@ export const discovery = defineMessages(
     "maintenance.echo.window": "{range} arasında {scope} için yeni olay açılmaz, bildirim gitmez; kontroller sürer.",
     "maintenance.echo.all": "tüm monitor'lar",
     "maintenance.echo.namespace": "{namespace} namespace'indeki monitor'lar",
-    "maintenance.echo.monitor": "{monitor} monitor'ü",
+    "maintenance.echo.monitor": "{monitor} monitor'u",
     "maintenance.echo.today": "bugün",
     "maintenance.echo.tomorrow": "yarın",
     "maintenance.echo.daily": "Her gün aynı saatte tekrarlanır ({timezone}).",
@@ -137,11 +135,9 @@ export const discovery = defineMessages(
     "maintenance.silence.silencing": "Susturuluyor…",
     "maintenance.silence.submit": "Alarmı sustur",
     "reports.what": "Rapor",
-    "reports.intro":
-      "Namespace başına uptime, kesinti sayısı ve süresi; her namespace'te en sorunlu monitor en üstte. Saatlik özetlerden hesaplanır; CSV ekip raporlarına eklenebilir.",
     "reports.calculating": "Hesaplanıyor…",
     "reports.period": "Dönem",
-    "reports.period.day": "24 saat",
+    "reports.period.day": "24 sa",
     "reports.csv": "CSV indir",
     "reports.empty": "Raporlanacak monitor yok.",
     "reports.namespace.monitors.one": "{count} monitor",
@@ -162,8 +158,7 @@ export const discovery = defineMessages(
   {
     "discovery.what": "The cluster's contents",
     "discovery.clusterError": "Could not read from the cluster:",
-    "discovery.intro":
-      "Finds the Services, Ingresses, Routes and workloads in a namespace. When the pod behind a Service defines an HTTP probe, the same path is checked; otherwise only the port is connected to.",
+    "discovery.intro": "Finds the Services, Ingresses, Routes and workloads of a namespace.",
     "discovery.unavailableTitle": "Not connected to a cluster",
     "discovery.unavailable":
       "Discovery and monitoring by annotation work once the backend can read a cluster. Until then, monitors can be added by hand.",
@@ -237,8 +232,7 @@ export const discovery = defineMessages(
     "discovery.import.skipped.one": "{count} target skipped",
     "discovery.import.skipped.other": "{count} targets skipped",
     "maintenance.what": "Maintenance windows",
-    "maintenance.intro":
-      "During a maintenance window the monitors in scope keep being checked, but no new incident is opened and no notification is sent. If the target is still unreachable when the window ends, the incident is opened then.",
+    "maintenance.intro": "Checks go on during maintenance; no incident opens and no one is told.",
     "maintenance.empty": "No maintenance planned",
     "maintenance.emptyBody":
       "A maintenance window keeps planned work from opening incidents and sending notifications while it lasts; the checks go on.",
@@ -294,11 +288,9 @@ export const discovery = defineMessages(
     "maintenance.silence.silencing": "Silencing…",
     "maintenance.silence.submit": "Silence the alert",
     "reports.what": "The report",
-    "reports.intro":
-      "Uptime, outage count and downtime per namespace, with the most troubled monitor at the top of each. Calculated from hourly summaries; the CSV can go into team reports.",
     "reports.calculating": "Calculating…",
     "reports.period": "Period",
-    "reports.period.day": "24 hours",
+    "reports.period.day": "24h",
     "reports.csv": "Download CSV",
     "reports.empty": "No monitors to report on.",
     "reports.namespace.monitors.one": "{count} monitor",

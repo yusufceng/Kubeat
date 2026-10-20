@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getT } from "@/lib/i18n/server";
 import { CopyLine } from "@/app/ui/copy-line";
-import { DiscoveryIcon, PlusIcon } from "@/app/ui/icons";
+import { DiscoveryIcon, PlusIcon, SearchIcon } from "@/app/ui/icons";
 
 /**
  * What a page or a part of one says while it has nothing to show: an icon
@@ -34,6 +34,29 @@ export function EmptyState({
       {children && <div className="pg-empty-body">{children}</div>}
       {action && <div className="pg-empty-action">{action}</div>}
     </section>
+  );
+}
+
+/**
+ * What an address that leads nowhere says, everywhere in the same form:
+ * the empty state's tile, what is not there, why that may be, and the way
+ * back. Each place words it for what was asked for: a page, a monitor, a
+ * namespace, an incident.
+ */
+export function NotFound({ title, body, back }: { title: string; body: string; back: { href: string; label: string } }) {
+  return (
+    <EmptyState
+      icon={<SearchIcon width={20} height={20} />}
+      title={title}
+      headingLevel={1}
+      action={
+        <Link href={back.href} className="btn">
+          {back.label}
+        </Link>
+      }
+    >
+      {body}
+    </EmptyState>
   );
 }
 

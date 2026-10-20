@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { currentUser } from "@/lib/auth";
-import { getT } from "@/lib/i18n/server";
+import { getT, titled } from "@/lib/i18n/server";
 import { LockIcon } from "@/app/ui/page-icons";
 import { PageHead } from "@/app/ui/page-head";
 import { PasswordForm } from "@/app/ui/user-forms";
@@ -64,6 +64,8 @@ async function Account() {
     </>
   );
 }
+
+export const generateMetadata = titled("account.title");
 
 export default async function Page() {
   const t = await getT();

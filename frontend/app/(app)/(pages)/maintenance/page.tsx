@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { listMaintenance, listMonitors, type Maintenance, type Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
 import { currentUser } from "@/lib/auth";
-import { getT } from "@/lib/i18n/server";
+import { getT, titled } from "@/lib/i18n/server";
 import type { T } from "@/lib/i18n/translate";
 import { BackendError } from "@/app/ui/backend-error";
 import { EmptyState } from "@/app/ui/empty-state";
@@ -196,6 +196,8 @@ async function NewWindow() {
     </Link>
   );
 }
+
+export const generateMetadata = titled("nav.maintenance");
 
 export default async function Page({ searchParams }: PageProps<"/maintenance">) {
   const t = await getT();

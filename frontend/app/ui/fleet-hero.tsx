@@ -48,7 +48,15 @@ export async function FleetHero({
   /** The period of the uptime, in seconds. */
   window: number;
   checkedAt: string | null;
-  strip: { outages: StripOutage[]; windows: StripWindow[]; now: number; hours: number; slots: number; knownFrom: number };
+  strip: {
+    outages: StripOutage[];
+    windows: StripWindow[];
+    now: number;
+    hours: number;
+    slots: number;
+    knownFrom: number;
+    fleet: number;
+  };
   outages: Outage[];
   outagesLimit: number;
 }) {
@@ -96,24 +104,25 @@ export async function FleetHero({
       {outages.length > 0 && (
         <ul className="fl-outages" aria-label={t("monitorsList.overview.open.label")}>
           {shown.map((o) => (
-            <li key={o.id}>
-              <Link href={`/monitors/${o.id}`} className="fl-outage">
-                <StatusGlyph kind="down" live />
-                <span className="fl-outage-who">
-                  <span className="fl-outage-name">{o.name}</span>
-                  {o.namespace && <span className="fl-outage-ns">{o.namespace}</span>}
-                </span>
-                <span className="fl-outage-cause" title={o.cause}>
-                  {o.cause}
-                </span>
-                <span className="fl-outage-for">
-                  <span className="sr-only">{t("monitorsList.hero.lasting")} </span>
-                  <LiveDuration since={o.since} />
-                </span>
-                <span className="fl-outage-open" aria-hidden>
-                  {t("monitorsList.hero.open")}
-                  <ArrowIcon width={15} height={15} />
-                </span>
+            // The line opens the monitor; its button, the incident's page.
+            <li key={o.id} className="fl-outage">
+              <StatusGlyph kind="down" live />
+              <span className="fl-outage-who">
+                <Link href={`/monitors/${o.id}`} className="fl-outage-name">
+                  {o.name}
+                </Link>
+                {o.namespace && <span className="fl-outage-ns">{o.namespace}</span>}
+              </span>
+              <span className="fl-outage-cause" title={o.cause}>
+                {o.cause}
+              </span>
+              <span className="fl-outage-for">
+                <span className="sr-only">{t("monitorsList.hero.lasting")} </span>
+                <LiveDuration since={o.since} />
+              </span>
+              <Link href={`/incidents/${o.incident}`} className="fl-outage-open" title={t("incident.number", { id: o.incident })}>
+                {t("monitorsList.hero.incident")}
+                <ArrowIcon width={15} height={15} />
               </Link>
             </li>
           ))}

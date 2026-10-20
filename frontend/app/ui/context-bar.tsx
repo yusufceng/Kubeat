@@ -8,12 +8,14 @@ import { Logo } from "@/app/ui/logo";
 import { Breadcrumb } from "@/app/ui/nav";
 import { PulsePill } from "@/app/ui/pulse-pill";
 import { shellUser } from "@/app/ui/session-controls";
+import { ListButton } from "@/app/ui/sidebar-frame";
 
 /**
- * The bar over a page: where the page is on the left; on the right the
- * command palette's button (⌘K), the fleet's pulse and, for those who may,
- * a new monitor. On a narrow screen it stays at the top and shows the name
- * in place of the breadcrumb.
+ * The bar over a page: where the page is on the left, after the button of
+ * the monitor list where that is a drawer; on the right the command
+ * palette's button (⌘K), the fleet's pulse and, for those who may, a new
+ * monitor. On a narrow screen it stays at the top and shows the name in
+ * place of the breadcrumb.
  */
 export async function ContextBar() {
   const t = await getT();
@@ -22,6 +24,9 @@ export async function ContextBar() {
       <Link href="/" aria-label={t("shell.home")} className="flex-none rounded-md lg:hidden">
         <Logo size={18} className="block" />
       </Link>
+      <Suspense>
+        <ListButton />
+      </Suspense>
       <div className="hidden min-w-0 lg:block">
         <Breadcrumb />
       </div>
@@ -64,10 +69,16 @@ async function NewMonitorButton() {
   const me = await shellUser();
   if (!me?.can_edit) return null;
   const t = await getT();
+  // Below the widest screens the button keeps to its icon, leaving the room to the breadcrumb.
   return (
-    <Link href="/monitors/new" className="btn btn-primary max-sm:px-2" aria-label={t("monitorsList.list.newMonitor")}>
+    <Link
+      href="/monitors/new"
+      className="btn btn-primary max-xl:px-2"
+      aria-label={t("monitorsList.list.newMonitor")}
+      title={t("monitorsList.list.newMonitor")}
+    >
       <PlusIcon />
-      <span className="max-sm:hidden">{t("monitorsList.list.newMonitor")}</span>
+      <span className="max-xl:hidden">{t("monitorsList.list.newMonitor")}</span>
     </Link>
   );
 }

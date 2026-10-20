@@ -439,3 +439,18 @@ func TestPlainHTTPHasNoCertificate(t *testing.T) {
 		t.Errorf("plain HTTP check: %+v", got)
 	}
 }
+
+func TestShortDuration(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		time.Hour:                    "1h",
+		90 * time.Minute:             "1h30m",
+		5 * time.Minute:              "5m",
+		45 * time.Second:             "45s",
+		time.Minute + 30*time.Second: "1m30s",
+		24 * time.Hour:               "24h",
+	} {
+		if got := shortDuration(d); got != want {
+			t.Errorf("shortDuration(%s) = %q, want %q", d, got, want)
+		}
+	}
+}

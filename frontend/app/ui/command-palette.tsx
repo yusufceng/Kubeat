@@ -18,6 +18,8 @@ import { StatusGlyph } from "@/app/ui/status-glyph";
 export type PaletteMonitor = {
   id: number;
   name: string;
+  /** The other names it is found by: that of its alerts, its object's (see otherNames). */
+  aka: string;
   kind: string;
   namespace: string;
   state: DisplayState;
@@ -84,7 +86,7 @@ function entries(monitors: PaletteMonitor[], canEdit: boolean, admin: boolean, t
       hint: m.namespace || t(MANUAL_LABEL),
       href: `/monitors/${m.id}`,
       icon: <StatusGlyph kind={style.glyph} live={m.state === "down"} label={t(style.label)} />,
-      fields: [m.name, m.namespace, m.kind, m.target],
+      fields: [m.name, m.namespace, m.kind, m.target, m.aka],
       rank: urgencyRank(m.state),
     });
   }

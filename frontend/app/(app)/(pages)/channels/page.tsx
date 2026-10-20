@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { type Channel, listChannels, listMonitors } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
-import { getT } from "@/lib/i18n/server";
+import { getT, titled } from "@/lib/i18n/server";
 import { BackendError } from "@/app/ui/backend-error";
 import { ChannelForm, ChannelRow } from "@/app/ui/channel-forms";
 import { EmptyState } from "@/app/ui/empty-state";
@@ -100,6 +100,8 @@ async function NewChannel() {
     </Link>
   );
 }
+
+export const generateMetadata = titled("nav.channels");
 
 export default async function Page({ searchParams }: PageProps<"/channels">) {
   const t = await getT();

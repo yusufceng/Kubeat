@@ -20,10 +20,16 @@ function slotBeat(slot: FleetSlot, t: T): Beat {
   const range = `${time(slot.start)}–${time(slot.end)}`;
   switch (slot.state) {
     case "down":
-      return { state: "down", text: `${range} · ${t.n("monitorsList.hero.strip.down", slot.down.length)}`, detail: names(slot.down, t) };
+      return {
+        state: "down",
+        level: slot.level,
+        text: `${range} · ${t.n("monitorsList.hero.strip.down", slot.down.length)}`,
+        detail: names(slot.down, t),
+      };
     case "partial":
       return {
         state: "partial",
+        level: slot.level,
         text: `${range} · ${t.n("monitorsList.hero.strip.partial", slot.down.length)}`,
         detail: names(slot.down, t),
       };
@@ -36,10 +42,12 @@ function slotBeat(slot: FleetSlot, t: T): Beat {
 
 /**
  * The last hours of a fleet in slots of a quarter of an hour, newest on
- * the right: when monitors were down, briefly down or in maintenance. It
- * is worked out here from the outages and windows the page read, as of the
- * moment the server answered, so that both sides draw the same strip; the
- * times in a slot's hover are the viewer's own.
+ * the right: when monitors were down, briefly down or in maintenance. The
+ * red (or amber) of a slot is as tall as the share of the fleet that was
+ * down in it, so one monitor down all day is a low band, not a red strip.
+ * It is worked out here from the outages and windows the page read, as of
+ * the moment the server answered, so that both sides draw the same strip;
+ * the times in a slot's hover are the viewer's own.
  */
 export function FleetStrip({
   outages,
@@ -48,6 +56,7 @@ export function FleetStrip({
   hours,
   slots,
   knownFrom,
+  fleet,
 }: {
   outages: StripOutage[];
   windows: StripWindow[];
@@ -55,15 +64,19 @@ export function FleetStrip({
   hours: number;
   slots: number;
   knownFrom: number;
+  /** How many monitors the strip is about. */
+  fleet: number;
 }) {
   const t = useT();
-  const fleet = useMemo(
-    () => fleetSlots({ outages, windows, now, hours, slots, knownFrom }),
-    [outages, windows, now, hours, slots, knownFrom],
+  const strip = useMemo(
+    () => fleetSlots({ outages, windows, now, hours, slots, knownFrom, fleet }),
+    [outages, windows, now, hours, slots, knownFrom, fleet],
   );
-  const beats = useMemo(() => fleet.map((s) => slotBeat(s, t)), [fleet, t]);
+  const beats = useMemo(() => strip.map((s) => slotBeat(s, t)), [strip, t]);
   const window = duration(hours * 3600, t);
   const slot = duration(Math.round((hours * 3600) / slots), t);
+  const failing = strip.filter((s) => s.down.length > 0);
+  const most = Math.max(0, ...failing.map((s) => s.down.length));
   return (
     <div className="fl-strip">
       <BeatStrip
@@ -71,11 +84,11 @@ export function FleetStrip({
         slots={slots}
         height={32}
         gap={1}
-        label={t("monitorsList.hero.strip.label", {
-          window,
-          down: fleet.filter((s) => s.state === "down").length,
-          partial: fleet.filter((s) => s.state === "partial").length,
-        })}
+        label={
+          failing.length === 0
+            ? t("monitorsList.hero.strip.labelNone", { window })
+            : t("monitorsList.hero.strip.label", { window, slots: failing.length, all: slots, most, total: fleet })
+        }
       />
       <p className="fl-strip-legend" aria-hidden>
         <span>{t("format.ago", { duration: window })}</span>

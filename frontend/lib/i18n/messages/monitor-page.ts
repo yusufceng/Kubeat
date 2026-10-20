@@ -93,6 +93,8 @@ export const monitorPage = defineMessages(
     "monitorPage.history.caption.day": "Her hücre {minutes} dakikalık bir dilim: sütunlar saat, satırlar saatin dakikaları.",
     "monitorPage.history.caption.week": "Her hücre bir saat: satırlar gün, sütunlar günün saatleri.",
     "monitorPage.history.hint": "Sonucu ve hata metnini görmek için bir hücrenin üzerine gelin; tıklamak onu sabitler.",
+    "monitorPage.history.help": "Izgara nasıl okunur",
+    "monitorPage.chart.help": "Grafik nasıl kullanılır",
     "monitorPage.history.inspect": "Bu dilimi incele: başarısız kontroller ve cluster olayları",
     "monitorPage.history.errors.title": "Bu aralıktaki hatalar",
     "monitorPage.history.errors.none": "Bu aralıkta başarısız kontrol yok.",
@@ -156,7 +158,7 @@ export const monitorPage = defineMessages(
     "monitorPage.copy": "Kopyala",
     "monitorPage.copied": "Kopyalandı",
     "monitorPage.actions.cloneName": "Kopyanın adı",
-    "monitorPage.actions.cloneTitle": "Monitor'ü kopyala",
+    "monitorPage.actions.cloneTitle": "Monitor'u kopyala",
     "monitorPage.actions.cloneDefault": "{name} (kopya)",
     "monitorPage.actions.pause": "Durdur",
     "monitorPage.actions.resume": "Devam ettir",
@@ -260,11 +262,11 @@ export const monitorPage = defineMessages(
     "monitorPage.why.code.route_no_endpoints":
       "OpenShift router bu isteği gönderecek bir yer bulamadı: host ve yolla eşleşen bir Route yok ya da Route'un Service'inde hazır pod yok.",
     "monitorPage.why.code.ingress_default_backend":
-      "Ingress controller'ın varsayılan arka ucu yanıt verdi: bu host ve yolla eşleşen bir Ingress kuralı yok.",
+      "Ingress controller'ın varsayılan backend'i yanıt verdi: bu host ve yolla eşleşen bir Ingress kuralı yok.",
     "monitorPage.why.code.ingress_no_endpoints":
       "nginx kendi 503 sayfasıyla yanıt verdi: ingress-nginx arkasında bu, Ingress'in Service'inde hazır pod olmadığı anlamına gelir.",
     "monitorPage.why.code.proxy_no_healthy_upstream":
-      "{proxy} bu servis için sağlıklı bir arka uç bulamadı: pod'ları hazır değil ya da hepsi vekilin sağlık kontrollerinden geçemiyor.",
+      "{proxy} bu servis için sağlıklı bir backend bulamadı: pod'ları hazır değil ya da hepsi proxy'nin sağlık kontrollerinden geçemiyor.",
     "monitorPage.why.code.proxy_upstream_connect_error":
       "{proxy} servise ulaşamadı ya da bağlantı yanıt gelmeden koptu: pod o portu dinlemiyor, çöktü ya da bağlantıyı sıfırladı.",
     "monitorPage.why.code.proxy_upstream_tls_error":
@@ -282,10 +284,10 @@ export const monitorPage = defineMessages(
     "monitorPage.why.code.http_429": "Sunucu bu istemcinin isteklerini sınırlıyor: kontroller çok sık ya da servis aşırı yüklü.",
     "monitorPage.why.code.http_500": "Uygulama isteği işlerken hata verdi; nedeni uygulamanın loglarındadır.",
     "monitorPage.why.code.http_502":
-      "Uygulamanın önündeki vekil ondan geçerli bir yanıt alamadı: pod çöktü, bağlantıyı kapattı ya da başka bir portu dinliyor.",
+      "Uygulamanın önündeki proxy ondan geçerli bir yanıt alamadı: pod çöktü, bağlantıyı kapattı ya da başka bir portu dinliyor.",
     "monitorPage.why.code.http_503":
-      "Servis kullanılamıyor: aşırı yüklü ya da açılıyor veya önündeki vekilin hazır bir arka ucu yok.",
-    "monitorPage.why.code.http_504": "Uygulamanın önündeki vekil yanıtını çok uzun bekledi: uygulama yavaş ya da takılmış.",
+      "Servis kullanılamıyor: aşırı yüklü ya da açılıyor veya önündeki proxy'nin hazır bir backend'i yok.",
+    "monitorPage.why.code.http_504": "Uygulamanın önündeki proxy yanıtını çok uzun bekledi: uygulama yavaş ya da takılmış.",
     "monitorPage.why.code.blocked_by_policy":
       "Kubeat'in hedef politikası bu adrese izin vermiyor (loopback, link-local ya da yöneticinin yasakladığı bir aralık); UPTIME_TARGET_ALLOW_CIDRS izin verebilir.",
     "monitorPage.why.code.dns_service_not_found":
@@ -440,6 +442,8 @@ export const monitorPage = defineMessages(
     "monitorPage.history.caption.day": "Each cell is a {minutes}-minute slot: columns are hours, rows the minutes of the hour.",
     "monitorPage.history.caption.week": "Each cell is an hour: rows are days, columns the hours of the day.",
     "monitorPage.history.hint": "Hover a cell to see its result and error text; clicking pins it.",
+    "monitorPage.history.help": "How to read the grid",
+    "monitorPage.chart.help": "How to use the chart",
     "monitorPage.history.inspect": "Inspect this slot: failed checks and cluster events",
     "monitorPage.history.errors.title": "Errors in this range",
     "monitorPage.history.errors.none": "No failed checks in this range.",

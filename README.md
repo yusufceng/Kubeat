@@ -2245,6 +2245,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `MONITOR_INCIDENTS` | `6` | Monitor sayfasının olay panelinde "Tümünü göster"den önce listelenen olay sayısı |
 | `OVERVIEW_EVENTS` | `12` | Genel bakışta ve namespace sayfasında listelenen son olay sayısı |
 | `OVERVIEW_OUTAGES` | `5` | Genel bakışın özetinde satır satır gösterilen devam eden kesinti sayısı; fazlası listede süzülerek açılır |
+| `FLAP_WINDOW` | `10m` | Bir monitor'un bu süreden kısa ve her biri bir öncekinin bitiminden bu süre içinde başlayan, art arda en az üç kesintisi etkinlik akışında tek satır, olay listesinde tek satır olarak gösterilir; `0s` her kesintiyi ayrı gösterir |
 | `FLEET_STRIP_HOURS` | `24` | Genel bakıştaki ve namespace sayfasındaki kesinti şeridinin kapsadığı saat |
 | `FLEET_STRIP_SLOTS` | `96` | Bu şeridin çubuk sayısı (varsayılanla her çubuk 15 dakika) |
 | `STATS_DAYS` | `7` | Genel bakışta ve namespace sayfasında MTTR, kesinti sayısı ve uptime gibi rakamların kapsadığı gün (en çok 365) |

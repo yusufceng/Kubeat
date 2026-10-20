@@ -5,6 +5,7 @@ import {
   maintenanceSpans,
   outagesWithin,
   percentParts,
+  sameErrors,
   stepLength,
   upSince,
   uptimeTone,
@@ -118,4 +119,31 @@ test("step lengths switch to seconds from a second on", () => {
   assert.deepEqual(stepLength(21.3, "tr-TR"), { value: "21", unit: "ms" });
   assert.deepEqual(stepLength(10_005, "tr-TR"), { value: "10", unit: "s" });
   assert.deepEqual(stepLength(1_550, "en-US"), { value: "1.6", unit: "s" });
+});
+
+test("errors that differ only in a length of time are listed once", () => {
+  const push = (n: number, at: string) => ({
+    error: `no push received for ${92 + n}h36m7s; one is expected every 1h0m0s`,
+    count: 1,
+    first_at: at,
+    last_at: at,
+  });
+  const listed = sameErrors([
+    push(0, "2026-10-20T10:00:00Z"),
+    { error: "unexpected status 503", count: 2, first_at: "2026-10-20T09:00:00Z", last_at: "2026-10-20T09:30:00Z" },
+    push(2, "2026-10-20T12:00:00Z"),
+    push(1, "2026-10-20T11:00:00Z"),
+    { error: "unexpected status 502", count: 1, first_at: "2026-10-20T08:00:00Z", last_at: "2026-10-20T08:00:00Z" },
+  ]);
+  assert.deepEqual(listed[0], {
+    error: "no push received for 94h36m7s; one is expected every 1h0m0s",
+    count: 3,
+    first_at: "2026-10-20T10:00:00Z",
+    last_at: "2026-10-20T12:00:00Z",
+  });
+  // A status code is not a length of time: 502 and 503 stay apart.
+  assert.deepEqual(
+    listed.map((e) => e.error).slice(1),
+    ["unexpected status 503", "unexpected status 502"],
+  );
 });

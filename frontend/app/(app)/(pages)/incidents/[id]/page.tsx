@@ -15,6 +15,7 @@ import { Clock, DayWord } from "@/app/ui/incident-time";
 import { IncidentTimeline } from "@/app/ui/incident-timeline";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { LiveRefresh } from "@/app/ui/live-refresh";
+import { monitorLabel } from "@/app/ui/monitor-name";
 import { type Readout, Readouts } from "@/app/ui/readouts";
 import { Crumbs } from "@/app/ui/shell-state";
 import { StateChip } from "@/app/ui/state-chip";
@@ -33,12 +34,14 @@ async function incidentId(params: Params): Promise<number | null> {
 /** Titled after its monitor, so that a tab opened from a notification says what it is about. */
 export async function generateMetadata({ params }: PageProps<"/incidents/[id]">): Promise<Metadata> {
   const id = await incidentId(params);
-  if (id === null) return {};
+  const t = await getT();
+  if (id === null) return { title: t("incident.notFound.title") };
   try {
-    const [page, t] = await Promise.all([readIncident(id), getT()]);
-    return { title: `${page.monitor.name} · ${t("incident.number", { id })}` };
-  } catch {
-    return {}; // the page itself says what is wrong
+    const page = await readIncident(id);
+    return { title: `${monitorLabel(page.monitor).name} · ${t("incident.number", { id })}` };
+  } catch (err) {
+    // Otherwise the page itself says what is wrong.
+    return err instanceof ApiError && err.status === 404 ? { title: t("incident.notFound.title") } : {};
   }
 }
 
@@ -146,6 +149,7 @@ async function IncidentDetail({ params }: { params: Params }) {
   const open = !incident.resolved_at;
   const cert = incident.kind === "cert";
   const object = kubectlName(monitor.source);
+  const name = monitorLabel(monitor).name;
   const nsLabel = monitor.namespace || t(MANUAL_LABEL);
   // The chip's words are split around the duration, which counts on while the incident is open.
   const [before, after] = t(open ? (cert ? "incident.chip.cert" : "incident.chip.down") : "incident.chip.resolved").split(
@@ -182,7 +186,7 @@ async function IncidentDetail({ params }: { params: Params }) {
             href: filterHref(emptyFilter, { namespaces: [monitor.namespace] }),
             mono: monitor.namespace !== "",
           },
-          { label: `${monitor.name} #${incident.id}` },
+          { label: `${name} #${incident.id}` },
         ]}
       />
       {open && <LiveRefresh />}
@@ -192,7 +196,7 @@ async function IncidentDetail({ params }: { params: Params }) {
             {t("incident.number", { id: incident.id })} · {t(cert ? "incident.kind.cert" : "incident.kind.down")}
           </p>
           <div className="inc-title-row">
-            <h1 className="type-display max-sm:type-display-s inc-title">{monitor.name}</h1>
+            <h1 className="type-display max-sm:type-display-s inc-title">{name}</h1>
             <span className="inc-kind" title={monitor.source || monitor.type}>
               {object && <span>{object}</span>}
               {object && <i aria-hidden />}

@@ -3,6 +3,7 @@ import type { Incident } from "@/lib/api";
 import { span } from "@/lib/format";
 import type { T } from "@/lib/i18n/translate";
 import { ChevronIcon } from "@/app/ui/icons";
+import { ChartIcon } from "@/app/ui/incident-icons";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { DayTime } from "@/app/ui/local-time";
 import { StatusGlyph } from "@/app/ui/status-glyph";
@@ -10,8 +11,9 @@ import { StatusGlyph } from "@/app/ui/status-glyph";
 /**
  * A monitor's incidents as a timeline, newest first: a glyph for how it
  * stands (an outage still going on pulses), what it was and how long it
- * lasted, then when it began and its cause. hrefFor, when given, makes
- * each a link: the monitor page frames the incident on its chart.
+ * lasted, then when it began and its cause. Each opens the incident's
+ * page; hrefFor, when given, adds a button that frames the incident on
+ * the monitor's chart.
  */
 export function IncidentTimeline({
   incidents,
@@ -74,12 +76,18 @@ function Item({ incident: i, href, t }: { incident: Incident; href?: string; t: 
   );
   return (
     <li className="mon-tl-item">
-      {href ? (
-        <Link href={href} className="mon-tl-row" title={t("monitorPage.incidents.show", { what })}>
-          {body}
+      <Link href={`/incidents/${i.id}`} className="mon-tl-row" title={t("incident.number", { id: i.id })}>
+        {body}
+      </Link>
+      {href && (
+        <Link
+          href={href}
+          className="mon-tl-chart"
+          aria-label={t("monitorPage.incidents.show", { what })}
+          title={t("monitorPage.incidents.show", { what })}
+        >
+          <ChartIcon />
         </Link>
-      ) : (
-        <div className="mon-tl-row">{body}</div>
       )}
     </li>
   );

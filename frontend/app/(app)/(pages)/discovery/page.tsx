@@ -11,7 +11,7 @@ import {
 import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { duration } from "@/lib/format";
-import { getT } from "@/lib/i18n/server";
+import { getT, titled } from "@/lib/i18n/server";
 import type { T } from "@/lib/i18n/translate";
 import { restoreSourceAction } from "@/app/actions";
 import { BackendError } from "@/app/ui/backend-error";
@@ -315,6 +315,8 @@ async function Discovery({ searchParams }: { searchParams: PageProps<"/discovery
     </>
   );
 }
+
+export const generateMetadata = titled("nav.discovery");
 
 export default async function Page({ searchParams }: PageProps<"/discovery">) {
   const t = await getT();

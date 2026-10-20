@@ -1,27 +1,23 @@
-import Link from "next/link";
-import { getT } from "@/lib/i18n/server";
+import { getT, titled } from "@/lib/i18n/server";
+import { NotFound } from "@/app/ui/empty-state";
 import { LanguageToggle } from "@/app/ui/language-toggle";
 import { Logo } from "@/app/ui/logo";
 
+export const generateMetadata = titled("notFound.title");
+
 /**
  * Shown for an address that leads nowhere, to visitors with or without a
- * session, outside the app's frame. A missing monitor or namespace is
- * answered inside it, by app/(app)/(workspace)/not-found.tsx.
+ * session, outside the app's frame; in the same form as a missing monitor
+ * or namespace inside it (app/(app)/(workspace)/not-found.tsx and those
+ * beside the pages).
  */
-export default async function NotFound() {
+export default async function RootNotFound() {
   const t = await getT();
   return (
     <div className="auth">
       <main className="auth-col">
         <Logo size={22} className="auth-logo" />
-        <p className="pg-mono text-ink-3">404</p>
-        <h1 className="auth-title">{t("notFound.title")}</h1>
-        <p className="auth-intro mt-0">{t("notFound.body")}</p>
-        <div>
-          <Link href="/" className="btn">
-            {t("notFound.home")}
-          </Link>
-        </div>
+        <NotFound title={t("notFound.title")} body={t("notFound.body")} back={{ href: "/", label: t("notFound.home") }} />
       </main>
       <footer className="auth-foot">
         <LanguageToggle variant="inline" />

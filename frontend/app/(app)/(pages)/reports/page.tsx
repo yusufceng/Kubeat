@@ -9,6 +9,7 @@ import { typeWord } from "@/lib/incident-timeline";
 import { getT } from "@/lib/i18n/server";
 import type { T } from "@/lib/i18n/translate";
 import { MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
+import { monitorNames } from "@/lib/workspace";
 import { BackendError } from "@/app/ui/backend-error";
 import { ReportsIcon } from "@/app/ui/icons";
 import { CloseIcon, DownloadIcon } from "@/app/ui/incident-icons";
@@ -76,11 +77,13 @@ function figures(stats: Stats, namespaces: number, t: T): Readout[] {
     },
     {
       label: t("reports.mttr"),
+      abbr: `${t("reports.mttr.name")}: ${t("reports.mttr.means")}`,
       ...(stats.mttr_seconds === null ? { value: "—", tone: "muted" as const } : period(stats.mttr_seconds, t)),
       hint: t("reports.readout.mttr.hint"),
     },
     {
       label: t("reports.mtbf"),
+      abbr: `${t("reports.mtbf.name")}: ${t("reports.mtbf.means")}`,
       ...(stats.mtbf_seconds === null ? { value: "—", tone: "muted" as const } : period(stats.mtbf_seconds, t)),
       hint: t("reports.readout.mtbf.hint"),
     },
@@ -183,7 +186,7 @@ function Figures({ r, longest, t }: { r: NamespaceReport | MonitorReport; longes
   );
 }
 
-function MonitorRow({ m, t }: { m: MonitorReport; t: T }) {
+function MonitorRow({ m, name, t }: { m: MonitorReport; name: string; t: T }) {
   const n = (v: number) => v.toLocaleString(t.intl);
   const l = labels(t);
   return (
@@ -198,8 +201,8 @@ function MonitorRow({ m, t }: { m: MonitorReport; t: T }) {
           ) : (
             <span className="rep-glyph-gap" aria-hidden />
           )}
-          <Link href={`/monitors/${m.id}`} title={t("reports.monitor.open", { name: m.name })}>
-            {m.name}
+          <Link href={`/monitors/${m.id}`} title={t("reports.monitor.open", { name })}>
+            {name}
           </Link>
           <span className="rep-type">{typeWord(m.type)}</span>
         </span>
@@ -216,7 +219,7 @@ function MonitorRow({ m, t }: { m: MonitorReport; t: T }) {
   );
 }
 
-function NamespaceRows({ group, t }: { group: NamespaceReport; t: T }) {
+function NamespaceRows({ group, names, t }: { group: NamespaceReport; names: Map<number, string>; t: T }) {
   const n = (v: number) => v.toLocaleString(t.intl);
   const name = group.namespace || t(MANUAL_LABEL);
   return (
@@ -241,7 +244,7 @@ function NamespaceRows({ group, t }: { group: NamespaceReport; t: T }) {
         <td role="cell" className="rep-num rep-wide rep-none" />
       </tr>
       {group.monitors.map((m) => (
-        <MonitorRow key={m.id} m={m} t={t} />
+        <MonitorRow key={m.id} m={m} name={names.get(m.id) ?? m.name} t={t} />
       ))}
     </tbody>
   );
@@ -257,14 +260,14 @@ async function Reports({ searchParams }: { searchParams: SearchParams }) {
 
   let report: Report;
   let stats: Stats | null;
+  let names: Map<number, string>;
   try {
-    const [r, s] = await Promise.all([
+    [report, stats, names] = await Promise.all([
       getReport(days, namespace),
       // The figures of the whole are a help, not the report: without them the table still stands.
       getStats(days, namespace !== undefined ? [namespace] : undefined).catch(() => null),
+      monitorNames(),
     ]);
-    report = r;
-    stats = s;
   } catch (err) {
     return <BackendError what={t("reports.what")} err={err} />;
   }
@@ -308,24 +311,12 @@ async function Reports({ searchParams }: { searchParams: SearchParams }) {
         )}
       </div>
       {/* Figures of nothing say nothing: an empty report shows only that it is empty. */}
-      {!empty && stats && <Readouts items={figures(stats, report.namespaces.length, t)} label={t("reports.readouts")} />}
-      {!empty && (
-        <dl className="rep-defs">
-          <div>
-            <dt>
-              <abbr title={t("reports.mttr.name")}>{t("reports.mttr")}</abbr>
-              <span>{t("reports.mttr.name")}:</span>
-            </dt>
-            <dd>{t("reports.mttr.means")}</dd>
-          </div>
-          <div>
-            <dt>
-              <abbr title={t("reports.mtbf.name")}>{t("reports.mtbf")}</abbr>
-              <span>{t("reports.mtbf.name")}:</span>
-            </dt>
-            <dd>{t("reports.mtbf.means")}</dd>
-          </div>
-        </dl>
+      {/* The monitors added by hand are a group of the report, not a namespace, as on the overview. */}
+      {!empty && stats && (
+        <Readouts
+          items={figures(stats, report.namespaces.filter((g) => g.namespace !== "").length, t)}
+          label={t("reports.readouts")}
+        />
       )}
       {empty ? (
         <div className="panel inc-empty">
@@ -366,7 +357,7 @@ async function Reports({ searchParams }: { searchParams: SearchParams }) {
               </tr>
             </thead>
             {report.namespaces.map((g) => (
-              <NamespaceRows key={g.namespace} group={g} t={t} />
+              <NamespaceRows key={g.namespace} group={g} names={names} t={t} />
             ))}
           </table>
         </div>
@@ -381,7 +372,6 @@ export default async function Page({ searchParams }: PageProps<"/reports">) {
     <main className="page rep-page">
       <header>
         <h1 className="type-display max-sm:type-display-s">{t("nav.reports")}</h1>
-        <p className="inc-lead">{t("reports.lead")}</p>
       </header>
       <Suspense fallback={<p className="text-sm text-ink-3">{t("reports.calculating")}</p>}>
         <Reports searchParams={searchParams} />

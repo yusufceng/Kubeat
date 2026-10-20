@@ -14,6 +14,7 @@ import { ChevronIcon } from "@/app/ui/icons";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { type DisplayState, stateStyles } from "@/app/ui/status";
 import { StatusGlyph } from "@/app/ui/status-glyph";
+import { TimeAgo } from "@/app/ui/time-ago";
 
 /** A row's uptime as a bare number ("99.86", "100") or a dash; floored, so that 99.996 is not a perfect 100. */
 function uptimeFigure(item: FleetItem, t: T): string {
@@ -90,7 +91,7 @@ export const Row = memo(function Row({
   const ref = useRef<HTMLLIElement>(null);
   useStateFlash(ref, item.state);
   const style = stateStyles[item.state];
-  const [name, rest] = splitName(item.name, item.discovered);
+  const [name, rest] = splitName(item.name, item.derived);
   const figure = uptimeFigure(item, t);
   const shown = item.beats.slice(-beats);
   const failed = shown.split("0").length - 1;
@@ -144,7 +145,8 @@ export const Row = memo(function Row({
           <span className="sr-only">, {t(style.label)}</span>
         </span>
         <BeatStrip
-          beats={[...shown].map((beat) => ({ state: beat === "1" ? "ok" : "down" }))}
+          // A paused monitor's last checks are history, not its state: they are idle grey.
+          beats={[...shown].map((beat) => ({ state: item.state === "paused" ? "idle" : beat === "1" ? "ok" : "down" }))}
           slots={beats}
           height={14}
           slotWidth={beatWidth(beats)}
@@ -265,6 +267,11 @@ export function HoverCard({ item, anchor }: { item: FleetItem; anchor: HTMLEleme
       </p>
       {item.state === "down" && item.downSince && (
         <DownFor since={item.downSince} className="mt-2 block text-xs font-medium tabular-nums text-down-ink" />
+      )}
+      {item.state === "paused" && item.lastCheck && (
+        <p className="mt-2 text-xs text-ink-3">
+          {t("monitorsList.list.card.pausedLast")} <TimeAgo iso={item.lastCheck} />
+        </p>
       )}
       {item.error && <p className="type-mono mt-1.5 line-clamp-3 break-words text-down-ink">{item.error}</p>}
       {item.certDays !== null && (

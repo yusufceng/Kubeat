@@ -1,5 +1,7 @@
+import Link from "next/link";
 import type { Monitor } from "@/lib/api";
 import type { T } from "@/lib/i18n/translate";
+import { ArrowIcon } from "@/app/ui/fleet-icons";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { StateChip } from "@/app/ui/state-chip";
 import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
@@ -64,25 +66,31 @@ export function StatusBadge({ state, t, live = false }: { state: DisplayState; t
 /**
  * The state as a chip, for headers: always the current state, so an outage
  * pulses. With since (an outage's start), the chip counts how long it has
- * lasted.
+ * lasted. With incident (the open one's id), the chip opens its page and
+ * says which it is.
  */
-export function StatusPill({ state, t, since }: { state: DisplayState; t: T; since?: string }) {
+export function StatusPill({ state, t, since, incident }: { state: DisplayState; t: T; since?: string; incident?: number }) {
   const s = stateStyles[state];
   const name = t(s.label);
-  if (!since) {
-    return (
-      <StateChip kind={s.glyph} live={state === "down"}>
-        {name}
-      </StateChip>
-    );
-  }
   // The duration is a component, so the sentence is split around its placeholder.
-  const [before, after] = t("stateChip.for", { state: name }).split("{duration}");
-  return (
+  const [before, after] = since ? t("stateChip.for", { state: name }).split("{duration}") : [name, ""];
+  const chip = (
     <StateChip kind={s.glyph} live={state === "down"}>
       {before}
-      <LiveDuration since={since} />
+      {since && <LiveDuration since={since} />}
       {after}
+      {incident !== undefined && (
+        <span className="mon-chip-to">
+          <ArrowIcon width={13} height={13} />
+          {t("incident.number", { id: incident })}
+        </span>
+      )}
     </StateChip>
+  );
+  if (incident === undefined) return chip;
+  return (
+    <Link href={`/incidents/${incident}`} className="mon-chip-link" title={t("stateChip.open")}>
+      {chip}
+    </Link>
   );
 }

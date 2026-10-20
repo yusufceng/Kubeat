@@ -40,6 +40,19 @@ export function useListFilter(): [ListFilter, (filter: ListFilter) => void] {
   return [useSyncExternalStore(listFilter.subscribe, listFilter.get, () => "all"), listFilter.set];
 }
 
+const listDrawer = store(false);
+
+/** Where the monitor list is a drawer (see SidebarFrame), as a media query. */
+export const DRAWER_MEDIA = "(64rem <= width < 75rem)";
+
+/**
+ * Whether the monitor list is open as a drawer: between 1024 and 1199px,
+ * where it has no column of its own, the context bar's button opens it.
+ */
+export function useListDrawer(): [boolean, (open: boolean) => void] {
+  return [useSyncExternalStore(listDrawer.subscribe, listDrawer.get, () => false), listDrawer.set];
+}
+
 /** One step of a breadcrumb; the last one is the page itself and has no link. mono sets cluster names. */
 export type Crumb = { label: string; href?: string; mono?: boolean };
 

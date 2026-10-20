@@ -5,7 +5,7 @@ import { connection } from "next/server";
 import { cache } from "react";
 import { listMonitors, type Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
-import { monitorLabel } from "@/app/ui/monitor-name";
+import { monitorLabel, otherNames } from "@/app/ui/monitor-name";
 import { type DisplayState, displayState } from "@/app/ui/status";
 
 /**
@@ -19,10 +19,28 @@ export const workspaceMonitors = cache(async () => {
   return listMonitors({ history: config.listBeats });
 });
 
+/**
+ * The monitors' names as the app shows them (see monitorLabel), by id, for
+ * the pages whose data carries only a monitor's own name; empty when the
+ * monitors cannot be read.
+ */
+export async function monitorNames(): Promise<Map<number, string>> {
+  try {
+    return new Map((await workspaceMonitors()).map((m) => [m.id, monitorLabel(m).name]));
+  } catch {
+    return new Map();
+  }
+}
+
 /** A monitor as the list shows it: only what a row needs. */
 export type ListItem = {
   id: number;
+  /** The name on screen; see monitorLabel. */
   name: string;
+  /** The name is the cluster object's own ("pricing:8080"), the one discovery gave. */
+  derived: boolean;
+  /** The other names it is found by: that of its alerts, its object's. */
+  aka: string;
   /** "Service", "Route", ... for discovered monitors. */
   kind: string | null;
   type: Monitor["type"];
@@ -42,6 +60,8 @@ export function toListItem(m: Monitor): ListItem {
   return {
     id: m.id,
     name: label.name,
+    derived: label.derived,
+    aka: otherNames(m),
     kind: label.kind,
     type: m.type,
     namespace: m.namespace,

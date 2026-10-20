@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import type { CheckGrid as Grid, GridCell } from "@/lib/api";
 import { useT } from "@/lib/i18n/client";
+import { sameErrors } from "@/lib/monitor-page";
 import { useMounted } from "@/lib/use-mounted";
+import { HelpTip } from "@/app/ui/help-tip";
 import { ChevronIcon } from "@/app/ui/icons";
 import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
 
@@ -245,7 +247,7 @@ export function CheckGrid({
           </div>
         )}
 
-        <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-3 select-none">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-3 select-none">
           {(Object.keys(stateStyle) as State[]).map((s) => (
             <span key={s} className="inline-flex items-center gap-1.5">
               {stateStyle[s].glyph ? (
@@ -256,13 +258,15 @@ export function CheckGrid({
               {t(stateStyle[s].label)}
             </span>
           ))}
-        </p>
-        <p className="mt-1.5 text-xs text-ink-3">
-          {t(week ? "monitorPage.history.caption.week" : "monitorPage.history.caption.day", {
-            minutes: grid.bucket_seconds / 60,
-          })}{" "}
-          {t("monitorPage.history.hint")}
-        </p>
+          <HelpTip label={t("monitorPage.history.help")}>
+            <p>
+              {t(week ? "monitorPage.history.caption.week" : "monitorPage.history.caption.day", {
+                minutes: grid.bucket_seconds / 60,
+              })}
+            </p>
+            <p>{t("monitorPage.history.hint")}</p>
+          </HelpTip>
+        </div>
 
         {detail && (
           <div className="mt-3 rounded-md border border-line bg-well px-3 py-2.5 text-xs">
@@ -286,7 +290,7 @@ export function CheckGrid({
           <p className="text-[13px] text-ink-3">{t("monitorPage.history.errors.none")}</p>
         ) : (
           <ul className="text-xs">
-            {grid.errors.map((e) => (
+            {sameErrors(grid.errors).map((e) => (
               <li key={e.error} className="border-t border-line py-2 first:border-t-0 first:pt-0">
                 <p className="font-mono break-words text-ink">{e.error || t("monitorPage.history.errors.unnamed")}</p>
                 <p className="mt-1 text-ink-3 tabular-nums">

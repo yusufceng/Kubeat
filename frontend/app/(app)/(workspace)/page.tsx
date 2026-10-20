@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getStats, type Incident, listIncidents, listMaintenance, type Maintenance, type Monitor } from "@/lib/api";
 import { config } from "@/lib/config";
@@ -21,6 +22,23 @@ import { EmptyFleet } from "@/app/ui/empty-fleet";
 import { FleetHero } from "@/app/ui/fleet-hero";
 import { certificateReadout, FleetReadouts, mttrReadout, stateReadouts } from "@/app/ui/fleet-readouts";
 import { shellUser } from "@/app/ui/session-controls";
+
+/**
+ * Titled after how the fleet stands, so that the tab says it: "3 monitors
+ * down", "1 monitor degraded", or else the overview's name.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  try {
+    const c = countStates(await workspaceMonitors());
+    const degraded = c.verifying + c.recovering;
+    if (c.down > 0) return { title: t.n("monitorsList.hero.down", c.down) };
+    if (degraded > 0) return { title: t.n("monitorsList.hero.degraded", degraded) };
+  } catch {
+    // The page says what is wrong.
+  }
+  return { title: t("monitorsList.overview.title") };
+}
 
 /** The monitors by namespace for the cluster map, problems first in each. */
 function mapGroups(monitors: Monitor[], locale: string): MapGroup[] {
@@ -83,7 +101,7 @@ async function Overview() {
       />
       <div className="fl-cols">
         <ClusterMap groups={mapGroups(monitors, t.intl)} />
-        <ActivityFeed events={activity(incidents, monitors, config.overviewEvents)} asOf={now} />
+        <ActivityFeed {...activity(incidents, monitors, config.overviewEvents, config.flapWindowSeconds * 1000)} asOf={now} />
       </div>
     </div>
   );

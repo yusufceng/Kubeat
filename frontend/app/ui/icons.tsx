@@ -31,6 +31,14 @@ export const PlusIcon = (p: Props) => (
   </Icon>
 );
 
+/** A pane with a column at its side: the monitor list. */
+export const ListPaneIcon = (p: Props) => (
+  <Icon {...p}>
+    <rect x="3.75" y="4.75" width="16.5" height="14.5" rx="2" />
+    <path d="M9.75 4.75v14.5" />
+  </Icon>
+);
+
 export const SearchIcon = (p: Props) => (
   <Icon {...p}>
     <circle cx="11" cy="11" r="6.5" />

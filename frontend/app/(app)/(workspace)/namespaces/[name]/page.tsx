@@ -1,4 +1,4 @@
-import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { getStats, type Incident, listMaintenance, type Maintenance, type Monitor, queryIncidents } from "@/lib/api";
@@ -13,8 +13,24 @@ import { BackendError } from "@/app/ui/backend-error";
 import { FleetHero } from "@/app/ui/fleet-hero";
 import { FleetReadouts, mttrReadout, outagesReadout, stateReadouts, uptimeReadout } from "@/app/ui/fleet-readouts";
 import { MonitorTable } from "@/app/ui/monitor-table";
+import { CrumbTrail } from "@/app/ui/nav";
 import { Crumbs } from "@/app/ui/shell-state";
 import { displayState } from "@/app/ui/status";
+
+/** Titled after the namespace, and what in it is down: "checkout · 1 monitor down". */
+export async function generateMetadata({ params }: PageProps<"/namespaces/[name]">): Promise<Metadata> {
+  const t = await getT();
+  const namespace = namespaceFromSlug((await params).name);
+  const label = namespace || t(MANUAL_LABEL);
+  try {
+    const monitors = (await workspaceMonitors()).filter((m) => m.namespace === namespace);
+    if (monitors.length === 0) return { title: t("notFound.namespace.title") };
+    const down = countStates(monitors).down;
+    return { title: down > 0 ? `${label} · ${t.n("monitorsList.hero.down", down)}` : label };
+  } catch {
+    return { title: label };
+  }
+}
 
 /**
  * One namespace (or the monitors added by hand) in the overview's
@@ -62,22 +78,14 @@ async function Namespace({ params }: { params: Promise<{ name: string }> }) {
   const states = stateReadouts(counts, monitors, windows, t, now);
   // Problems first; otherwise in the order the backend gives.
   const ordered = [...monitors].sort((a, b) => urgencyRank(displayState(a)) - urgencyRank(displayState(b)));
+  const overview = { label: t("monitorsList.overview.title"), href: "/" };
 
   return (
     <>
-      <Crumbs
-        items={[
-          { label: t("monitorsList.overview.title"), href: "/" },
-          { label, mono: namespace !== "" },
-        ]}
-      />
+      <Crumbs items={[overview, { label, mono: namespace !== "" }]} />
       <header className="fl-page-head">
-        {/* The context bar carries the breadcrumb on a wide screen. */}
-        <nav aria-label={t("shell.breadcrumb")} className="mb-2 text-[13px] text-ink-3 lg:hidden">
-          <Link href="/" className="hover:text-ink">
-            {t("monitorsList.overview.title")}
-          </Link>
-        </nav>
+        {/* The context bar carries the breadcrumb on a wide screen; here, the steps above the title. */}
+        <CrumbTrail items={[overview]} here={false} className="mb-2 lg:hidden" />
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           {/* A long name wraps (after its hyphens, as a rule) rather than losing its end. */}
           <h1 className={`type-display min-w-0 [overflow-wrap:anywhere] ${namespace ? "fl-title-mono" : ""}`}>{label}</h1>
@@ -110,7 +118,7 @@ async function Namespace({ params }: { params: Promise<{ name: string }> }) {
         phone={[states[0], states[1], states[2], states[4]]}
       />
       <MonitorTable monitors={ordered} slots={config.listBeats} tones={config.uptimeTones} />
-      <ActivityFeed events={activity(incidents, monitors, config.overviewEvents)} asOf={now} />
+      <ActivityFeed {...activity(incidents, monitors, config.overviewEvents, config.flapWindowSeconds * 1000)} asOf={now} />
     </>
   );
 }

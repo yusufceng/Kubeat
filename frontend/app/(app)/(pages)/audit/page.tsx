@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { type AuditEntry, listAudit } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
-import { getT } from "@/lib/i18n/server";
+import { getT, titled } from "@/lib/i18n/server";
 import { BackendError } from "@/app/ui/backend-error";
 import { EmptyState } from "@/app/ui/empty-state";
 import { EditIcon, PlusIcon, TrashIcon } from "@/app/ui/icons";
@@ -121,6 +121,8 @@ const actionLooks: Record<string, { icon: React.ReactNode; tone?: string }> = {
   setup: { icon: <PlusIcon /> },
   password_change: { icon: <LockIcon /> },
 };
+
+export const generateMetadata = titled("nav.audit");
 
 export default async function Page() {
   const t = await getT();

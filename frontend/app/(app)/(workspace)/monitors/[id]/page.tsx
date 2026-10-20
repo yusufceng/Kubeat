@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
+import { cache, Suspense } from "react";
 import {
   ApiError,
   type CheckResult,
@@ -42,12 +43,13 @@ import { Percent } from "@/app/ui/monitor-figures";
 import { MonitorHeader } from "@/app/ui/monitor-header";
 import { ZoomInIcon } from "@/app/ui/monitor-icons";
 import { IncidentTimeline } from "@/app/ui/monitor-incidents";
+import { monitorLabel } from "@/app/ui/monitor-name";
 import { CalendarDate, OutagesWithin, TimeRange } from "@/app/ui/monitor-time";
 import { PodsLoading, PodsPanel, readWorkload } from "@/app/ui/pods-panel";
 import { PushUrl } from "@/app/ui/push-url";
 import { type Readout, Readouts } from "@/app/ui/readouts";
 import { Crumbs } from "@/app/ui/shell-state";
-import { displayState } from "@/app/ui/status";
+import { displayState, stateStyles } from "@/app/ui/status";
 import { TimeAgo } from "@/app/ui/time-ago";
 import { WindowPanel } from "@/app/ui/window-panel";
 
@@ -55,6 +57,22 @@ import { WindowPanel } from "@/app/ui/window-panel";
 // it, and the least it shows.
 const ZOOM_MARGIN = 0.25;
 const ZOOM_MARGIN_MIN_MS = 60_000;
+
+/** The monitor, read once per request for both the page and its title. */
+const readMonitor = cache((id: number) => getMonitor(id));
+
+/** Titled after the monitor and how it stands, "pricing · Down", so that its tab says so. */
+export async function generateMetadata({ params }: PageProps<"/monitors/[id]">): Promise<Metadata> {
+  const id = Number((await params).id);
+  const t = await getT();
+  if (!Number.isInteger(id) || id <= 0) return { title: t("notFound.monitor.title") };
+  try {
+    const monitor = await readMonitor(id);
+    return { title: `${monitorLabel(monitor).name} · ${t(stateStyles[displayState(monitor)].label)}` };
+  } catch (err) {
+    return err instanceof ApiError && err.status === 404 ? { title: t("notFound.monitor.title") } : {};
+  }
+}
 
 /** The spans the check-history grid offers: a day of short slots, a week of hours. */
 const historyRanges = [
@@ -229,7 +247,7 @@ async function MonitorDetail({
   try {
     let ranged: Series | null;
     [monitor, results, incidents, windows, ranged, maintenance, channels] = await Promise.all([
-      getMonitor(id),
+      readMonitor(id),
       listResults(id, Math.max(config.historyLimit, config.resultsLimit)),
       listIncidents(config.incidentsLimit, id),
       getUptime(id, config.uptimeWindows),
@@ -389,7 +407,7 @@ async function MonitorDetail({
         items={[
           { label: t("monitorPage.breadcrumb.overview"), href: "/" },
           { label: monitor.namespace || t(MANUAL_LABEL), href: namespaceHref(monitor.namespace), mono: monitor.namespace !== "" },
-          { label: monitor.name },
+          { label: monitorLabel(monitor).name },
         ]}
       />
 

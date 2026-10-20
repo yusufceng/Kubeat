@@ -1,7 +1,7 @@
 import { ApiError, listMonitors } from "@/lib/api";
 import { kindShort } from "@/lib/kinds";
 import type { PaletteMonitor } from "@/app/ui/command-palette";
-import { monitorLabel } from "@/app/ui/monitor-name";
+import { monitorLabel, otherNames } from "@/app/ui/monitor-name";
 import { displayState } from "@/app/ui/status";
 
 /**
@@ -16,6 +16,7 @@ export async function GET() {
     const brief: PaletteMonitor[] = monitors.map((m) => ({
       id: m.id,
       name: monitorLabel(m).name,
+      aka: otherNames(m),
       kind: kindShort(m.source, m.type, m.target),
       namespace: m.namespace,
       state: displayState(m),

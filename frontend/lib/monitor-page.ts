@@ -188,3 +188,35 @@ export function stepLength(ms: number, intl: string): { value: string; unit: "ms
   if (ms >= 1000) return { value: (ms / 1000).toLocaleString(intl, { maximumFractionDigits: 1 }), unit: "s" };
   return { value: ms.toLocaleString(intl, { maximumFractionDigits: ms < 10 ? 1 : 0 }), unit: "ms" };
 }
+
+/** A length of time as Go writes it into an error: "92h36m7s", "1h0m0s", "4m30s", "1.5s", "250ms". */
+const GO_DURATION = /\b(?:\d+h)?(?:\d+m)?\d+(?:\.\d+)?(?:ms|µs|s)\b/g;
+
+/** One error of a range, as the check grid lists them. */
+export type RangeError = { error: string; count: number; first_at: string; last_at: string };
+
+/**
+ * The errors of a range, with those that differ only in a length of time
+ * told as one ("no push received for 92h36m7s", "... for 92h37m7s"): their
+ * counts added, from the first time to the last, in the newest one's
+ * words; the most frequent first.
+ */
+export function sameErrors(errors: RangeError[]): RangeError[] {
+  const groups = new Map<string, RangeError>();
+  for (const e of errors) {
+    const key = e.error.replace(GO_DURATION, "#");
+    const seen = groups.get(key);
+    groups.set(
+      key,
+      seen
+        ? {
+            error: e.last_at > seen.last_at ? e.error : seen.error,
+            count: seen.count + e.count,
+            first_at: e.first_at < seen.first_at ? e.first_at : seen.first_at,
+            last_at: e.last_at > seen.last_at ? e.last_at : seen.last_at,
+          }
+        : e,
+    );
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count || b.last_at.localeCompare(a.last_at));
+}

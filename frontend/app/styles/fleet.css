@@ -346,10 +346,23 @@
     pointer-events: auto;
     cursor: pointer;
   }
-  .fl-row:hover:has(.fl-pick) .fl-glyph,
-  .fl-row:has(.fl-pick:focus-visible) .fl-glyph,
-  [data-selecting] .fl-row .fl-glyph {
+  /* A row's checkbox takes the glyph's place while the pointer is on it. */
+  .fl-list:not([data-selecting]) .fl-row:hover:has(.fl-pick) .fl-glyph,
+  .fl-list:not([data-selecting]) .fl-row:has(.fl-pick:focus-visible) .fl-glyph {
     opacity: 0;
+  }
+  /* While selecting, the checkboxes have a column of their own in front of
+     the glyphs, so that what is down stays in sight. */
+  [data-selecting] .fl-row .fl-lead {
+    grid-template-columns: 14px 14px;
+    column-gap: 8px;
+    width: 58px;
+  }
+  [data-selecting] .fl-row .fl-lead > .fl-glyph {
+    grid-area: 1 / 2;
+  }
+  [data-selecting] .fl-row-link {
+    padding-left: 58px;
   }
   .fl-ns .fl-pick {
     opacity: 1;
@@ -583,7 +596,8 @@
     }
   }
 
-  /* The outages under the summary: a line each, the whole line a link. */
+  /* The outages under the summary: a line each, the whole line a link to
+     the monitor, with a button on it to the incident's page. */
   .fl-outages {
     position: relative;
     margin-top: 18px;
@@ -593,11 +607,21 @@
     border-top: 1px solid var(--line);
   }
   .fl-outage {
+    position: relative;
     display: grid;
     grid-template-columns: 16px auto minmax(0, 1fr) auto auto;
     align-items: center;
     column-gap: 12px;
     min-height: 44px;
+  }
+  .fl-outage-name::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+  .fl-outage:hover .fl-outage-name {
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
   .fl-outage > .glyph {
     justify-self: center;
@@ -652,7 +676,11 @@
     font-weight: 550;
     white-space: nowrap;
   }
-  .fl-outage:hover .fl-outage-open,
+  .fl-outage-open {
+    position: relative;
+    z-index: 1;
+  }
+  .fl-outage-open:hover,
   .fl-outage-more:hover {
     background: var(--hover);
     color: var(--ink);
@@ -670,15 +698,22 @@
       grid-row: 1;
     }
     .fl-outage-cause {
-      grid-column: 2 / -1;
+      grid-column: 2;
       grid-row: 2;
     }
     .fl-outage-for {
       grid-column: 3;
       grid-row: 1;
+      justify-self: end;
     }
     .fl-outage-open {
-      display: none;
+      grid-column: 3;
+      grid-row: 2;
+      justify-self: end;
+      height: 22px;
+      margin-right: -6px;
+      padding: 0 6px;
+      font-size: 12px;
     }
   }
 
@@ -852,9 +887,13 @@
     color: var(--ink);
     font-weight: 600;
   }
-  .fl-event-name:hover {
+  .fl-event-name:hover,
+  .fl-event-what:hover {
     text-decoration: underline;
     text-underline-offset: 2px;
+  }
+  .fl-event-what {
+    font-variant-numeric: tabular-nums;
   }
   .fl-event-cause {
     color: var(--ink-3);

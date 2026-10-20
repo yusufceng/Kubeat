@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useT } from "@/lib/i18n/client";
 import { inWorkspace } from "@/app/ui/nav";
-import { type ListFilter, useListFilter } from "@/app/ui/shell-state";
+import { DRAWER_MEDIA, type ListFilter, useListDrawer, useListFilter } from "@/app/ui/shell-state";
 import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
 
 /** Narrower than this, the monitor list is a part of the overview rather than a column. */
@@ -19,13 +19,18 @@ export function PulsePill({ up, down, degraded }: { up: number; down: number; de
   const router = useRouter();
   const pathname = usePathname();
   const [filter, setFilter] = useListFilter();
+  const [drawerOpen, setDrawerOpen] = useListDrawer();
 
   function show(part: ListFilter) {
     const narrow = matchMedia(NARROW).matches;
-    // On a wide screen the workspace has the list beside it; on a narrow
-    // one only the overview has it, below the overview itself.
+    const drawer = matchMedia(DRAWER_MEDIA).matches;
+    // On a wide screen the workspace has the list beside it (or over it, as
+    // a drawer); on a narrow one only the overview has it, below the
+    // overview itself.
     const listHere = narrow ? pathname === "/" : inWorkspace(pathname);
-    setFilter(listHere && filter === part ? "all" : part);
+    const listShown = listHere && (!drawer || drawerOpen);
+    setFilter(listShown && filter === part ? "all" : part);
+    if (drawer) setDrawerOpen(true);
     if (!listHere) router.push(narrow ? "/#monitors" : "/");
     else if (narrow) document.getElementById("monitors")?.scrollIntoView({ block: "start" });
   }

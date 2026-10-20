@@ -5,6 +5,7 @@ import "server-only";
 
 import type { Incident, Maintenance, Monitor } from "@/lib/api";
 import type { StripOutage, StripWindow } from "@/lib/fleet-strip";
+import { gatherRuns, runExtent } from "@/lib/flaps";
 import { kindShort, objectRef } from "@/lib/kinds";
 import { type ListItem, toListItem } from "@/lib/workspace";
 import { monitorLabel } from "@/app/ui/monitor-name";
@@ -39,6 +40,8 @@ export type FleetItem = ListItem & {
   certDays: number | null;
   /** When the ongoing outage began. */
   downSince: string | null;
+  /** When the latest check ran; for a paused monitor, about when it was paused. */
+  lastCheck: string | null;
 };
 
 export function toFleetItem(m: Monitor): FleetItem {
@@ -59,6 +62,7 @@ export function toFleetItem(m: Monitor): FleetItem {
     error,
     certDays,
     downSince: m.open_incident?.started_at ?? null,
+    lastCheck: last?.checked_at ?? null,
   };
 }
 
@@ -84,8 +88,8 @@ export function lastChecked(monitors: Monitor[]): string | null {
   return latest;
 }
 
-/** An outage that is going on, as the summary lists it. */
-export type Outage = { id: number; name: string; namespace: string; cause: string; since: string };
+/** An outage that is going on, as the summary lists it: id is the monitor's, incident the outage's own. */
+export type Outage = { id: number; incident: number; name: string; namespace: string; cause: string; since: string };
 
 /**
  * The ongoing outages, the newest first: monitors that are down, as the
@@ -97,6 +101,7 @@ export function ongoingOutages(monitors: Monitor[]): Outage[] {
     .filter((m) => m.open_incident !== null && displayState(m) === "down")
     .map((m) => ({
       id: m.id,
+      incident: m.open_incident!.id,
       name: monitorLabel(m).name,
       namespace: m.namespace,
       cause: m.open_incident!.cause,
@@ -124,14 +129,15 @@ export function certificateSummary(monitors: Monitor[]): { watched: number; warn
 /**
  * What the fleet strip is drawn from: the outages among the incidents read
  * (and those the monitors say are open, in case the list was cut before
- * them), the maintenance windows, and from when on the data is complete.
+ * them), the maintenance windows, from when on the data is complete, and
+ * how many monitors the strip is about.
  */
 export function stripInputs(
   monitors: Monitor[],
   incidents: Incident[],
   windows: Maintenance[],
   incidentsLimit: number,
-): { outages: StripOutage[]; windows: StripWindow[]; knownFrom: number } {
+): { outages: StripOutage[]; windows: StripWindow[]; knownFrom: number; fleet: number } {
   const names = new Map(monitors.map((m) => [m.id, monitorLabel(m).name]));
   const seen = new Set<number>();
   const outages: StripOutage[] = [];
@@ -139,6 +145,7 @@ export function stripInputs(
     if (i.kind !== "down" || seen.has(i.id)) return;
     seen.add(i.id);
     outages.push({
+      monitor: i.monitor_id,
       name: names.get(i.monitor_id) ?? i.monitor_name,
       start: Date.parse(i.started_at),
       end: i.resolved_at ? Date.parse(i.resolved_at) : null,
@@ -162,6 +169,7 @@ export function stripInputs(
       repeat: w.repeat,
     })),
     knownFrom: Number.isFinite(knownFrom) ? knownFrom : 0,
+    fleet: monitors.length,
   };
 }
 
@@ -174,46 +182,87 @@ export function windowsFor(windows: Maintenance[], monitors: Monitor[]): Mainten
   );
 }
 
-/** One line of the activity feed: an outage or a certificate warning that began or ended. */
+/**
+ * One line of the activity feed: an outage or a certificate warning that
+ * began or ended; an outage still going on; or a monitor's run of short
+ * outages (see lib/flaps.ts), told once.
+ */
 export type ActivityEvent = {
   key: string;
   at: string;
   monitorId: number;
   name: string;
-  kind: "down" | "recovered" | "cert" | "renewed";
-  /** The cause, for a beginning. */
+  kind: "down" | "recovered" | "cert" | "renewed" | "ongoing" | "flapping";
+  /** The incident it is about; for a run, its newest. */
+  incident: number;
+  /** The cause, for a beginning (for a run, its newest outage's). */
   cause: string;
   /** How long it lasted, in milliseconds, for an ending. */
   lasted: number | null;
+  /** A run's outages: how many, from the first start to the last end, the shortest and the longest. */
+  run: ReturnType<typeof runExtent> | null;
 };
 
-/** The beginnings and endings of the incidents, newest first. */
-export function activity(incidents: Incident[], monitors: Monitor[], limit: number): ActivityEvent[] {
+/**
+ * The activity feed: the outages going on, newest first, so that a busy
+ * day never pushes them out (from the monitors, since the incidents read
+ * may stop short of an old one); then what began and ended, newest first,
+ * a monitor's run of short outages as one line. limit counts both.
+ */
+export function activity(
+  incidents: Incident[],
+  monitors: Monitor[],
+  limit: number,
+  flapWindowMs: number,
+): { ongoing: ActivityEvent[]; events: ActivityEvent[] } {
   const names = new Map(monitors.map((m) => [m.id, monitorLabel(m).name]));
-  const out: ActivityEvent[] = [];
+  const nameOf = (i: Incident) => names.get(i.monitor_id) ?? i.monitor_name;
+  const event = (i: Incident, rest: Pick<ActivityEvent, "key" | "at" | "kind" | "cause" | "lasted" | "run">): ActivityEvent => ({
+    monitorId: i.monitor_id,
+    name: nameOf(i),
+    incident: i.id,
+    ...rest,
+  });
+
+  const ongoing = monitors
+    .flatMap((m) => (m.open_incident?.kind === "down" ? [m.open_incident] : []))
+    .sort((a, b) => b.started_at.localeCompare(a.started_at))
+    .slice(0, limit)
+    .map((i) => event(i, { key: `${i.id}-ongoing`, at: i.started_at, kind: "ongoing", cause: i.cause, lasted: null, run: null }));
+  const open = new Set(ongoing.map((e) => e.incident));
+
+  // Runs are a monitor's own: its incidents oldest first.
+  const byMonitor = new Map<number, Incident[]>();
   for (const i of incidents) {
-    const cert = i.kind === "cert";
-    const name = names.get(i.monitor_id) ?? i.monitor_name;
-    out.push({
-      key: `${i.id}-start`,
-      at: i.started_at,
-      monitorId: i.monitor_id,
-      name,
-      kind: cert ? "cert" : "down",
-      cause: i.cause,
-      lasted: null,
-    });
-    if (i.resolved_at) {
-      out.push({
-        key: `${i.id}-end`,
-        at: i.resolved_at,
-        monitorId: i.monitor_id,
-        name,
-        kind: cert ? "renewed" : "recovered",
-        cause: "",
-        lasted: Date.parse(i.resolved_at) - Date.parse(i.started_at),
-      });
+    if (i.kind === "down" && !i.resolved_at && open.has(i.id)) continue;
+    byMonitor.set(i.monitor_id, [...(byMonitor.get(i.monitor_id) ?? []), i]);
+  }
+  const out: ActivityEvent[] = [];
+  for (const list of byMonitor.values()) {
+    const ordered = list.toSorted((a, b) => a.started_at.localeCompare(b.started_at));
+    for (const entry of gatherRuns(ordered, flapWindowMs)) {
+      if (Array.isArray(entry)) {
+        const last = entry[entry.length - 1];
+        const run = runExtent(entry);
+        out.push(event(last, { key: `${last.id}-run`, at: run.to, kind: "flapping", cause: last.cause, lasted: null, run }));
+        continue;
+      }
+      const i = entry;
+      const cert = i.kind === "cert";
+      out.push(event(i, { key: `${i.id}-start`, at: i.started_at, kind: cert ? "cert" : "down", cause: i.cause, lasted: null, run: null }));
+      if (i.resolved_at) {
+        out.push(
+          event(i, {
+            key: `${i.id}-end`,
+            at: i.resolved_at,
+            kind: cert ? "renewed" : "recovered",
+            cause: "",
+            lasted: Date.parse(i.resolved_at) - Date.parse(i.started_at),
+            run: null,
+          }),
+        );
+      }
     }
   }
-  return out.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
+  return { ongoing, events: out.sort((a, b) => b.at.localeCompare(a.at)).slice(0, Math.max(0, limit - ongoing.length)) };
 }

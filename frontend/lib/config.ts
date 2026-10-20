@@ -130,6 +130,14 @@ export const config = {
   /** Number of ongoing outages listed in the overview's summary; the rest are a click away in the list. */
   overviewOutages: positiveInt(process.env.OVERVIEW_OUTAGES, 5),
   /**
+   * A monitor that flaps: three or more of its outages in a row, each
+   * shorter than this and each within this long of the one before, are
+   * told as one line of the activity feed and one row of the incident
+   * list. "10m" by default, like the other durations here; "0s" tells
+   * every outage on its own.
+   */
+  flapWindowSeconds: durationSeconds(process.env.FLAP_WINDOW ?? "") ?? 600,
+  /**
    * The fleet strip of the overview and of a namespace: how many hours it
    * covers, in how many slots (15 minutes each by default).
    */

@@ -195,7 +195,8 @@ function Hero({ view, t }: { view: StatusPageView; t: T }) {
 /** One service: its name and state, and its days as a strip, today on the right. */
 function Service({ monitor, view, t }: { monitor: StatusPageView["monitors"][number]; view: StatusPageView; t: T }) {
   const s = serviceStates[monitor.state];
-  const daysAgo = (days: number) => t("format.ago", { duration: t.n("format.days", days) });
+  // In words for the public, where the app writes "90d".
+  const daysAgo = (days: number) => t.n("statusPage.daysAgo", days);
   return (
     <li className="sp-service">
       <div className="sp-service-head">

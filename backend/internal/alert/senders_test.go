@@ -409,7 +409,7 @@ func TestRouterPicksSenderByType(t *testing.T) {
 func TestNotificationWithoutATarget(t *testing.T) {
 	n := sampleDown()
 	n.Monitor = store.Monitor{ID: 9, Name: "gece-yedeği", Type: store.MonitorPush, FailureThreshold: 1}
-	n.Incident.Cause = "no push received for 2m5s; one is expected every 1m0s"
+	n.Incident.Cause = "no push within the expected 1m interval"
 
 	want := "🔴 gece-yedeği erişilemiyor. Art arda 1 kontrol başarısız. Son hata: " + n.Incident.Cause
 	if got := Text(n); got != want {

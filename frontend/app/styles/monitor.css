@@ -77,6 +77,25 @@
     gap: 6px 10px;
     min-width: 0;
   }
+  /* The state chip of an open incident opens its page, which it names after the duration. */
+  .mon-chip-link {
+    display: inline-flex;
+    border-radius: var(--radius-sm);
+  }
+  .mon-chip-to {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: 6px;
+  }
+  .mon-chip-link:hover .mon-chip-to {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .mon-chip-to > svg {
+    position: relative;
+    top: 0.5px;
+  }
   .mon-error {
     min-width: 0;
     max-width: 100%;
@@ -471,6 +490,29 @@
   }
   .mon-tl-item {
     position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .mon-tl-item > .mon-tl-row {
+    flex: 1;
+    min-width: 0;
+  }
+  /* Beside an incident, the way to frame it on the chart. */
+  .mon-tl-chart {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-top: 3px;
+    border-radius: var(--radius-sm);
+    color: var(--ink-3);
+    transition: background-color 120ms var(--ease-signal);
+  }
+  .mon-tl-chart:hover {
+    background: var(--hover);
+    color: var(--ink);
   }
   .mon-tl-item::before {
     content: "";

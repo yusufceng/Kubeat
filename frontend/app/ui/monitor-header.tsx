@@ -1,10 +1,11 @@
-import Link from "next/link";
 import type { CheckResult, Monitor, MonitorChannel } from "@/lib/api";
 import type { T } from "@/lib/i18n/translate";
 import { kubectlName, typeWords } from "@/lib/monitor-page";
 import { MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
 import { ChannelsChip } from "@/app/ui/monitor-channels";
+import { monitorLabel } from "@/app/ui/monitor-name";
 import { MonitorActions } from "@/app/ui/monitor-settings";
+import { CrumbTrail } from "@/app/ui/nav";
 import { type DisplayState, StatusPill } from "@/app/ui/status";
 import { TagChip } from "@/app/ui/tag";
 
@@ -36,23 +37,23 @@ export function MonitorHeader({
   t: T;
 }) {
   const object = kubectlName(monitor.source);
+  const name = monitorLabel(monitor).name;
   const last = monitor.last_result;
   const failing = monitor.enabled && last !== null && !last.up;
   return (
     <header className="mon-head">
       <div className="mon-head-main">
-        {/* The context bar carries the breadcrumb on a wide screen. */}
-        <p className="mb-2 flex items-center gap-1.5 text-[13px] text-ink-3 lg:hidden">
-          <Link href="/" className="hover:text-ink">
-            {t("monitorPage.breadcrumb.overview")}
-          </Link>
-          <span aria-hidden>/</span>
-          <Link href={namespaceHref(monitor.namespace)} className={`hover:text-ink ${monitor.namespace ? "mon-mono" : ""}`}>
-            {monitor.namespace || t(MANUAL_LABEL)}
-          </Link>
-        </p>
+        {/* The context bar carries the breadcrumb on a wide screen; here, the steps above the title. */}
+        <CrumbTrail
+          here={false}
+          className="mb-2 lg:hidden"
+          items={[
+            { label: t("monitorPage.breadcrumb.overview"), href: "/" },
+            { label: monitor.namespace || t(MANUAL_LABEL), href: namespaceHref(monitor.namespace), mono: monitor.namespace !== "" },
+          ]}
+        />
         <div className="mon-title-row">
-          <h1 className="mon-title type-display-s @min-[42rem]:type-display">{monitor.name}</h1>
+          <h1 className="mon-title type-display-s @min-[42rem]:type-display">{name}</h1>
           <span className="mon-kind" title={`${t("monitorPage.kind.title")}: ${object ? `${object} · ` : ""}${typeWords[monitor.type]}`}>
             {object && (
               <>
@@ -65,7 +66,7 @@ export function MonitorHeader({
         </div>
         {monitor.description && <p className="mon-desc">{monitor.description}</p>}
         <div className="mon-stline">
-          <StatusPill state={state} t={t} since={since} />
+          <StatusPill state={state} t={t} since={since} incident={monitor.open_incident?.id} />
           {failing && <ErrorLine last={last} />}
         </div>
         <div className="mon-meta">
@@ -101,7 +102,7 @@ export function MonitorHeader({
       {canEdit && (
         <MonitorActions
           // Only what the buttons need goes to the browser.
-          monitor={{ id: monitor.id, name: monitor.name, enabled: monitor.enabled, managed: monitor.managed }}
+          monitor={{ id: monitor.id, name, enabled: monitor.enabled, managed: monitor.managed }}
           silence={silence}
         />
       )}

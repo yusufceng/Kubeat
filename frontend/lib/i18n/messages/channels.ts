@@ -5,8 +5,7 @@ export const channels = defineMessages(
   {
     // app/channels/page.tsx
     "channels.what": "Bildirim kanalları",
-    "channels.intro":
-      "Bir olay açıldığında ve kapandığında, kapsamı o monitor'u içeren etkin kanallara bildirim gönderilir.",
+    "channels.intro": "Bir olay açılınca ve kapanınca kapsamındaki kanallara haber gider.",
     "channels.empty.title": "Henüz bildirim kanalı yok",
     "channels.empty.editor": "Bir kanal eklenene dek olaylar kaydedilir ama kimseye bildirim gitmez.",
     "channels.empty.viewer": "Bildirim kanallarını editörler ve yöneticiler yönetir.",
@@ -69,8 +68,7 @@ export const channels = defineMessages(
     "channelRow.delete.body": "Bu kanala bir daha bildirim gitmez. Monitor'lar ve olaylar etkilenmez.",
 
     // app/status-pages/page.tsx
-    "statusPages.intro":
-      "Seçilen servislerin durumunu ve uptime geçmişini, giriş gerektirmeyen bir adreste gösterir: ekip dışındakiler, müşteriler ya da duvardaki ekran için.",
+    "statusPages.intro": "Seçtiğiniz servislerin durumu, giriş istemeyen bir adreste.",
     "statusPages.empty.title": "Henüz durum sayfası yok",
     "statusPages.empty":
       "Bir sayfa, seçtiğiniz monitor'ların durumunu ve uptime geçmişini giriş yapmadan görülebilen bir adreste yayınlar.",
@@ -163,6 +161,8 @@ export const channels = defineMessages(
     "statusPage.noMonitors": "Bu sayfada henüz gösterilen bir servis yok.",
     "statusPage.uptime": "{value} uptime",
     "statusPage.today": "bugün",
+    "statusPage.daysAgo.one": "{count} gün önce",
+    "statusPage.daysAgo.other": "{count} gün önce",
     "statusPage.incidents.title": "Son kesintiler",
     "statusPage.incidents.none": "Yakın zamanda kesinti olmadı.",
     "statusPage.incidents.lasted": "{duration} sonra düzeldi",
@@ -173,8 +173,7 @@ export const channels = defineMessages(
   {
     // app/channels/page.tsx
     "channels.what": "Notification channels",
-    "channels.intro":
-      "When an incident opens and when it closes, a notification goes to the enabled channels whose scope includes that monitor.",
+    "channels.intro": "When an incident opens and closes, the channels in its scope are told.",
     "channels.empty.title": "No notification channels yet",
     "channels.empty.editor": "Until a channel is added, incidents are recorded but nobody is notified.",
     "channels.empty.viewer": "Notification channels are managed by editors and administrators.",
@@ -237,8 +236,7 @@ export const channels = defineMessages(
     "channelRow.delete.body": "No more notifications go to this channel. Monitors and incidents are not affected.",
 
     // app/status-pages/page.tsx
-    "statusPages.intro":
-      "Shows the state and the uptime history of the chosen services at an address that needs no sign-in: for people outside the team, customers or the screen on the wall.",
+    "statusPages.intro": "The state of the services you choose, at an address that needs no sign-in.",
     "statusPages.empty.title": "No status pages yet",
     "statusPages.empty":
       "A page publishes the state and the uptime history of the monitors you choose at an address that can be seen without signing in.",
@@ -316,7 +314,7 @@ export const channels = defineMessages(
     "statusPage.summary.many.one": "{count} service",
     "statusPage.summary.many.other": "{count} services",
     "statusPage.updated": "Updated {time}",
-    "statusPage.refreshesIn": "refreshes in {count} s",
+    "statusPage.refreshesIn": "refreshes in {count}s",
     "statusPage.history.aria.one": "Uptime history of the last day",
     "statusPage.history.aria.other": "Uptime history of the last {count} days",
     "statusPage.noData": "no data",
@@ -330,6 +328,8 @@ export const channels = defineMessages(
     "statusPage.noMonitors": "This page does not show any service yet.",
     "statusPage.uptime": "{value} uptime",
     "statusPage.today": "today",
+    "statusPage.daysAgo.one": "{count} day ago",
+    "statusPage.daysAgo.other": "{count} days ago",
     "statusPage.incidents.title": "Recent outages",
     "statusPage.incidents.none": "No outages recently.",
     "statusPage.incidents.lasted": "resolved after {duration}",

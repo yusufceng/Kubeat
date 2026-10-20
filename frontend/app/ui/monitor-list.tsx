@@ -208,7 +208,7 @@ export function MonitorList({
         (type === "" || i.type === type) &&
         (tag === "" || i.tags.includes(tag)) &&
         (needle === "" ||
-          `${i.name} ${i.kindShort} ${i.target} ${i.namespace} ${i.tags.join(" ")}`.toLocaleLowerCase(t.intl).includes(needle)),
+          `${i.name} ${i.aka} ${i.kindShort} ${i.target} ${i.namespace} ${i.tags.join(" ")}`.toLocaleLowerCase(t.intl).includes(needle)),
     );
     const byNamespace = new Map<string, FleetItem[]>();
     for (const item of shown) byNamespace.set(item.namespace, [...(byNamespace.get(item.namespace) ?? []), item]);

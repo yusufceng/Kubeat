@@ -290,21 +290,29 @@ function ActiveBreadcrumb() {
   return <CrumbTrail items={page ?? sectionCrumbs(pathname, t)} />;
 }
 
-function CrumbTrail({ items }: { items: Crumb[] }) {
+/**
+ * The steps of a breadcrumb, chevrons between them. Where it is short of
+ * room the steps in the middle give way first, down to a few letters, and
+ * the page's own name last, keeping enough to be read. here says the last
+ * step is the page itself; a page's head on a phone gives only the steps
+ * above it, since its title follows.
+ */
+export function CrumbTrail({ items, here = true, className = "" }: { items: Crumb[]; here?: boolean; className?: string }) {
   const t = useT();
   return (
-    <nav aria-label={t("shell.breadcrumb")} className="min-w-0">
+    <nav aria-label={t("shell.breadcrumb")} className={`min-w-0 ${className}`}>
       <ol className="flex min-w-0 items-center gap-2 text-[13px] text-ink-3">
         {items.map((c, i) => {
-          const last = i === items.length - 1;
+          const current = here && i === items.length - 1;
+          // The first step (the section) keeps its word; the page's own name shrinks least.
+          const fit = current ? "min-w-20 shrink" : i === 0 ? "flex-none" : "min-w-12 shrink-[4]";
           return (
-            // The page's own name gives way first; the steps above it are short.
-            <li key={i} className={`flex items-center gap-2 ${last ? "min-w-0" : "flex-none"}`}>
+            <li key={i} className={`flex items-center gap-2 ${fit}`}>
               {i > 0 && <ChevronIcon width={14} height={14} className="flex-none" />}
-              {last || !c.href ? (
+              {current || !c.href ? (
                 <span
-                  aria-current={last ? "page" : undefined}
-                  className={`truncate ${last ? "font-[550] text-ink" : "max-w-48"} ${c.mono ? "font-mono text-xs" : ""}`}
+                  aria-current={current ? "page" : undefined}
+                  className={`truncate ${current ? "font-[550] text-ink" : "max-w-48"} ${c.mono ? "font-mono text-xs" : ""}`}
                   title={c.label}
                 >
                   {c.label}

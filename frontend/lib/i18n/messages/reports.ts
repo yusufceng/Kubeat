@@ -6,8 +6,6 @@ import { defineMessages } from "@/lib/i18n/define";
  */
 export const reports = defineMessages(
   {
-    "reports.lead":
-      "Namespace ve monitor başına uptime, kesintiler, MTTR ve MTBF. Her namespace'te en sorunlu monitor en üstte; saatlik özetlerden hesaplanır.",
     "reports.readouts": "Dönemin özeti",
     "reports.readout.uptime": "Uptime",
     "reports.readout.uptime.hint.one": "{count} kontrol",
@@ -36,12 +34,10 @@ export const reports = defineMessages(
     "reports.namespace.only": "Yalnızca {namespace}",
     "reports.namespace.clear": "Bütün namespace'leri göster",
     "reports.namespace.open": "{namespace} namespace'ini aç",
-    "reports.monitor.open": "{name} monitor'ünü aç",
+    "reports.monitor.open": "{name} monitor'unu aç",
     "reports.generated": "Saatlik özetlerden",
   },
   {
-    "reports.lead":
-      "Uptime, outages, MTTR and MTBF per namespace and monitor, with the most troubled monitor at the top of each namespace; calculated from hourly summaries.",
     "reports.readouts": "The period in figures",
     "reports.readout.uptime": "Uptime",
     "reports.readout.uptime.hint.one": "{count} check",
@@ -63,7 +59,7 @@ export const reports = defineMessages(
     "reports.mtbf.means": "how long things run between outages on average: monitored time outside outages ÷ number of outages. Longer is better.",
     "reports.noOutages": "no outages",
     "reports.unit.s": "s",
-    "reports.unit.min": "min",
+    "reports.unit.min": "m",
     "reports.unit.h": "h",
     "reports.unit.d": "d",
     "reports.table": "By namespace and monitor",

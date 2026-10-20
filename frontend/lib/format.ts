@@ -1,6 +1,6 @@
 import type { T } from "@/lib/i18n/translate";
 
-/** "12 sn önce" / "12 s ago", "3 dk önce" / "3 min ago", ... relative to now; "şimdi" / "just now" under a second. */
+/** "12 sn önce" / "12s ago", "3 dk önce" / "3m ago", ... relative to now; "şimdi" / "just now" under a second. */
 export function timeAgo(iso: string, now: number, t: T): string {
   const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   const ago = (duration: string) => t("format.ago", { duration });
@@ -13,7 +13,11 @@ export function timeAgo(iso: string, now: number, t: T): string {
   return ago(t.n("format.days", Math.floor(hours / 24)));
 }
 
-/** 30 -> "30 sn" / "30 s", 90 -> "1,5 dk" / "1.5 min", 86400 -> "24 sa" / "24 h", 604800 -> "7 gün" / "7 days". */
+/**
+ * 30 -> "30 sn" / "30s", 90 -> "1,5 dk" / "1.5m", 86400 -> "24 sa" / "24h",
+ * 604800 -> "7 gün" / "7d": the units of span(), so that one screen writes
+ * every length of time alike.
+ */
 export function duration(seconds: number, t: T): string {
   const format = (n: number) => n.toLocaleString(t.intl, { maximumFractionDigits: 1 });
   if (seconds < 60) return t("format.seconds", { count: seconds });

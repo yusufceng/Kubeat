@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Series, SeriesPoint } from "@/lib/api";
 import { duration } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
+import { HelpTip } from "@/app/ui/help-tip";
 import { ChevronIcon } from "@/app/ui/icons";
 import { CloseIcon, ZoomInIcon } from "@/app/ui/monitor-icons";
 import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
@@ -677,7 +678,7 @@ export function LatencyChart({
             {t("monitorPage.chart.band.maintenance")}
           </span>
         )}
-        <span className="basis-full">{t("monitorPage.chart.selectHint")}</span>
+        <HelpTip label={t("monitorPage.chart.help")}>{t("monitorPage.chart.selectHint")}</HelpTip>
       </figcaption>
 
       <details className="mon-more mt-3 px-0 pb-0">

@@ -19,7 +19,7 @@ import { BackendError } from "@/app/ui/backend-error";
 import { IncidentsIcon } from "@/app/ui/icons";
 import { IncidentFilters, type MonitorOption } from "@/app/ui/incident-filters";
 import { ChevronDownIcon, DownloadIcon } from "@/app/ui/incident-icons";
-import { IncidentTable } from "@/app/ui/incident-table";
+import { IncidentTable, type TableSort } from "@/app/ui/incident-table";
 import { LiveRefresh } from "@/app/ui/live-refresh";
 import { monitorLabel } from "@/app/ui/monitor-name";
 
@@ -36,17 +36,24 @@ async function requestTime(): Promise<number> {
   return Date.now();
 }
 
-/** The namespaces and monitors the list can be narrowed to: those the viewer can see. */
-async function filterOptions(): Promise<{ namespaces: string[]; monitors: MonitorOption[] }> {
+/**
+ * The namespaces and monitors the list can be narrowed to: those the viewer
+ * can see; and the monitors' names as the rest of the app shows them.
+ */
+async function filterOptions(): Promise<{ namespaces: string[]; monitors: MonitorOption[]; names: Map<number, string> }> {
   try {
     const monitors = await workspaceMonitors();
     const options = monitors
       .map((m) => ({ id: m.id, name: monitorLabel(m).name, namespace: m.namespace }))
       .sort((a, b) => compareNamespaces(a.namespace, b.namespace) || a.name.localeCompare(b.name));
-    return { namespaces: [...new Set(options.map((m) => m.namespace))], monitors: options };
+    return {
+      namespaces: [...new Set(options.map((m) => m.namespace))],
+      monitors: options,
+      names: new Map(options.map((m) => [m.id, m.name])),
+    };
   } catch {
     // The list still works without the choices; the context bar says what is wrong.
-    return { namespaces: [], monitors: [] };
+    return { namespaces: [], monitors: [], names: new Map() };
   }
 }
 
@@ -59,20 +66,27 @@ async function Incidents({ searchParams }: { searchParams: SearchParams }) {
   const unstated = filterToQuery({ ...filter, state: null }, now);
   delete unstated.sort;
   delete unstated.order;
+  // Of every state, the outages going on stand above the list, in its
+  // order, on each of its pages: whatever flapped since, they are what one
+  // comes for. The list under them holds the rest.
+  const pin = filter.state === null;
 
   let page: { incidents: Incident[]; total: number };
+  let ongoing: Incident[];
   let counts: { all: number; open: number; resolved: number };
   let options: Awaited<ReturnType<typeof filterOptions>>;
   try {
-    const [listed, all, open, choices] = await Promise.all([
-      queryIncidentsPage(filterToQuery(filter, now, pageSize)),
+    const [listed, pinned, all, open, choices] = await Promise.all([
+      queryIncidentsPage(filterToQuery(pin ? { ...filter, state: "resolved" } : filter, now, pageSize)),
+      pin ? queryIncidentsPage(filterToQuery({ ...filter, state: "open", page: 1 }, now, pageSize)) : null,
       filter.state === null ? null : countIncidents(unstated),
-      filter.state === "open" ? null : countIncidents({ ...unstated, state: "open" }),
+      filter.state === "resolved" ? countIncidents({ ...unstated, state: "open" }) : null,
       filterOptions(),
     ]);
     page = listed;
-    const allCount = all ?? listed.total;
-    const openCount = open ?? listed.total;
+    ongoing = pinned?.incidents ?? [];
+    const openCount = pinned?.total ?? open ?? listed.total;
+    const allCount = all ?? listed.total + openCount;
     counts = { all: allCount, open: openCount, resolved: Math.max(0, allCount - openCount) };
     options = choices;
   } catch (err) {
@@ -87,10 +101,25 @@ async function Incidents({ searchParams }: { searchParams: SearchParams }) {
   const lastPage = Math.max(1, Math.ceil(page.total / pageSize));
   const first = (filter.page - 1) * pageSize + 1;
   const last = (filter.page - 1) * pageSize + page.incidents.length;
+  const sort: TableSort = {
+    by: filter.sort,
+    order: filter.order,
+    href: (by, order) => filterHref(filter, { sort: by, ...(order && { order }) }),
+  };
+  // In the order of time, a monitor's run of short outages is one row, which
+  // opens the list narrowed to them; narrowed to a monitor, each is its own.
+  const runs =
+    filter.sort === "started_at" && filter.monitorId === null
+      ? {
+          windowMs: config.flapWindowSeconds * 1000,
+          href: ({ monitorId, from, to }: { monitorId: number; from: string; to: string }) =>
+            filterHref(filter, { monitorId, from, to, range: null }),
+        }
+      : undefined;
 
   return (
     <>
-      <PageHead csv={page.total > 0 ? csvHref(filter) : null} />
+      <PageHead csv={counts.all > 0 ? csvHref(filter) : null} />
       <IncidentFilters
         filter={filter}
         counts={counts}
@@ -98,27 +127,42 @@ async function Incidents({ searchParams }: { searchParams: SearchParams }) {
         monitors={options.monitors}
         ranges={config.incidentRanges}
       >
+        {ongoing.length > 0 && (
+          <section aria-labelledby="inc-ongoing-title" className="inc-group">
+            <h2 id="inc-ongoing-title" className="inc-group-title">
+              {t("incidents.state.open")}
+              <span className="tabular-nums text-down-ink">{counts.open.toLocaleString(t.intl)}</span>
+            </h2>
+            <IncidentTable incidents={ongoing} showMonitor names={options.names} sort={sort} />
+          </section>
+        )}
         {page.incidents.length > 0 ? (
-          <IncidentTable
-            incidents={page.incidents}
-            showMonitor
-            sort={{
-              by: filter.sort,
-              order: filter.order,
-              href: (sort, order) => filterHref(filter, { sort, ...(order && { order }) }),
-            }}
-            footer={
-              <Pages
-                filter={filter}
-                total={page.total}
-                first={first}
-                last={last}
-                hasPrev={filter.page > 1}
-                hasNext={filter.page < lastPage}
-              />
-            }
-          />
-        ) : page.total > 0 ? (
+          <section aria-labelledby={ongoing.length > 0 ? "inc-rest-title" : undefined} className="inc-group">
+            {ongoing.length > 0 && (
+              <h2 id="inc-rest-title" className="inc-group-title">
+                {t("incidents.state.resolved")}
+                <span className="tabular-nums text-ink-3">{page.total.toLocaleString(t.intl)}</span>
+              </h2>
+            )}
+            <IncidentTable
+              incidents={page.incidents}
+              showMonitor
+              names={options.names}
+              sort={sort}
+              runs={runs}
+              footer={
+                <Pages
+                  filter={filter}
+                  total={page.total}
+                  first={first}
+                  last={last}
+                  hasPrev={filter.page > 1}
+                  hasNext={filter.page < lastPage}
+                />
+              }
+            />
+          </section>
+        ) : ongoing.length > 0 && filter.page === 1 ? null : page.total > 0 ? (
           // Past the last page: the list got shorter since the link was made.
           <Empty
             title={t("incidents.past.title")}
@@ -147,14 +191,13 @@ async function Incidents({ searchParams }: { searchParams: SearchParams }) {
   );
 }
 
-/** The title, what the list holds, and the export of what it shows. */
+/** The title and the export of what the list shows. */
 async function PageHead({ csv }: { csv: string | null }) {
   const t = await getT();
   return (
     <header className="inc-head">
       <div className="min-w-0">
         <h1 className="type-display max-sm:type-display-s">{t("nav.incidents")}</h1>
-        <p className="inc-lead">{t("incidents.intro")}</p>
       </div>
       {csv && (
         <a href={csv} className="btn btn-ghost" download title={t("incidents.csv.hint")}>

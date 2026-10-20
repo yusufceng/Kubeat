@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -329,9 +330,11 @@ func (c *Checker) checkPush(ctx context.Context, m store.Monitor, now time.Time)
 	if err != nil {
 		return failed(err)
 	}
-	// A report may be late by the monitor's timeout before it is missed.
+	// A report may be late by the monitor's timeout before it is missed. The
+	// message stays the same check after check, so that the failures of one
+	// silence read as one: how long it has lasted is the incident's to say.
 	if age := now.Sub(report.ReceivedAt); age > m.Interval+m.Timeout {
-		return failedf("no push received for %s; one is expected every %s", age.Round(time.Second), m.Interval)
+		return failedf("no push within the expected %s interval", shortDuration(m.Interval))
 	}
 	if !report.Up {
 		if report.Message == "" {
@@ -340,4 +343,17 @@ func (c *Checker) checkPush(ctx context.Context, m store.Monitor, now time.Time)
 		return failedf("the source reported a failure: %s", report.Message)
 	}
 	return outcome{detail: report.Message, latency: report.Latency, hasTime: true}
+}
+
+// shortDuration writes an interval without its zero units: 1h0m0s as "1h",
+// 1h30m0s as "1h30m", 5m0s as "5m", 45s as it is.
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = s[:len(s)-2]
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = s[:len(s)-2]
+	}
+	return s
 }

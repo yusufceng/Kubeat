@@ -62,7 +62,7 @@ export async function MonitorTable({
           {monitors.map((m) => {
             const item = toFleetItem(m);
             const style = stateStyles[item.state];
-            const [name, rest] = splitName(item.name, item.discovered);
+            const [name, rest] = splitName(item.name, item.derived);
             return (
               <tr key={m.id}>
                 <td>
@@ -91,7 +91,7 @@ export async function MonitorTable({
                   </span>
                 </td>
                 <td className="fl-col-beats">
-                  <HeartbeatBar results={m.history} slots={slots} height={16} />
+                  <HeartbeatBar results={m.history} slots={slots} height={16} paused={!m.enabled} />
                 </td>
                 <td className={`fl-col-num fl-col-uptime ${m.enabled ? uptimeTone(m.uptime_percent, tones) : "text-ink-3"}`}>
                   {uptime(m.uptime_percent, t)}

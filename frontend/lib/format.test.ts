@@ -16,8 +16,8 @@ function translator(locale: "en" | "tr"): T {
       "format.span.h": "{count}h",
       "format.span.d": "{count}d",
       "format.justNow": "just now",
-      "format.seconds": "{count} s",
-      "format.minutes": "{count} min",
+      "format.seconds": "{count}s",
+      "format.minutes": "{count}m",
       "format.ago": "{duration} ago",
     },
     tr: {
@@ -72,7 +72,7 @@ test("a span leaves out a smaller unit that is zero, and is never zero seconds",
 test("time ago says just now rather than zero seconds", () => {
   const now = Date.parse("2026-10-20T16:00:00Z");
   assert.equal(timeAgo("2026-10-20T16:00:00Z", now, tr), "şimdi");
-  assert.equal(timeAgo("2026-10-20T15:59:48Z", now, en), "12 s ago");
+  assert.equal(timeAgo("2026-10-20T15:59:48Z", now, en), "12s ago");
   assert.equal(timeAgo("2026-10-20T15:57:00Z", now, tr), "3 dk önce");
 });
 
