@@ -3,9 +3,12 @@ package checker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/textproto"
+	"net/url"
 	"strings"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
@@ -58,11 +61,15 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 	}
 	// Explicit headers win over what the options above set.
 	for name, value := range o.Headers {
-		if http.CanonicalHeaderKey(name) == "Host" {
-			req.Host = value // net/http takes the Host header from here
-			continue
+		if http.CanonicalHeaderKey(name) != "Host" {
+			req.Header.Set(name, value)
 		}
-		req.Header.Set(name, value)
+	}
+	// net/http takes the Host header from here; trimmed, as the monitor's
+	// destination counts it, since it would send a padded one empty.
+	site := o.HostHeader()
+	if site != "" {
+		req.Host = site
 	}
 
 	transport := c.verifying
@@ -77,21 +84,41 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 		defer t.CloseIdleConnections()
 		transport = t
 	}
+	// The monitor's headers, credentials and body are for the server it
+	// checks: the one its URL names, or that one on TLS (store.SameServer),
+	// and the site its Host header names there. A redirect that stays on it
+	// goes to that site, though net/http keeps the Host header only on a
+	// relative one. A redirect to another server goes without them, with
+	// its own name for the host, and is not followed when net/http would
+	// send the body along (307, 308). Left to itself, net/http would keep
+	// custom headers on every redirect, credentials on one to the same host
+	// name on another port, and the Host header on one to "//elsewhere".
+	server := store.Endpoint(m.Target)
 	client := &http.Client{
 		Transport: transport,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
 			if o.MaxRedirects == 0 {
 				return http.ErrUseLastResponse // judge the redirect itself
 			}
 			if len(via) > o.MaxRedirects {
 				return fmt.Errorf("stopped after %d redirects", o.MaxRedirects)
 			}
+			if store.SameServer(server, store.Endpoint(next.URL.String())) {
+				if site != "" {
+					next.Host = site
+				}
+				return nil
+			}
+			if next.Body != nil && next.Body != http.NoBody {
+				return errBodyToAnotherServer
+			}
+			withoutOwnHeaders(next, o)
 			return nil
 		},
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return failed(err)
+		return failed(shortened(c.notHTTP(m, err)))
 	}
 	defer resp.Body.Close()
 
@@ -129,4 +156,55 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 		out.detail, out.err = matchJSON(content, o.JSONPath, o.JSONOperator, o.JSONExpected)
 	}
 	return out
+}
+
+// maxErrorURL bounds the address that a failed request's error repeats:
+// with the whole of a long target, a PromQL query say, the reason after it
+// would not fit in what a result keeps (maxDetail).
+const maxErrorURL = 120
+
+// shortened returns err with the address it repeats cut to maxErrorURL.
+func shortened(err error) error {
+	var failure *url.Error
+	if !errors.As(err, &failure) || err != failure || len(failure.URL) <= maxErrorURL {
+		return err
+	}
+	return &url.Error{Op: failure.Op, URL: truncate(failure.URL, maxErrorURL), Err: failure.Err}
+}
+
+// errBodyToAnotherServer fails a check whose redirect would send its
+// request body, which often carries a password or a token, to a server
+// other than the monitor's.
+var errBodyToAnotherServer = errors.New("the redirect would send the request body to another server")
+
+// notHTTP returns err, unless it says the server's answer was not HTTP:
+// net/http quotes in it the line it could not read, the banner of whatever
+// listens there, and the check stores that it was not HTTP instead.
+func (c *Checker) notHTTP(m store.Monitor, err error) error {
+	words := err
+	var failure *url.Error
+	if errors.As(err, &failure) {
+		words = failure.Err
+	}
+	if !strings.Contains(words.Error(), "malformed HTTP ") && !errors.As(words, new(textproto.ProtocolError)) {
+		return err
+	}
+	kind := c.targetSaid(m, "the server did not answer with HTTP", words.Error())
+	if failure != nil {
+		return &url.Error{Op: failure.Op, URL: failure.URL, Err: kind}
+	}
+	return kind
+}
+
+// withoutOwnHeaders takes the monitor's headers and credentials off a
+// request to another server than the monitor's, and leaves the host to the
+// request's URL.
+func withoutOwnHeaders(r *http.Request, o store.HTTPOptions) {
+	for name := range o.Headers {
+		r.Header.Del(name)
+	}
+	if o.Auth != store.HTTPAuthNone {
+		r.Header.Del("Authorization")
+	}
+	r.Host = ""
 }

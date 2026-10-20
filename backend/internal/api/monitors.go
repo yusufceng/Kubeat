@@ -126,7 +126,9 @@ func toResultResponse(r store.CheckResult) resultResponse {
 // toMonitorResponse is the monitor as the principal p sees it. The push
 // token goes only to those who may change the monitor: whoever holds it can
 // report the monitor up or down, raise an incident or end one, without
-// signing in, which is more than a viewer may do.
+// signing in, which is more than a viewer may do. So does an HTTP check's
+// request body, which often carries a password or a token, the reason it
+// is stored encrypted: those who may change it see it, viewers do not.
 func toMonitorResponse(p auth.Principal, st store.MonitorStatus, window time.Duration) monitorResponse {
 	resp := monitorResponse{
 		ID:              st.ID,
@@ -159,6 +161,8 @@ func toMonitorResponse(p auth.Principal, st store.MonitorStatus, window time.Dur
 	}
 	if p.CanEdit(st.Namespace) {
 		resp.PushToken = st.PushToken
+	} else if resp.HTTP != nil {
+		resp.HTTP.Body, resp.HTTP.ContentType = "", ""
 	}
 	if !st.MaintenanceUntil.IsZero() {
 		resp.MaintenanceUntil = &st.MaintenanceUntil
@@ -398,6 +402,41 @@ func validPort(port string) bool {
 	return err == nil && n >= 1 && n <= 65535
 }
 
+// validHostHeader reports whether value is what a Host header names: a
+// host name or an IP address, an IPv6 one in brackets, with a port or
+// without.
+func validHostHeader(value string) bool {
+	host, port, err := net.SplitHostPort(value) // takes the brackets off
+	bracketed := strings.HasPrefix(value, "[")
+	switch {
+	case err == nil:
+		if !validPort(port) {
+			return false
+		}
+	case bracketed && strings.HasSuffix(value, "]"):
+		host = value[1 : len(value)-1]
+	default:
+		host = value
+	}
+	if bracketed || strings.Contains(host, ":") {
+		return bracketed && strings.Contains(host, ":") && net.ParseIP(host) != nil
+	}
+	return validHost(host)
+}
+
+// asciiHost refuses a URL whose host is not ASCII. net/http dials such a
+// name and sends it as Host in two different Punycode forms, neither of
+// them the one written, so which server the monitor's secrets go to could
+// not be told from the target; its xn-- form says it plainly.
+func asciiHost(u *url.URL) error {
+	for _, c := range []byte(u.Hostname()) {
+		if c >= 0x80 {
+			return errors.New("the target's host must be written in ASCII: give an international name in its xn-- (Punycode) form")
+		}
+	}
+	return nil
+}
+
 // validateTarget checks that target is what a monitor of the given type
 // checks.
 func validateTarget(typ store.MonitorType, target string) error {
@@ -407,11 +446,13 @@ func validateTarget(typ store.MonitorType, target string) error {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return errors.New("target must be an http:// or https:// URL")
 		}
+		return asciiHost(u)
 	case store.MonitorWebSocket:
 		u, err := url.Parse(target)
 		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
 			return errors.New("target must be a ws:// or wss:// URL")
 		}
+		return asciiHost(u)
 	case store.MonitorTCP, store.MonitorGRPC, store.MonitorPostgres, store.MonitorMySQL, store.MonitorRedis:
 		host, port, err := net.SplitHostPort(target)
 		if err != nil || host == "" {
@@ -630,6 +671,53 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 	h.storeMonitor(w, r, m)
 }
 
+// renewPushToken gives a push monitor a new token and answers with the
+// monitor, which carries it; the old token stops working at once. A token
+// that leaked, or that viewers were handed before the token was kept from
+// them, is retired this way, and the monitor keeps its history, incidents
+// and place on status pages.
+func (h *handler) renewPushToken(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	m, err := h.opts.Store.GetMonitor(r.Context(), id)
+	p := principal(r)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !p.CanRead(m.Namespace)) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	if !p.CanEdit(m.Namespace) {
+		scopeError(w, p)
+		return
+	}
+	if m.Type != store.MonitorPush {
+		writeError(w, http.StatusBadRequest, "only a push monitor has a push token")
+		return
+	}
+	err = h.opts.Store.SetPushToken(r.Context(), id, newPushToken())
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	h.audit(r, "update", "monitor", id, m.Name+": push token renewed; the old one no longer works")
+	st, err := h.opts.Store.GetMonitorStatus(r.Context(), id, time.Now().Add(-h.opts.StatsWindow))
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toMonitorResponse(p, st, h.opts.StatsWindow))
+}
+
 // updateMonitorRequest carries only the fields to change.
 type updateMonitorRequest struct {
 	Name                 *string `json:"name"`
@@ -757,18 +845,19 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		scopeError(w, p)
 		return
 	}
-	// Stored secrets go only to the server they were entered for.
-	if destination(current.Type, merged.Target) != destination(current.Type, current.Target) {
-		if kept := req.checkOptions.keptSecrets(current); len(kept) > 0 {
-			writeError(w, http.StatusBadRequest, "enter "+strings.Join(kept, ", ")+" again: stored secrets go only to the server they were entered for")
-			return
-		}
-	}
 
 	change := merged.monitor(current)
 	if err := req.checkOptions.apply(&change); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// Stored secrets go only to the server they were entered for: the
+	// target's, or that one on TLS, and the site its Host header names.
+	if !store.SameServer(current.Destination(), change.Destination()) {
+		if kept := req.checkOptions.keptSecrets(current); len(kept) > 0 {
+			writeError(w, http.StatusBadRequest, "enter "+strings.Join(kept, ", ")+" again: stored secrets go only to the server they were entered for")
+			return
+		}
 	}
 	if err := validateEachPod(change); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

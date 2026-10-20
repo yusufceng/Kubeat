@@ -3,9 +3,11 @@ package checker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -52,14 +54,41 @@ func TestGuardHoldsEveryEngine(t *testing.T) {
 	}
 	c := New(Options{Guard: guard(t), Endpoints: fakeEndpoints{endpoints: []Endpoint{{Pod: "api-1", Address: addr}}}})
 	for name, m := range monitors {
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			got := c.Check(ctx, m)
-			if got.Up || !strings.Contains(got.Error, "is blocked by the target policy") || !strings.Contains(got.Error, "UPTIME_TARGET_ALLOW_CIDRS") {
-				t.Errorf("result = %+v", got)
-			}
-		})
+		// A refusal is not the failure an inverted monitor expects either:
+		// the connection never left, so the policy's error stands.
+		for _, inverted := range []bool{false, true} {
+			m.Inverted = inverted
+			t.Run(fmt.Sprintf("%s/inverted=%v", name, inverted), func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				got := c.Check(ctx, m)
+				if got.Up || !strings.Contains(got.Error, "is blocked by the target policy") || !strings.Contains(got.Error, "UPTIME_TARGET_ALLOW_CIDRS") {
+					t.Errorf("result = %+v", got)
+				}
+			})
+		}
+	}
+}
+
+// An inverted monitor still takes a real failure of its target for the one
+// it expects, and an answer for a failure of its own.
+func TestInvertedMonitorBehindTheGuard(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	closed := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	closedAddr := closed.Listener.Addr().String()
+	closed.Close()
+	c := New(Options{Guard: guard(t, "127.0.0.0/8")})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	m := store.Monitor{Type: store.MonitorTCP, Target: closedAddr, Inverted: true}
+	if got := c.Check(ctx, m); !got.Up || !strings.HasPrefix(got.Detail, "failed as expected: ") {
+		t.Errorf("an allowed target that refuses: %+v", got)
+	}
+	m.Target = srv.Listener.Addr().String()
+	if got := c.Check(ctx, m); got.Up || !strings.HasPrefix(got.Error, "the target responded") {
+		t.Errorf("an allowed target that answers: %+v", got)
 	}
 }
 
@@ -76,6 +105,34 @@ func TestGuardException(t *testing.T) {
 		{Type: store.MonitorRedis, Target: fakeRedis(t, "", "", "+PONG")},
 	} {
 		if got := c.Check(ctx, m); !got.Up {
+			t.Errorf("%s %s: %+v", m.Type, m.Target, got)
+		}
+	}
+}
+
+// A proxy the operator set is reached at its exact address, a sidecar's on
+// loopback too, without an exception; the rest of loopback stays closed.
+func TestGuardTrustsTheProxy(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer proxy.Close()
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer other.Close()
+	proxyURL, _ := url.Parse(proxy.URL)
+	trusting := guard(t).Trust(netguard.HostPort(proxy.URL))
+	c := New(Options{Guard: trusting})
+	// What the transport would take from HTTP_PROXY.
+	c.verifying.Proxy = trusting.Proxy(http.ProxyURL(proxyURL))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if got := c.Check(ctx, httpMonitor("http://192.0.2.10/healthz")); !got.Up || got.StatusCode != http.StatusOK {
+		t.Errorf("through the trusted proxy: %+v", got)
+	}
+	for _, m := range []store.Monitor{
+		httpMonitor(other.URL), // handed to the proxy, with its target checked first
+		{Type: store.MonitorTCP, Target: other.Listener.Addr().String()},
+	} {
+		if got := c.Check(ctx, m); got.Up || !strings.Contains(got.Error, "is blocked by the target policy") {
 			t.Errorf("%s %s: %+v", m.Type, m.Target, got)
 		}
 	}

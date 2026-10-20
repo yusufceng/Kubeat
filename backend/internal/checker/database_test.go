@@ -103,10 +103,11 @@ func TestRedisCheck(t *testing.T) {
 	if got := check(shared, store.DatabaseOptions{Password: "s3cret"}); !got.Up {
 		t.Errorf("shared password: %+v", got)
 	}
-	if got := check(shared, store.DatabaseOptions{}); got.Up || !strings.Contains(got.Error, "NOAUTH") {
+	// The server's own words go to the log (TestTargetsWordsAreNotStored).
+	if got := check(shared, store.DatabaseOptions{}); got.Up || got.Error != "the server answered with an error (NOAUTH)" {
 		t.Errorf("no password given: %+v", got)
 	}
-	if got := check(shared, store.DatabaseOptions{Password: "wrong"}); got.Up || !strings.Contains(got.Error, "login: WRONGPASS") {
+	if got := check(shared, store.DatabaseOptions{Password: "wrong"}); got.Up || got.Error != "login: the server answered with an error (WRONGPASS)" {
 		t.Errorf("wrong password: %+v", got)
 	}
 
@@ -119,7 +120,7 @@ func TestRedisCheck(t *testing.T) {
 	}
 
 	// Something answers, but it is not Redis saying PONG.
-	if got := check(fakeRedis(t, "", "", "+LOADING"), store.DatabaseOptions{}); got.Up || !strings.Contains(got.Error, "unexpected answer") {
+	if got := check(fakeRedis(t, "", "", "+LOADING"), store.DatabaseOptions{}); got.Up || got.Error != "unexpected answer to PING" {
 		t.Errorf("unexpected answer: %+v", got)
 	}
 	// A plain server does not complete a TLS handshake.

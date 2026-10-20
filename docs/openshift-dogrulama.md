@@ -24,7 +24,9 @@ geri bildirileceğini anlatır. Hepsi bir öğleden sonraya sığar.
 - İzlenecek bir şeyler: Route'u olan bir iki uygulama namespace'i. Yoksa
   `deploy/demo` altındaki örnek namespace'i `oc apply` ile kurun.
 - İsteğe bağlı: Keycloak ya da kurumsal IdP'de bir OIDC istemcisi (redirect
-  URL `https://<kubeat-route>/auth/callback`), LDAP için bir arama hesabı.
+  URL `https://<kubeat-route>/auth/callback`; `publicURL` verilirse
+  `<publicURL>/auth/callback`, kurulum notları yazar), LDAP için bir arama
+  hesabı.
 
 ## Kurulum
 

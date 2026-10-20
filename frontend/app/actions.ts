@@ -27,6 +27,7 @@ import {
   type DnsOptions,
   type HttpOptions,
   importCandidates,
+  renewPushToken,
   restoreSource,
   type MaintenanceRepeat,
   type Monitor,
@@ -201,6 +202,12 @@ export async function bulkMonitorsAction(ids: number[], action: BulkAction): Pro
 export async function setMonitorEnabledAction(formData: FormData): Promise<void> {
   await updateMonitor(Number(formData.get("id")), { enabled: formData.get("enabled") === "true" });
   refresh();
+}
+
+/** Gives a push monitor a new report address; the old one stops working at once. */
+export async function renewPushTokenAction(formData: FormData): Promise<void> {
+  await renewPushToken(Number(formData.get("id")));
+  refresh(); // the page shows the new address
 }
 
 export async function deleteMonitorAction(formData: FormData): Promise<void> {

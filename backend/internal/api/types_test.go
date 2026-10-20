@@ -238,6 +238,108 @@ func TestPushTokenOnlyForThoseWhoMayChangeTheMonitor(t *testing.T) {
 	}
 }
 
+// A push token that leaked, or that viewers saw before it was kept from
+// them, is renewed in place: the old one stops working, the monitor keeps
+// its id and so its history. Only those who may change the monitor may.
+func TestRenewPushToken(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	ctx := context.Background()
+	var job, web monitorResponse
+	do(t, "POST", base, monitorJSON("nightly-backup", "push", "", `"namespace":"shop"`), &job)
+	do(t, "POST", base, monitorJSON("web", "http", "https://shop.example/", `"namespace":"shop"`), &web)
+	addUser(t, srv.URL, "editor", store.RoleEditor, "shop")
+	addUser(t, srv.URL, "viewer", store.RoleViewer, "shop")
+	addUser(t, srv.URL, "outsider", store.RoleEditor, "billing")
+	editor, _ := signIn(t, srv.URL, "editor", "parola-123")
+	viewer, _ := signIn(t, srv.URL, "viewer", "parola-123")
+	outsider, _ := signIn(t, srv.URL, "outsider", "parola-123")
+	renew := base + "/" + itoa(job.ID) + "/push-token"
+	pushes := func(token string) int {
+		t.Helper()
+		var answer pushResponse
+		return do(t, "GET", srv.URL+"/api/push/"+token+"?status=down&msg=forged", "", &answer)
+	}
+
+	for name, tc := range map[string]struct {
+		token, url string
+		want       int
+	}{
+		"a viewer":                  {viewer, renew, http.StatusForbidden},
+		"an editor of another team": {outsider, renew, http.StatusNotFound},
+		"a monitor without one":     {editor, base + "/" + itoa(web.ID) + "/push-token", http.StatusBadRequest},
+		"no such monitor":           {editor, base + "/999/push-token", http.StatusNotFound},
+	} {
+		if code := doAs(t, tc.token, "POST", tc.url, "", nil); code != tc.want {
+			t.Errorf("%s: status = %d, want %d", name, code, tc.want)
+		}
+	}
+	if stored, _ := db.GetMonitor(ctx, job.ID); stored.PushToken != job.PushToken {
+		t.Fatalf("the token changed on a refused request: %q", stored.PushToken)
+	}
+
+	var renewed monitorResponse
+	if code := doAs(t, editor, "POST", renew, "", &renewed); code != http.StatusOK {
+		t.Fatalf("renew: status = %d", code)
+	}
+	if renewed.ID != job.ID || len(renewed.PushToken) != 32 || renewed.PushToken == job.PushToken {
+		t.Errorf("renewed = id %d, token %q (was %q)", renewed.ID, renewed.PushToken, job.PushToken)
+	}
+	if code := pushes(job.PushToken); code != http.StatusNotFound {
+		t.Errorf("the old token: status = %d", code)
+	}
+	if code := pushes(renewed.PushToken); code != http.StatusOK {
+		t.Errorf("the new token: status = %d", code)
+	}
+	audit, err := db.ListAudit(ctx, 10)
+	if err != nil || len(audit) == 0 || audit[0].Username != "editor" || audit[0].ObjectID != job.ID ||
+		audit[0].Summary != "nightly-backup: push token renewed; the old one no longer works" {
+		t.Errorf("audit = %+v, %v", audit, err)
+	}
+}
+
+// An HTTP check's request body often carries a password: like the push
+// token, it goes to those who may change the monitor and to no viewer.
+func TestRequestBodyOnlyForThoseWhoMayChangeTheMonitor(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	body := `{\"username\":\"probe\",\"password\":\"S3cr3t\"}`
+	var login monitorResponse
+	if code := do(t, "POST", base, monitorJSON("login", "http", "https://shop.example/login",
+		`"namespace":"shop","http":{"method":"POST","body":"`+body+`","content_type":"application/json"}`), &login); code != http.StatusCreated {
+		t.Fatalf("create: status = %d", code)
+	}
+	want := `{"username":"probe","password":"S3cr3t"}`
+	addUser(t, srv.URL, "editor", store.RoleEditor, "shop")
+	addUser(t, srv.URL, "viewer", store.RoleViewer, "shop")
+	addUser(t, srv.URL, "seer", store.RoleViewer, "*")
+	editor, _ := signIn(t, srv.URL, "editor", "parola-123")
+	viewer, _ := signIn(t, srv.URL, "viewer", "parola-123")
+	seer, _ := signIn(t, srv.URL, "seer", "parola-123")
+
+	for name, tc := range map[string]struct{ token, body, contentType string }{
+		"admin":               {testToken, want, "application/json"},
+		"editor":              {editor, want, "application/json"},
+		"viewer":              {viewer, "", ""},
+		"viewer of every one": {seer, "", ""},
+	} {
+		var one monitorResponse
+		if code := doAs(t, tc.token, "GET", base+"/"+itoa(login.ID), "", &one); code != http.StatusOK || one.HTTP == nil ||
+			one.HTTP.Body != tc.body || one.HTTP.ContentType != tc.contentType || one.HTTP.Method != "POST" {
+			t.Errorf("%s reads the monitor: status = %d, http = %+v", name, code, one.HTTP)
+		}
+		var list []monitorResponse
+		if code := doAs(t, tc.token, "GET", base, "", &list); code != http.StatusOK || len(list) != 1 || list[0].HTTP.Body != tc.body {
+			t.Errorf("%s lists the monitors: status = %d, list = %+v", name, code, list)
+		}
+	}
+	// What an editor saves comes back with the body.
+	var updated monitorResponse
+	if code := doAs(t, editor, "PATCH", base+"/"+itoa(login.ID), `{"description":"giriş"}`, &updated); code != http.StatusOK || updated.HTTP.Body != want {
+		t.Errorf("editor's update: status = %d, http = %+v", code, updated.HTTP)
+	}
+}
+
 func TestCloneMonitor(t *testing.T) {
 	srv, db := newTestAPI(t)
 	base := srv.URL + "/api/v1/monitors"

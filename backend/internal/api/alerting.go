@@ -248,7 +248,7 @@ func webURL(target string) error {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return errors.New("target must be an http:// or https:// URL")
 	}
-	return nil
+	return asciiHost(u)
 }
 
 // channelSettings validates a channel's target and secret for its type and
@@ -436,7 +436,7 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		}
 		// Gotify and ntfy send the token to the target's server: kept for a
 		// target on another one, it would go to whoever runs that.
-		if keep && ch.Secret != "" && endpoint(ch.Target) != endpoint(stored) {
+		if keep && ch.Secret != "" && store.Endpoint(ch.Target) != store.Endpoint(stored) {
 			writeError(w, http.StatusBadRequest, "enter secret again: a stored secret goes only to the server it was entered for")
 			return
 		}

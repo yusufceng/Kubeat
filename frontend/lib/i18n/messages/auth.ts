@@ -90,6 +90,8 @@ export const auth = defineMessages(
     "users.oidc.offBefore": "SSO kapalı. Açmak için backend'e",
     "users.oidc.offAnd": "ve",
     "users.oidc.offAfter": "verin; README'de anlatılıyor.",
+    "users.oidc.problem":
+      "SSO ayarlanmış ama kapalı: ayarlarıyla çalışamaz. Düzeltip backend'i yeniden başlatın; izleme bundan etkilenmez. Backend'in açılışta loga yazdığı neden:",
     "users.ldap.title": "LDAP",
     "users.ldap.directory": "Dizin:",
     "users.ldap.enabled":
@@ -207,6 +209,8 @@ export const auth = defineMessages(
     "users.oidc.offBefore": "SSO is off. To turn it on, set",
     "users.oidc.offAnd": "and",
     "users.oidc.offAfter": "on the backend; the README explains how.",
+    "users.oidc.problem":
+      "SSO is configured but off: it cannot work with its settings. Fix them and restart the backend; monitoring is not affected. The reason the backend logged at start:",
     "users.ldap.title": "LDAP",
     "users.ldap.directory": "Directory:",
     "users.ldap.enabled":

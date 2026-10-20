@@ -16,6 +16,7 @@ FRONTEND_HOST ?= 127.0.0.1
 # Lokal veritabanındaki gizli değerleri şifreleyen anahtar; ilk çalıştırmada
 # bir kez üretilir ve git'e girmez. Silinirse veritabanındaki şifreli değerler
 # okunamaz ve backend başlamaz: o zaman backend/uptime.db de silinmelidir.
+# Dosya bayt bayt anahtar olduğundan satır sonu olmadan yazılır.
 DEV_SECRET_KEY := .dev/secret.key
 # Lokal geliştirmede bu makinedeki servisler de kontrol edilebilsin diye
 # loopback hedef politikasından istisna tutulur. Gerçek kurulumda loopback
@@ -26,7 +27,7 @@ TARGET_ALLOW_CIDRS ?= 127.0.0.0/8,::1/128
 # asla kullanmaz.
 KUBE_CONTEXT ?= minikube
 NAMESPACE ?= kubeat
-VERSION ?= 0.37.0
+VERSION ?= 0.38.0
 CHART := deploy/helm/kubeat
 # Ek helm ayarları, örn. HELM_ARGS="--set prometheus.url=http://..."
 HELM_ARGS ?=
@@ -34,19 +35,30 @@ HELM_ARGS ?=
 # benzetimi bunu kendi değerleriyle değiştirir.
 MINIKUBE_SECURITY ?= --set podSecurityContext.fsGroup=1001
 
-.PHONY: dev backend frontend test lint build images minikube-deploy minikube-open minikube-demo minikube-password minikube-openshift-sim
+.PHONY: dev backend dev-secret-key frontend test lint build images minikube-deploy minikube-open minikube-demo minikube-password minikube-openshift-sim
 
 # Backend ve frontend'i birlikte çalıştırır; Ctrl-C ikisini de durdurur.
 dev:
 	@trap 'kill 0' INT TERM EXIT; $(MAKE) backend & $(MAKE) frontend & wait
 
-backend: $(DEV_SECRET_KEY)
+backend: dev-secret-key
 	cd backend && UPTIME_ADDR=127.0.0.1:$(BACKEND_PORT) UPTIME_API_TOKEN=$(API_TOKEN) UPTIME_ADMIN_PASSWORD=$(ADMIN_PASSWORD) \
 		UPTIME_SECRET_KEY_FILE=$(abspath $(DEV_SECRET_KEY)) UPTIME_TARGET_ALLOW_CIDRS=$(TARGET_ALLOW_CIDRS) go run ./cmd/server
 
+# Anahtar dosyası yoksa üretilir. Önceki bir Makefile onu satır sonuyla
+# yazıyordu; o zamanki backend satır sonunu atıyor, şimdiki ise anahtara
+# sayıyor. O anahtarla şifrelenmiş lokal veritabanı açılabilsin diye
+# sondaki satır sonu bir kez silinir.
+dev-secret-key: $(DEV_SECRET_KEY)
+	@if [ -s $(DEV_SECRET_KEY) ] && [ -z "$$(tail -c 1 $(DEV_SECRET_KEY))" ]; then \
+		umask 077 && printf '%s' "$$(cat $(DEV_SECRET_KEY))" > $(DEV_SECRET_KEY).partial && \
+		mv $(DEV_SECRET_KEY).partial $(DEV_SECRET_KEY) && \
+		echo "$(DEV_SECRET_KEY): sondaki satır sonu silindi (önceki Makefile'ın yazdığı anahtar)"; \
+	fi
+
 $(DEV_SECRET_KEY):
 	@mkdir -p $(@D)
-	@umask 077 && openssl rand -base64 36 > $@.partial && mv $@.partial $@
+	@umask 077 && openssl rand -base64 36 | tr -d '\n' > $@.partial && mv $@.partial $@
 	@echo "$@ oluşturuldu: lokal veritabanının şifreleme anahtarı"
 
 frontend:
@@ -54,6 +66,8 @@ frontend:
 
 test:
 	cd backend && go test ./...
+	cd frontend && npm test
+	deploy/helm/test-chart.sh
 
 lint:
 	cd backend && go vet ./...

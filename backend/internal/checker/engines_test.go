@@ -1,14 +1,19 @@
 package checker
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +22,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -524,11 +532,152 @@ func TestWorkloadCheck(t *testing.T) {
 	if got := check(fakeWorkloads{}, 0); got.Up || got.Error != "the workload is scaled to zero" {
 		t.Errorf("scaled to zero: %+v", got)
 	}
-	if got := check(fakeWorkloads{err: errors.New("deployment shop/web does not exist")}, 0); got.Up || !strings.Contains(got.Error, "does not exist") {
+	if got := check(fakeWorkloads{err: fmt.Errorf("%w: deployment shop/web does not exist", k8s.ErrNoWorkload)}, 0); got.Up || !strings.HasSuffix(got.Error, "deployment shop/web does not exist") {
 		t.Errorf("missing workload: %+v", got)
 	}
 	if got := check(nil, 0); got.Up || !strings.Contains(got.Error, "cluster") {
 		t.Errorf("without a cluster: %+v", got)
+	}
+}
+
+// A failed request to the cluster API is stored as the kind of failure it
+// was: the result, which every reader of the monitor sees and which
+// incidents and notifications repeat, names neither Kubeat's service
+// account nor the API server's address. The log has the error itself.
+func TestClusterFailuresAreStoredAsTheirKind(t *testing.T) {
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, nil))
+	apiURL := "https://172.30.0.1:443/apis/apps/v1/namespaces/shop/deployments/api"
+	forbidden := fmt.Errorf("get deployment: %w", apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "api",
+		errors.New(`User "system:serviceaccount:kubeat:kubeat" cannot get resource "deployments" in API group "apps" in the namespace "shop"`)))
+	unreachable := fmt.Errorf("list endpointslices: %w", &url.Error{Op: "Get", URL: apiURL,
+		Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}})
+	late := fmt.Errorf("get service: %w", &url.Error{Op: "Get", URL: apiURL, Err: context.DeadlineExceeded})
+
+	workload := store.Monitor{ID: 1, Type: store.MonitorWorkload, Target: "shop/deployment/api"}
+	eachPod := httpMonitor("http://api.shop.svc:8080/healthz")
+	eachPod.Namespace, eachPod.Source, eachPod.EachPod = "shop", "service/api:8080", true
+	const account, server = "system:serviceaccount:kubeat:kubeat", "172.30.0.1"
+	for _, tc := range []struct {
+		name   string
+		m      store.Monitor
+		err    error
+		want   string
+		secret string // what the error itself names
+	}{
+		{"workload, forbidden", workload, forbidden, "the cluster API refused Kubeat's request (forbidden); ask an administrator", account},
+		{"workload, no answer in time", workload, late, "the cluster API did not answer in time", server},
+		{"each pod, forbidden", eachPod, forbidden, "the cluster API refused Kubeat's request (forbidden); ask an administrator", account},
+		{"each pod, unreachable", eachPod, unreachable, "the cluster API could not be reached", server},
+	} {
+		logged.Reset()
+		c := New(Options{Logger: logger, Workloads: fakeWorkloads{err: tc.err}, Endpoints: fakeEndpoints{err: tc.err}})
+		got := c.Check(context.Background(), tc.m)
+		if got.Up || got.Error != tc.want {
+			t.Errorf("%s: %+v, want error %q", tc.name, got, tc.want)
+		}
+		if !strings.Contains(logged.String(), tc.secret) {
+			t.Errorf("%s: the log lacks the error itself: %s", tc.name, logged.String())
+		}
+	}
+}
+
+// A target that answers outside the monitor's protocol, or with an error
+// of its own, is stored as the kind of failure that was. Its words, a
+// banner naming its software, hosts or builds, go to the log and not to
+// the results, which every reader of the monitor sees though only an
+// editor chose the target.
+func TestTargetsWordsAreNotStored(t *testing.T) {
+	// answering is a service that reads a line and answers with words.
+	answering := func(words string) string {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { ln.Close() })
+		go func() {
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				go func() {
+					defer conn.Close()
+					_, _ = bufio.NewReader(conn).ReadString('\n')
+					_, _ = conn.Write([]byte(words))
+					time.Sleep(100 * time.Millisecond)
+				}()
+			}
+		}()
+		return ln.Addr().String()
+	}
+	var logged bytes.Buffer
+	c := New(Options{Logger: slog.New(slog.NewTextHandler(&logged, nil))})
+	web := func(addr string) store.Monitor { return httpMonitor("http://" + addr + "/") }
+	notHTTP := func(addr string) string { return `Get "http://` + addr + `/": the server did not answer with HTTP` }
+
+	ssh, smtp, admin := answering("SSH-2.0-OpenSSH_9.6p1 Ubuntu-internal\r\n"), answering("SMTP/1.0 220 mail.internal.example\r\n"), answering("INTERNAL-ADMIN-v3-token=abc123\r\n")
+	header, long := answering("HTTP/1.1 200 OK\r\ncache-prod-7 build=sekret\r\n\r\n"), answering("HELLO "+strings.Repeat("A", 5000)+"\r\n")
+	redisError, redisBanner := answering("-ERR internal cache node cache-prod-7 build=sekret\r\n"), answering("SSH-2.0-OpenSSH_9.6p1 Ubuntu-internal\r\n")
+	for _, tc := range []struct {
+		name, want, words string
+		m                 store.Monitor
+	}{
+		{"http, a status code", notHTTP(ssh), "Ubuntu-internal", web(ssh)},
+		{"http, a version", notHTTP(smtp), "SMTP/1.0", web(smtp)},
+		{"http, a line", notHTTP(admin), "token=abc123", web(admin)},
+		{"http, a header", notHTTP(header), "build=sekret", web(header)},
+		{"http, a long line", notHTTP(long), strings.Repeat("A", 100), web(long)},
+		{"websocket", "the server did not answer with HTTP", "Ubuntu-internal", store.Monitor{Type: store.MonitorWebSocket, Target: "ws://" + ssh + "/"}},
+		{"redis, an error", "the server answered with an error (ERR)", "build=sekret", store.Monitor{Type: store.MonitorRedis, Target: redisError}},
+		{"redis, a banner", "unexpected answer to PING", "Ubuntu-internal", store.Monitor{Type: store.MonitorRedis, Target: redisBanner}},
+	} {
+		logged.Reset()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		got := c.Check(ctx, tc.m)
+		cancel()
+		if got.Up || got.Error != tc.want {
+			t.Errorf("%s: %+v, want error %q", tc.name, got, tc.want)
+		}
+		if !strings.Contains(logged.String(), tc.words) || len(logged.String()) > 2*maxLoggedAnswer {
+			t.Errorf("%s: the log lacks the target's words, or has too many of them: %s", tc.name, logged.String())
+		}
+	}
+}
+
+// Whatever a failure says, the stored error is bounded like a detail.
+func TestStoredErrorsAreBounded(t *testing.T) {
+	long := strings.Repeat("x", 1000)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := ln.Addr().String()
+	ln.Close()
+	push := store.Monitor{Type: store.MonitorPush, Interval: time.Minute}
+	for name, tc := range map[string]struct {
+		m      store.Monitor
+		pushes Pushes
+	}{
+		"a long push message": {push, fakePushes{report: store.PushReport{ReceivedAt: time.Now(), Message: long}}},
+		"inverted":            {store.Monitor{Type: store.MonitorPush, Interval: time.Minute, Inverted: true}, fakePushes{report: store.PushReport{ReceivedAt: time.Now(), Up: true, Message: long}}},
+	} {
+		got := New(Options{Pushes: tc.pushes}).Check(context.Background(), tc.m)
+		if got.Up || got.Error == "" || len(got.Error) > maxDetail+len("…") || !strings.HasSuffix(got.Error, "…") {
+			t.Errorf("%s: %d bytes: %q", name, len(got.Error), got.Error)
+		}
+	}
+	// A long target is cut in the error, not the reason after it.
+	for _, target := range []string{"http://" + closed + "/" + long, "ws://" + closed + "/" + long} {
+		m := httpMonitor(target)
+		if strings.HasPrefix(target, "ws") {
+			m = store.Monitor{Type: store.MonitorWebSocket, Target: target}
+		}
+		got := New(Options{}).Check(context.Background(), m)
+		if got.Up || len(got.Error) > maxDetail || !strings.Contains(got.Error, "refused") {
+			t.Errorf("%s…: %d bytes: %q", target[:30], len(got.Error), got.Error)
+		}
 	}
 }
 

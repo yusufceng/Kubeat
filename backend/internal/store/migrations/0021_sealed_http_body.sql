@@ -1,0 +1,5 @@
+-- Request bodies of HTTP monitors are stored encrypted from this version
+-- on, which changes no table: this migration only raises the schema
+-- version. A binary from before it reads a sealed body as plain text and
+-- would send the ciphertext as the request; it refuses this database as
+-- newer than itself instead.

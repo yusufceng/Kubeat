@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -42,9 +41,29 @@ func TestSlots(t *testing.T) {
 	if _, ok := forever.acquire(ctx); ok {
 		t.Error("a slot was given while all were taken")
 	}
+}
 
-	if got, want := cap(newSlots(0, time.Second).taken), max(1, runtime.GOMAXPROCS(0)/2); got != want {
-		t.Errorf("zero slots means %d, want %d", got, want)
+// Without a setting, half the CPUs compare passwords at once, at least
+// one, and at least two with a directory: every directory sign-in takes a
+// comparison too. A setting is taken as it is.
+func TestPasswordCheckSlots(t *testing.T) {
+	for _, tc := range []struct {
+		setting, procs int
+		directory      bool
+		want           int
+	}{
+		{0, 1, false, 1},
+		{0, 3, false, 1},
+		{0, 8, false, 4},
+		{0, 1, true, 2},
+		{0, 3, true, 2},
+		{0, 8, true, 4},
+		{1, 8, true, 1},
+		{6, 2, false, 6},
+	} {
+		if got := passwordCheckSlots(tc.setting, tc.procs, tc.directory); got != tc.want {
+			t.Errorf("passwordCheckSlots(%d, %d CPUs, directory %v) = %d, want %d", tc.setting, tc.procs, tc.directory, got, tc.want)
+		}
 	}
 }
 

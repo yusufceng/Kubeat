@@ -119,6 +119,151 @@ func TestMonitorSecretsStayWithTheirServer(t *testing.T) {
 	}
 }
 
+// An ingress controller or a router hands a request to the site its Host
+// header names: changing the header moves the monitor to another server as
+// much as changing the URL's host does, and so needs the secrets again.
+func TestHostHeaderIsPartOfTheServer(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	ctx := context.Background()
+	addUser(t, srv.URL, "editor", store.RoleEditor, "shop")
+	editor, _ := signIn(t, srv.URL, "editor", "parola-123")
+
+	var routed, direct monitorResponse
+	do(t, "POST", base, monitorJSON("routed", "http", "http://ingress-nginx-controller.ingress-nginx.svc/healthz",
+		`"namespace":"shop","http":{"auth":"bearer","auth_secret":"ADMIN-TOKEN","headers":{"Host":"api.shop.example","X-Api-Key":"ADMIN-KEY"}}`), &routed)
+	do(t, "POST", base, monitorJSON("direct", "http", "http://ingress-nginx-controller.ingress-nginx.svc/healthz",
+		`"namespace":"shop","http":{"headers":{"X-Api-Key":"ADMIN-KEY"}}`), &direct)
+	patch := func(id int64, target, headers string) (int, string) {
+		t.Helper()
+		var problem errorBody
+		code := doAsError(t, editor, "PATCH", base+"/"+itoa(id),
+			`{"target":"`+target+`","http":{"auth":"bearer","auth_secret":"`+maskedValue+`","headers":{`+headers+`}}}`, &problem)
+		return code, problem.Error
+	}
+	healthz, ready := "http://ingress-nginx-controller.ingress-nginx.svc/healthz", "http://ingress-nginx-controller.ingress-nginx.svc/ready"
+	masked := `"X-Api-Key":"` + maskedValue + `"`
+	again := "enter http.auth_secret, http.headers.X-Api-Key again: stored secrets go only to the server they were entered for"
+
+	for name, headers := range map[string]string{
+		"another site":      `"Host":"capture.attacker.example",` + masked,
+		"the site left out": masked,
+	} {
+		if code, problem := patch(routed.ID, healthz, headers); code != http.StatusBadRequest || problem != again {
+			t.Errorf("%s: status = %d, %q", name, code, problem)
+		}
+	}
+	if stored, _ := db.GetMonitor(ctx, routed.ID); stored.HTTP.Headers["Host"] != "api.shop.example" ||
+		stored.HTTP.Headers["X-Api-Key"] != "ADMIN-KEY" || stored.HTTP.AuthSecret != "ADMIN-TOKEN" {
+		t.Errorf("routed: stored = %+v", stored.HTTP)
+	}
+	// The same site, kept or however it is written, on another path too.
+	for _, tc := range []struct{ target, headers string }{
+		{healthz, `"Host":"` + maskedValue + `",` + masked},
+		{ready, `"Host":"` + maskedValue + `",` + masked},
+		{healthz, `"Host":"API.Shop.Example",` + masked},
+	} {
+		if code, problem := patch(routed.ID, tc.target, tc.headers); code != http.StatusOK {
+			t.Errorf("the same site, %s %s: status = %d, %q", tc.target, tc.headers, code, problem)
+		}
+	}
+	// A Host header added to a monitor that had none names another site.
+	var problem errorBody
+	if code := doAsError(t, editor, "PATCH", base+"/"+itoa(direct.ID),
+		`{"http":{"headers":{"Host":"capture.attacker.example",`+masked+`}}}`, &problem); code != http.StatusBadRequest ||
+		problem.Error != "enter http.headers.X-Api-Key again: stored secrets go only to the server they were entered for" {
+		t.Errorf("a Host header added: status = %d, %q", code, problem.Error)
+	}
+	if stored, _ := db.GetMonitor(ctx, direct.ID); stored.HTTP.HostHeader() != "" || stored.HTTP.Headers["X-Api-Key"] != "ADMIN-KEY" {
+		t.Errorf("direct: stored = %+v", stored.HTTP)
+	}
+
+	// The Host header is stored as it is sent, and as the destination
+	// counts it: trimmed. net/http would send a padded one empty, to the
+	// site a router keeps for requests without a name, and one that names
+	// no host would go out the same way.
+	if code, problem := patch(routed.ID, healthz, `"Host":"api.shop.example ",`+masked); code != http.StatusOK {
+		t.Errorf("a padded Host: status = %d, %q", code, problem)
+	}
+	if stored, _ := db.GetMonitor(ctx, routed.ID); stored.HTTP.Headers["Host"] != "api.shop.example" ||
+		stored.HTTP.Headers["X-Api-Key"] != "ADMIN-KEY" || stored.HTTP.AuthSecret != "ADMIN-TOKEN" {
+		t.Errorf("a padded Host: stored = %+v", stored.HTTP)
+	}
+	notAHost := "http.headers: the value of Host must be a host name or an IP address, with an optional port"
+	problem = errorBody{}
+	if code := doAsError(t, editor, "PATCH", base+"/"+itoa(direct.ID), `{"http":{"headers":{"Host":" ",`+masked+`}}}`, &problem); code != http.StatusBadRequest ||
+		problem.Error != notAHost {
+		t.Errorf("a blank Host: status = %d, %q", code, problem.Error)
+	}
+	if stored, _ := db.GetMonitor(ctx, direct.ID); len(stored.HTTP.Headers) != 1 || stored.HTTP.Headers["X-Api-Key"] != "ADMIN-KEY" {
+		t.Errorf("a blank Host: stored = %+v", stored.HTTP)
+	}
+	for value, valid := range map[string]bool{
+		"api.shop.example": true, "api.shop.example:8443": true, "10.0.0.5": true, "[fd00::1]:8080": true, "[fd00::1]": true,
+		"": false, "a b": false, "api.shop.example:": false, "api.shop.example:99999": false, "fd00::1": false,
+		"[api.shop.example]": false, "[10.0.0.5]:80": false, "api.shop.example/x": false, ":80": false,
+	} {
+		if got := validHostHeader(value); got != valid {
+			t.Errorf("validHostHeader(%q) = %v", value, got)
+		}
+	}
+}
+
+// Plain HTTP on port 80 moved to HTTPS on port 443 of the same host, for
+// the same site, is the same server: the secrets go there as they did,
+// over TLS now. Back to plain HTTP, or on to another port, is a move.
+func TestTLSOnTheSameHostKeepsTheSecrets(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	ctx := context.Background()
+	addUser(t, srv.URL, "editor", store.RoleEditor, "shop")
+	editor, _ := signIn(t, srv.URL, "editor", "parola-123")
+
+	var status, routed monitorResponse
+	do(t, "POST", base, monitorJSON("status", "http", "http://status.internal.example/health",
+		`"namespace":"shop","http":{"auth":"bearer","auth_secret":"ADMIN-TOKEN","headers":{"X-Api-Key":"ADMIN-KEY"}}`), &status)
+	do(t, "POST", base, monitorJSON("routed", "http", "http://ingress.shop.svc/healthz",
+		`"namespace":"shop","http":{"auth":"bearer","auth_secret":"ADMIN-TOKEN","headers":{"Host":"api.shop.example","X-Api-Key":"ADMIN-KEY"}}`), &routed)
+	masked := func(target, host string) string {
+		headers := `"X-Api-Key":"` + maskedValue + `"`
+		if host != "" {
+			headers += `,"Host":"` + host + `"`
+		}
+		return `{"target":"` + target + `","http":{"auth":"bearer","auth_secret":"` + maskedValue + `","headers":{` + headers + `}}}`
+	}
+	again := "enter http.auth_secret, http.headers.X-Api-Key again: stored secrets go only to the server they were entered for"
+
+	// In this order: each step starts from what the one before it stored.
+	for _, tc := range []struct {
+		name    string
+		id      int64
+		patch   string
+		refused string
+		target  string
+	}{
+		{"another port over TLS", status.ID, masked("https://status.internal.example:8443/health", ""), again, "http://status.internal.example/health"},
+		{"TLS on the same host", status.ID, masked("https://status.internal.example/health", ""), "", "https://status.internal.example/health"},
+		{"back to plain HTTP", status.ID, masked("http://status.internal.example/health", ""), again, "https://status.internal.example/health"},
+		{"TLS for another site", routed.ID, masked("https://ingress.shop.svc/healthz", "capture.attacker.example"), again, "http://ingress.shop.svc/healthz"},
+		{"TLS for the same site", routed.ID, masked("https://ingress.shop.svc/healthz", maskedValue), "", "https://ingress.shop.svc/healthz"},
+	} {
+		var problem errorBody
+		code := doAsError(t, editor, "PATCH", base+"/"+itoa(tc.id), tc.patch, &problem)
+		if (tc.refused == "" && code != http.StatusOK) || (tc.refused != "" && (code != http.StatusBadRequest || problem.Error != tc.refused)) {
+			t.Errorf("%s: status = %d, %q", tc.name, code, problem.Error)
+		}
+		if stored, _ := db.GetMonitor(ctx, tc.id); stored.Target != tc.target || stored.HTTP.AuthSecret != "ADMIN-TOKEN" || stored.HTTP.Headers["X-Api-Key"] != "ADMIN-KEY" {
+			t.Errorf("%s: stored = %s %+v", tc.name, stored.Target, stored.HTTP)
+		}
+	}
+	// The options left out keep the secrets as they are, for TLS too.
+	var plain monitorResponse
+	do(t, "POST", base, monitorJSON("plain", "http", "http://plain.internal.example/", `"namespace":"shop","http":{"headers":{"X-Api-Key":"ADMIN-KEY"}}`), &plain)
+	if code := doAs(t, editor, "PATCH", base+"/"+itoa(plain.ID), `{"target":"https://plain.internal.example/"}`, nil); code != http.StatusOK {
+		t.Errorf("options left out: status = %d", code)
+	}
+}
+
 // A channel's token goes only to the server it was entered for, as a
 // monitor's secrets do.
 func TestChannelSecretsStayWithTheirServer(t *testing.T) {

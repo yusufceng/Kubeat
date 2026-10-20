@@ -40,11 +40,11 @@ spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . }}
   {{- end }}
-  {{- if .Values.ingress.tls.enabled }}
+  {{- if include "kubeat.ingressTLS" . }}
   # Signing in sends passwords and every request the session cookie, so the
   # UI is served over HTTPS.
   tls:
-    - secretName: {{ .Values.ingress.tls.secretName | default (printf "%s-tls" .Release.Name) | quote }}
+    - secretName: {{ include "kubeat.ingressTLSSecret" . | quote }}
       {{- with .Values.ingress.host }}
       hosts:
         - {{ . | quote }}

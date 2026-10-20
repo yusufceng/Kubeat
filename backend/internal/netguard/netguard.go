@@ -12,6 +12,8 @@
 // A Policy is applied as a connection is made, to the address actually
 // connected to, so a name that resolves to a denied address, an answer that
 // changes between two lookups and every redirect hop are held to it alike.
+// The endpoints the operator sets, a proxy or a mail server, are trusted at
+// their exact address instead (see Trust).
 package netguard
 
 import (
@@ -24,8 +26,11 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
+
+	"golang.org/x/net/http/httpproxy"
 )
 
 // defaultDeny are the ranges denied without any setting. Each holds
@@ -37,7 +42,11 @@ var defaultDeny = []netip.Prefix{
 	netip.MustParsePrefix("::/128"),
 	netip.MustParsePrefix("169.254.0.0/16"), // link-local, with instance metadata at 169.254.169.254
 	netip.MustParsePrefix("fe80::/10"),
+	// The metadata services outside link-local, each in a range that is
+	// otherwise open: private IPv6 or public.
 	netip.MustParsePrefix("fd00:ec2::254/128"),  // AWS instance metadata over IPv6
+	netip.MustParsePrefix("fd20:ce::254/128"),   // Google Cloud instance metadata over IPv6
+	netip.MustParsePrefix("168.63.129.16/32"),   // Azure's host agent (WireServer), also the platform's DNS
 	netip.MustParsePrefix("100.100.100.200/32"), // Alibaba Cloud instance metadata
 	netip.MustParsePrefix("224.0.0.0/4"),        // multicast
 	netip.MustParsePrefix("ff00::/8"),
@@ -45,7 +54,10 @@ var defaultDeny = []netip.Prefix{
 }
 
 // nat64 is the well-known NAT64 prefix (RFC 6052): a gateway connects to
-// the IPv4 address in the last 32 bits on the caller's behalf.
+// the IPv4 address in the last 32 bits on the caller's behalf. A network
+// with a prefix of its own (64:ff9b:1::/48 or another) needs the mapped
+// forms of the denied ranges among the extra denials: where it puts the
+// IPv4 address is its own choice.
 var nat64 = netip.MustParsePrefix("64:ff9b::/96")
 
 // ErrBlocked is wrapped by the error about an address the policy refuses,
@@ -59,6 +71,9 @@ type Policy struct {
 	deny  []netip.Prefix // the built-in ranges and the extra ones
 	extra []netip.Prefix // the extra ones alone, for the log
 	allow []netip.Prefix
+	// trusted are the addresses, host:port as connections ask for them,
+	// that go through whatever they resolve to (see Trust).
+	trusted []string
 }
 
 // New returns the policy that denies the built-in ranges and extraDeny,
@@ -95,6 +110,96 @@ func parse(list []string) ([]netip.Prefix, error) {
 		out = append(out, prefix.Masked())
 	}
 	return out, nil
+}
+
+// Trust returns a copy of the policy that lets a connection asked for at
+// one of the given addresses through, whatever it resolves to. The policy
+// is for the addresses users set; these are the operator's own: the proxy
+// a request is handed to, the mail server, a notification service's API.
+// Each is a host:port, compared with the address a connection is asked
+// for before it is resolved, the host without regard to case; "" is
+// skipped. That host and port alone are trusted, so a sidecar on the
+// pod's loopback needs no exception, which would open the rest of
+// loopback to every monitor and channel.
+func (p *Policy) Trust(addresses ...string) *Policy {
+	if p == nil {
+		return nil
+	}
+	trusted := slices.Clone(p.trusted)
+	for _, address := range addresses {
+		if a := normalAddress(address); a != "" && !slices.Contains(trusted, a) {
+			trusted = append(trusted, a)
+		}
+	}
+	copied := *p
+	copied.trusted = trusted
+	return &copied
+}
+
+// trusts reports whether a connection asked for at address goes through
+// unchecked.
+func (p *Policy) trusts(address string) bool {
+	return p != nil && len(p.trusted) > 0 && slices.Contains(p.trusted, normalAddress(address))
+}
+
+// normalAddress is a host:port as Trust compares it: the host in lower
+// case, an IPv6 one in brackets. It is "" for anything else.
+func normalAddress(address string) string {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil || host == "" || port == "" {
+		return ""
+	}
+	return net.JoinHostPort(strings.ToLower(host), port)
+}
+
+// defaultPorts are the ports net/http connects to for a scheme that names
+// none: a request's, and a proxy's.
+var defaultPorts = map[string]string{"http": "80", "https": "443", "socks5": "1080", "socks5h": "1080"}
+
+// hostPort is the address a connection for u goes to: its host, and its
+// port or the one its scheme implies. It is "" when there is neither.
+func hostPort(u *url.URL) string {
+	if u == nil || u.Hostname() == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		port = defaultPorts[strings.ToLower(u.Scheme)]
+	}
+	if port == "" {
+		return ""
+	}
+	return net.JoinHostPort(strings.ToLower(u.Hostname()), port)
+}
+
+// HostPort is the address a connection to the URL rawURL goes to, for
+// Trust: the host:port of a service's address from the settings, such as
+// https://api.telegram.org (api.telegram.org:443). It is "" for anything
+// that is not a URL with a host.
+func HostPort(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return hostPort(u)
+}
+
+// EnvironmentProxies returns the addresses of the proxies HTTP_PROXY and
+// HTTPS_PROXY (or their lower-case forms) name, read as
+// http.ProxyFromEnvironment reads them: the operator's choice, for Trust.
+func EnvironmentProxies() []string {
+	config := httpproxy.FromEnvironment()
+	// Every proxy named, whichever requests NO_PROXY keeps away from it.
+	config.NoProxy = ""
+	proxyFor := config.ProxyFunc()
+	var out []string
+	for _, scheme := range []string{"http", "https"} {
+		proxy, err := proxyFor(&url.URL{Scheme: scheme, Host: "kubeat.invalid"})
+		if addr := hostPort(proxy); err == nil && addr != "" && !slices.Contains(out, addr) {
+			out = append(out, addr)
+		}
+	}
+	return out
 }
 
 // blockedError names the refused address and the denied range it is in.
@@ -168,16 +273,35 @@ func (p *Policy) Control(_ context.Context, _, address string, _ syscall.RawConn
 	return p.Check(addrPort.Addr())
 }
 
-// Dialer returns a copy of base whose connections the policy checks; the
-// copy's ControlContext is the policy's, and base's own Control functions
-// are dropped. A nil policy returns a plain copy.
-func (p *Policy) Dialer(base *net.Dialer) *net.Dialer {
-	d := *base
+// Dialer connects as a net.Dialer does, held to a policy.
+type Dialer struct {
+	policy *Policy
+	// checked has the policy's Control; plain connects to the addresses
+	// the policy trusts.
+	checked, plain net.Dialer
+}
+
+// Dialer returns a dialer that connects as base does, with each connection
+// checked by the policy (Control) unless it is asked for at an address the
+// policy trusts. base's own Control functions are dropped from the checked
+// connections. A nil policy connects as base does.
+func (p *Policy) Dialer(base *net.Dialer) *Dialer {
+	d := &Dialer{policy: p, checked: *base, plain: *base}
 	if p != nil {
-		d.Control = nil
-		d.ControlContext = p.Control
+		d.checked.Control = nil
+		d.checked.ControlContext = p.Control
 	}
-	return &d
+	return d
+}
+
+// DialContext connects to address on the named network, as
+// net.Dialer.DialContext does. Whether the address is trusted is decided
+// on it as given, before it is resolved.
+func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if d.policy.trusts(address) {
+		return d.plain.DialContext(ctx, network, address)
+	}
+	return d.checked.DialContext(ctx, network, address)
 }
 
 // CheckHost checks every address host resolves to. It is for connections
@@ -185,6 +309,18 @@ func (p *Policy) Dialer(base *net.Dialer) *net.Dialer {
 // a request handed to a proxy, which then connects on its own. A name that
 // does not resolve here is left to the proxy, which may know names this
 // network does not.
+//
+// A host made of numbers is not a name, though: a proxy that reads it as
+// inet_aton does takes 2852039166, 0xa9.0xfe.0xa9.0xfe and 169.254.43518
+// for 169.254.169.254, and 127.1 for 127.0.0.1, while none of them
+// resolves here. Such a host is checked as the address it spells, and
+// refused when it spells none.
+//
+// Trailing dots only root a name, and a proxy drops every one of them, as
+// Squid does: 169.254.169.254.. is 169.254.169.254 to it, and localhost..
+// is localhost, though neither resolves here. Such a host is checked as
+// the proxy reads it: a name both without the dots, as the hosts file has
+// it, and rooted, as DNS has it.
 func (p *Policy) CheckHost(ctx context.Context, host string) error {
 	if p == nil {
 		return nil
@@ -192,33 +328,125 @@ func (p *Policy) CheckHost(ctx context.Context, host string) error {
 	if addr, err := netip.ParseAddr(host); err == nil {
 		return p.Check(addr)
 	}
-	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if err != nil {
+	spelled := strings.TrimRight(host, ".")
+	if numeric(spelled) {
+		addr, ok := parseNumeric(spelled)
+		if !ok {
+			return fmt.Errorf("%w: %q is written as an IPv4 address but is not one", ErrBlocked, host)
+		}
+		if err := p.Check(addr); err != nil {
+			return fmt.Errorf("%s: %w", host, err)
+		}
 		return nil
 	}
-	for _, addr := range addrs {
-		if err := p.Check(addr); err != nil {
-			return err
+	names := []string{host}
+	if spelled != host {
+		names = []string{spelled, spelled + "."}
+	}
+	for _, name := range names {
+		addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", name)
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if err := p.Check(addr); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
+// numeric reports whether host is written the way inet_aton reads an IPv4
+// address: one to four parts separated by dots, each decimal, octal (with
+// a leading 0) or hexadecimal (with 0x). A part that is not a valid number
+// of its kind, such as 08 or 0x alone, still counts: parseNumeric refuses
+// it, where implementations of inet_aton disagree.
+func numeric(host string) bool {
+	parts := strings.Split(host, ".")
+	if len(parts) > 4 {
+		return false
+	}
+	for _, part := range parts {
+		digits, hex := part, false
+		if len(part) >= 2 && part[0] == '0' && (part[1] == 'x' || part[1] == 'X') {
+			digits, hex = part[2:], true
+		} else if part == "" {
+			return false
+		}
+		for _, c := range digits {
+			if !(c >= '0' && c <= '9' || hex && (c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// parseNumeric reads a numeric host as inet_aton does: every part but the
+// last is one byte, and the last fills the bytes left, so 127.1 is
+// 127.0.0.1 and a single part is the whole address.
+func parseNumeric(host string) (netip.Addr, bool) {
+	parts := strings.Split(host, ".")
+	var ip uint32
+	for i, part := range parts {
+		base := 10
+		switch {
+		case len(part) >= 2 && part[0] == '0' && (part[1] == 'x' || part[1] == 'X'):
+			base, part = 16, part[2:]
+		case len(part) > 1 && part[0] == '0':
+			base, part = 8, part[1:]
+		}
+		value, err := strconv.ParseUint(part, base, 32)
+		if err != nil {
+			return netip.Addr{}, false
+		}
+		// The bits from this part's on: all of them for the last part.
+		bits := 32 - 8*i
+		switch {
+		case i < len(parts)-1 && value <= 0xff:
+			ip |= uint32(value) << (bits - 8)
+		case i == len(parts)-1 && (bits == 32 || value < 1<<bits):
+			ip |= uint32(value)
+		default:
+			return netip.Addr{}, false
+		}
+	}
+	return netip.AddrFrom4([4]byte{byte(ip >> 24), byte(ip >> 16), byte(ip >> 8), byte(ip)}), true
+}
+
 // Proxy wraps the Proxy function of an http.Transport. A request sent
 // through a proxy reaches its target from the proxy, so the connection the
 // dialer checks is the one to the proxy; the target is checked here, before
-// the request is handed over. A nil policy returns next as it is.
+// the request is handed over, unless the policy trusts it. A nil policy
+// returns next as it is.
 func (p *Policy) Proxy(next func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	if p == nil || next == nil {
 		return next
 	}
 	return func(req *http.Request) (*url.URL, error) {
 		proxy, err := next(req)
-		if err != nil || proxy == nil {
+		if err != nil || proxy == nil || p.trusts(hostPort(req.URL)) {
 			return proxy, err
 		}
 		if err := p.CheckHost(req.Context(), req.URL.Hostname()); err != nil {
 			return nil, err
+		}
+		// A plain http:// request goes to the proxy in absolute form, and
+		// net/http writes the Host header there, not the URL's host: that
+		// is the address the proxy fetches. Over https the proxy is asked
+		// to CONNECT to the URL's host, and the header stays in the tunnel.
+		if req.URL.Scheme == "http" && req.Host != "" {
+			host := req.Host
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+			if !strings.EqualFold(host, req.URL.Hostname()) {
+				if err := p.CheckHost(req.Context(), host); err != nil {
+					return nil, err
+				}
+			}
 		}
 		return proxy, nil
 	}
@@ -235,12 +463,14 @@ func (p *Policy) Transport() *http.Transport {
 }
 
 // LogValue is how the policy shows in a log: the ranges denied on top of
-// the built-in ones, and the exceptions, as they are in effect.
+// the built-in ones, the exceptions and the trusted addresses, as they
+// are in effect.
 func (p *Policy) LogValue() slog.Value {
 	if p == nil {
 		return slog.StringValue("off")
 	}
-	return slog.GroupValue(slog.Any("extra_deny", texts(p.extra)), slog.Any("allow", texts(p.allow)))
+	return slog.GroupValue(slog.Any("extra_deny", texts(p.extra)), slog.Any("allow", texts(p.allow)),
+		slog.Any("trusted", append([]string{}, p.trusted...)))
 }
 
 func texts(list []netip.Prefix) []string {

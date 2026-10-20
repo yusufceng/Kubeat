@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -154,43 +153,10 @@ func toCheckOptions(m store.Monitor) checkOptions {
 
 // A stored secret is kept by an update that sends back its mask, or leaves
 // out the options it belongs to, but only for the server it was entered
-// for. The masks keep a secret from being read; were it kept for another
-// server, anyone who may edit the monitor or channel could still have it
-// sent to a server of their choosing and read it there.
-
-// defaultPorts are the ports a URL's scheme implies when it names none.
-var defaultPorts = map[string]string{"http": "80", "https": "443", "ws": "80", "wss": "443"}
-
-// endpoint is the server a URL talks to: its scheme, host and port, with
-// the port the scheme implies when it names none. It is "" for anything
-// that is not a URL with a host.
-func endpoint(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	scheme := strings.ToLower(u.Scheme)
-	port := u.Port()
-	if port == "" {
-		port = defaultPorts[scheme]
-	}
-	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
-}
-
-// destination is the server a monitor's check connects to, and so hands
-// the monitor's credentials: the scheme, host and port of a URL, the host
-// and port of a host:port target.
-func destination(typ store.MonitorType, target string) string {
-	switch typ {
-	case store.MonitorHTTP, store.MonitorWebSocket:
-		return endpoint(target)
-	case store.MonitorTCP, store.MonitorGRPC, store.MonitorPostgres, store.MonitorMySQL, store.MonitorRedis:
-		if host, port, err := net.SplitHostPort(target); err == nil {
-			return net.JoinHostPort(strings.ToLower(host), port)
-		}
-	}
-	return target
-}
+// for (store.Monitor.Destination). The masks keep a secret from being
+// read; were it kept for another server, anyone who may edit the monitor
+// or channel could still have it sent to a server of their choosing and
+// read it there.
 
 // keptSecrets names the stored secrets of m that an update with these
 // options would keep: those sent back masked, or all of them when the
@@ -199,12 +165,7 @@ func (o checkOptions) keptSecrets(m store.Monitor) []string {
 	var kept []string
 	switch {
 	case m.Type == store.MonitorHTTP && o.HTTP == nil:
-		if m.HTTP.AuthSecret != "" {
-			kept = append(kept, "http.auth_secret")
-		}
-		for name := range m.HTTP.Headers {
-			kept = append(kept, "http.headers."+name)
-		}
+		return m.SecretNames()
 	case m.Type == store.MonitorHTTP:
 		if o.HTTP.AuthSecret == maskedValue && store.HTTPAuth(o.HTTP.Auth) == m.HTTP.Auth && m.HTTP.AuthSecret != "" {
 			kept = append(kept, "http.auth_secret")
@@ -216,9 +177,7 @@ func (o checkOptions) keptSecrets(m store.Monitor) []string {
 			}
 		}
 	case m.Type.IsDatabase() && (o.Database == nil || o.Database.Password == maskedValue):
-		if m.Database.Password != "" {
-			kept = append(kept, "database.password")
-		}
+		return m.SecretNames()
 	}
 	slices.Sort(kept)
 	return slices.Compact(kept)
@@ -441,6 +400,14 @@ func (o *httpOptions) resolve(existing store.HTTPOptions) (store.HTTPOptions, er
 		}
 		if len(value) > maxHeaderValue || strings.ContainsAny(value, "\r\n") {
 			return none, fmt.Errorf("http.headers: the value of %s is too long or contains a line break", name)
+		}
+		if name == "Host" {
+			// The value the monitor's destination is counted by is the one
+			// sent: net/http would send a padded or malformed one empty, to
+			// whichever site a router keeps for requests without a name.
+			if value = strings.TrimSpace(value); !validHostHeader(value) {
+				return none, errors.New("http.headers: the value of Host must be a host name or an IP address, with an optional port")
+			}
 		}
 		if out.Headers == nil {
 			out.Headers = make(map[string]string, len(o.Headers))

@@ -1,3 +1,4 @@
+{{- include "kubeat.checkValues" . -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -81,7 +82,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "kubeat.apiTokenSecret" . }}
                   key: token
-            {{- if .Values.metrics.auth.enabled }}
+            {{- if include "kubeat.metricsAuth" . }}
             - name: UPTIME_METRICS_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -129,6 +130,7 @@ spec:
             {{- end }}
             {{- with .Values.oidc }}
             {{- if .issuer }}
+            {{- include "kubeat.checkOIDCRedirect" $ }}
             - name: UPTIME_OIDC_ISSUER
               value: {{ .issuer | quote }}
             - name: UPTIME_OIDC_CLIENT_ID
@@ -241,6 +243,15 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          # Until the backend first answers, only this probe runs: the first
+          # start with an encryption key compacts the database before it
+          # serves anything, which the liveness probe would cut short.
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: {{ dig "startupProbe" "periodSeconds" 5 .Values.backend }}
+            failureThreshold: {{ dig "startupProbe" "failureThreshold" 120 .Values.backend }}
           readinessProbe:
             httpGet:
               path: /api/v1/health

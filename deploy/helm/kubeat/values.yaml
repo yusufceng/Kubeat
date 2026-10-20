@@ -20,11 +20,6 @@ backend:
     repository: ghcr.io/yusufceng/kubeat-backend
     tag: ""            # defaults to the chart's appVersion
     pullPolicy: IfNotPresent
-  # Extra settings as environment variables; see the README for the list.
-  # UPTIME_ADDR and UPTIME_DB_PATH are set by the chart.
-  env: {}
-    # UPTIME_RETENTION: 168h
-    # UPTIME_RECOVERY_THRESHOLD: "2"
   resources:
     requests:
       cpu: 50m
@@ -34,9 +29,23 @@ backend:
   persistence:
     size: 2Gi
     storageClass: ""   # empty uses the cluster default
-  # Any UPTIME_* setting the chart has no value for (the README lists them
-  # all). Do not repeat variables the chart itself sets.
+  # How long the backend may take to start before it is restarted:
+  # failureThreshold × periodSeconds, 10 minutes. The first start with an
+  # encryption key compacts the database (VACUUM) before it answers, which
+  # takes a while for a large one on slow storage; one cut short is done
+  # again by the next start. After three starts that did not finish it, the
+  # next one comes up without it and logs an error: raise failureThreshold
+  # then, and the start after that compacts.
+  startupProbe:
+    periodSeconds: 5
+    failureThreshold: 120
+  # Any UPTIME_* setting the chart has no value for, as environment variables
+  # (the README lists them all). Do not repeat variables the chart itself
+  # sets, such as UPTIME_ADDR, UPTIME_DB_PATH or UPTIME_SECRET_KEY. This is
+  # the only place for them: the chart refuses a backend.env, which older
+  # values files have, unless it is empty.
   extraEnv: {}
+    # UPTIME_RETENTION: 168h
     # UPTIME_REMINDER_INTERVAL: 15m    # announce an ongoing outage again
     # UPTIME_NOTIFY_GROUP_WAIT: 30s    # "0" turns grouping off
     # UPTIME_RECOVERY_THRESHOLD: "1"
@@ -56,13 +65,20 @@ backend:
 frontend:
   replicas: 1
   # Any frontend setting (REFRESH_INTERVAL_MS, HISTORY_LIMIT, ...; the
-  # README lists them) the chart has no value for.
+  # README lists them) the chart has no value for; BACKEND_URL is set by the
+  # chart. This is the only place for them: the chart refuses a
+  # frontend.env, which older values files have, unless it is empty.
   extraEnv: {}
+    # REFRESH_INTERVAL_MS: "5000"
   # Whether the session cookie is marked Secure, so that browsers send it
   # over HTTPS only: "auto" when publicURL (or the Route or Ingress host it
-  # is derived from) is https:// or the request came over HTTPS; "always";
-  # or "never", which users who reach the UI over plain HTTP from anywhere
-  # but localhost (an Ingress without TLS) need, or they cannot sign in.
+  # is derived from, http:// with ingress.tls off) is https:// or the
+  # request came over HTTPS; "always"; or "never", which users who reach the
+  # UI over plain HTTP from anywhere but localhost need when publicURL is
+  # https:// all the same, or when a plain-HTTP proxy in front talks HTTPS
+  # to the Route without an X-Forwarded-Proto of its own; otherwise they
+  # cannot sign in. "never", like an http:// publicURL, also keeps
+  # upgrade-insecure-requests out of the Content-Security-Policy.
   cookieSecure: auto
   # The pages that may show status pages in a frame (a wiki, a wall
   # display), as a Content-Security-Policy frame-ancestors source list:
@@ -77,9 +93,6 @@ frontend:
     repository: ghcr.io/yusufceng/kubeat-frontend
     tag: ""
     pullPolicy: IfNotPresent
-  # BACKEND_URL is set by the chart.
-  env: {}
-    # REFRESH_INTERVAL_MS: "5000"
   resources:
     requests:
       cpu: 50m
@@ -87,42 +100,40 @@ frontend:
     limits:
       memory: 512Mi
 
-# The chart generates four Secrets on the first install and keeps them
-# across upgrades by reading them back from the cluster: the administrator
-# password (auth), the API token (apiToken), the encryption key (secretKey)
-# and the metrics token (metrics.auth). A renderer without access to the
-# cluster (helm template, Argo CD, OpenShift GitOps) cannot read them back:
-# it generates new values on every render, and a sync overwrites the
-# Secrets. A new encryption key is the worst of it: after its next restart
-# the backend refuses it, and what the old key encrypted is lost with it.
-# Under GitOps create these Secrets yourself (Sealed Secrets, External
-# Secrets, ...) and name them in the existingSecret values.
+# Secrets under GitOps. The chart generates four Secrets on the first
+# install and keeps them across upgrades by reading them back from the
+# cluster: the administrator password (auth.existingSecret), the API token
+# (apiToken.existingSecret), the encryption key (secretKey.existingSecret)
+# and the metrics token (metrics.auth.existingSecret). A renderer without
+# access to the cluster (helm template, Argo CD, OpenShift GitOps) cannot
+# read them back: it generates new values on every render, and a sync
+# overwrites the Secrets. A new encryption key is the worst of it: after its
+# next restart the backend refuses it, and what the old key encrypted is
+# lost with it. A new metrics token fails every scrape with 401 until the
+# backend restarts. Under GitOps create all four yourself (Sealed Secrets,
+# External Secrets, ...) and name them in those values; the README's
+# "GitOps ile kurulum" says more. The values below point here.
 
 # Sign-in to the UI with a single administrator password. By default the
 # chart generates the password once and keeps it; the install notes say how
 # to read it.
-#
-# GitOps (Argo CD, OpenShift GitOps, anything that renders with
-# "helm template"): the chart keeps the Secrets it generates (this one,
-# apiToken's and secretKey's) by reading them back with "lookup", which does
-# not run there. Every render makes new values, and a sync overwrites the
-# Secrets: the API token changes, the admin Secret no longer matches the
-# account, and the backend no longer starts with the new encryption key.
-# Provide all three as existing Secrets there (Sealed Secrets, External
-# Secrets...), or keep the generated ones out of the sync.
 auth:
   # Name of an existing Secret with the key "password": the password of the
   # first administrator account, "admin", created on the backend's first
   # start. Afterwards accounts are managed in the UI. It has to pass the
   # password rules (UPTIME_PASSWORD_MIN_LENGTH characters to 72 bytes, not
   # "admin", "password" or another of the first guesses), or the backend
-  # does not start while there is no account yet.
+  # does not start while there is no account yet. Needed under GitOps (see
+  # "Secrets under GitOps" above).
   existingSecret: ""
   sessionTtlHours: 12
 
 # Sign-in with directory (LDAP) accounts, beside the local ones. Directory
 # users get their role from the group mappings made in the UI. See the
-# README for every UPTIME_LDAP_* setting; the rest go in extraEnv.
+# README for every UPTIME_LDAP_* setting; the rest go in extraEnv. Every
+# directory sign-in also takes a bcrypt comparison, a quarter of a second
+# of a core: for many directory users signing in at once, raise the
+# backend's CPU limit or UPTIME_LOGIN_CONCURRENCY (backend.extraEnv).
 ldap:
   url: ""                        # ldap://ldap.example.com:389 or ldaps://...:636
   baseDN: ""                     # where users are searched for
@@ -139,12 +150,17 @@ ldap:
     # UPTIME_LDAP_DEFAULT_NAMESPACES: "*"
 
 # Sign-in through an OpenID Connect provider (Keycloak, Azure AD, Okta,
-# Dex...). Register Kubeat there with the redirect URL
-# https://<kubeat host>/auth/callback; with publicURL, route.host or
-# ingress.host set the chart fills redirectURL in from it. Without any of
-# them (a Route whose host the router picks) SSO does not work until
-# publicURL is set to that host. Roles come from the group mappings on the
-# Users page, as for LDAP.
+# Dex...). Register Kubeat there with the redirect URL the install notes
+# print. Unless redirectURL is set, the chart makes it from publicURL
+# (<publicURL>/auth/callback), or else from route.host or ingress.host
+# (https://<host>/auth/callback, https even with ingress.tls off, for when
+# TLS ends in front of the ingress controller: SSO needs HTTPS there).
+# Without any of them (a Route whose host the router picks) SSO does not
+# work until publicURL is set to that host. The chart refuses a redirect
+# URL the backend would turn SSO off for, anything but
+# https://<host>/auth/callback (plain http:// only for localhost): a
+# publicURL with a path needs redirectURL. Roles come from the group
+# mappings on the Users page, as for LDAP.
 oidc:
   issuer: ""                     # https://sso.example.com/realms/corp
   clientID: ""
@@ -152,7 +168,8 @@ oidc:
     name: ""
     key: client-secret
   redirectURL: ""                # https://<kubeat host>/auth/callback; derived from publicURL,
-                                 # route.host or ingress.host. Must be https.
+                                 # route.host or ingress.host. Must be https, with
+                                 # nothing after /auth/callback.
   name: SSO                      # the sign-in button's label
   extraEnv: {}
     # UPTIME_OIDC_SCOPES: "openid profile email groups"
@@ -177,7 +194,7 @@ backup:
 # accounts are locked. By default the chart generates it once and keeps it.
 apiToken:
   # Name of an existing Secret with the key "token", to manage it yourself.
-  # Needed with GitOps tools that render with "helm template" (see auth).
+  # Needed under GitOps (see "Secrets under GitOps" above auth).
   existingSecret: ""
 
 # The key that encrypts tokens, passwords and webhook addresses in the
@@ -186,9 +203,12 @@ apiToken:
 # database is of no use without the key its secrets were encrypted with.
 secretKey:
   # Name of an existing Secret with the key "key" (32 characters or more).
-  # Needed with GitOps tools that render with "helm template" (see auth):
-  # there a sync would replace the generated key, and the backend could no
-  # longer read what it encrypted.
+  # Needed under GitOps (see "Secrets under GitOps" above auth): there a
+  # sync would replace the generated key, and the backend could no longer
+  # read what it encrypted. The chart gives the backend the key from this
+  # Secret as UPTIME_SECRET_KEY. UPTIME_SECRET_KEY_FILE is for installs
+  # without the chart: never set it in backend.extraEnv, where the backend,
+  # given both, does not start.
   existingSecret: ""
 
 # Restricts who can connect to the backend at the network level, in addition
@@ -230,7 +250,8 @@ prometheus:
   # the URL. Give caFile instead.
   insecureSkipVerify: false
   # OpenShift only: binds the service account to cluster-monitoring-view,
-  # which Thanos Querier requires.
+  # which Thanos Querier requires on port 9091 (queries across the cluster).
+  # Port 9092 answers per namespace, for discovery.namespaces, without it.
   openshiftMonitoringView: false
 
 # The backend serves Prometheus metrics at /metrics on its service port.
@@ -245,6 +266,7 @@ metrics:
     enabled: true
     # Name of an existing Secret with the key "token", to manage it yourself.
     # Never the API token's Secret: the scraping Prometheus keeps a copy.
+    # Needed under GitOps (see "Secrets under GitOps" above auth).
     existingSecret: ""
   # Creates a ServiceMonitor so the cluster's Prometheus scrapes them. Needs
   # the prometheus-operator CRDs; on OpenShift, user workload monitoring.
@@ -340,8 +362,12 @@ ingress:
   # request the session cookie, so the Ingress serves host over HTTPS with
   # the kubernetes.io/tls Secret secretName. Turn it off only when TLS ends
   # in front of the ingress controller, at a load balancer; then set
-  # publicURL (and oidc.redirectURL) to the https:// address, as the chart
-  # derives http:// from the host.
+  # publicURL to the https:// address, as the chart derives http:// from the
+  # host for it. The OIDC redirect URL stays https://, for when TLS ends in
+  # front of the controller: SSO needs HTTPS there. An Ingress served over
+  # plain HTTP up to 0.37.0 needs that Secret now, or this turned off
+  # knowingly: with TLS on, the address is https:// and the session cookie
+  # Secure, so over plain HTTP nobody can sign in.
   tls:
     enabled: true
     secretName: ""     # defaults to <release>-tls

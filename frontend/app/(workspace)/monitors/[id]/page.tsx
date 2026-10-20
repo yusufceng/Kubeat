@@ -418,7 +418,9 @@ async function MonitorDetail({
         )}
       </dl>
 
-      {monitor.push_token && <PushUrl token={monitor.push_token} internalBase={config.pushInternalUrl} />}
+      {monitor.push_token && (
+        <PushUrl monitorId={monitor.id} token={monitor.push_token} internalBase={config.pushInternalUrl} />
+      )}
 
       <section className="card p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

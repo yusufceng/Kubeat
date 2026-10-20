@@ -91,27 +91,7 @@ func main() {
 		ldap = ldapClient
 		logger.Info("directory sign-in enabled", "url", cfg.LDAPURL)
 	}
-	oidcClient, err := oidcauth.New(oidcauth.Config{
-		Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret, RedirectURL: cfg.OIDCRedirectURL,
-		Scopes: strings.Fields(cfg.OIDCScopes), UsernameClaim: cfg.OIDCUsernameClaim, DisplayNameClaim: cfg.OIDCDisplayNameClaim,
-		EmailClaim: cfg.OIDCEmailClaim, GroupsClaim: cfg.OIDCGroupsClaim, CAFile: cfg.OIDCCAFile,
-		InsecureSkipVerify: cfg.OIDCInsecureSkipVerify, Timeout: cfg.OIDCTimeout,
-	})
-	if err != nil {
-		logger.Error("invalid OIDC configuration", "error", err)
-		db.Close()
-		os.Exit(1)
-	}
-	var oidc api.OIDC
-	if oidcClient != nil {
-		oidc = oidcClient
-		logger.Info("OIDC sign-in enabled", "issuer", cfg.OIDCIssuer, "name", cfg.OIDCName, "redirect_url", cfg.OIDCRedirectURL)
-		if cfg.OIDCRedirectURL == "" {
-			// The frontend's own idea of its address is trusted only on
-			// localhost; behind a Route it is the pod's 0.0.0.0:3000.
-			logger.Warn("OIDC sign-in works only for a frontend on localhost: set UPTIME_PUBLIC_URL to the address users reach Kubeat at, or UPTIME_OIDC_REDIRECT_URL to its /auth/callback")
-		}
-	}
+	oidc, oidcProblem := setUpOIDC(cfg, logger)
 
 	// Background work stops on the same signal as the HTTP server and is
 	// waited for before the database is closed.
@@ -131,6 +111,11 @@ func main() {
 		db.Close()
 		os.Exit(1)
 	}
+	// The proxies of HTTP_PROXY and HTTPS_PROXY are the operator's own, and
+	// are reached at their exact address, wherever that is: one on the
+	// pod's loopback needs no exception. The mail server, Telegram and
+	// PagerDuty are trusted the same way by their own senders alone.
+	guard = guard.Trust(netguard.EnvironmentProxies()...)
 	logger.Info("target policy in effect", "target_policy", guard)
 
 	senders := alert.NewRouter(guard, userAgent, alert.SMTPConfig{
@@ -210,6 +195,7 @@ func main() {
 		Endpoints:          endpoints,
 		RolloutGrace:       cfg.WorkloadRolloutGrace,
 		Guard:              guard,
+		Logger:             logger,
 	}), scheduler.Options{
 		Tick:          cfg.SchedulerTick,
 		MaxJitter:     cfg.MaxJitter,
@@ -294,11 +280,11 @@ func main() {
 		defer background.Done()
 		runSessionCleanup(ctx, db, cfg.AuditRetention, logger)
 	}()
-	throttle := &auth.Throttle{MaxFailures: cfg.LoginMaxFailures, Lockout: cfg.LoginLockout, MaxKeys: cfg.LoginThrottleMaxKeys}
+	throttle := &auth.Throttle{MaxFailures: cfg.LoginMaxFailures, Lockout: cfg.LoginLockout, MaxKeys: cfg.LoginThrottleMaxKeys, Logger: logger}
 	background.Add(1)
 	go func() {
 		defer background.Done()
-		sweepThrottle(ctx, throttle, logger)
+		sweepThrottle(ctx, throttle)
 	}()
 
 	if cfg.PrometheusURL != "" {
@@ -345,6 +331,7 @@ func main() {
 			LDAPDefaultRole:          store.Role(cfg.LDAPDefaultRole),
 			LDAPDefaultNamespaces:    splitList(cfg.LDAPDefaultNamespaces),
 			OIDC:                     oidc,
+			OIDCProblem:              oidcProblem,
 			OIDCName:                 cfg.OIDCName,
 			OIDCDefaultRole:          store.Role(cfg.OIDCDefaultRole),
 			OIDCDefaultNamespaces:    splitList(cfg.OIDCDefaultNamespaces),
@@ -442,35 +429,137 @@ func protectSecrets(ctx context.Context, db *store.SQLite, key string, allowPlai
 	}
 	// Reading everything once tells a wrong key now, with a clear message.
 	if _, err := db.ListMonitors(ctx); err != nil {
-		return err
+		return wrongKeyHint(err)
 	}
 	if _, err := db.ListChannels(ctx); err != nil {
+		return wrongKeyHint(err)
+	}
+	owed, earlier, err := db.CompactionPending(ctx)
+	if err != nil {
 		return err
 	}
-	if counts.Plain == 0 {
+	pending := earlier
+	if counts.Plain > 0 {
+		if counts.Sealed == 0 && !pending {
+			// The plain values the database was written with stay in the
+			// free space of its file and in the write-ahead log until the
+			// file is rewritten. That is owed from now on, to this start
+			// or, if it is cut short, to the next ones.
+			if err := db.SetCompactionPending(ctx, time.Now()); err != nil {
+				return err
+			}
+			pending = true
+		}
+		if err := db.EncryptSecrets(ctx); err != nil {
+			return err
+		}
+		logger.Info("secrets stored before the key was configured are now encrypted", "count", counts.Plain)
+	}
+	if !pending {
+		// Nothing plain, or a database that had the key already, with a
+		// value only now counted among the secrets (request bodies):
+		// rewriting the rows zeroed the plain values in place, and nothing
+		// else was stored without the key. Older copies of those values
+		// may linger until overwritten, which is not worth compacting for
+		// at every upgrade.
 		return nil
 	}
-	if err := db.EncryptSecrets(ctx); err != nil {
-		return err
+	compact(ctx, db, owed, earlier, logger)
+	return nil
+}
+
+// maxCompactionAttempts is how many starts in a row may try the compaction
+// owed after encrypting a database's secrets and not finish it. One that
+// takes longer than a start is given, by the chart's startupProbe or by a
+// liveness probe without one, is cut short every time; past this bound
+// the next start skips it, so that the backend comes up, and logs what to
+// do. The start after that tries once more (a raised startup budget gets
+// its chance), and if that one is cut short too, the next skips again: a
+// restart costs at most one start cut short.
+const maxCompactionAttempts = 3
+
+// compact does the compaction the database is owed after its secrets were
+// encrypted (see protectSecrets), or skips it. Not finishing it only
+// postpones it: the start goes on whatever happens. Each attempt is
+// counted before it begins, so that one cut short counts too; earlier says
+// whether an earlier start owed it already.
+func compact(ctx context.Context, db *store.SQLite, owed store.PendingCompaction, earlier bool, logger *slog.Logger) {
+	if owed.Attempts >= maxCompactionAttempts {
+		logger.Error("the database is still owed a compaction after encrypting its secrets, and the last starts tried it and did not finish: "+
+			"cut short (by the startup or liveness probe, most likely) or failed (see their warnings). This start skips it, so that "+
+			"the backend comes up; unencrypted copies of the secrets may remain in the free space of the database file. Give a start "+
+			"the time it needs (in the chart, raise backend.startupProbe.failureThreshold) and free disk about the size of the database, "+
+			"or compact it offline with VACUUM while the backend is stopped (see the README); the next start tries once more",
+			"pending_since", owed.Since, "attempts", owed.Attempts)
+		if err := db.SetCompactionAttempts(ctx, maxCompactionAttempts-1); err != nil {
+			logger.Warn("the attempts at the compaction could not be counted afresh: the next start skips it as well", "error", err)
+		}
+		return
 	}
-	logger.Info("secrets stored before the key was configured are now encrypted", "count", counts.Plain)
-	if counts.Sealed > 0 {
-		// A database that had the key already, with a value only now
-		// counted among the secrets (request bodies): rewriting the rows
-		// zeroed the plain values in place, and nothing else was stored
-		// without the key. Older copies of those values may linger until
-		// overwritten, which is not worth compacting for at every upgrade.
-		return nil
+	if earlier {
+		logger.Warn("an earlier start did not finish compacting the database after encrypting its secrets: "+
+			"unencrypted copies may remain in the free space of its file; compacting now, which takes a while for a large one",
+			"pending_since", owed.Since, "attempt", owed.Attempts+1, "max_attempts", maxCompactionAttempts)
+	} else {
+		logger.Info("compacting the database, so that no unencrypted copy of the secrets is left in it; this takes a while for a large one")
 	}
-	// The plain values the database was written with stay in the free
-	// space of its file and in the write-ahead log until the file is
-	// rewritten. Once only, now: the next start finds nothing plain.
-	logger.Info("compacting the database once, so that no unencrypted copy of the secrets is left in it; this takes a while for a large one")
+	if err := db.SetCompactionAttempts(ctx, owed.Attempts+1); err != nil {
+		// Uncounted, an attempt cut short could be made by every start.
+		logger.Warn("the database is not compacted: the attempt could not be counted; the next start tries again", "error", err)
+		return
+	}
 	if err := db.Vacuum(ctx); err != nil {
 		logger.Warn("the database could not be compacted: unencrypted copies of the secrets may remain in the free space of its file; "+
-			"run VACUUM on it while the server is stopped", "error", err)
+			"the next start tries again", "error", err)
 	}
-	return nil
+}
+
+// setUpOIDC makes the client for sign-in through an OpenID Connect
+// provider, or says why there is none although an issuer is set. Settings
+// with which SSO cannot work (see config.Config.OIDCProblem, or a CA file
+// that cannot be read) turn SSO off: its button is not offered, the reason
+// is logged and shown to administrators, and everything else runs. A
+// sign-in setting must not take the monitoring down.
+func setUpOIDC(cfg config.Config, logger *slog.Logger) (oidc api.OIDC, problem string) {
+	if cfg.OIDCIssuer == "" {
+		return nil, ""
+	}
+	err := cfg.OIDCProblem
+	var client *oidcauth.Client
+	if err == nil {
+		client, err = oidcauth.New(oidcauth.Config{
+			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret, RedirectURL: cfg.OIDCRedirectURL,
+			Scopes: strings.Fields(cfg.OIDCScopes), UsernameClaim: cfg.OIDCUsernameClaim, DisplayNameClaim: cfg.OIDCDisplayNameClaim,
+			EmailClaim: cfg.OIDCEmailClaim, GroupsClaim: cfg.OIDCGroupsClaim, CAFile: cfg.OIDCCAFile,
+			InsecureSkipVerify: cfg.OIDCInsecureSkipVerify, Timeout: cfg.OIDCTimeout,
+			// Starting a sign-in needs no credentials, like trying a
+			// password: the same bound keeps a flood of either from growing
+			// the memory without end.
+			MaxPending: cfg.LoginThrottleMaxKeys, Logger: logger,
+		})
+	}
+	if err != nil {
+		logger.Error("SSO is off: its settings cannot be used; fix them and restart, monitoring and the other sign-ins are not affected",
+			"issuer", cfg.OIDCIssuer, "error", err)
+		return nil, err.Error()
+	}
+	logger.Info("OIDC sign-in enabled", "issuer", cfg.OIDCIssuer, "name", cfg.OIDCName, "redirect_url", cfg.OIDCRedirectURL)
+	if cfg.OIDCRedirectURL == "" {
+		// The frontend's own idea of its address is trusted only on
+		// localhost; behind a Route it is the pod's 0.0.0.0:3000.
+		logger.Warn("OIDC sign-in works only for a frontend on localhost: set UPTIME_PUBLIC_URL to the address users reach Kubeat at, or UPTIME_OIDC_REDIRECT_URL to its /auth/callback")
+	}
+	return client, ""
+}
+
+// wrongKeyHint adds to a refusal of the key what most often explains one
+// that looks right: every byte of it counts, a trailing newline too.
+func wrongKeyHint(err error) error {
+	if !errors.Is(err, secretbox.ErrWrongKey) {
+		return err
+	}
+	return fmt.Errorf("%w; every byte of the key counts, a trailing newline too: a key file written with one "+
+		"gives another key than the same text without it", err)
 }
 
 // adminUsername is the account UPTIME_ADMIN_PASSWORD creates and resets.
@@ -572,9 +661,9 @@ func runSessionCleanup(ctx context.Context, db *store.SQLite, auditRetention tim
 }
 
 // sweepThrottle forgets, every lockout period, the sign-in names whose
-// attempts have all aged out, and warns while the throttle stays full:
-// names it does not track yet are refused until it has room again.
-func sweepThrottle(ctx context.Context, throttle *auth.Throttle, logger *slog.Logger) {
+// attempts have all aged out; the sweep also logs what the throttle has
+// not reported yet.
+func sweepThrottle(ctx context.Context, throttle *auth.Throttle) {
 	ticker := time.NewTicker(throttle.Lockout)
 	defer ticker.Stop()
 	for {
@@ -582,10 +671,7 @@ func sweepThrottle(ctx context.Context, throttle *auth.Throttle, logger *slog.Lo
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			if tracked := throttle.Sweep(now.UTC()); throttle.MaxKeys > 0 && tracked >= throttle.MaxKeys {
-				logger.Warn("the sign-in throttle is full, perhaps from a flood of made-up usernames: names it does not track yet are refused as locked until older ones age out",
-					"tracked", tracked, "max", throttle.MaxKeys)
-			}
+			throttle.Sweep(now.UTC())
 		}
 	}
 }

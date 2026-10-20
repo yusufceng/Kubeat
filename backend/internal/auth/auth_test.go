@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -188,26 +190,166 @@ func TestThrottleSweep(t *testing.T) {
 	}
 }
 
-// With all its room taken, the throttle refuses new names instead of
-// growing, and keeps counting for the names it holds.
+// With all its room taken, the throttle lets a new name in and makes room
+// for it rather than refusing it: the name with the fewest attempts goes,
+// of those the one tried longest ago, however long ago the others were
+// tried.
 func TestThrottleMaxKeys(t *testing.T) {
-	th := &Throttle{MaxFailures: 3, Lockout: 10 * time.Minute, MaxKeys: 2}
+	th := &Throttle{MaxFailures: 5, Lockout: 10 * time.Minute, MaxKeys: 3}
+	t0 := time.Unix(1_700_000_000, 0)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	th.Begin("ayse", at(0))
+	th.Begin("ayse", at(1))
+	th.Begin("made-up-1", at(2))
+	th.Begin("made-up-2", at(3))
+	if n, _, ok := th.Begin("made-up-3", at(4)); !ok || n != 1 {
+		t.Fatalf("a new name while full: number %d, ok %v; want 1, true", n, ok)
+	}
+	if got := th.Sweep(at(4)); got != 3 {
+		t.Errorf("%d keys are tracked, want the bound, 3", got)
+	}
+	// made-up-1 made room; ayse, tried twice, kept her failures.
+	if n, _, _ := th.Begin("ayse", at(5)); n != 3 {
+		t.Errorf("ayse's attempt number after the flood = %d, want 3", n)
+	}
+	if n, _, _ := th.Begin("made-up-1", at(6)); n != 1 {
+		t.Errorf("made-up-1's attempt number = %d, want 1: it was forgotten", n)
+	}
+
+	// Every name was tried more than once now, ayse longest ago, but she
+	// has the most failures: of the names tried twice, the one tried
+	// longest ago goes, made-up-3.
+	th.Begin("made-up-3", at(7))
+	th.Begin("made-up-1", at(8))
+	th.Begin("made-up-4", at(9))
+	if n, _, _ := th.Begin("ayse", at(10)); n != 4 {
+		t.Errorf("ayse's attempt number = %d, want 4: the name with the most failures was pushed out", n)
+	}
+	if n, _, _ := th.Begin("made-up-3", at(11)); n != 1 {
+		t.Errorf("made-up-3's attempt number = %d, want 1: it was forgotten", n)
+	}
+}
+
+// A locked name is never pushed out to make room, and takes none: names
+// locked on purpose do not leave a name being guessed at, one failure
+// short of the lock, the only one to push out.
+func TestThrottleKeepsLockedNames(t *testing.T) {
+	var logs bytes.Buffer
+	th := &Throttle{MaxFailures: 3, Lockout: 10 * time.Minute, MaxKeys: 3, Logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	t0 := time.Unix(1_700_000_000, 0)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	th.Begin("ayse", at(0))
+	th.Begin("ayse", at(1))
+	for i, name := range []string{"locked-1", "locked-2"} {
+		for j := range 3 {
+			th.Begin(name, at(2+3*i+j))
+		}
+	}
+	// Full, and every name but ayse is locked: new names are let in beyond
+	// the bound, which is for the names that are not locked...
+	for i := range 2 {
+		if n, _, ok := th.Begin(fmt.Sprintf("made-up-%d", i), at(10+i)); !ok || n != 1 {
+			t.Fatalf("a new name while the locked names fill the bound: number %d, ok %v; want 1, true", n, ok)
+		}
+	}
+	if got := th.Sweep(at(12)); got != 5 {
+		t.Errorf("%d keys are tracked, want 5: the locked names take no room", got)
+	}
+	if !strings.Contains(logs.String(), "admitted=1 locked=2 max=3") {
+		t.Errorf("going beyond the bound was not reported: %q", logs.String())
+	}
+	// ...until those fill it: then the fewest attempts go, made-up-0.
+	th.Begin("made-up-2", at(13))
+	if n, _, ok := th.Begin("ayse", at(14)); !ok || n != 3 {
+		t.Errorf("ayse's attempt: number %d, ok %v; want 3, true: her failures were kept", n, ok)
+	}
+	if _, _, ok := th.Begin("ayse", at(15)); ok {
+		t.Error("ayse was not locked after her third failure")
+	}
+	for _, name := range []string{"locked-1", "locked-2"} {
+		if _, locked, ok := th.Begin(name, at(16)); ok || locked <= 0 {
+			t.Errorf("%s was forgotten while locked", name)
+		}
+	}
+	if n, _, _ := th.Begin("made-up-0", at(17)); n != 1 {
+		t.Errorf("made-up-0's attempt number = %d, want 1: it was forgotten", n)
+	}
+}
+
+// A label is new to a key once within its lockout period, and again only
+// once the key is forgotten.
+func TestThrottleFirst(t *testing.T) {
+	th := &Throttle{MaxFailures: 5, Lockout: 10 * time.Minute}
 	t0 := time.Unix(1_700_000_000, 0)
 	th.Begin("ayse", t0)
-	th.Begin("made-up-1", t0)
-	if _, locked, ok := th.Begin("made-up-2", t0.Add(time.Second)); ok || locked != th.Lockout {
-		t.Errorf("a new name while full: locked for %s, ok %v; want the lockout, false", locked, ok)
+	if !th.First("ayse", "login_failed") || th.First("ayse", "login_failed") {
+		t.Error("login_failed was not new exactly once")
 	}
-	if n, _, ok := th.Begin("ayse", t0.Add(time.Second)); !ok || n != 2 {
-		t.Errorf("a tracked name while full: number %d, ok %v", n, ok)
+	if !th.First("ayse", "login_denied") {
+		t.Error("another label was not new")
+	}
+	th.Begin("ayse", t0.Add(time.Minute))
+	if th.First("ayse", "login_failed") || th.First("ayse", "login_denied") {
+		t.Error("a label was new again within the lockout period")
 	}
 	th.Reset("ayse")
-	if _, _, ok := th.Begin("made-up-2", t0.Add(2*time.Second)); !ok {
-		t.Error("a new name is refused after a key was freed")
+	th.Begin("ayse", t0.Add(2*time.Minute))
+	if !th.First("ayse", "login_failed") {
+		t.Error("a label was not new after a success")
 	}
-	th.Sweep(t0.Add(time.Hour))
-	if _, _, ok := th.Begin("made-up-3", t0.Add(time.Hour)); !ok {
-		t.Error("a new name is refused after the sweep made room")
+	th.Begin("ayse", t0.Add(13*time.Minute)) // the attempt before has aged out
+	if !th.First("ayse", "login_failed") {
+		t.Error("a label was not new once the attempts had aged out")
+	}
+	if !th.First("nobody", "login_failed") || !th.First("nobody", "login_failed") {
+		t.Error("a key that is not tracked remembered a label")
+	}
+}
+
+// Names whose attempts have all aged out make room before any other, also
+// before a name tried only once.
+func TestThrottleFullForgetsAgedNamesFirst(t *testing.T) {
+	th := &Throttle{MaxFailures: 5, Lockout: 10 * time.Minute, MaxKeys: 2}
+	t0 := time.Unix(1_700_000_000, 0)
+	th.Begin("old", t0)
+	th.Begin("old", t0.Add(time.Second))
+	th.Begin("ayse", t0.Add(5*time.Minute))
+	later := t0.Add(11 * time.Minute)
+	if _, _, ok := th.Begin("mehmet", later); !ok {
+		t.Fatal("a new name was refused")
+	}
+	if n, _, _ := th.Begin("ayse", later.Add(time.Second)); n != 2 {
+		t.Errorf("ayse's attempt number = %d, want 2: she was pushed out though an aged name could go", n)
+	}
+}
+
+// What the throttle refuses, forgets and tracks beyond its bound is logged,
+// at most once a minute; the sweep logs what was left over.
+func TestThrottleReports(t *testing.T) {
+	var logs bytes.Buffer
+	th := &Throttle{MaxFailures: 2, Lockout: 10 * time.Minute, MaxKeys: 1, Logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	t0 := time.Unix(1_700_000_000, 0)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	for i := range 5 { // each new name pushes out the one before
+		th.Begin(fmt.Sprintf("made-up-%d", i), at(i))
+	}
+	th.Begin("made-up-4", at(5)) // locked by this one
+	th.Begin("made-up-4", at(6)) // refused
+	th.Begin("made-up-5", at(7)) // tracked beyond the bound: the locked name stays
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "forgotten=1 ") {
+		t.Fatalf("logged within the first minute: %q, want one line with forgotten=1", logs.String())
+	}
+	logs.Reset()
+	th.Sweep(at(8))
+	if got := logs.String(); !strings.Contains(got, "forgotten=3 ") || !strings.Contains(got, "refused=1 name=made-up-4") ||
+		!strings.Contains(got, "admitted=1 locked=1 max=1") {
+		t.Errorf("the sweep's report = %q, want the three names forgotten, the refusal and the name beyond the bound since the first line", got)
+	}
+	logs.Reset()
+	th.Sweep(at(9))
+	if logs.Len() != 0 {
+		t.Errorf("an empty report was logged: %q", logs.String())
 	}
 }
 

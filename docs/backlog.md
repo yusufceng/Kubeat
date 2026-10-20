@@ -52,3 +52,8 @@ gizleyen bağlantı kuramıyor. Kalanlar: Mattermost düz `@channel`, `@all`,
 ve Gotify'ın mesajı markdown işler. Konuşulan çözüm, dışarıdan gelen
 değerleri satır içi kod olarak yazmak ya da `@` işaretini bozmaktır;
 metinlerin okunurluğunu değiştirdiği için ayrıca karar verilmeli.
+
+Güncelleme (2026-10-16, sonra): Mattermost için yapıldı. Ona giden metinde
+her `@` ve `]` işaretinden sonra görünmez bir boşluk (U+200B) var: hiçbir
+bahsetme kimseyi çağırmıyor, `[etiket](adres)` bağlantı ya da resim
+olmuyor ve metin aynı okunuyor. Teams ve Gotify hâlâ açık.

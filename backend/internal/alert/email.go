@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/mail"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,12 +38,17 @@ type SMTPConfig struct {
 // ErrEmailNotConfigured is returned when no SMTP server is configured.
 var ErrEmailNotConfigured = errors.New("e-mail is not configured: set UPTIME_SMTP_HOST and UPTIME_SMTP_FROM")
 
+// address is where the mail server listens: host:port.
+func (c SMTPConfig) address() string {
+	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+}
+
 // EmailSender sends notifications as plain-text e-mail.
 type EmailSender struct {
 	SMTP SMTPConfig
-	// Dialer connects to the mail server, under TLS too; nil uses a plain
+	// Dial connects to the mail server, under TLS too; nil uses a plain
 	// net.Dialer. It is where a target policy applies to e-mail.
-	Dialer *net.Dialer
+	Dial func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 // Enabled reports whether an SMTP server is configured.
@@ -118,20 +124,13 @@ func buildMessage(from string, to []string, n Notification, now time.Time) []byt
 }
 
 func (s *EmailSender) deliver(ctx context.Context, recipients []string, message []byte) error {
-	addr := net.JoinHostPort(s.SMTP.Host, fmt.Sprint(s.SMTP.Port))
 	tlsConfig := &tls.Config{ServerName: s.SMTP.Host}
-	dialer := s.Dialer
-	if dialer == nil {
-		dialer = &net.Dialer{}
+	dial := s.Dial
+	if dial == nil {
+		dial = (&net.Dialer{}).DialContext
 	}
 
-	var conn net.Conn
-	var err error
-	if s.SMTP.Security == SMTPTLS {
-		conn, err = (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", addr)
-	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", addr)
-	}
+	conn, err := dial(ctx, "tcp", s.SMTP.address())
 	if err != nil {
 		return err
 	}
@@ -139,6 +138,13 @@ func (s *EmailSender) deliver(ctx context.Context, recipients []string, message 
 	// net/smtp has no context support; bound the whole exchange instead.
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
+	}
+	if s.SMTP.Security == SMTPTLS {
+		secured := tls.Client(conn, tlsConfig)
+		if err := secured.HandshakeContext(ctx); err != nil {
+			return err
+		}
+		conn = secured
 	}
 
 	client, err := smtp.NewClient(conn, s.SMTP.Host)

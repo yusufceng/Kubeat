@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,9 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
+
+// redisErrorKind is the first word of a Redis error reply: its kind.
+var redisErrorKind = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,31}$`)
 
 // databaseTLS returns the TLS configuration of a database check, or nil
 // when the monitor does not use TLS.
@@ -172,7 +176,14 @@ func (c *Checker) checkRedis(ctx context.Context, m store.Monitor) outcome {
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if strings.HasPrefix(line, "-") {
-			return "", errors.New(strings.TrimPrefix(line, "-"))
+			kind := "the server answered with an error"
+			// Redis begins an error with its kind in capitals (ERR,
+			// NOAUTH, WRONGPASS, LOADING): a word of the protocol, which
+			// says what went wrong without the server's own words.
+			if code, _, _ := strings.Cut(line[1:], " "); redisErrorKind.MatchString(code) {
+				kind += " (" + code + ")"
+			}
+			return "", c.targetSaid(m, kind, line)
 		}
 		return line, nil
 	}
@@ -192,7 +203,7 @@ func (c *Checker) checkRedis(ctx context.Context, m store.Monitor) outcome {
 		return failed(err)
 	}
 	if answer != "+PONG" {
-		return failedf("unexpected answer to PING: %s", truncate(answer, 80))
+		return failed(c.targetSaid(m, "unexpected answer to PING", answer))
 	}
 	return outcome{detail: "PONG"}
 }

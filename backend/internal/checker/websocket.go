@@ -66,7 +66,7 @@ func (c *Checker) checkWebSocket(ctx context.Context, m store.Monitor) outcome {
 	defer transport.CloseIdleConnections()
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
-		return failed(err)
+		return failed(shortened(c.notHTTP(m, err)))
 	}
 	defer resp.Body.Close()
 

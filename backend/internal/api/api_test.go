@@ -208,17 +208,20 @@ func TestCreateMonitorValidation(t *testing.T) {
 	srv, _ := newTestAPI(t)
 
 	tests := map[string]string{
-		"not JSON":           `{`,
-		"unknown field":      `{"name":"a","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":5,"extra":1}`,
-		"empty name":         `{"name":"  ","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":5}`,
-		"unknown type":       `{"name":"a","type":"icmp","target":"x","interval_seconds":30,"timeout_seconds":5}`,
-		"http without host":  `{"name":"a","type":"http","target":"example.com","interval_seconds":30,"timeout_seconds":5}`,
-		"http wrong scheme":  `{"name":"a","type":"http","target":"ftp://example.com","interval_seconds":30,"timeout_seconds":5}`,
-		"tcp without port":   `{"name":"a","type":"tcp","target":"example.com","interval_seconds":30,"timeout_seconds":5}`,
-		"tcp bad port":       `{"name":"a","type":"tcp","target":"example.com:99999","interval_seconds":30,"timeout_seconds":5}`,
-		"interval too short": `{"name":"a","type":"http","target":"http://x","interval_seconds":4,"timeout_seconds":1}`,
-		"zero timeout":       `{"name":"a","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":0}`,
-		"timeout > interval": `{"name":"a","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":31}`,
+		"not JSON":            `{`,
+		"unknown field":       `{"name":"a","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":5,"extra":1}`,
+		"empty name":          `{"name":"  ","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":5}`,
+		"unknown type":        `{"name":"a","type":"icmp","target":"x","interval_seconds":30,"timeout_seconds":5}`,
+		"http without host":   `{"name":"a","type":"http","target":"example.com","interval_seconds":30,"timeout_seconds":5}`,
+		"http wrong scheme":   `{"name":"a","type":"http","target":"ftp://example.com","interval_seconds":30,"timeout_seconds":5}`,
+		"http non-ASCII host": `{"name":"a","type":"http","target":"http://bİlling.apps.example/","interval_seconds":30,"timeout_seconds":5}`,
+		"http escaped host":   `{"name":"a","type":"http","target":"http://b%C4%B0lling.apps.example/","interval_seconds":30,"timeout_seconds":5}`,
+		"ws non-ASCII host":   `{"name":"a","type":"websocket","target":"wss://bİlling.apps.example/","interval_seconds":30,"timeout_seconds":5}`,
+		"tcp without port":    `{"name":"a","type":"tcp","target":"example.com","interval_seconds":30,"timeout_seconds":5}`,
+		"tcp bad port":        `{"name":"a","type":"tcp","target":"example.com:99999","interval_seconds":30,"timeout_seconds":5}`,
+		"interval too short":  `{"name":"a","type":"http","target":"http://x","interval_seconds":4,"timeout_seconds":1}`,
+		"zero timeout":        `{"name":"a","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":0}`,
+		"timeout > interval":  `{"name":"a","type":"http","target":"http://x","interval_seconds":30,"timeout_seconds":31}`,
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -640,6 +643,18 @@ func TestMonitorListFiltersAndHistory(t *testing.T) {
 	for _, bad := range []string{"?history=0", "?history=x", "?ids=a", "?ids=0", "?ids=1,,2", "?ids=" + many} {
 		if code := do(t, "GET", base+bad, "", nil); code != http.StatusBadRequest {
 			t.Errorf("GET %.30q: status = %d, want 400", bad, code)
+		}
+	}
+}
+
+// A channel's address names its server in ASCII too.
+func TestWebURLRefusesNonASCIIHosts(t *testing.T) {
+	if err := webURL("https://hooks.example.com/services/x"); err != nil {
+		t.Errorf("an ASCII host: %v", err)
+	}
+	for _, target := range []string{"https://bİlling.example/hook", "https://b%C4%B0lling.example/hook"} {
+		if err := webURL(target); err == nil {
+			t.Errorf("%s: accepted", target)
 		}
 	}
 }

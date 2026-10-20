@@ -17,8 +17,8 @@ var DNSRecordTypes = []string{"A", "AAAA", "CNAME", "MX", "NS", "TXT", "SRV", "P
 const defaultDNSPort = "53"
 
 // resolver returns the resolver for a monitor: the system's, or one that
-// asks only the given server.
-func (c *Checker) resolver(server string) *net.Resolver {
+// asks only the given server, connecting to it with dial.
+func resolver(server string, dial func(ctx context.Context, network, address string) (net.Conn, error)) *net.Resolver {
 	if server == "" {
 		return net.DefaultResolver
 	}
@@ -29,7 +29,7 @@ func (c *Checker) resolver(server string) *net.Resolver {
 		// The Go resolver is the one that honours Dial.
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return c.dialer.DialContext(ctx, network, server)
+			return dial(ctx, network, server)
 		},
 	}
 }
@@ -37,9 +37,10 @@ func (c *Checker) resolver(server string) *net.Resolver {
 // checkDNS looks up the monitor's target. It succeeds when at least one
 // record comes back and, if the monitor expects a value, one contains it.
 func (c *Checker) checkDNS(ctx context.Context, m store.Monitor) outcome {
-	records, err := lookup(ctx, c.resolver(m.DNS.Resolver), m.DNS.RecordType, m.Target)
+	var refusal policyRefusal
+	records, err := lookup(ctx, resolver(m.DNS.Resolver, refusal.dial(c)), m.DNS.RecordType, m.Target)
 	if err != nil {
-		return failed(err)
+		return failed(refusal.wrap(err))
 	}
 	if len(records) == 0 {
 		return failedf("no %s records for %s", m.DNS.RecordType, m.Target)

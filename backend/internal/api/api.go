@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
@@ -26,6 +27,7 @@ type Store interface {
 	UpdateMonitor(ctx context.Context, m store.Monitor) (store.Monitor, error)
 	DeleteMonitor(ctx context.Context, id int64) error
 	GetMonitorByPushToken(ctx context.Context, token string) (store.Monitor, error)
+	SetPushToken(ctx context.Context, id int64, token string) error
 	RecordPush(ctx context.Context, report store.PushReport) error
 	GetOpenIncident(ctx context.Context, monitorID int64, kind store.IncidentKind) (store.Incident, error)
 	ResolveIncident(ctx context.Context, id int64, resolvedAt time.Time) error
@@ -130,14 +132,18 @@ type Options struct {
 	SessionTTL        time.Duration
 	Throttle          *auth.Throttle
 	PasswordMinLength int
-	// LoginConcurrency bounds the password checks that run at once, bcrypt
-	// comparisons and directory binds; zero means half the CPUs, at least
-	// one. A check waits at most LoginQueueWait for its turn (zero: as long
-	// as its request lasts) and is then refused with 503.
+	// LoginConcurrency bounds the bcrypt comparisons that run at once; zero
+	// means half the CPUs, at least one, and two with LDAP (see
+	// passwordCheckSlots). Directory binds have slots of their own
+	// (directoryConcurrency). A sign-in waits at most
+	// LoginQueueWait for its turn at either (zero: as long as its request
+	// lasts) and is then refused with 503.
 	LoginConcurrency int
 	LoginQueueWait   time.Duration
 	// LoginAuditPerMinute caps the failed sign-ins written to the audit log
-	// in a minute; zero means no cap.
+	// in a minute, but for the wrong passwords of names with an account
+	// here (local, or a directory or SSO user who signed in before); zero
+	// means no cap.
 	LoginAuditPerMinute int
 	// LDAP, if set, lets directory accounts sign in. A directory user gets
 	// the role of the group mappings that match their groups, or else
@@ -148,7 +154,10 @@ type Options struct {
 	// OIDC, if set, lets users sign in through an OpenID Connect provider;
 	// OIDCName is what the sign-in page calls it. Roles come from the
 	// group mappings, as for LDAP, with the same kind of default.
+	// OIDCProblem says why OIDC is not set although a provider is
+	// configured: its settings cannot be used. Administrators see it.
 	OIDC                  OIDC
+	OIDCProblem           string
 	OIDCName              string
 	OIDCDefaultRole       store.Role
 	OIDCDefaultNamespaces []string
@@ -184,7 +193,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 24
+const Revision = 25
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -196,9 +205,11 @@ type Health struct {
 
 type handler struct {
 	opts Options
-	// passwordChecks are the slots password checks run in; failedLogins
-	// decides which failed sign-ins the audit log gets.
+	// passwordChecks are the slots bcrypt comparisons run in, and
+	// directoryBinds those directory sign-ins run in; failedLogins decides
+	// which failed sign-ins the audit log gets.
 	passwordChecks *slots
+	directoryBinds *slots
 	failedLogins   *auditCap
 }
 
@@ -206,7 +217,8 @@ type handler struct {
 func NewHandler(opts Options) http.Handler {
 	h := &handler{
 		opts:           opts,
-		passwordChecks: newSlots(opts.LoginConcurrency, opts.LoginQueueWait),
+		passwordChecks: newSlots(passwordCheckSlots(opts.LoginConcurrency, runtime.GOMAXPROCS(0), opts.LDAP != nil), opts.LoginQueueWait),
+		directoryBinds: newSlots(directoryConcurrency, opts.LoginQueueWait),
 		failedLogins:   newAuditCap(opts.LoginAuditPerMinute, opts.Logger),
 	}
 	mux := http.NewServeMux()
@@ -220,6 +232,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/monitors/{id}", h.updateMonitor)
 	mux.HandleFunc("DELETE /api/v1/monitors/{id}", h.deleteMonitor)
 	mux.HandleFunc("POST /api/v1/monitors/{id}/clone", h.cloneMonitor)
+	mux.HandleFunc("POST /api/v1/monitors/{id}/push-token", h.renewPushToken)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/results", h.listResults)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/series", h.monitorSeries)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/uptime", h.monitorUptime)

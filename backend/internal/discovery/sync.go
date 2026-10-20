@@ -279,12 +279,27 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 			}
 			counts.Updated++
 		case differs(current, want):
+			before, from := current.Destination(), current.Target
 			current.Target, current.Interval, current.Timeout, current.FailureThreshold = want.Target, want.Interval, want.Timeout, want.FailureThreshold
 			current.GRPC.Service, current.EachPod = want.GRPC.Service, want.EachPod
+			// Stored secrets go only to the server they were entered for. An
+			// object that now leads elsewhere, to another host or back to
+			// plain HTTP, takes the monitor's secrets and request body with
+			// it no more: whoever may edit the monitor enters them again for
+			// the new server. One that gains TLS stays on its server.
+			summary := current.Name
+			if !store.SameServer(before, current.Destination()) {
+				if dropped := current.DropSecrets(); len(dropped) > 0 {
+					summary += fmt.Sprintf(": the target moved from %s to %s; dropped %s, which go only to the server they were entered for",
+						from, current.Target, strings.Join(dropped, ", "))
+					s.opts.Logger.Warn("discovery sync: a monitor's target moved to another server; its secrets were dropped",
+						"monitor", current.Name, "from", from, "to", current.Target, "dropped", dropped)
+				}
+			}
 			if _, err := s.opts.Store.UpdateMonitor(ctx, current); err != nil {
 				return fmt.Errorf("update monitor %d: %w", current.ID, err)
 			}
-			s.audit(ctx, "update", current.ID, current.Name)
+			s.audit(ctx, "update", current.ID, summary)
 			counts.Updated++
 		}
 		counts.Managed++

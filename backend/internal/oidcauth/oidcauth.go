@@ -6,6 +6,7 @@
 package oidcauth
 
 import (
+	"container/list"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -14,6 +15,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -57,6 +59,14 @@ type Config struct {
 	// StateTTL is how long a sign-in may take between leaving for the
 	// provider and coming back.
 	StateTTL time.Duration
+	// MaxPending bounds the sign-ins under way that are remembered. Anyone
+	// can start one, so a flood of starts would otherwise grow the memory
+	// without end; past the bound the oldest are forgotten, and those
+	// users are asked to start again. Zero means 100000.
+	MaxPending int
+	// Logger, if set, is told when sign-ins under way are forgotten to
+	// make room, at most once per StateTTL.
+	Logger *slog.Logger
 }
 
 // Identity is what the provider said about a user.
@@ -79,8 +89,8 @@ var (
 
 // pending is a sign-in that left for the provider and may come back.
 type pending struct {
-	nonce, verifier, redirect string
-	expires                   time.Time
+	state, nonce, verifier, redirect string
+	expires                          time.Time
 }
 
 // Client is an OIDC relying party for one provider.
@@ -90,8 +100,13 @@ type Client struct {
 
 	mu       sync.Mutex
 	provider *oidc.Provider // nil until discovery succeeded
-	pending  map[string]pending
-	now      func() time.Time
+	// The sign-ins under way by state, and the same in the order they
+	// started. Every one is given StateTTL, so that is also the order they
+	// expire in: the oldest are forgotten first, without looking at the rest.
+	pending map[string]*list.Element // of *pending, in order
+	order   *list.List
+	warned  time.Time // when forgetting sign-ins to make room was last logged
+	now     func() time.Time
 }
 
 // New returns a client. The provider is discovered on first use, not here,
@@ -121,6 +136,9 @@ func New(cfg Config) (*Client, error) {
 	if cfg.StateTTL <= 0 {
 		cfg.StateTTL = 10 * time.Minute
 	}
+	if cfg.MaxPending <= 0 {
+		cfg.MaxPending = 100000
+	}
 	tlsConfig := &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify} //nolint:gosec // an explicit setting
 	if cfg.CAFile != "" {
 		pem, err := os.ReadFile(cfg.CAFile)
@@ -138,7 +156,8 @@ func New(cfg Config) (*Client, error) {
 	return &Client{
 		cfg:     cfg,
 		client:  &http.Client{Transport: transport, Timeout: cfg.Timeout},
-		pending: make(map[string]pending),
+		pending: make(map[string]*list.Element),
+		order:   list.New(),
 		now:     time.Now,
 	}, nil
 }
@@ -231,16 +250,33 @@ func (c *Client) Start(ctx context.Context, callersRedirect string) (authURL str
 
 	c.mu.Lock()
 	now := c.now()
-	for s, p := range c.pending { // forget sign-ins that never came back
-		if !p.expires.After(now) {
-			delete(c.pending, s)
-		}
+	// Forget the sign-ins that never came back, then, while the bound is
+	// reached, the oldest of the rest, the nearest to expiring anyway.
+	for e := c.order.Front(); e != nil && !e.Value.(*pending).expires.After(now); e = c.order.Front() {
+		c.forget(e)
 	}
-	c.pending[state] = pending{nonce: nonce, verifier: verifier, redirect: redirect, expires: now.Add(c.cfg.StateTTL)}
+	crowded := 0
+	for ; c.order.Len() >= c.cfg.MaxPending; crowded++ {
+		c.forget(c.order.Front())
+	}
+	c.pending[state] = c.order.PushBack(&pending{state: state, nonce: nonce, verifier: verifier, redirect: redirect, expires: now.Add(c.cfg.StateTTL)})
+	warn := crowded > 0 && c.cfg.Logger != nil && (c.warned.IsZero() || now.Sub(c.warned) >= c.cfg.StateTTL)
+	if warn {
+		c.warned = now
+	}
 	c.mu.Unlock()
+	if warn {
+		c.cfg.Logger.Warn("too many SSO sign-ins under way, perhaps from a flood of started ones: the oldest are forgotten, and their users have to start again",
+			"max", c.cfg.MaxPending)
+	}
 
 	conf := c.oauthConfig(p, redirect)
 	return conf.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)), nil
+}
+
+// forget drops a sign-in under way; call with mu held.
+func (c *Client) forget(e *list.Element) {
+	delete(c.pending, c.order.Remove(e).(*pending).state)
 }
 
 // Finish completes a sign-in with what the provider sent back: it
@@ -248,10 +284,13 @@ func (c *Client) Start(ctx context.Context, callersRedirect string) (authURL str
 // reads the user's claims, from the ID token and the userinfo endpoint.
 func (c *Client) Finish(ctx context.Context, state, code string) (Identity, error) {
 	c.mu.Lock()
-	p, ok := c.pending[state]
-	delete(c.pending, state) // a state is good once
+	var p *pending
+	if e, ok := c.pending[state]; ok {
+		p = e.Value.(*pending)
+		c.forget(e) // a state is good once
+	}
 	c.mu.Unlock()
-	if !ok || !p.expires.After(c.now()) {
+	if p == nil || !p.expires.After(c.now()) {
 		return Identity{}, ErrInvalidState
 	}
 	provider, err := c.discover(ctx)

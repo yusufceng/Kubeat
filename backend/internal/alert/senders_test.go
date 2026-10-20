@@ -438,8 +438,9 @@ func injected() Notification {
 }
 
 // What came from a monitor, a target or a push report reads as typed in
-// Slack and Mattermost: no broadcast mention, no link whose label hides
-// its address.
+// Slack and Mattermost: Slack's forms, a broadcast mention such as
+// <!channel> or a link <address|label> whose label hides its address, are
+// escaped for both.
 func TestSlackTextIsEscaped(t *testing.T) {
 	srv, bodies := capture(t)
 	router := NewRouter(nil, "kubeat/test", SMTPConfig{}, Endpoints{})
@@ -470,9 +471,59 @@ func TestSlackTextIsEscaped(t *testing.T) {
 	// Kubeat's own link stays a link: its "&" is not escaped.
 	up := injected()
 	up.Event, up.Incident.ResolvedAt = EventUp, up.Incident.StartedAt.Add(time.Minute)
-	link := newSlackBody(up, time.Now()).Attachments[0].TitleLink
-	if link != URL(up) || !strings.Contains(link, "&to=") {
-		t.Errorf("title_link = %q, want %q", link, URL(up))
+	for _, esc := range []func(string) string{chatEscaper.Replace, mattermostEscaper.Replace} {
+		link := newSlackBody(up, time.Now(), esc).Attachments[0].TitleLink
+		if link != URL(up) || !strings.Contains(link, "&to=") {
+			t.Errorf("title_link = %q, want %q", link, URL(up))
+		}
+	}
+}
+
+// Mattermost reads Markdown and mentions of its own as well: an @channel,
+// @here, @all or @name and a [label](address) from a monitor's name or a
+// push report reach it broken by a zero-width space, so that they notify
+// no one and link nowhere. Slack's text is left as it was.
+func TestMattermostMentionsAndLinksReadAsTyped(t *testing.T) {
+	srv, bodies := capture(t)
+	router := NewRouter(nil, "kubeat/test", SMTPConfig{}, Endpoints{})
+	n := sampleDown()
+	n.Monitor.Name = "nightly-backup @all"
+	n.Incident.Cause = "the source reported a failure: @channel @Here x.@all @ops sign in again: " +
+		"[https://kubeat.example/login](https://evil.example/login) ![p](https://evil.example/p.png) [a][ref]\n[ref]: https://evil.example/r"
+	for _, typ := range []store.ChannelType{store.ChannelMattermost, store.ChannelSlack} {
+		if err := router.Send(context.Background(), store.Channel{Type: typ, Target: srv.URL}, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Every text of a body: the message, the fallback, the title, the fields.
+	texts := func(body map[string]any) []string {
+		attachment := body["attachments"].([]any)[0].(map[string]any)
+		out := []string{body["text"].(string), attachment["fallback"].(string), attachment["title"].(string)}
+		for _, f := range attachment["fields"].([]any) {
+			field := f.(map[string]any)
+			out = append(out, field["title"].(string), field["value"].(string))
+		}
+		return out
+	}
+	got := bodies()
+	mattermost, slack := texts(got[0]), texts(got[1])
+	for _, text := range mattermost {
+		lower := strings.ToLower(text)
+		for _, form := range []string{"@channel", "@here", "@all", "@ops", "](", "][", "]:"} {
+			if strings.Contains(lower, form) {
+				t.Errorf("mattermost: %q in %q", form, text)
+			}
+		}
+	}
+	// Both read as typed: without the zero-width spaces, the texts are Slack's.
+	if want := chatEscaper.Replace(Text(n)); slack[0] != want ||
+		strings.ReplaceAll(mattermost[0], "​", "") != want || !strings.Contains(mattermost[0], "nightly-backup @​all") {
+		t.Errorf("text: mattermost %q, slack %q, want %q", mattermost[0], slack[0], want)
+	}
+	for i := range slack {
+		if strings.Contains(slack[i], "​") || strings.ReplaceAll(mattermost[i], "​", "") != slack[i] {
+			t.Errorf("text %d: mattermost %q, slack %q", i, mattermost[i], slack[i])
+		}
 	}
 }
 
@@ -499,9 +550,9 @@ func TestGoogleChatTextIsEscaped(t *testing.T) {
 	}
 }
 
-// With a target policy no sender reaches the backend's own loopback: not a
-// channel's address, nor the Telegram, PagerDuty or mail server the
-// operator set. An exception lets them through.
+// With a target policy no channel's address reaches the backend's own
+// loopback; the Telegram, PagerDuty and mail server the operator set do,
+// at their exact address. An exception lets the channels through too.
 func TestRouterConnectsThroughTheGuard(t *testing.T) {
 	srv, bodies := capture(t)
 	mail := newFakeSMTP(t)
@@ -516,41 +567,56 @@ func TestRouterConnectsThroughTheGuard(t *testing.T) {
 	}
 	endpoints := Endpoints{Telegram: srv.URL, PagerDuty: srv.URL}
 
+	// The services the operator set are trusted at their exact address,
+	// a sidecar's on loopback here, by their own senders alone: a channel
+	// aimed at the same address is refused.
 	strict, err := netguard.New(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, security := range []string{SMTPNone, SMTPTLS} {
-		smtp := mail.config()
-		smtp.Security = security
-		router := NewRouter(strict, "kubeat/test", smtp, endpoints)
-		for _, typ := range store.ChannelTypes {
-			if err := send(router, typ); !errors.Is(err, netguard.ErrBlocked) {
-				t.Errorf("%s (mail %s): err = %v, want the target policy's", typ, security, err)
+	router := NewRouter(strict, "kubeat/test", mail.config(), endpoints)
+	for _, typ := range store.ChannelTypes {
+		err := send(router, typ)
+		switch typ {
+		case store.ChannelTelegram, store.ChannelPagerDuty, store.ChannelEmail:
+			if err != nil {
+				t.Errorf("%s to the operator's address: %v", typ, err)
+			}
+		default:
+			if !errors.Is(err, netguard.ErrBlocked) {
+				t.Errorf("%s: err = %v, want the target policy's", typ, err)
 			}
 		}
 	}
+	// Telegram and PagerDuty delivered, and the mail server took the mail.
 	mail.mu.Lock()
-	commands := len(mail.commands)
+	delivered := mail.data != ""
+	mail.data = ""
 	mail.mu.Unlock()
-	if len(bodies()) != 0 || commands != 0 {
-		t.Errorf("blocked senders still delivered: %d requests, %d SMTP commands", len(bodies()), commands)
+	if len(bodies()) != 2 || !delivered {
+		t.Errorf("the operator's services: %d requests, mail delivered: %v", len(bodies()), delivered)
+	}
+	// A channel aimed at the mail server is refused as well.
+	smtp := mail.config()
+	hook := store.Channel{Type: store.ChannelWebhook, Target: "http://" + smtp.address() + "/"}
+	if err := router.Send(ctx, hook, sampleDown()); !errors.Is(err, netguard.ErrBlocked) {
+		t.Errorf("a webhook at the mail server: err = %v", err)
 	}
 
 	open, err := netguard.New(nil, []string{"127.0.0.0/8", "::1/128"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := NewRouter(open, "kubeat/test", mail.config(), endpoints)
+	router = NewRouter(open, "kubeat/test", mail.config(), endpoints)
 	for _, typ := range store.ChannelTypes {
 		if err := send(router, typ); err != nil {
 			t.Errorf("%s with an exception: %v", typ, err)
 		}
 	}
 	mail.mu.Lock()
-	delivered := mail.data != ""
+	delivered = mail.data != ""
 	mail.mu.Unlock()
-	if len(bodies()) != len(store.ChannelTypes)-1 || !delivered {
+	if len(bodies()) != 2+len(store.ChannelTypes)-1 || !delivered {
 		t.Errorf("with an exception: %d requests, mail delivered: %v", len(bodies()), delivered)
 	}
 }

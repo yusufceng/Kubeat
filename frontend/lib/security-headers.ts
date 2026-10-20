@@ -22,8 +22,10 @@ export type SecurityOptions = {
   dev: boolean;
   /** The request came over HTTPS (see forwardedHttps). */
   https: boolean;
-  /** Users reach Kubeat at an HTTPS address (PUBLIC_URL). */
-  publicHttps: boolean;
+  /** Where users reach Kubeat (PUBLIC_URL); empty when not known. */
+  publicUrl: string;
+  /** COOKIE_SECURE; "never" says that users come over plain HTTP. */
+  cookieSecure: "auto" | "always" | "never";
   /** The CSP source list of the pages that may show a status page in a frame. */
   statusPageFrameAncestors: string;
   /** Strict-Transport-Security max-age in seconds; 0 sends none. */
@@ -31,18 +33,35 @@ export type SecurityOptions = {
 };
 
 /**
- * Whether the proxies in front of us say the request came over HTTPS.
- * X-Forwarded-Proto may hold a value per proxy ("https, http" when TLS ended
- * at a load balancer in front of the router); one HTTPS hop is enough. A
- * client that sends the header itself only changes its own answer.
+ * Whether the proxies in front of us say the browser came over HTTPS.
+ * X-Forwarded-Proto may hold a value per proxy, each appending its own, so
+ * the first is the one the browser used: "https, http" when TLS ended at a
+ * load balancer in front of the router, "http, https" when a plain-HTTP
+ * proxy talks HTTPS to the router (upgrading that browser's requests would
+ * break the page). A client that sends the header itself only changes its
+ * own answer.
  */
 export function forwardedHttps(forwardedProto: string | null | undefined): boolean {
-  return (forwardedProto ?? "").split(",").some((proto) => proto.trim().toLowerCase() === "https");
+  const clientFacing = (forwardedProto ?? "").split(",")[0];
+  return clientFacing.trim().toLowerCase() === "https";
 }
 
 /** Whether an address such as PUBLIC_URL is an HTTPS one. */
 export function isHttpsUrl(url: string): boolean {
   return /^https:\/\//i.test(url);
+}
+
+/**
+ * Whether the browser is told to fetch the page's http:// links over HTTPS
+ * (upgrade-insecure-requests): when the request came over HTTPS, unless
+ * the install says its users come over plain HTTP, with
+ * COOKIE_SECURE=never or an http:// PUBLIC_URL. A plain-HTTP proxy that
+ * adds no X-Forwarded-Proto of its own and talks HTTPS to the router
+ * leaves the router's "https" first, and that browser would get the page
+ * without a script or stylesheet.
+ */
+function upgradeInsecureRequests(opts: SecurityOptions): boolean {
+  return opts.https && opts.cookieSecure !== "never" && !/^http:\/\//i.test(opts.publicUrl);
 }
 
 /** The headers for the answer to a request for pathname. */
@@ -51,7 +70,7 @@ export function securityHeaders(pathname: string, opts: SecurityOptions): Record
   // Browsers ignore it over plain HTTP, so an HTTPS public address is
   // reason enough; no includeSubDomains or preload, since the host may be
   // one name under a shared apps domain.
-  if (opts.hstsMaxAge > 0 && (opts.https || opts.publicHttps)) {
+  if (opts.hstsMaxAge > 0 && (opts.https || isHttpsUrl(opts.publicUrl))) {
     headers["Strict-Transport-Security"] = `max-age=${opts.hstsMaxAge}`;
   }
   return headers;
@@ -86,6 +105,6 @@ function contentSecurityPolicy(pathname: string, opts: SecurityOptions): string 
     `frame-ancestors ${frameAncestors}`,
     // Over plain HTTP (localhost, a port-forward) the upgrade would break
     // every script and stylesheet.
-    ...(opts.https ? ["upgrade-insecure-requests"] : []),
+    ...(upgradeInsecureRequests(opts) ? ["upgrade-insecure-requests"] : []),
   ].join("; ");
 }

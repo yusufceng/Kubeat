@@ -70,7 +70,74 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
   `frontend.extraEnv` altında ortam değişkeni olarak verilir — alarm
   davranışı da böyle ayarlanır (`UPTIME_REMINDER_INTERVAL`,
   `UPTIME_NOTIFY_GROUP_WAIT`, `UPTIME_RECOVERY_THRESHOLD`, ...); bkz.
-  [values.yaml](deploy/helm/kubeat/values.yaml).
+  [values.yaml](deploy/helm/kubeat/values.yaml). Eski values dosyalarındaki
+  `backend.env` ve `frontend.env` okunmaz: boş değillerse chart kurulmaz ve
+  oradaki ayarların `extraEnv`'e taşınmasını ister.
+
+### 0.38'e yükseltme
+
+0.38 güvenliği sıkılaştırır ve bazı varsayılanları değiştirir. 0.37 ya da
+öncesinden yükseltirken:
+
+1. **Önce yedek alın.** Veritabanı şeması 22'ye çıkar. 0.37.0 ve öncesi
+   yükseltilmiş veritabanını açmaz ("database is at version 22, newer than
+   this binary"), `helm rollback` backend'i yeniden başlatma döngüsünde
+   bırakır. Geri dönmek gerekirse yükseltmeden önce alınmış yedeği geri
+   yükleyin (bkz. "Yedekleme ve geri yükleme"); o yedekten sonraki
+   değişiklikler yeniden girilir ve bu sürümün aldığı yedekler eski
+   sürümlere yüklenemez.
+2. **Şifreleme anahtarı zorunlu.** Backend `UPTIME_SECRET_KEY` (ya da
+   `UPTIME_SECRET_KEY_FILE`) olmadan başlamaz; chart anahtarı kendisi
+   üretir. Chart dışı kurulumlar anahtarı vermeli ya da şifrelemeden bilerek
+   `UPTIME_ALLOW_PLAINTEXT_SECRETS=true` ile vazgeçmelidir. Anahtarlı ilk
+   açılış veritabanını sıkıştırır ve büyük bir veritabanında uzun sürer
+   (bkz. "Gizli değerlerin şifrelenmesi").
+3. **Hedef politikası.** Monitor'lar ve bildirim kanalları loopback'e,
+   link-local adreslere ve bulutların metadata servislerine bağlanmaz. Bu
+   aralıkları gerçekten kontrol eden monitor'lar (NodeLocal DNSCache'in
+   `169.254.20.10`'u, Azure DNS'in `168.63.129.16`'sı) için
+   `UPTIME_TARGET_ALLOW_CIDRS` verin (bkz. "Hedef politikası").
+   Yönlendirmeler monitor'un header'larını ve `auth` bilgisini yalnızca aynı
+   sunucuda kaldıklarında taşır; başka bir host'a ya da porta yönlenen ve
+   kimlik bilgisi isteyen monitor'ların hedefini son adrese çevirin.
+4. **Metrikler anahtar ister.** Chart'la kurulan backend'in `/metrics`'i
+   bearer token ister. ServiceMonitor onu gönderir; elle yapılandırılmış bir
+   Prometheus da göndermeli ya da `metrics.auth.enabled=false` verilmelidir
+   (bkz. "Metrik anahtarı").
+5. **Ingress TLS ile sunulur.** Ingress'i düz HTTP ile kullanan kurulumlar
+   TLS Secret'ını oluşturmalı ya da `ingress.tls.enabled=false`
+   vermelidir; SSO ise Ingress controller'ın önünde HTTPS ister (bkz.
+   "Dışarıya açma: Route ve Ingress").
+6. **Herkes bir kez yeniden girer.** HTTPS ile sunulan kurulumlarda oturum
+   çerezinin adı `__Host-kubeat_session` oldu.
+7. **SSO dönüş adresi.** `publicURL` Route ya da Ingress host'undan
+   farklıysa dönüş adresi `<publicURL>/auth/callback` olur: yükseltmeden
+   önce kimlik sağlayıcıya kaydedin ya da eskisini `oidc.redirectURL` ile
+   sabitleyin. 0.37.0'a kadar SSO Route ya da Ingress host'unu kullanıyordu;
+   yolu olan bir `publicURL`'de (`https://portal.example.com/kubeat`)
+   `oidc.redirectURL=https://<route ya da ingress host'u>/auth/callback`
+   verin. Backend'in reddedeceği bir dönüş adresiyle chart kurulmaz ve
+   hangi değerin düzeltileceğini söyler.
+8. **Push token'larını yenileyin.** Önceki sürümler push monitor'larının
+   rapor adreslerini izleyicilere de gösteriyordu. İzleyicilerin rapor
+   gönderememesi gereken monitor'larda token'ı monitor sayfasındaki
+   **Adresi yenile** düğmesiyle (`POST /api/v1/monitors/{id}/push-token`)
+   yenileyin ve job'lara yeni adresi verin.
+9. **Thanos'un 9091 portu.** Cluster çapındaki keşifle 9091'i kullanan
+   kurulumlar `prometheus.openshiftMonitoringView=true` vermelidir; yoksa
+   pod'ların CPU ve bellek değerleri boş kalır (bkz. "Pod'lar ve kaynak
+   kullanımı").
+10. **`backend.env` ve `frontend.env` okunmaz.** Boş değillerse chart
+    kurulmaz: ayarları `extraEnv`'e taşıyın. `--reuse-values` eski değeri
+    geri getirir; `--reset-then-reuse-values` (Helm 3.14+) ile
+    `--set backend.env=null --set backend.extraEnv.<AD>=<değer>` verin ya
+    da ayarları taşınmış bir values dosyasıyla `--reuse-values` olmadan
+    yükseltin.
+
+Gerisi bir şey yapmayı gerektirmez: izleyiciler HTTP monitor'larının istek
+gövdesini görmez; ters çevrilmiş monitor'lar politikanın reddini beklenen
+hata saymaz; kullanılamayan bir SSO ayarı backend'i durdurmaz, yalnızca
+SSO'yu kapatır; `helm upgrade --reuse-values` 0.37.0'dan da çalışır.
 
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
@@ -173,6 +240,7 @@ Push raporları (`/api/push/{token}`) da anahtar istemez: adresteki token o
 monitor'un sırrıdır ve yalnızca o monitor'a rapor yazabilir. Token'ı (ve
 rapor adresini) yalnızca monitor'u değiştirebilenler görür; izleyicilere
 gösterilmez, çünkü onunla monitor'u düşmüş ya da çalışıyor gösterebilirler.
+Sızan bir token monitor sayfasından yenilenebilir (bkz. `push`).
 
 Cluster'a ya da metrik sunucusuna yapılan bir istek başarısız olduğunda
 hatanın kendisini (Kubeat'in servis hesabı, API sunucusunun ve metrik
@@ -181,7 +249,24 @@ yöneticiler görür. Diğerlerine hatanın türü söylenir: servis hesabının
 namespace'te neyi yapamadığı, kimliğinin kabul edilmediği, sunucuya
 ulaşılamadığı ya da sunucunun sertifikasına güvenilmediği; türü belli olmayan
 hatalarda ayrıntının logda olduğu yazar. Hatanın tam metni her zaman backend
-logundadır.
+logundadır. Workload monitor'larının ve her pod'u ayrı kontrol eden
+monitor'ların kontrolleri de cluster'a sorar; bu kontrollerin sonucu, olay
+nedeni ve bildirimi monitor'u okuyabilen herkese ve bildirim kanallarına
+gittiği için yöneticilere de yalnızca hatanın türünü yazar (forbidden,
+unauthorized, not found, zaman aşımı, ulaşılamıyor, güvenilmeyen sertifika);
+tam metin logdadır.
+
+Bir hedefin protokol dışı sözleri de sonuca yazılmaz: HTTP ile yanıt
+vermeyen bir servisin ilk satırı (bir SSH ya da SMTP karşılaması), Redis'in
+hata yanıtı ve `PING`'e verilen beklenmedik yanıt sonuçta yalnızca türüyle
+görünür (`the server did not answer with HTTP`, `the server answered with an
+error (WRONGPASS)`, `unexpected answer to PING`); kendisi backend
+logundadır. Böylece hedefi seçemeyen izleyiciler bir iç servisin
+karşılamasını sonuçlardan okuyamaz. Diğer hatalar hedefin söylediğini
+taşımaya devam eder: sertifikadaki adlar, JSON kontrolünün karşılaştırdığı
+değer, PostgreSQL ve MySQL'in hata mesajları ve yönlendirme adresleri. Bir
+sonucun hata metninin ilk 300 baytı saklanır; uzun bir hedef adresi hatada
+kısaltılır, ki hatanın nedeni kesilmesin.
 
 Helm chart API anahtarını ilk kurulumda rastgele üretir, bir Secret'ta
 saklar ve güncellemelerde korur; Argo CD gibi araçlarla kurarken bkz.
@@ -214,8 +299,9 @@ bulut sağlayıcısının metadata servisine (`169.254.169.254`) götürmesin di
 kontroller ve bildirimler her bağlantıyı **hedef politikasına** göre açar.
 Politika bağlantı anında, ad çözüldükten sonra bağlanılacak adrese bakar:
 zararsız görünen bir alan adı, iki sorgu arasında değişen bir DNS yanıtı ve
-yönlendirmenin (redirect) her adımı aynı kurala takılır. Yöneticinin verdiği
-Telegram, PagerDuty ve SMTP adresleri de politikadan geçer.
+yönlendirmenin (redirect) her adımı aynı kurala takılır. Yöneticinin
+ortamda verdiği vekil, SMTP, Telegram ve PagerDuty adresleri ise tam
+adresleriyle güvenilir (bkz. aşağıda "Yöneticinin uç noktaları").
 
 Yerleşik olarak yasak olan aralıklar:
 
@@ -225,6 +311,8 @@ Yerleşik olarak yasak olan aralıklar:
 | `0.0.0.0/8`, `::/128` | "Bu makine"; `0.0.0.0` loopback'e ulaşır |
 | `169.254.0.0/16`, `fe80::/10` | Link-local; bulut metadata servisi `169.254.169.254`'tedir |
 | `fd00:ec2::254/128` | AWS metadata servisinin IPv6 adresi |
+| `fd20:ce::254/128` | Google Cloud metadata servisinin IPv6 adresi |
+| `168.63.129.16/32` | Azure'un host ajanı (WireServer); aynı zamanda Azure'un DNS sunucusu |
 | `100.100.100.200/32` | Alibaba Cloud metadata servisi |
 | `224.0.0.0/4`, `ff00::/8`, `255.255.255.255/32` | Multicast ve broadcast |
 
@@ -233,11 +321,22 @@ Yerleşik olarak yasak olan aralıklar:
 servisleri kontrol etmektir ve ClusterIP'ler (OpenShift'te `172.30.0.0/16`),
 pod IP'leri ve `*.svc` adları bu aralıklardadır. IPv6 biçiminde yazılmış
 IPv4 adresleri (`::ffff:127.0.0.1`) ve NAT64 adresleri (`64:ff9b::/96`),
-taşıdıkları IPv4 adresine göre denetlenir.
+taşıdıkları IPv4 adresine göre denetlenir. Yalnızca bu iyi bilinen NAT64
+öneki tanınır: ağınız kendi önekini kullanıyorsa (örneğin `64:ff9b:1::/48`
+içinden bir `/96`), IPv4 adresinin nereye yazıldığı ağa bağlıdır ve yasak
+aralıkların o önekteki karşılıkları `UPTIME_TARGET_DENY_CIDRS`'e ayrıca
+eklenmelidir; `64:ff9b:1:1::/96` için metadata ve loopback:
+`64:ff9b:1:1::a9fe:0/112,64:ff9b:1:1::7f00:0/104`.
+
+Azure'da `168.63.129.16` platformun DNS sunucusudur da: onu çözücü olarak
+soran bir DNS monitor'u için istisna gerekir
+(`UPTIME_TARGET_ALLOW_CIDRS=168.63.129.16/32`). Pod'un kendi ad çözmesi
+bundan etkilenmez.
 
 Yasak bir adrese giden kontrol ya da kanal testi, adresi ve aralığı söyleyen
 bir hatayla başarısız olur: `169.254.169.254 is blocked by the target policy
-(169.254.0.0/16); UPTIME_TARGET_ALLOW_CIDRS can allow it`. İki ayar,
+(169.254.0.0/16); UPTIME_TARGET_ALLOW_CIDRS can allow it`. Ters çevrilmiş
+(`inverted`) bir monitor bunu beklediği başarısızlık saymaz. İki ayar,
 virgülle ayrılmış CIDR listesi alır; tek bir adres `/32` (IPv6'da `/128`)
 ile yazılır, geçersiz bir girdi backend'i başlatmaz:
 
@@ -254,14 +353,44 @@ UPTIME_TARGET_ALLOW_CIDRS=169.254.20.10/32
 UPTIME_TARGET_DENY_CIDRS=10.0.0.0/8
 ```
 
-Açılışta `target policy in effect` log satırı eklenen yasakları ve
-istisnaları yazar. Çözücüsü verilmemiş DNS monitor'ları ve ad çözme,
+Açılışta `target policy in effect` log satırı eklenen yasakları,
+istisnaları ve güvenilen vekil adreslerini (`trusted`) yazar. Çözücüsü
+verilmemiş DNS monitor'ları ve ad çözme,
 pod'un kendi çözücüsünü (CoreDNS) kullanır; politika ona uygulanmaz.
 Backend'e `HTTP_PROXY`/`HTTPS_PROXY` verildiyse vekil üzerinden giden bir
-isteğin hedefi önce backend'de çözülüp denetlenir; vekilin kendi adresi de
-politikaya tabidir, loopback'te dinleyen bir vekil için istisna gerekir.
+isteğin hedefi önce backend'de çözülüp denetlenir. Rakamlardan oluşan bir
+host (`2852039166`, `0xa9.0xfe.0xa9.0xfe`, `127.1`) burada çözülmez ama
+vekil onu bir IPv4 adresi olarak okuyabilir: böyle bir host, okunduğu adres
+(`169.254.169.254`, `127.0.0.1`) olarak denetlenir, geçerli bir adres
+değilse reddedilir. Host'un sonundaki noktalar (`169.254.169.254..`,
+`localhost..`) bir şey değiştirmez: vekil hepsini atar, backend de host'u
+onlarsız denetler. Düz `http://` bir istekte vekil, URL'deki host'a değil
+istek satırına yazılan `Host` header'ına gider; monitor'un `Host`
+header'ı da bu yüzden aynı biçimde denetlenir. Burada çözülemeyen bir ad
+ise vekile bırakılır; vekil adı yeniden çözer ve nereye ulaşacağı onun
+ağına bağlıdır.
 Lokal geliştirmede `make backend` loopback'i istisna tutar
 (`TARGET_ALLOW_CIDRS`), böylece makinedeki servisler kontrol edilebilir.
+
+**Yöneticinin uç noktaları.** `HTTP_PROXY`/`HTTPS_PROXY` vekilleri, SMTP
+sunucusu (`UPTIME_SMTP_HOST` ve `UPTIME_SMTP_PORT`),
+`UPTIME_TELEGRAM_API_URL` ve `UPTIME_PAGERDUTY_EVENTS_URL` kullanıcıların
+değil yöneticinin ayarlarıdır. Backend bunlara, yazıldıkları `host:port`
+ile tam olarak eşleşen bağlantılarda politikaya bakmadan bağlanır;
+karşılaştırma, ad çözülmeden önce istenen adres üzerinde yapılır. Böylece
+pod'un loopback'inde dinleyen bir yan konteyner (vekil, SMTP aktarıcısı,
+Telegram Bot API sunucusu) istisna gerektirmez ve loopback'in geri kalanı
+kapalı kalır. SMTP, Telegram ve PagerDuty adreslerine yalnızca kendi
+gönderimleri güvenir: aynı adrese yöneltilmiş bir kanal ya da monitor yine
+reddedilir. Vekilin adresine ise her kontrol ve kanal güvenir, çünkü
+istekler ona gider; bir monitor vekilin kendisine de bağlanabilir.
+
+`UPTIME_TARGET_ALLOW_CIDRS`'e eklenen bir loopback aralığı (örneğin
+`127.0.0.1/32`) ise loopback'in **her portunu her monitor'a ve kanala**
+açar: pod'daki bir servis ağının (service mesh) yönetim portu da buna
+dahildir. Yöneticinin uç noktaları için buna gerek yoktur; yalnızca bir
+monitor'un gerçekten loopback'teki bir şeyi kontrol etmesi gerekiyorsa
+verin.
 
 Backend'in HTTP sunucusu bir isteğin tamamını okumaya `UPTIME_HTTP_READ_TIMEOUT`
 (30 sn), yanıtını yazmaya `UPTIME_HTTP_WRITE_TIMEOUT` (2 dk) süre tanır, boşta
@@ -282,16 +411,42 @@ okunamaz.
   Anahtar en az 32 karakterlik rastgele bir metin olmalıdır
   (`openssl rand -base64 36`). Ortam değişkeni yerine bir dosyadan da
   okunabilir: `UPTIME_SECRET_KEY_FILE` (bağlanmış bir Secret ya da Docker
-  secret; sondaki satır sonu atılır). İkisi birden verilemez.
+  secret). İkisi birden verilemez. Bu yol chart dışı kurulumlar içindir:
+  Helm chart anahtarı Secret'tan `UPTIME_SECRET_KEY` olarak verir,
+  `backend.extraEnv` ile ayrıca `UPTIME_SECRET_KEY_FILE` verilirse backend
+  başlamaz.
+- Anahtarın her baytı sayılır: dosya da ortam değişkeni gibi olduğu gibi
+  kullanılır, böylece aynı Secret değişken olarak da dosya olarak da aynı
+  anahtarı verir. Sonunda satır sonu olan bir dosyanın (`openssl rand -base64
+  36 > key`, `echo ... > key`) satır sonu da anahtara dahildir; aynı metnin
+  satır sonlu ve satır sonsuz hâli iki ayrı anahtardır ve backend yanlış
+  anahtarla başlamaz. Dosyayı satır sonu olmadan yazın
+  (`openssl rand -base64 36 | tr -d '\n' > key`); Secret'ı bu dosyadan
+  (`--from-file=key=key`) ya da `--from-literal=key="$(openssl rand -base64
+  36)"` ile oluşturun.
 - Şifrelemeden bilerek vazgeçmek için `UPTIME_ALLOW_PLAINTEXT_SECRETS=true`
   verilir: değerler şifresiz yazılır ve backend bunu her açılışta uyarı
   olarak loglar. Veritabanında şifreli değer varken anahtar verilmezse ya da
   yanlış anahtar verilirse backend bu ayarla da başlamaz.
 - Anahtar sonradan ayarlanırsa, açılışta daha önce şifresiz yazılmış değerler
-  şifrelenir ve veritabanı bir kez sıkıştırılır (`VACUUM`), ki şifresiz
-  kopyaları dosyanın boş alanında ve WAL dosyasında kalmasın. Bu, veritabanı
-  kadar boş disk ister ve büyük bir veritabanında o açılışı uzatır. Anahtardan
-  önce alınmış yedekler şifresizdir; yenileri onları silene kadar
+  şifrelenir ve veritabanı sıkıştırılır (`VACUUM`), ki şifresiz kopyaları
+  dosyanın boş alanında ve WAL dosyasında kalmasın. Bu, veritabanı kadar boş
+  disk ister ve büyük bir veritabanında o açılışı uzatır; chart backend'e
+  açılması için `backend.startupProbe` kadar süre tanır (varsayılan 10
+  dakika). Açılış sıkıştırma bitmeden kesilir ya da sıkıştırma başarısız olursa
+  (örneğin disk dolarsa) bu veritabanına not edilir: sonraki açılış bunu
+  uyarı olarak loglar ve sıkıştırmayı yeniden dener. Üst üste üç açılış
+  sıkıştırmayı bitiremezse (sıkıştırma açılışa tanınan süreden uzun
+  sürüyorsa her açılış kesilir) dördüncüsü onu atlar: ne yapılacağını hata
+  olarak loglar ve sıkıştırmadan açılır. Sonraki açılış bir kez daha
+  dener; o da bitiremezse ondan sonraki yine atlar, yani bir yeniden
+  başlatma en fazla bir kesilen açılışa mal olur. O zaman ya açılışa daha çok süre tanıyın (chart'ta
+  `backend.startupProbe.failureThreshold`) ve veritabanı kadar boş disk
+  bırakın, ya da sıkıştırmayı backend dururken elle yapın: veritabanı
+  volume'unu `sqlite3` bulunan bir pod'a bağlayıp
+  `sqlite3 -bail uptime.db 'VACUUM; DELETE FROM compaction_pending;'`
+  çalıştırın (ikinci komut sıkıştırmanın yapıldığını backend'e bildirir).
+  Anahtardan önce alınmış yedekler şifresizdir; yenileri onları silene kadar
   (`UPTIME_BACKUP_KEEP`) öyle kalır, isterseniz elle silin.
 - Silinen ya da üzerine yazılan değerler dosyada sıfırlarla ezilir
   (`secure_delete`). Veritabanı, WAL dosyası ve yedekler yalnızca backend'in
@@ -307,25 +462,14 @@ okunamaz.
 
 Helm chart anahtarı ilk kurulumda üretir (`<release>-secret-key` Secret'ı),
 güncellemelerde korur ve release kaldırılsa bile silmez. Cluster'a erişmeden
-şablon üreten araçlar (Argo CD, OpenShift GitOps, `helm template`) onu
-koruyamaz; böyle kurarken anahtarı kendiniz verin (bkz. "GitOps ile
-kurulum"). Okumak için:
+şablon üreten araçlar (Argo CD, OpenShift GitOps, `helm template`) onu ve
+chart'ın ürettiği diğer Secret'ları koruyamaz; böyle kurarken hangi
+Secret'ları kendiniz vereceğiniz "GitOps ile kurulum" bölümündedir. Okumak
+için:
 
 ```
 kubectl -n kubeat get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d
 ```
-
-**GitOps (Argo CD, OpenShift GitOps).** Chart ürettiği Secret'ları
-(`<release>-secret-key`, `<release>-admin`, `<release>-api-token`) Helm'in
-`lookup` fonksiyonuyla geri okuyarak korur. Şablonu `helm template` ile üreten
-araçlarda `lookup` çalışmaz: her render yeni değerler üretir ve
-senkronizasyon Secret'ların üzerine yazar. Şifreleme anahtarı değişince backend
-bir sonraki açılışta başlamaz ve şifreli değerler kurtarılamaz; API anahtarı
-değişir; `admin` Secret'ı hesabın parolasını artık tutmaz. Bu araçlarla
-kurarken üç Secret'ı da önceden oluşturup (Sealed Secrets, External Secrets
-vb.) `secretKey.existingSecret`, `apiToken.existingSecret` ve
-`auth.existingSecret` ile verin ya da chart'ın ürettiklerini senkronizasyonun
-dışında bırakın.
 
 ### Hesaplar ve giriş
 
@@ -362,7 +506,7 @@ parolayla açılmak ya da `/setup`'ı ilk gelene açık bırakmak yerine durur.
 | --- | --- | --- |
 | Yönetici (`admin`) | Her şeyi | Her şeyi; kullanıcıları, LDAP eşlemelerini, kapsamsız kanalları |
 | Editör (`editor`) | Kapsamındaki monitor'ları, olayları, bakım pencerelerini; yalnızca kapsamıyla sınırlı kanalları ve durum sayfalarını | Kapsamında monitor ekler, düzenler, siler, susturur, keşiften içe aktarır; kapsamıyla sınırlı kanal, bakım penceresi ve durum sayfası açar |
-| İzleyici (`viewer`) | Kapsamındaki monitor'ları (push monitor'larının rapor adresi hariç) ve olayları; kapsamını ilgilendiren bakım pencerelerini | Hiçbir şeyi |
+| İzleyici (`viewer`) | Kapsamındaki monitor'ları (push monitor'larının rapor adresi ve HTTP monitor'larının istek gövdesi hariç) ve olayları; kapsamını ilgilendiren bakım pencerelerini | Hiçbir şeyi |
 
 Elle eklenen bir monitor'un "grubu" kapsam açısından namespace gibidir: `shop`
 editörü grubu `shop` olan monitor'lar açabilir, grupsuz monitor açamaz.
@@ -381,7 +525,8 @@ Yetki backend'de denetlenir; arayüz yalnızca yapılamayanı gizler.
 
 **Oturum.** Giriş yapınca backend rastgele bir oturum token'ı üretir
 (veritabanında hash'i tutulur) ve arayüz onu HttpOnly, SameSite=Lax (HTTPS
-üzerinden Secure) bir çerezde saklar. Oturum `UPTIME_SESSION_TTL`
+üzerinden Secure ve `__Host-` önekli; bkz. "Tarayıcı güvenliği") bir
+çerezde saklar. Oturum `UPTIME_SESSION_TTL`
 (varsayılan 12 saat) sonra biter; parola değişince diğer oturumlar kapanır;
 hesap devre dışı bırakılınca anında kapanır.
 
@@ -398,32 +543,69 @@ içinde `UPTIME_LOGIN_MAX_FAILURES` (10) hatalı denemeden sonra giriş o ad
 için kapanır; süre dolana kadar doğru parola da reddedilir (429). Deneme,
 parola denetlenmeden önce sayılır: aynı anda gönderilen istekler de sınırı
 aşamaz. Dizine ulaşılamaması ya da devre dışı bir hesabın doğru parolası
-deneme sayılmaz. Parola değiştirirken sorulan mevcut parola da aynı sınırla,
+deneme sayılmaz; dizindeki parolası doğru olup burada rolü olmayan birinin
+girişi ise sayılır. Parola değiştirirken sorulan mevcut parola da aynı sınırla,
 ayrı bir sayaçla korunur. Sayaç backend belleğindedir, yeniden başlatınca
-sıfırlanır ve en fazla `UPTIME_LOGIN_THROTTLE_MAX_KEYS` (100000) ad tutar;
-son denemesi kilit süresinden eski adlar her kilit süresinde bir silinir.
-Sınır dolarsa (uydurma adlarla bir saldırı) henüz tutulmayan adlar yer
-açılana kadar kilitli sayılır ve backend bunu uyarı olarak loglar.
+sıfırlanır ve kilitli olmayan en fazla `UPTIME_LOGIN_THROTTLE_MAX_KEYS`
+(100000) ad tutar; son denemesi kilit süresinden eski adlar her kilit
+süresinde bir silinir. Sınır dolunca (uydurma adlarla bir saldırı) yeni bir
+ad reddedilmez, kendine yer açar: önce son denemesi kilit süresinden eski
+adlar unutulur, sonra kilit süresi içinde en az denenmiş adlardan en uzun
+süredir denenmeyeni. Kilitli bir ad unutulmaz ve sınıra sayılmaz: sayaç,
+kilitli adlar kadar sınırın üstüne çıkabilir. Uydurma
+adlar böylece birbirini iter: kimse kilitlenmez, bir kilit süresi dolmadan
+kalkmaz ve k hatası olan bir adı unutturmak için önce sınır kadar başka ada
+k'şar deneme yapmak gerekir; sınırı düşürmek bunu ucuzlatır. Backend yer
+açmak için unutulan adları, sınırın üstünde tutulan adları ve kilitli
+adlara gelen denemeleri dakikada en fazla bir kez uyarı olarak loglar.
 
-**Parola denetimleri.** Bir parola denetimi (bcrypt karşılaştırması ya da
-dizine bağlanma) bir çekirdeği çeyrek saniye kadar meşgul eder. Aynı anda en
-fazla `UPTIME_LOGIN_CONCURRENCY` (varsayılan: CPU sayısının yarısı, en az 1)
-denetim çalışır; sırasını `UPTIME_LOGIN_QUEUE_WAIT` (3 sn) içinde bulamayan
-giriş 503 ile geri çevrilir. Böylece bir giriş seli kontrollerin CPU'sunu
-tüketemez. Hesabı olmayan bir adın reddi de bir parola denetimi kadar sürer:
-yanıtın süresi hangi adların yerel hesabı olduğunu söylemez. Frontend
-backend'i `BACKEND_TIMEOUT_MS` (3 sn) kadar beklediğinden, sırada bu kadar
-bekleyen giriş arayüzde "backend'e ulaşılamadı" olarak da görünebilir.
+**Parola denetimleri.** Bir bcrypt karşılaştırması bir çekirdeği çeyrek
+saniye kadar meşgul eder. Aynı anda en fazla `UPTIME_LOGIN_CONCURRENCY`
+(varsayılan: CPU sayısının yarısı, en az 1; LDAP açıkken en az 2)
+karşılaştırma çalışır; sırasını `UPTIME_LOGIN_QUEUE_WAIT` (3 sn) içinde
+bulamayan giriş 503 ile geri çevrilir. Böylece bir giriş seli kontrollerin
+CPU'sunu tüketemez. Dizine
+bağlanmak CPU harcamaz, dizini bekler; dizin girişlerinin bu yüzden ayrı bir
+sırası vardır: aynı anda en fazla 16 tanesi çalışır, sıra yine
+`UPTIME_LOGIN_QUEUE_WAIT` kadar beklenir. Yavaş ya da yanıt vermeyen bir
+dizin yalnızca dizin girişlerini bekletir; yerel hesaplar, dizin çökünce
+başvurulacak `admin` dahil, girmeye devam eder. İstemcisi vazgeçen bir
+dizin girişi dizin bağlantısını hemen kapatır ve sırasını bırakır.
+
+Hesabı olmayan bir adın reddi de bir parola denetimi kadar sürer. LDAP
+açıkken yerel hesabı olmayan her ad, dizine sorulurken aynı maliyette bir
+karşılaştırmadan da geçer ve yanıt ikisi de bitince döner. Dizin bir bcrypt
+karşılaştırmasından yavaş yanıt vermedikçe yanıtın süresi hangi adların
+yerel hesabı olduğunu söylemez; bunun bedeli, dizin kullanıcılarının
+girişinin de çeyrek saniye kadar sürmesidir. Her dizin girişi, başarılı
+olanlar da, böylece bir bcrypt karşılaştırması harcar ve yerel hesaplarla
+aynı karşılaştırma sırasını bekler; LDAP açıkken `UPTIME_LOGIN_CONCURRENCY`
+`0` ise bu yüzden aynı anda en az 2 karşılaştırma çalışır. Çok sayıda dizin
+kullanıcısı aynı anda giriyorsa (mesai başı gibi) `UPTIME_LOGIN_CONCURRENCY`
+değerini ya da backend'in CPU sınırını yükseltin. Frontend backend'i
+`BACKEND_TIMEOUT_MS` (3 sn) kadar beklediğinden, sırada bu kadar bekleyen
+giriş arayüzde "backend'e ulaşılamadı" olarak da görünebilir.
 
 **Kayıt.** Kim ne zaman neyi oluşturdu, değiştirdi, sildi; girişler ve
 başarısız denemeler **Kayıt** sayfasında (yalnızca yöneticiler) listelenir
-ve `UPTIME_AUDIT_RETENTION` (90 gün) boyunca tutulur. Başarısız girişlerden
-kayda bir adın kilit süresi içindeki ilk hatası ve adı kilitleyen hata
-yazılır, aradakiler yazılmaz; hepsi birlikte dakikada en fazla
-`UPTIME_LOGIN_AUDIT_PER_MINUTE` (60) girdi olur. Fazlası dakikanın sonunda
-sayısıyla uyarı olarak loglanır; her başarısız deneme ayrıca bilgi olarak
-loglanır. Böylece uydurma adlarla bir deneme seli ne diski doldurur ne de
-kayıttaki diğer girdileri görünmez kılar.
+ve `UPTIME_AUDIT_RETENTION` (90 gün) boyunca tutulur. Bir adın kilit süresi
+içindeki başarısız girişlerinden (`login_failed`) ve rolü olmayan bir dizin
+kullanıcısı olarak reddinden (`login_denied`) kayda her birinin ilki ve adı
+kilitleyen ret yazılır, aradakiler yazılmaz: parolasını önce yanlış yazıp
+sonra rolü olmadığı için reddedilen bir dizin kullanıcısı iki girdi
+bırakır. Kubeat'te hesabı olmayan adların (uydurma adlar ve hiç girmemiş
+dizin kullanıcıları) başarısız girişleri ve rolü olmayan dizin
+kullanıcılarının reddi dakikada en fazla `UPTIME_LOGIN_AUDIT_PER_MINUTE`
+(60) girdi yazar; fazlası dakikanın sonunda sayısıyla uyarı olarak loglanır.
+Hesabı olan bir adın (yerel hesap ya da daha önce girmiş bir dizin veya SSO
+kullanıcısı) yanlış parolası bu sınıra takılmaz: böyle adların sayısı
+bellidir ve her biri bir kilit süresinde en fazla
+`UPTIME_LOGIN_MAX_FAILURES` girdi yazar. LDAP
+kapalıyken bir SSO ya da dizin hesabına parolayla girilmeye çalışılırsa
+kayıtta "hesabın burada parolası yok" yazar. Her başarısız deneme ayrıca
+bilgi olarak loglanır. Böylece uydurma adlarla bir deneme seli diski
+dolduramaz ve Kubeat'in tanıdığı hesaplara yönelik denemeleri kayıttan
+gizleyemez.
 
 **API anahtarı.** `UPTIME_API_TOKEN` betikler ve otomasyon içindir: onu
 `Authorization: Bearer ...` ile sunan istek yönetici yetkisiyle çalışır ve
@@ -448,7 +630,9 @@ yollar önceden hazır tutulmalıdır:
 
 `UPTIME_LDAP_URL` ayarlandığında, yerel hesabı olmayan bir kullanıcı adı
 dizinde aranır ve parolası dizine sorulur. Yerel hesabı olan bir ad her
-zaman yerel parolayla denetlenir.
+zaman yerel parolayla denetlenir; SSO ile oluşmuş bir hesabın adı da dizine
+sorulmaz (dizinde aynı adı taşıyan başka biri olabilir), o hesap yalnızca
+SSO ile girer.
 
 ```
 UPTIME_LDAP_URL=ldaps://ldap.example.com:636
@@ -497,28 +681,49 @@ UPTIME_OIDC_REDIRECT_URL=https://kubeat.apps.example/auth/callback
 ```
 
 - Sağlayıcıda istemci bu redirect URL ile kaydedilir. Boş bırakılırsa
-  `UPTIME_PUBLIC_URL` adresinin `/auth/callback` yolu kullanılır; chart
-  adresi `publicURL`, `route.host` ya da `ingress.host` değerinden kendisi
-  türetir. Route'a host vermeyip router'a bıraktıysanız, router'ın verdiği
-  host'u öğrendikten sonra `publicURL` değerini `https://<host>` yapın;
-  chart o zamana kadar kurulum notlarında uyarır.
+  `UPTIME_PUBLIC_URL` adresinin `/auth/callback` yolu kullanılır. Chart'ta
+  `oidc.redirectURL` verilmemişse adres türetilir: `publicURL` verildiyse
+  `<publicURL>/auth/callback`, verilmediyse
+  `https://<route.host ya da ingress.host>/auth/callback`. Sonuncusu
+  `ingress.tls.enabled=false` iken de `https://`'tir: TLS'in Ingress
+  controller'ın önünde bittiği kurulumlar içindir; TLS hiçbir yerde
+  bitmiyorsa SSO çalışmaz. Chart backend'in reddedeceği bir dönüş adresiyle
+  (bkz. aşağıda açılıştaki denetim) kurulmaz; adresin hangi değerden
+  geldiğini ve ne yapılacağını söyleyerek durur. Yolu olan bir `publicURL`
+  (`https://portal.example.com/kubeat` gibi) SSO ile ancak `oidc.redirectURL`
+  verilerek kullanılabilir. Kaydedilecek adresi kurulum notları yazar.
+  Route'a host vermeyip router'a bıraktıysanız, router'ın verdiği host'u
+  öğrendikten sonra `publicURL` değerini `https://<host>` yapın; chart o
+  zamana kadar kurulum notlarında uyarır.
 - İkisi de yoksa SSO yalnızca `localhost` üzerinde çalışan bir arayüzle
   (`next dev`) çalışır ve backend açılışta bunu uyarı olarak loglar.
   Arayüzün kendi adresi diye bildirdiği değere başka hiçbir yerde
   güvenilmez: joker (wildcard) redirect kabul eden bir sağlayıcı
   kullanıcının kodunu, kimlik doğrulamasız bir isteğin istediği herhangi
   bir adrese gönderirdi.
-- Adres açılışta denetlenir: tam bir URL olmalı, yolu `/auth/callback`
-  olmalı ve HTTPS kullanmalıdır (düz HTTP yalnızca `localhost` için;
-  özel IP'ler ve cluster içi adlar serbesttir). Uymazsa backend başlamaz
-  ve nedenini söyler.
+- Adres açılışta denetlenir: tam bir URL olmalı, yolu yalnızca
+  `/auth/callback` olmalı (kullanıcı bilgisi, sorgu ya da `#` parçası
+  olmadan) ve HTTPS kullanmalıdır (düz HTTP yalnızca `localhost` için;
+  özel IP'ler ve cluster içi adlar serbesttir). Uymazsa SSO kapalı kalır:
+  giriş sayfasında düğmesi çıkmaz, backend nedenini açılışta hata olarak
+  loglar, **Kullanıcılar** sayfası da yöneticilere gösterir. İzleme ve
+  diğer giriş yolları etkilenmez; bir giriş ayarı kontrolleri durdurmaz.
+  `UPTIME_OIDC_CLIENT_ID` verilmemişse ya da `UPTIME_OIDC_CA_FILE`
+  okunamıyorsa da böyledir. Ayar düzeltilip backend yeniden başlatılınca
+  SSO açılır.
 - Giriş, onu başlatan tarayıcıya bağlıdır: arayüz sağlayıcıya giderken
-  state değerini o tarayıcıda kısa ömürlü bir çerezde (`/auth` yolunda, 10
-  dakika) tutar ve dönüşte yalnızca aynı state ile devam eder. Böylece
-  kimse kendi başlattığı bir girişin dönüş bağlantısını başkasına açtırıp
-  onu kendi hesabına sokamaz; başka bir tarayıcıda başlatılmış bir girişin
-  bağlantısı açılırsa giriş sayfası girişin buradan yeniden başlatılmasını
-  ister.
+  state değerini o tarayıcıda kısa ömürlü (10 dakika) bir çerezde tutar ve
+  dönüşte yalnızca aynı state ile devam eder. Böylece kimse kendi
+  başlattığı bir girişin dönüş bağlantısını başkasına açtırıp onu kendi
+  hesabına sokamaz; başka bir tarayıcıda başlatılmış bir girişin bağlantısı
+  açılırsa giriş sayfası girişin buradan yeniden başlatılmasını ister.
+  HTTPS üzerinden bu çerez de `__Host-` öneklidir, yani aynı apps alan
+  adındaki başka bir host onu yerleştiremez (bkz. "Tarayıcı güvenliği").
+- Sağlayıcıya gidip henüz dönmemiş girişler backend belleğinde 10 dakika
+  tutulur, en fazla `UPTIME_LOGIN_THROTTLE_MAX_KEYS` (100000) kadar. Giriş
+  başlatmak kimlik istemediği için bir başlatma seli belleği sınırsız
+  büyütemez: sınıra varılınca en eski girişler unutulur, sahipleri girişi
+  yeniden başlatır ve backend bunu uyarı olarak loglar.
 - Hesap `preferred_username` (`UPTIME_OIDC_USERNAME_CLAIM`), `name` ve
   `email` claim'lerinden kurulur; gruplar `groups` claim'inden
   (`UPTIME_OIDC_GROUPS_CLAIM`). Okta için kapsamlara `groups` eklenir
@@ -538,6 +743,13 @@ UPTIME_OIDC_REDIRECT_URL=https://kubeat.apps.example/auth/callback
 - OpenShift'in kendi OAuth sunucusu OIDC değildir; "OpenShift ile giriş"
   için cluster'ın bağlı olduğu kurumsal sağlayıcı (çoğunlukla Keycloak ya da
   Azure AD) doğrudan kullanılır.
+
+**Yükseltme notu:** 0.37.0'a kadar chart dönüş adresini Route ya da Ingress
+host'undan türetiyordu; artık `publicURL` verildiyse ondan türetir.
+`publicURL` Route ya da Ingress host'undan farklıysa `redirect_uri`
+`<publicURL>/auth/callback` olur: yükseltmeden önce bu adresi sağlayıcıya
+kaydedin ya da eski adresi `oidc.redirectURL` ile sabitleyin, yoksa sağlayıcı
+girişi `invalid redirect_uri` diye reddeder.
 
 ### Tarayıcı güvenliği
 
@@ -565,12 +777,46 @@ başlıklar gönderir:
   `includeSubDomains` ve `preload` kullanılmaz: host çoğunlukla paylaşılan
   bir apps alan adının altındadır.
 - **Oturum çerezi** `COOKIE_SECURE=auto` (varsayılan) ile, `PUBLIC_URL`
-  `https://` ise ya da önündeki proxy'lerden biri isteğin HTTPS ile
-  geldiğini (`X-Forwarded-Proto`) söylüyorsa Secure işaretlenir; tarayıcı
-  onu düz HTTP üzerinden hiç göndermez. `always` ve `never` de verilebilir.
-  `localhost` dışında düz HTTP ile erişilen bir kurulumda (TLS'siz bir
-  Ingress) `never` gerekir (chart'ta `frontend.cookieSecure=never`); yoksa
-  tarayıcı çerezi kabul etmez ve giriş yapılamaz.
+  `https://` ise ya da tarayıcının bağlandığı ilk proxy isteğin HTTPS ile
+  geldiğini söylüyorsa Secure işaretlenir; tarayıcı onu düz HTTP üzerinden
+  hiç göndermez. Proxy'ler `X-Forwarded-Proto`'ya kendi değerlerini
+  ekledikçe yalnızca ilk değer, tarayıcıya bakan proxy'ninki sayılır:
+  `https, http` (TLS router'ın önündeki yük dengeleyicide biter) HTTPS'tir,
+  `http, https` (düz HTTP sunan bir proxy router'a HTTPS ile bağlanır)
+  değildir. `always` ve `never` de verilebilir.
+  `localhost` dışından düz HTTP ile erişilen bir kurulumda çerez Secure
+  olmamalıdır: TLS'siz bir Ingress'te (`ingress.tls.enabled=false`) chart
+  adresi `http://` türettiği için `auto` bunu kendisi sağlar. `PUBLIC_URL`
+  yine de `https://` iken kullanıcılar düz HTTP ile geliyorsa ya da önde
+  düz HTTP sunan proxy kendi `X-Forwarded-Proto`'sunu eklemeden router'a
+  HTTPS ile bağlanıyorsa (nginx `proxy_pass` varsayılan olarak eklemez; ilk
+  değer router'ın eklediği `https` olur) `never` gerekir (chart'ta
+  `frontend.cookieSecure=never`); yoksa tarayıcı çerezi kabul etmez ve giriş
+  yapılamaz.
+- **`upgrade-insecure-requests`** (Content-Security-Policy) yalnızca
+  `X-Forwarded-Proto`'nun ilk değeri `https` iken gönderilir;
+  `COOKIE_SECURE=never` ya da `http://` bir `PUBLIC_URL` kullanıcıların düz
+  HTTP ile geldiğini söylediği için o zaman hiç gönderilmez. Düz HTTP'deki
+  bir tarayıcı bu yönergeyle sayfanın script ve stillerini HTTPS'ten
+  isterdi ve sayfa onlarsız açılırdı.
+- **`__Host-` önekli çerezler.** Çerezler Secure iken adları önek alır:
+  `__Host-kubeat_session` ve SSO girişi sürerken `__Host-kubeat_oidc_state`
+  (`Path=/`, `Domain` yok). Tarayıcı böyle bir çerezi yalnızca bu host'un
+  kendisinden ve HTTPS üzerinden kabul eder. Host çoğunlukla paylaşılan bir
+  apps alan adının altında olduğu için önek olmadan başka bir ekibin
+  Route'u (ya da oradaki bir script açığı) tüm alan adı için kendi oturum
+  ya da state çerezini yerleştirip ziyaretçiyi farkında olmadan kendi
+  hesabında çalıştırabilirdi. Secure iken yalnızca önekli ad okunur;
+  çıkışta ve süresi dolmuş bir oturumda eski adlar da silinir. Yükseltmeden
+  önceki bir `kubeat_session` tarayıcıda kalsaydı, kurulum onun oturumu
+  sürerken düz adlara dönünce (`COOKIE_SECURE=never`) yeniden okunur ve
+  çıkış yapmış kullanıcıyı o oturuma geri sokardı.
+  Düz HTTP'de önek kullanılamaz; çerezler eski adlarıyla
+  (`kubeat_session`, `kubeat_oidc_state`) kalır.
+
+  **Yükseltme notu:** HTTPS ile sunulan kurulumlarda oturum çerezinin adı
+  değiştiği için yükseltmeden sonra herkesin bir kez yeniden giriş yapması
+  gerekir.
 - Ayrıca `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
   kamera, mikrofon, konum, ödeme ve USB'yi kapatan bir `Permissions-Policy`
   ve `Cross-Origin-Opener-Policy: same-origin` gönderilir; `X-Powered-By`
@@ -593,7 +839,8 @@ güncellemelerde korur ve backend'e verir. `metrics.serviceMonitor.enabled`
 ile gelen ServiceMonitor anahtarı aynı Secret'tan okuyup gönderir
 (`authorization`); OpenShift user workload monitoring'de de başka bir şey
 gerekmez. Anahtarı kendiniz yönetmek için `metrics.auth.existingSecret`
-verilir. Bu anahtar bilerek API anahtarından ayrıdır: scrape eden Prometheus
+verilir; GitOps ile kurarken bu gereklidir (bkz. "GitOps ile kurulum"). Bu
+anahtar bilerek API anahtarından ayrıdır: scrape eden Prometheus
 onun bir kopyasını kendi yapılandırmasında tutar (OpenShift'te
 `openshift-user-workload-monitoring` namespace'indeki bir Secret'ta) ve
 orada metriklerden başka bir şey açmamalıdır.
@@ -640,17 +887,33 @@ gider; arayüz HTTPS ile sunulmalıdır.
   kendiniz oluşturun ya da cert-manager'a oluşturtun
   (`ingress.annotations` ile `cert-manager.io/cluster-issuer: <issuer>`).
   Controller'ın HSTS ya da istek sınırı ayarları da `ingress.annotations`
-  ile verilir. Chart `UPTIME_PUBLIC_URL`'i ve OIDC dönüş adresini TLS
-  açıkken `https://<ingress.host>`, kapalıyken `http://<ingress.host>`
-  olarak türetir. TLS'i yalnızca TLS Ingress'in önünde, bir yük
-  dengeleyicide bitiyorsa kapatın; o durumda `publicURL` ve
-  `oidc.redirectURL` değerlerini `https://` adresle verin. TLS kapalıyken
-  kurulum notları uyarır.
+  ile verilir. Chart `UPTIME_PUBLIC_URL`'i TLS açıkken
+  `https://<ingress.host>`, kapalıyken `http://<ingress.host>` olarak
+  türetir; OIDC dönüş adresi ikisinde de
+  `https://<ingress.host>/auth/callback` olur (bkz. "SSO (OpenID
+  Connect)"). TLS'i yalnızca TLS Ingress'in önünde, bir yük dengeleyicide
+  bitiyorsa kapatın; o durumda `publicURL` değerini `https://` adresle
+  verin. TLS kapalıyken kurulum notları uyarır.
 
-**Yükseltme notu:** Ingress ile kurulmuş ve TLS'i yük dengeleyicide biten
-kurulumlarda yükseltirken `ingress.tls.enabled=false` (ve `https://` ile
-`publicURL`) verin; yoksa Ingress var olmayan bir sertifika Secret'ı ister ve
-controller HTTPS'e yönlendirmeye başlar.
+**Yükseltme notu:** Ingress bu sürümle varsayılan olarak TLS ile sunulur ve
+chart adresi `https://<ingress.host>` olarak türetir; adres `https://`
+olduğu için oturum çerezi de Secure işaretlenir. 0.37.0'da Ingress'i düz HTTP
+ile kullanan kurulumlar yükseltirken şunlardan birini yapmalıdır:
+
+- `ingress.tls.secretName` (varsayılan `<release>-tls`) adlı
+  `kubernetes.io/tls` Secret'ını oluşturun ya da cert-manager'a oluşturtun;
+- TLS'siz sürdürmek için `ingress.tls.enabled=false` verin. TLS'i Ingress'in
+  önündeki bir yük dengeleyicide bitiyorsa `https://` ile `publicURL` de
+  verin. SSO (`oidc.issuer`) Ingress controller'ın önünde HTTPS ister:
+  sağlayıcı kullanıcıyı `https://` bir adrese geri gönderir. TLS hiçbir
+  yerde bitmiyorsa onu bir yerde sonlandırın ya da `oidc.issuer`'ı
+  boşaltarak SSO'yu kapatın.
+
+Hiçbiri yapılmazsa Ingress var olmayan bir Secret'a bakar: ingress-nginx
+kendi varsayılan sertifikasıyla HTTPS'e yönlendirir, Traefik düz HTTP'de
+kalır. Düz HTTP'de tarayıcı Secure çerezi kabul etmez; giriş yapan kullanıcı
+hiçbir hata görmeden giriş sayfasına geri döner. Secret yoksa kurulum notları
+uyarır (cert-manager onu oluştururken de, ilk kurulumda bu beklenir).
 
 ### Servis hesabı
 
@@ -766,6 +1029,7 @@ eklenmelidir.
 | `PATCH` | `/api/v1/monitors/{id}` | Monitor'u düzenler; `{"enabled": false}` ile durdurur |
 | `DELETE` | `/api/v1/monitors/{id}` | Monitor'u ve sonuçlarını siler |
 | `POST` | `/api/v1/monitors/{id}/clone` | Monitor'un `{"name"}` adıyla bir kopyasını oluşturur; gizli değerler de kopyalanır, kopyanın hedefi başka bir sunucuya çevrilirse yeniden girilmeleri gerekir |
+| `POST` | `/api/v1/monitors/{id}/push-token` | Push monitor'una yeni bir token verir ve monitor'u yeni `push_token` ile döner; eski token hemen çalışmaz olur. Monitor'u değiştirebilenler kullanabilir, denetim kaydına yazılır |
 | `GET`, `POST` | `/api/push/{token}?status=up&msg=...&ping=...` | Push monitor'unun raporu; API anahtarı gerekmez |
 | `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
 | `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş; `range` yerine `from=&to=` ile belirli bir aralık |
@@ -819,7 +1083,13 @@ Her monitor'da ortak alanlar: `name`, `type`, `target`, `interval_seconds`,
   normal aralık beklenir. Kısa bir değer, kesintiyi daha erken doğrular ya da
   geçici bir hatayı daha erken eler.
 - `inverted`: sonucu tersine çevirir; hedef **başarısız** olduğu sürece
-  monitor "çalışıyor" sayılır. Erişilmemesi gereken şeyler için.
+  monitor "çalışıyor" sayılır. Erişilmemesi gereken şeyler için. Hedef
+  politikasının reddettiği bir bağlantı ise beklenen başarısızlık sayılmaz:
+  Kubeat hedefe hiç bağlanmamıştır ve ağın onu gerçekten engelleyip
+  engellemediğini bilemez, bu yüzden kontrol politikanın hatasıyla başarısız
+  olur. Yasak bir aralıktaki adresin (metadata servisi gibi) ağda kapalı
+  olduğunu doğrulayacak bir monitor için o adrese istisna gerekir (bkz.
+  "Hedef politikası").
 
 ## Monitor tipleri
 
@@ -836,6 +1106,12 @@ Her monitor'da ortak alanlar: `name`, `type`, `target`, `interval_seconds`,
 | `mysql` | `host:port` | MySQL ya da MariaDB'ye giriş yapıp sorgu çalıştırır |
 | `redis` | `host:port` | Redis'e bağlanır, gerekiyorsa giriş yapar, `PING` gönderir |
 | `workload` | `namespace/tür/ad` | Bir Deployment, StatefulSet ya da DaemonSet'in hazır pod sayısı |
+
+Hedeflerdeki ve kanal adreslerindeki host adları ASCII ile yazılır:
+uluslararası bir ad `xn--` (Punycode) biçimiyle verilir (`bİlling.example`
+yerine `xn--blling-i9a.example`). Böyle bir adı Go farklı biçimlerde çözer
+ve gönderir; yazıldığı gibi kabul edilseydi monitor'un gizli değerlerinin
+hangi sunucuya gittiği hedeften okunamazdı.
 
 Tipe özel ayarlar, tipin adını taşıyan nesnede verilir (üç veritabanı tipi
 `database` nesnesini paylaşır). Güncellemede bu nesne
@@ -885,10 +1161,42 @@ değişmez.
 Header değerleri ve `auth_secret` API yanıtlarında `********` olarak
 maskelenir; güncellemede bu değer gönderilirse kayıtlı değer korunur. Kayıtlı
 değerler yalnızca girildikleri sunucuya gider: hedef başka bir sunucuya
-taşınırsa (şeması, host'u ya da portu değişirse) güncelleme `400` ile
-reddedilir ve yeniden girilmesi gereken alanları sayar. `http` seçenekleri hiç
-gönderilmese de, yönetici için de böyledir: yoksa monitor'u düzenleyebilen
-biri onu kendi sunucusuna yöneltip gösterilmeyen değerleri orada okuyabilirdi.
+taşınırsa (host'u ya da portu değişirse, `https://`'den `http://`'ye
+dönerse) güncelleme `400` ile reddedilir ve yeniden girilmesi gereken
+alanları sayar. `Host` header'ı eklenir, değişir ya da kaldırılırsa da
+böyledir: ingress controller ve OpenShift router isteği bu header'ın adını
+verdiği siteye iletir. Yalnızca yolun değişmesi aynı sunucu sayılır; aynı
+host'ta ve aynı `Host` adıyla `http://`'den (port 80) `https://`'e (port 443)
+geçmek de öyledir: istek aynı siteye, bu kez TLS ile gider. `http`
+seçenekleri hiç gönderilmese de, yönetici için de böyledir: yoksa monitor'u
+düzenleyebilen biri onu kendi sunucusuna yöneltip gösterilmeyen değerleri
+orada okuyabilirdi. `Host` header'ının değeri baştaki ve sondaki boşluklar
+atılarak saklanır ve bir host adı ya da IP adresi olmalıdır (portlu ya da
+portsuz); değilse istek `400` ile reddedilir.
+
+Yönlendirmeler de aynı kurala uyar: başka bir sunucuya (başka host ya da
+port, `https://`'den `http://`'ye dönüş ya da başka bir `Host` adı) giden
+bir yönlendirme isteğine monitor'un header'ları ve `auth` bilgisi eklenmez,
+`Host` da yeni adresin adı olur. İstek gövdesi de başka bir sunucuya
+gitmez: gövdeyi yeniden gönderecek bir `307` ya da `308` yönlendirmesi
+izlenmez ve kontrol `the redirect would send the request body to another
+server` hatasıyla başarısız olur. Aynı sunucu içindeki yönlendirmeler,
+aynı host'ta `http://`'den (port 80) `https://`'e (port 443) geçiş de
+dahil, hepsini taşımaya
+devam eder; sunucu kendi adresini mutlak bir URL ile verse de istek
+`Host` header'ının adını verdiği siteye gider.
+
+**Yükseltme notu:** 0.37.0'a kadar monitor'un header'ları her
+yönlendirmede, `auth` bilgisi ise aynı host'un başka bir portuna ya da bir
+alt alan adına giden yönlendirmelerde de gönderiliyordu. Başka bir host'a
+(örneğin `example.com`'dan `www.example.com`'a) ya da porta yönlendirilen ve
+kimlik bilgisi isteyen monitor'lar artık `401` gibi bir hatayla düşer:
+hedefi yönlendirmenin son adresine çevirip değerleri yeniden girin.
+
+İstek gövdesi (`body`) maskelenmez: monitor'u düzenleyen onu görüp
+değiştirebilmelidir. Ama çoğu zaman bir parola ya da token taşıdığı için
+yalnızca monitor'u değiştirebilenlere döner; izleyiciler `body` ve
+`content_type` alanlarını boş görür.
 
 ### `tcp`
 
@@ -952,6 +1260,11 @@ ulaşılamaz; işler raporu arayüzün servisine gönderir
 command: ["sh", "-c", "yedek-al && curl -fsS 'http://kubeat-backend:8080/api/push/<token>'"]
 ```
 
+Token sızdıysa monitor sayfasındaki **Adresi yenile** düğmesi ya da
+`POST /api/v1/monitors/{id}/push-token` yenisini verir: eski token hemen
+çalışmaz olur, monitor ise geçmişi, olayları ve durum sayfalarındaki yeriyle
+kalır. Rapor gönderen işler yeni adresle güncellenmelidir.
+
 ### `grpc`
 
 `"grpc": {"service": "shop.Cart", "tls": false, "tls_skip_verify": false}`:
@@ -982,9 +1295,12 @@ yapıp gerçekten bir şey sorar.
   `query` kullanılmaz.
 - `password` API yanıtlarında `********` olarak maskelenir; güncellemede bu
   değer gönderilirse kayıtlı parola korunur. Hedefin host'u ya da portu
-  değişirse parola, `http` seçeneklerindeki gibi yeniden girilmelidir. Hata
-  mesajları sunucunun söylediğini taşır (`password authentication failed for
-  user "probe"`), parolayı taşımaz.
+  değişirse parola, `http` seçeneklerindeki gibi yeniden girilmelidir.
+  PostgreSQL ve MySQL'in hata mesajları sunucunun söylediğini taşır
+  (`password authentication failed for user "probe"`), parolayı taşımaz.
+  Redis'in hata yanıtı ise sonuca yalnızca türüyle yazılır
+  (`the server answered with an error (WRONGPASS)`, `(NOAUTH)`); sunucunun
+  açıklaması backend logundadır.
 
 Gerçek sunuculara karşı testler, adresleri verildiğinde çalışır:
 
@@ -1167,9 +1483,25 @@ helm upgrade --install kubeat deploy/helm/kubeat \
   --set prometheus.openshiftMonitoringView=true
 ```
 
+9091 portu tüm cluster'ın metriklerini yanıtlar ve yalnızca
+`cluster-monitoring-view` rolündeki servis hesaplarına açıktır:
+`prometheus.openshiftMonitoringView=true` bu bağlamayı yapar ve 9091 ile
+birlikte gereklidir; yoksa pod'ların CPU ve belleği boş kalır. Keşif
+`discovery.namespaces` ile sınırlıysa onun yerine namespace başına yanıt
+veren 9092 portu kullanılır (bkz. "Cluster-admin olmadan"). Keşif cluster
+çapındayken 9091 bu ayar olmadan verilirse kurulum notları uyarır.
+
 Token'ın gittiği sunucunun sertifikası `prometheus.caFile` ile doğrulanır;
 `prometheus.insecureSkipVerify` token ile birlikte kullanılmamalıdır (bkz.
 "Servis hesabı").
+
+**Yükseltme notu:** Keşif ClusterRole'ü bu sürümle namespace'leri yalnızca
+listeler, tek tek okuma (`get`) izni vermez. OpenShift 4.14 ve öncesinde
+Thanos Querier'ın 9091 portu bu `get` iznini `cluster-monitoring-view`
+yerine kabul ediyordu: `prometheus.openshiftMonitoringView=true` vermeden 9091
+kullanan kurulumlarda yükseltmeden sonra pod'ların CPU ve belleği `403` ile
+boş kalır. `prometheus.openshiftMonitoringView=true` verin (4.15 ve sonrasında
+zaten gerekliydi).
 
 Minikube'da denemek için `make minikube-demo` küçük bir Prometheus kurar;
 ardından:
@@ -1353,6 +1685,18 @@ Bu monitor'lar arayüzde **annotation** rozetiyle görünür. Hedefleri ve
 zamanlamaları nesneden geldiği için arayüzden ya da API'den değiştirilemez
 (`409`); etiket, açıklama, duraklatma ve bildirimler değiştirilebilir.
 
+Böyle bir monitor'a sonradan header'lar, kimlik bilgisi (`auth`) ya da
+istek gövdesi (`body`) eklenmişse, onlar da yalnızca girildikleri sunucuya
+gider. Nesne monitor'u başka bir sunucuya götürürse (Route'un host'u
+değişir, Ingress ya da Route TLS'i bırakıp `http://`'ye döner),
+senkronizasyon hedefi günceller ama header değerlerini, `auth_secret`'ı,
+istek gövdesini ve veritabanı parolasını siler; denetim kaydına neyin
+silindiğini yazar. Değerler yeni sunucu için yeniden girilmelidir. Yalnızca
+yolun değişmesi ve nesneye TLS eklenmesi (aynı host'ta `http://`'den
+(port 80) `https://`'e (port 443) geçiş) aynı sunucu sayılır; kendi
+portunda TLS'e geçen bir readiness probe'u gibi başka geçişler taşınma
+sayılır.
+
 Böyle bir monitor **silinebilir**. Nesnesindeki annotation yerinde kaldığı
 için Kubeat silmeyi hatırlar ve monitor'ü yeniden oluşturmaz; keşif
 sayfasında "Kubeat'te silindi" satırıyla görünür ve oradaki **Yeniden izle**
@@ -1476,11 +1820,18 @@ monitor sayfasına, gruplanmış mesajda namespace sayfasına gider ve
 türetilir) ayarlı değilse hiç konmaz.
 
 Monitor adları, hedefler ve hata metinleri (push raporunun mesajı dahil)
-yazıldığı gibi görünür: Slack, Mattermost ve Google Chat'te `&`, `<` ve `>`
-kaçışlanır; metindeki `<!channel>` ya da `<users/all>` kimseyi çağırmaz,
-etiketi adresini gizleyen bir bağlantı oluşmaz. Discord mesajı kimseyi
-etiketlemez (`@everyone` dahil); Telegram'a giden metin HTML olarak
-kaçışlanır.
+yazıldığı gibi görünür. Slack, Mattermost ve Google Chat'te `&`, `<` ve `>`
+kaçışlanır: metindeki `<!channel>` ya da `<users/all>` kimseyi çağırmaz,
+`<adres|etiket>` biçiminde, etiketi adresini gizleyen bir bağlantı oluşmaz.
+Slack düz `@channel` yazımını metin olarak gösterir (Kubeat `link_names`
+istemez) ve Slack metninde başka bir bağlantı yazımı yoktur. Mattermost ise
+metni markdown olarak okur ve kendi bahsetmelerini de tanır: Mattermost'a
+giden metinde her `@` ve `]` işaretinden sonra görünmez bir boşluk
+(U+200B) bulunur. Böylece `@channel`, `@here`, `@all` ve bir kişinin ya da
+grubun `@adı` kimseyi çağırmaz; `[etiket](adres)` ne bağlantıya ne de
+istemcinin indireceği bir resme dönüşür. Discord mesajı kimseyi etiketlemez
+(`@everyone` dahil); Telegram'a giden metin HTML olarak kaçışlanır. Teams
+ve Gotify mesajlarındaki markdown ise kaçışlanmaz.
 
 **Gizli değerler.** URL'ler API yanıtlarında maskelenir (`https://host/…`),
 `secret` ise hiç dönmez; yalnızca `has_secret` bilgisi verilir. Güncellemede
@@ -1496,8 +1847,9 @@ olup sunucu STARTTLS sunmuyorsa gönderim reddedilir, şifresiz gönderilmez.
 Telegram ve PagerDuty internetteki servislerdir. Cluster'dan doğrudan çıkış
 yoksa backend'e `HTTPS_PROXY` verilebilir ya da adresler
 `UPTIME_TELEGRAM_API_URL` ve `UPTIME_PAGERDUTY_EVENTS_URL` ile kendi
-vekilinize yönlendirilebilir. Bu adresler de hedef politikasına tabidir;
-vekil loopback'te dinliyorsa istisna gerekir.
+vekilinize yönlendirilebilir. Bu adreslere ve vekile tam adresleriyle
+güvenilir; loopback'te dinlemeleri istisna gerektirmez (bkz. "Hedef
+politikası").
 
 Genel webhook kanalına şu gövdeyle `POST` yapılır. `text` alanı insan tarafından
 okunabilir özettir.
@@ -1525,7 +1877,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_DB_PATH` | `uptime.db` | SQLite dosyasının yolu |
 | `UPTIME_API_TOKEN` | – | Betikler için yönetici yetkisiyle çalışan API anahtarı; boşsa API yalnızca oturumla kullanılır |
 | `UPTIME_SECRET_KEY` | – | Veritabanındaki token ve parolaları şifreleyen anahtar; en az 32 karakter. Zorunlu: yoksa backend başlamaz (bkz. `UPTIME_ALLOW_PLAINTEXT_SECRETS`) |
-| `UPTIME_SECRET_KEY_FILE` | – | Anahtarın okunduğu dosya, örneğin bağlanmış bir Secret; `UPTIME_SECRET_KEY` ile birlikte verilemez |
+| `UPTIME_SECRET_KEY_FILE` | – | Anahtarın okunduğu dosya, örneğin bağlanmış bir Secret; içeriği bayt bayt, sondaki satır sonu dahil kullanılır. `UPTIME_SECRET_KEY` ile birlikte verilemez. Chart dışı kurulumlar içindir: chart anahtarı `UPTIME_SECRET_KEY` olarak verdiğinden `backend.extraEnv` ile verilmez |
 | `UPTIME_ALLOW_PLAINTEXT_SECRETS` | `false` | Anahtar yokken de başlar; gizli değerler şifresiz yazılır |
 | `UPTIME_ADMIN_PASSWORD` | – | Hesap yokken `admin` yöneticisini bu parolayla oluşturur; parola kurallarına uymazsa backend başlamaz. Boşsa ilk yönetici `/setup`'ta oluşturulur |
 | `UPTIME_METRICS_TOKEN` | – | `/metrics`'in istediği anahtar (`Authorization: Bearer ...`; API anahtarı da geçer); boşsa `/metrics` herkese açıktır |
@@ -1533,10 +1885,10 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
 | `UPTIME_LOGIN_MAX_FAILURES` | `10` | Bir kullanıcı adını kilitleyen hatalı deneme sayısı |
 | `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi; denemesi bundan eski adlar bu aralıkla sayaçtan silinir |
-| `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu en fazla kullanıcı adı; doluyken henüz tutulmayan adlar kilitli sayılır |
-| `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan parola denetimi (bcrypt ya da dizine bağlanma) sayısı; `0` CPU sayısının yarısı, en az 1 |
-| `UPTIME_LOGIN_QUEUE_WAIT` | `3s` | Bir girişin parola denetimi sırasını en fazla bekleme süresi; sonra 503 |
-| `UPTIME_LOGIN_AUDIT_PER_MINUTE` | `60` | Kayda bir dakikada yazılan en fazla başarısız giriş; fazlası yalnızca uyarı olarak sayılır |
+| `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu, kilitli olmayan en fazla kullanıcı adı; doluyken yeni bir ad, en az denenmiş adlardan en uzun süredir denenmeyenin yerini alır, kilitli adlar unutulmaz. Aynı zamanda sürmekte olan (sağlayıcıya gidip henüz dönmemiş) SSO girişlerinin en fazla sayısı; aşılınca en eskileri unutulur |
+| `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan bcrypt karşılaştırması sayısı; `0` CPU sayısının yarısı, en az 1, LDAP açıkken en az 2 (her dizin girişi de bir karşılaştırma harcar). Dizine bağlanmaların ayrı sırası vardır (aynı anda 16) |
+| `UPTIME_LOGIN_QUEUE_WAIT` | `3s` | Bir girişin sırasını (bcrypt ya da dizin) en fazla bekleme süresi; sonra 503 |
+| `UPTIME_LOGIN_AUDIT_PER_MINUTE` | `60` | Kayda bir dakikada yazılan en fazla başarısız giriş (hesabı olan adların, yani yerel hesapların ve daha önce girmiş dizin ya da SSO kullanıcılarının yanlış parolası hariç); fazlası yalnızca uyarı olarak sayılır |
 | `UPTIME_PASSWORD_MIN_LENGTH` | `8` | En kısa parola (karakter); en uzunu 72 bayttır |
 | `UPTIME_AUDIT_RETENTION` | `2160h` | Kayıt girdilerinin saklanma süresi (90 gün) |
 | `UPTIME_LDAP_URL` | – | Dizin adresi (`ldap://` ya da `ldaps://`); boşsa LDAP kapalı |
@@ -1548,12 +1900,12 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_LDAP_INSECURE_SKIP_VERIFY` | `false` | Dizin sertifikasını doğrulamaz |
 | `UPTIME_LDAP_DISPLAY_NAME_ATTR`, `UPTIME_LDAP_EMAIL_ATTR`, `UPTIME_LDAP_GROUP_ATTR` | `cn`, `mail`, `memberOf` | Okunan öznitelikler |
 | `UPTIME_LDAP_GROUP_BASE_DN`, `UPTIME_LDAP_GROUP_FILTER` | – | `memberOf` yoksa grupların arandığı yer ve süzgeç (`(member={dn})`) |
-| `UPTIME_LDAP_TIMEOUT` | `10s` | Dizin işlemlerinin zaman aşımı |
+| `UPTIME_LDAP_TIMEOUT` | `10s` | Dizine bağlanmanın (TLS el sıkışması dahil) ve her dizin işleminin zaman aşımı |
 | `UPTIME_LDAP_DEFAULT_ROLE`, `UPTIME_LDAP_DEFAULT_NAMESPACES` | – | Eşleşen grubu olmayan dizin kullanıcısının rolü ve kapsamı; boşsa giremez |
 | `UPTIME_OIDC_ISSUER` | – | OpenID Connect sağlayıcısının issuer adresi; boşsa SSO kapalı |
-| `UPTIME_OIDC_CLIENT_ID` | – | Sağlayıcıda kayıtlı istemci kimliği (issuer ile zorunlu) |
+| `UPTIME_OIDC_CLIENT_ID` | – | Sağlayıcıda kayıtlı istemci kimliği (issuer ile zorunlu; yoksa SSO kapalı kalır) |
 | `UPTIME_OIDC_CLIENT_SECRET` | – | İstemci sırrı; public client için boş |
-| `UPTIME_OIDC_REDIRECT_URL` | – | Sağlayıcının geri döndüğü adres: `https://<kubeat>/auth/callback`; boşsa `UPTIME_PUBLIC_URL` adresinin `/auth/callback` yolu. HTTPS olmalıdır (düz HTTP yalnızca `localhost`); ikisi de yoksa SSO yalnızca `localhost`'taki bir arayüzle çalışır |
+| `UPTIME_OIDC_REDIRECT_URL` | – | Sağlayıcının geri döndüğü adres: `https://<kubeat>/auth/callback`; boşsa `UPTIME_PUBLIC_URL` adresinin `/auth/callback` yolu. HTTPS olmalıdır (düz HTTP yalnızca `localhost`), uymazsa SSO kapalı kalır ve backend nedenini loglar; ikisi de yoksa SSO yalnızca `localhost`'taki bir arayüzle çalışır |
 | `UPTIME_OIDC_SCOPES` | `openid profile email` | İstenen kapsamlar, boşlukla ayrılmış |
 | `UPTIME_OIDC_USERNAME_CLAIM` | `preferred_username` | Kullanıcı adının okunduğu claim |
 | `UPTIME_OIDC_DISPLAY_NAME_CLAIM` | `name` | Görünen adın okunduğu claim |
@@ -1640,8 +1992,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
 | `DEFAULT_LOCALE` | `en` | Tarayıcısı bizde olan bir dil istemeyen ziyaretçinin arayüz dili: `en` ya da `tr` |
-| `PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres (backend'deki `UPTIME_PUBLIC_URL`); `https://` ise oturum çerezi Secure işaretlenir ve HSTS gönderilir. Chart `publicURL`'den ya da Route/Ingress host'undan verir |
-| `COOKIE_SECURE` | `auto` | Oturum çerezinin Secure (yalnızca HTTPS) işaretlenmesi: `auto` (`PUBLIC_URL` `https://` ise ya da `X-Forwarded-Proto` değerlerinden biri `https` ise), `always` ya da `never` (`localhost` dışından düz HTTP ile erişim için) |
+| `PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres (backend'deki `UPTIME_PUBLIC_URL`); `https://` ise oturum çerezi Secure işaretlenir ve HSTS gönderilir, `http://` ise `upgrade-insecure-requests` gönderilmez. Chart `publicURL`'den ya da Route/Ingress host'undan verir |
+| `COOKIE_SECURE` | `auto` | Oturum çerezinin Secure (yalnızca HTTPS) işaretlenmesi: `auto` (`PUBLIC_URL` `https://` ise ya da `X-Forwarded-Proto`'nun ilk, tarayıcıya bakan değeri `https` ise), `always` ya da `never` (`localhost` dışından düz HTTP ile erişim için; `upgrade-insecure-requests` de gönderilmez) |
 | `STATUS_PAGE_FRAME_ANCESTORS` | `'none'` | Durum sayfalarını iframe içinde gösterebilecek siteler, CSP `frame-ancestors` kaynak listesi olarak (örn. `https://wiki.example.com`); arayüzün geri kalanı hiç gösterilemez |
 | `HSTS_MAX_AGE` | `31536000` | HTTPS ile gelen tarayıcıya gönderilen `Strict-Transport-Security` süresi (saniye); `0` kapalı |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |

@@ -22,8 +22,16 @@ func subject(n Notification) string {
 // SlackSender posts to a Slack incoming webhook: the one-line text, which
 // is what a notification preview shows, and an attachment that carries the
 // colour of the event, the details and the link back. Mattermost reads the
-// same format.
+// same format (MattermostSender).
 type SlackSender struct {
+	Client    *http.Client
+	UserAgent string
+}
+
+// MattermostSender posts Slack's body to a Mattermost incoming webhook,
+// escaped for what Mattermost reads on top of Slack's syntax
+// (mattermostEscaper).
+type MattermostSender struct {
 	Client    *http.Client
 	UserAgent string
 }
@@ -53,17 +61,29 @@ type slackField struct {
 func shortValue(v string) bool { return len([]rune(v)) <= 40 }
 
 // chatEscaper escapes the characters Slack gives a meaning in text, and
-// Mattermost reading Slack's format, and Google Chat in its own: "<" opens
-// a mention such as <!channel> or <users/all>, or a link such as
-// <https://…|label> whose label hides the address, and "&" starts the
-// escape of either. Names, targets and errors, a push report's message
-// among them, are escaped with it, so that they read as typed instead of
-// notifying a whole channel or disguising a link. The same three escapes
-// make the text safe where Google Chat renders HTML.
+// Google Chat in its own: "<" opens a mention such as <!channel> or
+// <users/all>, or a link such as <https://…|label> whose label hides the
+// address, and "&" starts the escape of either. Names, targets and errors,
+// a push report's message among them, are escaped with it, so that these
+// forms read as typed instead of notifying a whole channel or disguising a
+// link. Slack shows a plain @channel as text, since Kubeat does not ask it
+// to parse names (link_names), and its text has no other way to write a
+// link. The same three escapes make the text safe where Google Chat
+// renders HTML.
 var chatEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
-func newSlackBody(n Notification, now time.Time) slackBody {
-	esc := chatEscaper.Replace
+// mattermostEscaper is chatEscaper and more. Mattermost takes Slack's forms
+// too, but it reads text as Markdown and knows mentions of its own: a
+// plain @channel, @here, @all, or a user's or a group's @name. A zero-width
+// space after every "@" keeps any of them from notifying anyone, and one
+// after every "]" keeps [label](address) from turning into a link whose
+// label hides its address, or an image the clients would fetch: neither
+// is Markdown any longer, and the text reads as typed.
+var mattermostEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "@", "@​", "]", "]​")
+
+// newSlackBody is the body of a Slack or Mattermost message, with what came
+// from a monitor or a target escaped by esc.
+func newSlackBody(n Notification, now time.Time, esc func(string) string) slackBody {
 	text := esc(Text(n))
 	// The link is Kubeat's own address, which Slack takes as it is.
 	attachment := slackAttachment{
@@ -77,7 +97,11 @@ func newSlackBody(n Notification, now time.Time) slackBody {
 }
 
 func (s *SlackSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
-	return postJSON(ctx, s.Client, s.UserAgent, ch.Target, newSlackBody(n, time.Now()))
+	return postJSON(ctx, s.Client, s.UserAgent, ch.Target, newSlackBody(n, time.Now(), chatEscaper.Replace))
+}
+
+func (s *MattermostSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	return postJSON(ctx, s.Client, s.UserAgent, ch.Target, newSlackBody(n, time.Now(), mattermostEscaper.Replace))
 }
 
 // GoogleChatSender posts to a Google Chat space webhook: the one-line text

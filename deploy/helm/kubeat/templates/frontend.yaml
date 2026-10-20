@@ -55,13 +55,14 @@ spec:
             - name: PUBLIC_URL
               value: {{ . | quote }}
             {{- end }}
+            {{- /* These three came after 0.37.0: dig takes the default of values.yaml when they are missing (see _helpers.tpl). */}}
             - name: COOKIE_SECURE
-              value: {{ .Values.frontend.cookieSecure | quote }}
+              value: {{ dig "cookieSecure" "auto" .Values.frontend | quote }}
             - name: STATUS_PAGE_FRAME_ANCESTORS
-              value: {{ .Values.frontend.statusPageFrameAncestors | quote }}
+              value: {{ dig "statusPageFrameAncestors" "'none'" .Values.frontend | quote }}
             # An int64 first: a number this large would print as 3.1536e+07.
             - name: HSTS_MAX_AGE
-              value: {{ .Values.frontend.hstsMaxAge | int64 | quote }}
+              value: {{ dig "hstsMaxAge" 31536000 .Values.frontend | int64 | quote }}
             {{- range $name, $value := .Values.frontend.extraEnv }}
             - name: {{ $name }}
               value: {{ $value | quote }}

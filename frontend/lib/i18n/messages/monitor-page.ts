@@ -193,6 +193,10 @@ export const monitorPage = defineMessages(
     "monitorPage.pushUrl.params.status": "(iş kendi hatasını bildirebilir),",
     "monitorPage.pushUrl.params.msg": "kısa bir not,",
     "monitorPage.pushUrl.params.ping": "işin süresi (ms).",
+    "monitorPage.pushUrl.renew": "Adresi yenile",
+    "monitorPage.pushUrl.renew.confirm":
+      "Bu monitor'a yeni bir rapor adresi verilsin mi? Eski adres hemen çalışmaz olur: ona rapor gönderen işler yeni adresle güncellenmelidir. Geçmiş ve olaylar korunur.",
+    "monitorPage.pushUrl.renew.action": "Yenile",
     "monitorPage.channels.none": "Bu monitor için etkin bildirim kanalı yok: kesintisini kimse duymaz.",
     "monitorPage.channels.add": "Kanal ekleyin",
     "monitorPage.channels.label": "Bildirim:",
@@ -401,6 +405,10 @@ export const monitorPage = defineMessages(
     "monitorPage.pushUrl.params.status": "(the job can report its own failure),",
     "monitorPage.pushUrl.params.msg": "a short note,",
     "monitorPage.pushUrl.params.ping": "the job's duration (ms).",
+    "monitorPage.pushUrl.renew": "Renew address",
+    "monitorPage.pushUrl.renew.confirm":
+      "Give this monitor a new report address? The old one stops working at once: the jobs that report to it need the new one. History and incidents are kept.",
+    "monitorPage.pushUrl.renew.action": "Renew",
     "monitorPage.channels.none": "This monitor has no active notification channel: nobody will hear about its outage.",
     "monitorPage.channels.add": "Add a channel",
     "monitorPage.channels.label": "Notifications:",

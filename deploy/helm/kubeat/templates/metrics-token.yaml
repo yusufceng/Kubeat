@@ -6,7 +6,7 @@ copy in its configuration (on OpenShift in a Secret of
 openshift-user-workload-monitoring), where it must open nothing but the
 metrics.
 */ -}}
-{{- if and .Values.metrics.auth.enabled (not .Values.metrics.auth.existingSecret) }}
+{{- if and (include "kubeat.metricsAuth" .) (not (dig "auth" "existingSecret" "" .Values.metrics)) }}
 {{- $name := printf "%s-metrics-token" .Release.Name }}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
 apiVersion: v1

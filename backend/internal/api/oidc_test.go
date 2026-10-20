@@ -93,3 +93,22 @@ func TestOIDCSignIn(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+// A provider whose settings cannot be used is off: the sign-in page offers
+// no button, and administrators are told why rather than how to turn SSO on.
+func TestOIDCOffWithAProblem(t *testing.T) {
+	const problem = `UPTIME_OIDC_REDIRECT_URL: "https://kubeat.example/auth/callback/" must be the UI's /auth/callback`
+	srv, _ := newTestAPIWith(t, func(o *Options) { o.OIDCProblem = problem })
+
+	var providers providersResponse
+	if code := doAs(t, "", http.MethodGet, srv.URL+"/api/v1/auth/providers", "", &providers); code != http.StatusOK || providers.OIDC != nil {
+		t.Errorf("providers = %d %+v, want no OIDC", code, providers)
+	}
+	if code := doAs(t, "", http.MethodGet, srv.URL+"/api/v1/auth/oidc/start", "", nil); code != http.StatusNotFound {
+		t.Errorf("start = %d, want 404", code)
+	}
+	var status oidcStatusResponse
+	if code := do(t, http.MethodGet, srv.URL+"/api/v1/oidc", "", &status); code != http.StatusOK || status.Enabled || status.Problem != problem {
+		t.Errorf("status = %d %+v, want off with the problem", code, status)
+	}
+}

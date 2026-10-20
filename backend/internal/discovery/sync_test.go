@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,86 @@ func TestSyncCreatesUpdatesAndRemovesManagedMonitors(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(audit) == 0 || audit[0].Username != Actor || audit[0].ObjectType != "monitor" {
+		t.Errorf("audit = %+v", audit)
+	}
+}
+
+// An object that leads its monitor to another server, a Route to another
+// host or an Ingress without TLS, no longer takes the secrets stored with
+// the monitor along, nor its request body: they are dropped, and the audit
+// log names them. A new path on the same server keeps them, and so does TLS
+// added to an Ingress: the same host, over HTTPS.
+func TestSyncDropsSecretsWhenTheTargetMovesToAnotherServer(t *testing.T) {
+	ctx := context.Background()
+	cluster := &fakeCluster{candidates: []k8s.Candidate{
+		{Kind: k8s.KindRoute, Namespace: "shop", Name: "web", Annotations: monitored(nil),
+			Type: store.MonitorHTTP, Target: "https://web.shop.example/", Reason: k8s.ReasonRouteHost},
+		{Kind: k8s.KindIngress, Namespace: "shop", Name: "site", Annotations: monitored(nil),
+			Type: store.MonitorHTTP, Target: "https://site.shop.example/", Reason: k8s.ReasonIngressRule},
+		{Kind: k8s.KindIngress, Namespace: "shop", Name: "plain", Annotations: monitored(nil),
+			Type: store.MonitorHTTP, Target: "http://plain.shop.example/", Reason: k8s.ReasonIngressRule},
+	}}
+	s, db := newSyncer(t, cluster)
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	web, site, plain := "shop/route/web", "shop/ingress/site@site.shop.example/", "shop/ingress/plain@plain.shop.example/"
+	// Their editors give the monitors credentials, and a body to log in with.
+	body := `{"username":"probe","password":"S3cr3t"}`
+	for _, name := range []string{web, site, plain} {
+		m := names(t, db)[name]
+		m.HTTP.Auth, m.HTTP.AuthSecret, m.HTTP.Headers = store.HTTPAuthBearer, "BEARER-TOKEN", map[string]string{"X-Api-Key": "API-KEY"}
+		m.HTTP.Method, m.HTTP.Body, m.HTTP.ContentType = "POST", body, "application/json"
+		if _, err := db.UpdateMonitor(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kept := func(name string) bool {
+		m := names(t, db)[name]
+		return m.HTTP.AuthSecret == "BEARER-TOKEN" && m.HTTP.Headers["X-Api-Key"] == "API-KEY" && m.HTTP.Body == body
+	}
+
+	cluster.candidates[0].Target = "https://web.shop.example/healthz"
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !kept(web) || !kept(site) || !kept(plain) {
+		t.Errorf("a new path on the same server: %+v", names(t, db)[web].HTTP)
+	}
+
+	cluster.candidates[0].Target = "https://capture.attacker.example/"
+	cluster.candidates[1].Target = "http://site.shop.example/"
+	cluster.candidates[2].Target = "https://plain.shop.example/"
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); st.Updated != 3 || st.Removed != 0 {
+		t.Errorf("status = %+v", st)
+	}
+	for name, target := range map[string]string{web: "https://capture.attacker.example/", site: "http://site.shop.example/"} {
+		m := names(t, db)[name]
+		if m.Target != target || m.HTTP.AuthSecret != "" || len(m.HTTP.Headers) != 0 || m.HTTP.Body != "" || m.HTTP.ContentType != "" ||
+			m.HTTP.Auth != store.HTTPAuthBearer || m.HTTP.Method != "POST" {
+			t.Errorf("%s: target %s, http %+v", name, m.Target, m.HTTP)
+		}
+	}
+	if m := names(t, db)[plain]; m.Target != "https://plain.shop.example/" || !kept(plain) {
+		t.Errorf("TLS added: target %s, http %+v", m.Target, m.HTTP)
+	}
+	audit, err := db.ListAudit(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropped := 0
+	for _, e := range audit {
+		if e.Username == Actor && e.Action == "update" && strings.Contains(e.Summary, "dropped") {
+			if !strings.HasSuffix(e.Summary, "; dropped http.auth_secret, http.body, http.headers.X-Api-Key, which go only to the server they were entered for") {
+				t.Errorf("audit: %q", e.Summary)
+			}
+			dropped++
+		}
+	}
+	if dropped != 2 {
 		t.Errorf("audit = %+v", audit)
 	}
 }

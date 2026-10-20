@@ -25,6 +25,9 @@ const MinKeyLength = 32
 // ErrNoKey means a value is encrypted and no key was configured to read it.
 var ErrNoKey = errors.New("secretbox: the value is encrypted, but no key is configured (UPTIME_SECRET_KEY)")
 
+// ErrWrongKey means a value was encrypted with another key.
+var ErrWrongKey = errors.New("secretbox: the value cannot be decrypted: the key is not the one it was encrypted with")
+
 // Box encrypts and decrypts with one key. A nil *Box is valid: it leaves
 // values as they are and can read only plain ones.
 type Box struct {
@@ -82,7 +85,7 @@ func (b *Box) Open(stored string) (string, error) {
 	nonce, ciphertext := raw[:b.aead.NonceSize()], raw[b.aead.NonceSize():]
 	plain, err := b.aead.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return "", errors.New("secretbox: the value cannot be decrypted: the key is not the one it was encrypted with")
+		return "", ErrWrongKey
 	}
 	return string(plain), nil
 }

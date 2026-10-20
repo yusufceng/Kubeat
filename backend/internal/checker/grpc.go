@@ -2,6 +2,7 @@ package checker
 
 import (
 	"context"
+	"fmt"
 	"net"
 
 	"google.golang.org/grpc"
@@ -28,11 +29,13 @@ func (c *Checker) checkGRPC(ctx context.Context, m store.Monitor) outcome {
 
 	// passthrough: the address is dialled as given, without gRPC's own name
 	// resolution and its extra lookups.
+	var refusal policyRefusal
+	dial := refusal.dial(c)
 	conn, err := grpc.NewClient("passthrough:///"+m.Target,
 		grpc.WithTransportCredentials(transport),
 		grpc.WithUserAgent(c.opts.UserAgent),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
-			return c.dialer.DialContext(ctx, "tcp", addr)
+			return dial(ctx, "tcp", addr)
 		}))
 	if err != nil {
 		return failed(err)
@@ -50,7 +53,7 @@ func (c *Checker) checkGRPC(ctx context.Context, m store.Monitor) outcome {
 		case codes.DeadlineExceeded:
 			return failed(context.DeadlineExceeded)
 		}
-		return failedf("%s: %s", st.Code(), st.Message())
+		return failed(refusal.wrap(fmt.Errorf("%s: %s", st.Code(), st.Message())))
 	}
 	if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 		return failedf("health status is %s", resp.GetStatus())

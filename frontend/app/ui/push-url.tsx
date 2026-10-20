@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { renewPushTokenAction } from "@/app/actions";
+import { ConfirmForm } from "@/app/ui/confirm";
 import { useT } from "@/lib/i18n/client";
 import { useMounted } from "@/lib/use-mounted";
-import { CopyIcon } from "@/app/ui/icons";
+import { CopyIcon, RenewIcon } from "@/app/ui/icons";
 
 function CopyRow({ label, value }: { label: string; value: string }) {
   const t = useT();
@@ -34,9 +36,10 @@ function CopyRow({ label, value }: { label: string; value: string }) {
 /**
  * Where the source of a push monitor reports to. The public address is this
  * page's own origin, which only the browser knows; inside the cluster the
- * backend's service accepts the same path.
+ * backend's service accepts the same path. Only those who may change the
+ * monitor get the token, and they can renew it when it has leaked.
  */
-export function PushUrl({ token, internalBase }: { token: string; internalBase: string }) {
+export function PushUrl({ monitorId, token, internalBase }: { monitorId: number; token: string; internalBase: string }) {
   const t = useT();
   const mounted = useMounted();
   const path = `/api/push/${token}`;
@@ -44,9 +47,21 @@ export function PushUrl({ token, internalBase }: { token: string; internalBase: 
 
   return (
     <section aria-label={t("monitorPage.pushUrl.title")} className="card flex flex-col gap-4 p-5">
-      <div>
-        <h2 className="text-sm font-semibold">{t("monitorPage.pushUrl.title")}</h2>
-        <p className="mt-0.5 text-xs text-muted">{t("monitorPage.pushUrl.intro")}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">{t("monitorPage.pushUrl.title")}</h2>
+          <p className="mt-0.5 text-xs text-muted">{t("monitorPage.pushUrl.intro")}</p>
+        </div>
+        <ConfirmForm
+          action={renewPushTokenAction}
+          question={t("monitorPage.pushUrl.renew.confirm")}
+          confirmLabel={t("monitorPage.pushUrl.renew.action")}
+        >
+          <input type="hidden" name="id" value={monitorId} />
+          <button type="submit" className="btn">
+            <RenewIcon /> {t("monitorPage.pushUrl.renew")}
+          </button>
+        </ConfirmForm>
       </div>
       <CopyRow label={t("monitorPage.pushUrl.external")} value={external} />
       <CopyRow label={t("monitorPage.pushUrl.internal")} value={`${internalBase}${path}`} />

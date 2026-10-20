@@ -17,7 +17,7 @@ spec:
     - port: http
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval }}
-      {{- if .Values.metrics.auth.enabled }}
+      {{- if include "kubeat.metricsAuth" . }}
       # The metrics token: Prometheus reads it from the Secret the backend
       # takes it from.
       authorization:

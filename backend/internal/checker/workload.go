@@ -2,9 +2,11 @@ package checker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -37,7 +39,7 @@ func (c *Checker) checkWorkload(ctx context.Context, m store.Monitor) outcome {
 	}
 	st, err := c.opts.Workloads.Replicas(ctx, m.Target)
 	if err != nil {
-		return failed(err)
+		return failed(c.clusterFailure(m, err))
 	}
 	rollingFor, rolling := c.rollingFor(m.Target, st.Rolling)
 
@@ -67,6 +69,19 @@ func (c *Checker) checkWorkload(ctx context.Context, m store.Monitor) outcome {
 		return outcome{detail: fmt.Sprintf("%d of %d pods are ready, rollout in progress", st.Ready, st.Desired)}
 	}
 	return outcome{detail: fmt.Sprintf("%d of %d pods are ready", st.Ready, st.Desired)}
+}
+
+// clusterFailure is what a check stores when its request to the cluster API
+// fails: what kind of failure it was (k8s.FailureReason). Every reader of
+// the monitor reads its results, and its incidents and notifications carry
+// them; the error itself, which names Kubeat's service account or the API
+// server's address, goes to the log.
+func (c *Checker) clusterFailure(m store.Monitor, err error) error {
+	reason := k8s.FailureReason(err)
+	if reason != err.Error() {
+		c.opts.Logger.Warn("a check's request to the cluster API failed", "monitor_id", m.ID, "monitor", m.Name, "error", err)
+	}
+	return errors.New(reason)
 }
 
 // rollingFor returns how long the workload has been seen rolling out. The

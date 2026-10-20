@@ -2,6 +2,7 @@ package checker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -46,7 +48,7 @@ func (c *Checker) checkEachPod(ctx context.Context, m store.Monitor) outcome {
 	}
 	endpoints, err := c.opts.Endpoints.PodEndpoints(ctx, m.Namespace, m.Source)
 	if err != nil {
-		return failed(err)
+		return failed(c.clusterFailure(m, err))
 	}
 	if len(endpoints) == 0 {
 		return failedf("no ready pod behind %s", m.Source)
@@ -77,6 +79,7 @@ func (c *Checker) checkEachPod(ctx context.Context, m store.Monitor) outcome {
 	wg.Wait()
 
 	var failures []string
+	var refusal error // the target policy's, for a pod it refused
 	combined := outcome{hasTime: true}
 	for _, r := range results {
 		combined.latency = max(combined.latency, r.took)
@@ -88,11 +91,14 @@ func (c *Checker) checkEachPod(ctx context.Context, m store.Monitor) outcome {
 			if combined.statusCode == 0 {
 				combined.statusCode = r.statusCode
 			}
+			if errors.Is(r.err, netguard.ErrBlocked) {
+				refusal = r.err
+			}
 		}
 	}
 	sort.Strings(failures)
 	if len(failures) > 0 {
-		combined.err = fmt.Errorf("%d of %d pods failed: %s", len(failures), len(results), listPods(failures))
+		combined.err = refusedTo(fmt.Errorf("%d of %d pods failed: %s", len(failures), len(results), listPods(failures)), refusal)
 		return combined
 	}
 	names := make([]string, 0, len(results))

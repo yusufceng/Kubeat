@@ -18,26 +18,31 @@ type Router struct {
 }
 
 // NewRouter returns a Router for every channel type. Every connection its
-// senders make goes through guard: to a channel's own address, which
-// whoever may edit the channel sets, and to the services the operator set
-// in smtp and endpoints alike. A nil guard lets them connect anywhere.
+// senders make goes through guard. A channel's own address, which whoever
+// may edit the channel sets, is held to it. The services the operator set
+// in smtp and endpoints are trusted at their exact address, each by its
+// own sender alone: one on the pod's loopback, a sidecar, needs no
+// exception, and a channel aimed at its address is still refused. A nil
+// guard lets them connect anywhere.
 func NewRouter(guard *netguard.Policy, userAgent string, smtp SMTPConfig, endpoints Endpoints) *Router {
 	client := &http.Client{Transport: guard.Transport()}
-	email := &EmailSender{SMTP: smtp, Dialer: guard.Dialer(&net.Dialer{})}
-	// Mattermost reads Slack's format, Google Chat its own cards.
-	text := &SlackSender{Client: client, UserAgent: userAgent}
+	trusting := func(service string) *http.Client {
+		return &http.Client{Transport: guard.Trust(netguard.HostPort(service)).Transport()}
+	}
+	email := &EmailSender{SMTP: smtp, Dial: guard.Trust(smtp.address()).Dialer(&net.Dialer{}).DialContext}
 	return &Router{
 		email: email,
 		senders: map[store.ChannelType]Sender{
-			store.ChannelWebhook:    &WebhookSender{Client: client, UserAgent: userAgent},
-			store.ChannelSlack:      text,
-			store.ChannelMattermost: text,
+			store.ChannelWebhook: &WebhookSender{Client: client, UserAgent: userAgent},
+			store.ChannelSlack:   &SlackSender{Client: client, UserAgent: userAgent},
+			// Mattermost reads Slack's format, Google Chat its own cards.
+			store.ChannelMattermost: &MattermostSender{Client: client, UserAgent: userAgent},
 			store.ChannelGoogleChat: &GoogleChatSender{Client: client, UserAgent: userAgent},
 			store.ChannelTeams:      &TeamsSender{Client: client, UserAgent: userAgent},
 			store.ChannelEmail:      email,
 			store.ChannelDiscord:    &DiscordSender{Client: client, UserAgent: userAgent},
-			store.ChannelTelegram:   &TelegramSender{Client: client, UserAgent: userAgent, BaseURL: endpoints.Telegram},
-			store.ChannelPagerDuty:  &PagerDutySender{Client: client, UserAgent: userAgent, URL: endpoints.PagerDuty},
+			store.ChannelTelegram:   &TelegramSender{Client: trusting(endpoints.Telegram), UserAgent: userAgent, BaseURL: endpoints.Telegram},
+			store.ChannelPagerDuty:  &PagerDutySender{Client: trusting(endpoints.PagerDuty), UserAgent: userAgent, URL: endpoints.PagerDuty},
 			store.ChannelNtfy:       &NtfySender{Client: client, UserAgent: userAgent},
 			store.ChannelGotify:     &GotifySender{Client: client, UserAgent: userAgent},
 		},

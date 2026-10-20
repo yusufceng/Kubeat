@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -75,6 +76,10 @@ type Identity struct {
 type Client struct {
 	cfg Config
 	tls *tls.Config
+	// address is the directory's host:port; ldaps is true when TLS starts
+	// with the connection.
+	address string
+	ldaps   bool
 }
 
 // New returns a Client, or nil when cfg.URL is empty.
@@ -122,42 +127,44 @@ func New(cfg Config) (*Client, error) {
 		}
 		tlsConfig.RootCAs = pool
 	}
-	return &Client{cfg: cfg, tls: tlsConfig}, nil
+	port := u.Port()
+	switch {
+	case port != "":
+	case u.Scheme == "ldaps":
+		port = ldap.DefaultLdapsPort
+	default:
+		port = ldap.DefaultLdapPort
+	}
+	return &Client{cfg: cfg, tls: tlsConfig, address: net.JoinHostPort(u.Hostname(), port), ldaps: u.Scheme == "ldaps"}, nil
 }
 
 // URL returns where the directory is, for display.
 func (c *Client) URL() string { return c.cfg.URL }
 
-func (c *Client) connect(ctx context.Context) (*ldap.Conn, error) {
-	dialCtx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
-	defer cancel()
-	conn, err := ldap.DialURL(c.cfg.URL, ldap.DialWithTLSConfig(c.tls), ldap.DialWithDialer(dialerFor(dialCtx)))
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	conn.SetTimeout(c.cfg.Timeout)
-	if c.cfg.StartTLS && !strings.HasPrefix(c.cfg.URL, "ldaps://") {
-		if err := conn.StartTLS(c.tls); err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("%w: StartTLS: %v", ErrUnavailable, err)
-		}
-	}
-	return conn, nil
-}
-
 // Authenticate checks the password of a user and returns what the
-// directory knows about them.
+// directory knows about them. It stops when ctx is done, whatever the
+// directory is doing.
 func (c *Client) Authenticate(ctx context.Context, username, password string) (Identity, error) {
 	username = strings.TrimSpace(username)
 	if username == "" || password == "" {
 		return Identity{}, ErrInvalidCredentials // an empty password would be an anonymous bind
 	}
-	conn, err := c.connect(ctx)
+	conn, stop, err := c.connect(ctx)
 	if err != nil {
 		return Identity{}, err
 	}
+	defer stop()
 	defer conn.Close()
+	id, err := c.authenticate(conn, username, password)
+	if err != nil && !errors.Is(err, ErrInvalidCredentials) && ctx.Err() != nil {
+		// The connection was closed under it: say why.
+		return Identity{}, fmt.Errorf("%w: %v", ErrUnavailable, ctx.Err())
+	}
+	return id, err
+}
 
+// authenticate does the work of Authenticate on an open connection.
+func (c *Client) authenticate(conn *ldap.Conn, username, password string) (Identity, error) {
 	// Find the user with the search account, then bind as the user.
 	if c.cfg.BindDN != "" {
 		if err := conn.Bind(c.cfg.BindDN, c.cfg.BindPassword); err != nil {

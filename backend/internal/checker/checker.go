@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -15,8 +16,13 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
-// maxDetail bounds the text a check stores about what it found.
+// maxDetail bounds the text a check stores about what it found, or why it
+// failed.
 const maxDetail = 300
+
+// maxLoggedAnswer bounds how much of a target's own words a check logs
+// (targetSaid): a first line may run to the size of a whole header.
+const maxLoggedAnswer = 1 << 10
 
 // Pushes gives the latest report of a push monitor.
 type Pushes interface {
@@ -48,8 +54,13 @@ type Options struct {
 	// without one, asks it about the address it resolved. A target is set
 	// by whoever may edit a monitor, so without a guard any of them could
 	// reach the backend's own loopback or the cloud's metadata service.
-	// Nil allows every address.
+	// The addresses it trusts, such as the proxy's, are reached as they
+	// are. Nil allows every address.
 	Guard *netguard.Policy
+	// Logger gets what a check keeps out of its result: the cluster API's
+	// own error, where the result says only what kind of failure it was.
+	// Nil logs with slog.Default.
+	Logger *slog.Logger
 }
 
 // Checker runs the checks of every monitor type. It is safe for concurrent
@@ -57,7 +68,7 @@ type Options struct {
 type Checker struct {
 	verifying *http.Transport
 	insecure  *http.Transport
-	dialer    *net.Dialer
+	dialer    *netguard.Dialer
 	opts      Options
 
 	// rollouts is when each workload target was first seen rolling out.
@@ -69,6 +80,9 @@ type Checker struct {
 // New returns a Checker. Timeouts are not set here; every check is bounded
 // by the context passed to Check.
 func New(opts Options) *Checker {
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
 	dialer := opts.Guard.Dialer(&net.Dialer{})
 	transport := func(skipVerify bool) *http.Transport {
 		t := http.DefaultTransport.(*http.Transport).Clone()
@@ -152,25 +166,28 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	result.CertExpiresAt = out.certExpiry
 	result.Up = out.err == nil
 	if out.err != nil {
-		result.Error = out.err.Error()
+		result.Error = truncate(out.err.Error(), maxDetail)
 	} else {
 		result.Detail = truncate(out.detail, maxDetail)
 	}
 
-	if m.Inverted {
+	// A connection the target policy refused never left Kubeat: whether
+	// the network would have let it through is unknown, so it is not the
+	// failure an inverted monitor expects, and the policy's error stands.
+	if m.Inverted && !errors.Is(out.err, netguard.ErrBlocked) {
 		invert(&result)
 	}
 	return result
 }
 
 // invert turns the outcome around for a monitor that expects its target to
-// fail. A check that could not run at all still counts as a failure.
+// fail.
 func invert(r *store.CheckResult) {
 	if r.Up {
 		r.Up = false
 		r.Error = "the target responded, but this monitor expects it to fail"
 		if r.Detail != "" {
-			r.Error += ": " + r.Detail
+			r.Error = truncate(r.Error+": "+r.Detail, maxDetail)
 		}
 		r.Detail = ""
 		return
@@ -178,6 +195,65 @@ func invert(r *store.CheckResult) {
 	r.Up = true
 	r.Detail = truncate("failed as expected: "+r.Error, maxDetail)
 	r.Error = ""
+}
+
+// policyRefusal remembers the target policy's refusal of a connection, for
+// the engines whose libraries put a failed connection into errors of their
+// own, the DNS resolver's and gRPC's, which errors.Is cannot see through.
+type policyRefusal struct {
+	mu  sync.Mutex
+	err error
+}
+
+// dial connects through the checker's dialer and remembers a refusal.
+func (r *policyRefusal) dial(c *Checker) func(ctx context.Context, network, address string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := c.dialer.DialContext(ctx, network, address)
+		if errors.Is(err, netguard.ErrBlocked) {
+			r.mu.Lock()
+			r.err = err
+			r.mu.Unlock()
+		}
+		return conn, err
+	}
+}
+
+// wrap returns err, its text unchanged, so that errors.Is finds in it the
+// refusal remembered, if there is one.
+func (r *policyRefusal) wrap(err error) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return refusedTo(err, r.err)
+}
+
+// refusedTo returns err so that errors.Is also finds refusal, the target
+// policy's error, in it; err itself when either is nil.
+func refusedTo(err, refusal error) error {
+	if err == nil || refusal == nil || errors.Is(err, netguard.ErrBlocked) {
+		return err
+	}
+	return refused{err, refusal}
+}
+
+// refused is an error, as a library or a check put it, about a connection
+// the target policy refused.
+type refused struct {
+	error
+	refusal error
+}
+
+func (e refused) Unwrap() []error { return []error{e.error, e.refusal} }
+
+// targetSaid is what a check stores when the target answered outside the
+// monitor's protocol, or with an error of its own: kind, what sort of
+// failure it was. Every reader of the monitor reads its results, while
+// only an editor chose the target, which may be any service the target
+// policy allows; its words, a banner or a message naming its software,
+// hosts or builds, go to the log.
+func (c *Checker) targetSaid(m store.Monitor, kind, words string) error {
+	c.opts.Logger.Warn("a check's target answered outside the monitor's protocol", "monitor_id", m.ID, "monitor", m.Name,
+		"failure", kind, "answer", truncate(words, maxLoggedAnswer))
+	return errors.New(kind)
 }
 
 // truncate cuts s to at most max bytes without splitting a character.

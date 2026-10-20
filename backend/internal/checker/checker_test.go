@@ -3,10 +3,16 @@ package checker
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -181,6 +187,222 @@ func TestHTTPOptions(t *testing.T) {
 
 	if got := check("/", func(o *store.HTTPOptions) { o.ExpectedStatus = "nonsense" }); got.Up || !strings.Contains(got.Error, "expected status") {
 		t.Errorf("invalid expected status: %+v", got)
+	}
+}
+
+// The monitor's headers and credentials go to the server it checks, along
+// its redirects there, and to no other: not another port of the same host,
+// not another host. A redirect that names the monitor's own server by its
+// address stays on the monitor's site there. The request body goes to no
+// other server either: a redirect that would send it there is not followed.
+func TestRedirectToAnotherServerDropsTheMonitorsHeaders(t *testing.T) {
+	type request struct{ path, host, key, auth, body string }
+	var (
+		mu   sync.Mutex
+		seen []request
+	)
+	record := func(r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, request{r.URL.Path, r.Host, r.Header.Get("X-Api-Key"), r.Header.Get("Authorization"), string(body)})
+	}
+	other := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { record(r) }))
+	defer other.Close()
+	var front *httptest.Server
+	front = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, "/same", http.StatusFound) // the same site
+		case "/same":
+			http.Redirect(w, r, front.URL+"/by-address", http.StatusFound) // the same server, by its address
+		case "/by-address":
+			http.Redirect(w, r, other.URL+"/away", http.StatusFound) // another port
+		case "/plain":
+			http.Redirect(w, r, front.URL+"/plain-end", http.StatusFound)
+		case "/post":
+			http.Redirect(w, r, front.URL+"/post-here", http.StatusTemporaryRedirect) // the body along
+		case "/post-here":
+			http.Redirect(w, r, other.URL+"/post-away", http.StatusTemporaryRedirect)
+		case "/post-dropped":
+			http.Redirect(w, r, other.URL+"/post-away", http.StatusSeeOther) // a GET, without the body
+		}
+	}))
+	defer front.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	check := func(path string, edit func(*store.HTTPOptions)) (store.CheckResult, []request) {
+		mu.Lock()
+		seen = nil
+		mu.Unlock()
+		m := httpMonitor(front.URL + path)
+		m.HTTP.Auth, m.HTTP.AuthSecret = store.HTTPAuthBearer, "TOKEN"
+		edit(&m.HTTP)
+		got := New(Options{}).Check(ctx, m)
+		mu.Lock()
+		defer mu.Unlock()
+		return got, seen
+	}
+	headers := func(h map[string]string) func(*store.HTTPOptions) {
+		return func(o *store.HTTPOptions) { o.Headers = h }
+	}
+	posting := func(o *store.HTTPOptions) {
+		o.Method, o.Body, o.Headers = "POST", `{"password":"S3cr3t"}`, map[string]string{"X-Api-Key": "KEY"}
+	}
+
+	frontHost, otherHost := front.Listener.Addr().String(), other.Listener.Addr().String()
+	for _, tc := range []struct {
+		path    string
+		edit    func(*store.HTTPOptions)
+		up      bool
+		want    []request
+		failure string
+	}{
+		{"/start", headers(map[string]string{"X-Api-Key": "KEY", "Host": "api.shop.example"}), true, []request{
+			{"/start", "api.shop.example", "KEY", "Bearer TOKEN", ""},
+			{"/same", "api.shop.example", "KEY", "Bearer TOKEN", ""},
+			{"/by-address", "api.shop.example", "KEY", "Bearer TOKEN", ""},
+			{"/away", otherHost, "", "", ""},
+		}, ""},
+		// Without a Host header the address is the site: a redirect on it is
+		// the same server, whatever the path.
+		{"/plain", headers(map[string]string{"X-Api-Key": "KEY"}), true, []request{
+			{"/plain", frontHost, "KEY", "Bearer TOKEN", ""},
+			{"/plain-end", frontHost, "KEY", "Bearer TOKEN", ""},
+		}, ""},
+		{"/post", posting, false, []request{
+			{"/post", frontHost, "KEY", "Bearer TOKEN", `{"password":"S3cr3t"}`},
+			{"/post-here", frontHost, "KEY", "Bearer TOKEN", `{"password":"S3cr3t"}`},
+		}, `Post "` + other.URL + `/post-away": the redirect would send the request body to another server`},
+		{"/post-dropped", posting, true, []request{
+			{"/post-dropped", frontHost, "KEY", "Bearer TOKEN", `{"password":"S3cr3t"}`},
+			{"/post-away", otherHost, "", "", ""},
+		}, ""},
+	} {
+		got, requests := check(tc.path, tc.edit)
+		if got.Up != tc.up || got.Error != tc.failure {
+			t.Errorf("%s: %+v", tc.path, got)
+		}
+		if fmt.Sprint(requests) != fmt.Sprint(tc.want) {
+			t.Errorf("%s: requests:\n got  %v\n want %v", tc.path, requests, tc.want)
+		}
+	}
+}
+
+// A site that sends plain HTTP on to its own HTTPS address, as an OpenShift
+// Route with insecureEdgeTerminationPolicy: Redirect (302) or ingress-nginx's
+// ssl-redirect (308) does, is still the monitor's server: its headers,
+// credentials, Host header and body go along. Back to plain HTTP is another
+// server, and so is another port.
+func TestRedirectToTLSOnTheSameHostKeepsTheMonitorsHeaders(t *testing.T) {
+	type request struct{ scheme, host, path, key, auth, body string }
+	var (
+		mu   sync.Mutex
+		seen []request
+	)
+	record := func(r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, request{scheme, r.Host, r.URL.Path, r.Header.Get("X-Api-Key"), r.Header.Get("Authorization"), string(body)})
+	}
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		switch r.URL.Path {
+		case "/downgrade":
+			http.Redirect(w, r, "http://example.com/end", http.StatusFound)
+		case "/another-port":
+			http.Redirect(w, r, "https://example.com:8443/end", http.StatusFound)
+		}
+	}))
+	defer secure.Close()
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		if code, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/")); err == nil {
+			http.Redirect(w, r, "https://example.com/end", code)
+		}
+	}))
+	defer plain.Close()
+
+	// example.com, which the test certificate names, on its two usual ports
+	// and one more; the certificate is verified, as in production.
+	routes := map[string]string{
+		"example.com:80": plain.Listener.Addr().String(), "example.com:443": secure.Listener.Addr().String(),
+		"example.com:8443": secure.Listener.Addr().String(),
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(secure.Certificate())
+	c := New(Options{})
+	c.verifying.Proxy = nil
+	c.verifying.TLSClientConfig = &tls.Config{RootCAs: roots}
+	c.verifying.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, routes[addr])
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	check := func(target string, edit func(*store.HTTPOptions)) []request {
+		mu.Lock()
+		seen = nil
+		mu.Unlock()
+		m := httpMonitor(target)
+		m.HTTP.Auth, m.HTTP.AuthSecret, m.HTTP.Headers = store.HTTPAuthBearer, "TOKEN", map[string]string{"X-Api-Key": "KEY"}
+		edit(&m.HTTP)
+		if got := c.Check(ctx, m); !got.Up {
+			t.Errorf("%s: %+v", target, got)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return seen
+	}
+	as := func(*store.HTTPOptions) {}
+
+	for _, tc := range []struct {
+		target string
+		edit   func(*store.HTTPOptions)
+		want   []request
+	}{
+		{"http://example.com/301", as, []request{
+			{"http", "example.com", "/301", "KEY", "Bearer TOKEN", ""}, {"https", "example.com", "/end", "KEY", "Bearer TOKEN", ""}}},
+		{"http://example.com/302", as, []request{
+			{"http", "example.com", "/302", "KEY", "Bearer TOKEN", ""}, {"https", "example.com", "/end", "KEY", "Bearer TOKEN", ""}}},
+		{"http://example.com:80/308", func(o *store.HTTPOptions) { o.Method, o.Body = "POST", `{"password":"S3cr3t"}` }, []request{
+			{"http", "example.com:80", "/308", "KEY", "Bearer TOKEN", `{"password":"S3cr3t"}`},
+			{"https", "example.com", "/end", "KEY", "Bearer TOKEN", `{"password":"S3cr3t"}`}}},
+		// The site the Host header names, on the same server over TLS.
+		{"http://example.com/302", func(o *store.HTTPOptions) { o.Headers["Host"] = "app.example" }, []request{
+			{"http", "app.example", "/302", "KEY", "Bearer TOKEN", ""}, {"https", "app.example", "/end", "KEY", "Bearer TOKEN", ""}}},
+		{"https://example.com/downgrade", as, []request{
+			{"https", "example.com", "/downgrade", "KEY", "Bearer TOKEN", ""}, {"http", "example.com", "/end", "", "", ""}}},
+		{"https://example.com/another-port", as, []request{
+			{"https", "example.com", "/another-port", "KEY", "Bearer TOKEN", ""}, {"https", "example.com:8443", "/end", "", "", ""}}},
+	} {
+		if got := check(tc.target, tc.edit); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+			t.Errorf("%s: requests:\n got  %v\n want %v", tc.target, got, tc.want)
+		}
+	}
+}
+
+// The Host header goes out as the monitor's destination counts it: net/http
+// would send a padded one empty, to whichever site a router keeps for
+// requests without a name.
+func TestHostHeaderIsSentTrimmed(t *testing.T) {
+	var host string
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { host = r.Host }))
+	defer srv.Close()
+	for value, want := range map[string]string{
+		"api.shop.example ": "api.shop.example", "\tapi.shop.example": "api.shop.example", " ": srv.Listener.Addr().String(),
+	} {
+		m := httpMonitor(srv.URL)
+		m.HTTP.Headers = map[string]string{"Host": value}
+		if got := New(Options{}).Check(context.Background(), m); !got.Up || host != want {
+			t.Errorf("Host %q: sent %q, %+v", value, host, got)
+		}
 	}
 }
 

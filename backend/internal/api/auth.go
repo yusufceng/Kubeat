@@ -445,7 +445,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w, "invalid username or password")
 		return
 	}
-	key := strings.ToLower(req.Username)
+	key := signInKey(req.Username)
 	now := time.Now().UTC()
 	// The attempt counts as a failure from here on, before the password is
 	// checked: parallel attempts cannot all be tried before the first
@@ -464,26 +464,31 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	known := err == nil
-	release, ok := h.passwordChecks.acquire(r.Context())
-	if !ok {
+	busy := func() {
 		undo()
 		writeError(w, http.StatusServiceUnavailable, "too many sign-ins at once; try again")
-		return
 	}
-	defer release()
 	switch {
 	case known && user.Source == store.UserLocal:
-		right := auth.CheckPassword(user.PasswordHash, req.Password)
-		release()
-		if !right {
-			h.loginFailed(w, r, req.Username, "wrong password", attempt)
+		right, err := h.checkPassword(r.Context(), user.PasswordHash, req.Password)
+		if err != nil {
+			busy()
 			return
 		}
-	case h.opts.LDAP != nil:
-		identity, err := h.opts.LDAP.Authenticate(r.Context(), req.Username, req.Password)
-		release()
+		if !right {
+			h.loginFailed(w, r, req.Username, wrongPassword, attempt, known)
+			return
+		}
+	case h.opts.LDAP != nil && (!known || user.Source == store.UserLDAP):
+		// An account that signs in through SSO is not the directory's to
+		// take: the same name there may be someone else.
+		identity, err := h.askDirectory(r.Context(), req.Username, req.Password)
+		if errors.Is(err, errBusy) {
+			busy()
+			return
+		}
 		if errors.Is(err, ldapauth.ErrInvalidCredentials) {
-			h.loginFailed(w, r, req.Username, "rejected by the directory", attempt)
+			h.loginFailed(w, r, req.Username, rejectedByDirectory, attempt, known)
 			return
 		}
 		if err != nil {
@@ -495,23 +500,35 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		user, err = h.directoryUser(r.Context(), user, known, store.UserLDAP, directoryIdentity{
 			Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email, Groups: identity.Groups,
 		}, ldapauth.SameDN, h.opts.LDAPDefaultRole, h.opts.LDAPDefaultNamespaces)
+		var denied noRoleError
+		if errors.As(err, &denied) {
+			// The password was right, but the account may not sign in. That
+			// counts as a failure all the same: anyone in the directory
+			// could otherwise write an audit row a request, and never lock.
+			h.opts.Logger.Info("sign-in refused", "user", req.Username, "reason", "no role", "attempt", attempt)
+			h.auditRefusal(r.Context(), req.Username, store.AuditEntry{
+				Action: "login_denied", ObjectType: "user", ObjectID: user.ID, Summary: req.Username + ": " + err.Error(),
+			}, attempt, true)
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		if err != nil {
 			undo()
-			var denied noRoleError
-			if errors.As(err, &denied) {
-				h.audit(r, "login_denied", "user", user.ID, req.Username+": "+err.Error())
-				writeError(w, http.StatusForbidden, err.Error())
-				return
-			}
 			h.internalError(w, r, err)
 			return
 		}
 	default:
 		// No password to compare with, but a comparison all the same: the
 		// time of the answer must not tell this name from a local account's.
-		auth.CheckPassword("", req.Password)
-		release()
-		h.loginFailed(w, r, req.Username, "unknown user", attempt)
+		if _, err := h.checkPassword(r.Context(), "", req.Password); err != nil {
+			busy()
+			return
+		}
+		failure := unknownUser
+		if known {
+			failure = passwordElsewhere
+		}
+		h.loginFailed(w, r, req.Username, failure, attempt, known)
 		return
 	}
 	if !user.Enabled {
@@ -522,6 +539,49 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	h.opts.Throttle.Reset(key)
 	h.signIn(w, r, user, "login")
 }
+
+// checkPassword compares password with hash (see auth.CheckPassword) in a
+// password-check slot, or returns errBusy when none came free in time.
+func (h *handler) checkPassword(ctx context.Context, hash, password string) (bool, error) {
+	release, ok := h.passwordChecks.acquire(ctx)
+	if !ok {
+		return false, errBusy
+	}
+	defer release()
+	return auth.CheckPassword(hash, password), nil
+}
+
+// askDirectory checks a password with the directory, in a directory slot:
+// a bind waits on the directory, not on the CPU, so a slow directory holds
+// up directory sign-ins and nothing else. The name has no local account,
+// so its password is also compared with the dummy hash, in a
+// password-check slot and alongside the bind, and the answer waits for
+// both: it takes as long as a local account's would, unless the directory
+// is slower than a bcrypt comparison. errBusy means a slot did not come
+// free in time.
+func (h *handler) askDirectory(ctx context.Context, username, password string) (ldapauth.Identity, error) {
+	releaseCheck, ok := h.passwordChecks.acquire(ctx)
+	if !ok {
+		return ldapauth.Identity{}, errBusy
+	}
+	compared := make(chan struct{})
+	go func() {
+		defer close(compared)
+		defer releaseCheck()
+		auth.CheckPassword("", password)
+	}()
+	defer func() { <-compared }()
+	releaseBind, ok := h.directoryBinds.acquire(ctx)
+	if !ok {
+		return ldapauth.Identity{}, errBusy
+	}
+	defer releaseBind()
+	return h.opts.LDAP.Authenticate(ctx, username, password)
+}
+
+// signInKey is the throttle's key for the sign-ins of a username: the same
+// whatever the case it is typed in, as the account's name is.
+func signInKey(username string) string { return strings.ToLower(username) }
 
 // tooManyAttempts is the answer for a key the throttle refuses.
 func tooManyAttempts(locked time.Duration) string {
@@ -545,28 +605,64 @@ var auditTR = map[string]string{
 	"wrong password":                              "parola yanlış",
 	"rejected by the directory":                   "dizin kabul etmedi",
 	"unknown user":                                "bilinmeyen kullanıcı",
+	"the account has no password here":            "hesabın burada parolası yok",
 	"%s; sign-in locked after %d failed attempts": "%s; %d hatalı denemeden sonra giriş kilitlendi",
 }
+
+// Why a password sign-in failed, in the audit log's words.
+const (
+	wrongPassword       = "wrong password"
+	rejectedByDirectory = "rejected by the directory"
+	unknownUser         = "unknown user"
+	// passwordElsewhere is a name whose account signs in another way: an
+	// SSO account, or a directory one while LDAP is off.
+	passwordElsewhere = "the account has no password here"
+)
 
 // loginFailed answers as for any wrong password: nothing in the answer
 // tells a username apart from a password. The throttle counted the
 // attempt when it began; attempt is its number in the lockout period.
+// Every failure is logged; see auditRefusal for the audit log.
 //
-// Every failure is logged, but the audit log gets only a name's first
-// failure in the lockout period and the one that locks it, and no more
-// than LoginAuditPerMinute failures a minute in all: a flood of guesses,
-// at one name or at made-up ones, must not bury what else the log holds.
-func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, username, why string, attempt int) {
+// known says that the name has a local record: an account, local or one
+// that signed in through the directory or SSO before. Its failures are
+// written whatever LoginAuditPerMinute: there are only so many such names,
+// each writes at most MaxFailures rows a lockout period (when a guesser
+// keeps it locked, every guess let through is the locking one), and a
+// flood of made-up names must not hide the guesses at one of them. Those
+// of a name without one, made up or only in the directory, count against
+// the cap: anyone can cause them.
+func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, username, why string, attempt int, known bool) {
 	h.opts.Logger.Info("sign-in refused", "user", username, "reason", why, "attempt", attempt)
-	locks := attempt >= h.opts.Throttle.MaxFailures
-	if (attempt == 1 || locks) && h.failedLogins.allow(time.Now()) {
-		summary := h.auditText(why)
-		if locks {
-			summary = fmt.Sprintf(h.auditText("%s; sign-in locked after %d failed attempts"), summary, attempt)
-		}
-		_ = h.opts.Store.AppendAudit(r.Context(), store.AuditEntry{At: time.Now().UTC(), Username: username, Action: "login_failed", Summary: summary})
-	}
+	h.auditRefusal(r.Context(), username, store.AuditEntry{Username: username, Action: "login_failed", Summary: h.auditText(why)},
+		attempt, !known)
 	unauthorized(w, "invalid username or password")
+}
+
+// auditRefusal writes a refused sign-in of username to the audit log, but
+// not every one: of a name's refusals within the lockout period, the first
+// of each action (login_failed, login_denied) and the one that locks the
+// name. A directory user without a role who first mistypes the password
+// thus leaves the denial as well as the failure. When capped, no more
+// than LoginAuditPerMinute refusals a minute are written in all: a flood
+// of guesses at made-up names must not bury what else the log holds. The
+// row is written also when the client is gone by then.
+func (h *handler) auditRefusal(ctx context.Context, username string, e store.AuditEntry, attempt int, capped bool) {
+	first := h.opts.Throttle.First(signInKey(username), e.Action)
+	locks := attempt >= h.opts.Throttle.MaxFailures
+	if !first && !locks {
+		return
+	}
+	if capped && !h.failedLogins.allow(time.Now()) {
+		return
+	}
+	if locks {
+		e.Summary = fmt.Sprintf(h.auditText("%s; sign-in locked after %d failed attempts"), e.Summary, attempt)
+	}
+	e.At = time.Now().UTC()
+	if err := h.opts.Store.AppendAudit(context.WithoutCancel(ctx), e); err != nil {
+		h.opts.Logger.Error("audit entry lost", "action", e.Action, "error", err)
+	}
 }
 
 // noRoleError means the directory knows the user but no group of theirs
@@ -732,14 +828,12 @@ func (h *handler) authPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, tooManyAttempts(locked))
 		return
 	}
-	release, ok := h.passwordChecks.acquire(r.Context())
-	if !ok {
+	right, err := h.checkPassword(r.Context(), u.PasswordHash, req.CurrentPassword)
+	if err != nil {
 		h.opts.Throttle.Undo(key, now)
 		writeError(w, http.StatusServiceUnavailable, "too many password checks at once; try again")
 		return
 	}
-	right := auth.CheckPassword(u.PasswordHash, req.CurrentPassword)
-	release()
 	if !right {
 		writeError(w, http.StatusBadRequest, "the current password is wrong")
 		return
@@ -928,22 +1022,31 @@ func (h *handler) updateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "you cannot take your own administrator role or disable yourself")
 		return
 	}
+	// A password the rules refuse refuses the whole request, before any of
+	// it is saved: an answer of 400 means that nothing changed.
+	if req.Password != nil {
+		if err := auth.ValidatePassword(u.Username, *req.Password, h.opts.PasswordMinLength); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	updated, err := h.opts.Store.UpdateUser(r.Context(), u)
 	if err != nil {
 		h.internalError(w, r, err)
 		return
 	}
+	// Saved, so audited, whatever happens next.
+	h.audit(r, "update", "user", u.ID, u.Username)
 	if req.Password != nil {
 		if err := h.setPassword(r, updated, *req.Password); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			h.internalError(w, r, err)
 			return
 		}
 	}
 	if req.Enabled != nil && !*req.Enabled {
 		_ = h.opts.Store.DeleteUserSessions(r.Context(), u.ID) // signed out at once
 	}
-	h.audit(r, "update", "user", u.ID, u.Username)
 	writeJSON(w, http.StatusOK, toUserResponse(updated))
 }
 
@@ -984,6 +1087,8 @@ type oidcStatusResponse struct {
 	// DefaultRole is what a provider user gets without a mapped group;
 	// empty means they cannot sign in.
 	DefaultRole store.Role `json:"default_role"`
+	// Problem says why SSO is off although a provider is configured.
+	Problem string `json:"problem,omitempty"`
 }
 
 func (h *handler) oidcStatus(w http.ResponseWriter, r *http.Request) {
@@ -993,6 +1098,8 @@ func (h *handler) oidcStatus(w http.ResponseWriter, r *http.Request) {
 	resp := oidcStatusResponse{Enabled: h.opts.OIDC != nil, DefaultRole: h.opts.OIDCDefaultRole}
 	if h.opts.OIDC != nil {
 		resp.Issuer, resp.Name = h.opts.OIDC.Issuer(), h.opts.OIDCName
+	} else {
+		resp.Problem = h.opts.OIDCProblem
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

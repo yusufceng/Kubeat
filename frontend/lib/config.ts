@@ -66,13 +66,15 @@ export const config = {
    * Where users reach Kubeat, as "https://kubeat.apps.example": the
    * backend's UPTIME_PUBLIC_URL. When it is HTTPS, browsers are on HTTPS
    * whatever the proxies in front of us say (see secureCookies and the
-   * Strict-Transport-Security header).
+   * Strict-Transport-Security header); when it is http://, they may be on
+   * plain HTTP whatever the proxies say (see lib/security-headers.ts).
    */
   publicUrl: (process.env.PUBLIC_URL ?? "").trim().replace(/\/+$/, ""),
   /**
    * Whether cookies are marked Secure, sent over HTTPS only: "always",
    * "never", or "auto": when publicUrl is HTTPS or the request came over
-   * HTTPS. "never" is for plain HTTP from anywhere but localhost.
+   * HTTPS. "never" is for plain HTTP from anywhere but localhost, and also
+   * keeps upgrade-insecure-requests out of the Content-Security-Policy.
    */
   cookieSecure: cookieSecureMode(process.env.COOKIE_SECURE),
   /**

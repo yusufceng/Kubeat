@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -267,11 +270,114 @@ func TestVacuumLeavesNoPlainCopies(t *testing.T) {
 	}
 }
 
+// A compaction recorded as owed stays owed until Vacuum has done it, with
+// the attempts counted at it. A Vacuum that fails, here cut short, empties
+// the write-ahead log all the same: one that ran out of disk would
+// otherwise leave it full.
+func TestVacuumAndThePendingCompaction(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "uptime.db")
+	s, err := OpenSQLite(ctx, path, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, m := range secretMonitors() {
+		if _, err := s.CreateMonitor(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Nothing owed: no attempt to count.
+	if err := s.SetCompactionAttempts(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending, err := s.CompactionPending(ctx); err != nil || pending {
+		t.Errorf("counting an attempt made a compaction owed: %v, %v", pending, err)
+	}
+	t0 := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	for _, at := range []time.Time{t0, t0.Add(time.Hour)} {
+		if err := s.SetCompactionPending(ctx, at); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetCompactionAttempts(ctx, 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if owed, pending, err := s.CompactionPending(ctx); err != nil || !pending || !owed.Since.Equal(t0) || owed.Attempts != 2 {
+		t.Errorf("pending compaction = %+v, %v, %v; want since the first time it was recorded, %s, with 2 attempts", owed, pending, err, t0)
+	}
+
+	wal := func() int64 {
+		info, err := os.Stat(path + "-wal")
+		if err != nil {
+			return 0
+		}
+		return info.Size()
+	}
+	if wal() == 0 {
+		t.Fatal("the write-ahead log is empty to begin with; the test would prove nothing")
+	}
+	cut, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.Vacuum(cut); err == nil {
+		t.Fatal("a vacuum cut short succeeded")
+	}
+	if size := wal(); size != 0 {
+		t.Errorf("after a failed vacuum the write-ahead log holds %d bytes, want it emptied", size)
+	}
+	if _, pending, _ := s.CompactionPending(ctx); !pending {
+		t.Error("a failed vacuum forgot the compaction owed")
+	}
+
+	if err := s.Vacuum(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending, err := s.CompactionPending(ctx); err != nil || pending {
+		t.Errorf("after the vacuum the compaction is still owed: %v, %v", pending, err)
+	}
+}
+
 // Whatever the writer deletes or overwrites is zeroed in the file.
 func TestWriterZeroesWhatItDeletes(t *testing.T) {
 	s := openTest(t)
 	var on int
 	if err := s.write.QueryRowContext(context.Background(), "PRAGMA secure_delete").Scan(&on); err != nil || on != 1 {
 		t.Errorf("secure_delete = %d, %v; want 1", on, err)
+	}
+}
+
+// A database of v0.37.0, schema version 20, read request bodies as plain
+// text. Once this version has sealed them, v0.37.0 would send the
+// ciphertext as the request body; a higher schema version, reached
+// through a migration with no statement in it, makes it refuse the
+// database instead, as newer than itself.
+func TestSealedBodiesRaiseTheSchemaVersion(t *testing.T) {
+	const plainBodies = 20
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v0.37.db")
+	old, err := openPool(path, time.Second, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, _ := fs.Glob(migrationFiles, "migrations/*.sql")
+	sort.Strings(names)
+	for _, name := range names[:plainBodies] {
+		body, _ := migrationFiles.ReadFile(name)
+		if _, err := old.ExecContext(ctx, string(body)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if _, err := old.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", plainBodies)); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	s, err := OpenSQLite(ctx, path, time.Second)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	s.Close()
+	if v, err := SchemaVersion(ctx, path); err != nil || v <= plainBodies || v != CurrentSchemaVersion() {
+		t.Errorf("schema version after the upgrade = %d, %v; want %d, above the %d that v0.37.0 opens", v, err, CurrentSchemaVersion(), plainBodies)
 	}
 }

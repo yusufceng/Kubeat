@@ -24,7 +24,9 @@ spec:
               {{- include "kubeat.selector" . | nindent 14 }}
               app.kubernetes.io/component: frontend
         {{- if .Values.metrics.serviceMonitor.enabled }}
-        {{- with .Values.networkPolicy.metricsFrom }}
+        {{- /* metricsFrom came after 0.37.0; its default as in values.yaml (see _helpers.tpl). */}}
+        {{- $userWorkloadMonitoring := list (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" "openshift-user-workload-monitoring"))) }}
+        {{- with dig "metricsFrom" $userWorkloadMonitoring .Values.networkPolicy }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- end }}

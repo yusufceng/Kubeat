@@ -8,7 +8,7 @@ import { sessionToken } from "@/lib/session";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 13;
+export const REQUIRED_API_REVISION = 25;
 
 export type Health = {
   status: string;
@@ -397,6 +397,10 @@ export const updateMonitor = (id: number, changes: MonitorChanges) =>
 export const deleteMonitor = (id: number) =>
   request<void>(`/monitors/${id}`, { method: "DELETE" });
 
+/** Gives a push monitor a new token, which the answer carries; the old one stops working. */
+export const renewPushToken = (id: number) =>
+  request<Monitor>(`/monitors/${id}/push-token`, { method: "POST" });
+
 export type Report = {
   from: string;
   to: string;
@@ -772,7 +776,8 @@ export type Providers = {
   oidc: { name: string } | null;
 };
 
-export type OidcStatus = { enabled: boolean; issuer?: string; name?: string; default_role: Role | "" };
+/** problem says why SSO is off although a provider is configured: its settings cannot be used. */
+export type OidcStatus = { enabled: boolean; issuer?: string; name?: string; default_role: Role | ""; problem?: string };
 
 export const getOidcStatus = () => request<OidcStatus>("/oidc");
 

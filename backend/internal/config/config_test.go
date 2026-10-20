@@ -194,19 +194,29 @@ func TestLoginConcurrencyMayBeZero(t *testing.T) {
 }
 
 // The key can come from a file, a mounted Secret for instance, but not
-// from both places at once.
+// from both places at once. The file is taken byte for byte, as the
+// variable is, its trailing newline too: the same Secret gives the same
+// key either way.
 func TestSecretKeyFile(t *testing.T) {
 	dir := t.TempDir()
 	keyFile := filepath.Join(dir, "key")
-	if err := os.WriteFile(keyFile, []byte("  0123456789abcdef0123456789abcdef-from-file\n"), 0o600); err != nil {
+	const written = "0123456789abcdef0123456789abcdef-from-file\n"
+	if err := os.WriteFile(keyFile, []byte(written), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("UPTIME_SECRET_KEY", "")
 	t.Setenv("UPTIME_SECRET_KEY_FILE", keyFile)
 	cfg, err := Load()
-	if err != nil || cfg.SecretKey != "0123456789abcdef0123456789abcdef-from-file" {
-		t.Errorf("key from a file = %q, %v", cfg.SecretKey, err)
+	if err != nil || cfg.SecretKey != written {
+		t.Errorf("key from a file = %q, %v; want %q", cfg.SecretKey, err, written)
 	}
+	t.Setenv("UPTIME_SECRET_KEY_FILE", "")
+	t.Setenv("UPTIME_SECRET_KEY", written)
+	if fromEnv, err := Load(); err != nil || fromEnv.SecretKey != cfg.SecretKey {
+		t.Errorf("the same bytes in the variable = %q, %v; want the file's key", fromEnv.SecretKey, err)
+	}
+	t.Setenv("UPTIME_SECRET_KEY", "")
+	t.Setenv("UPTIME_SECRET_KEY_FILE", keyFile)
 
 	t.Setenv("UPTIME_SECRET_KEY", "0123456789abcdef0123456789abcdef-from-env")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "both") {
@@ -249,27 +259,36 @@ func TestLoadRejectsUnknownSMTPSecurity(t *testing.T) {
 }
 
 // The OIDC redirect URL comes from the configuration only: set, or made
-// from the public address, and checked at start.
+// from the public address, and checked at start. One that cannot be used
+// turns SSO off, with the reason, but never stops the server.
 func TestOIDCRedirectURL(t *testing.T) {
+	load := func() Config {
+		t.Helper()
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v; an SSO setting must not stop the server", err)
+		}
+		return cfg
+	}
 	t.Setenv("UPTIME_PUBLIC_URL", "https://kubeat.apps.example/")
 	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "")
-	if cfg, err := Load(); err != nil || cfg.OIDCRedirectURL != "" {
-		t.Errorf("OIDC off: redirect = %q, %v; want none", cfg.OIDCRedirectURL, err)
+	if cfg := load(); cfg.OIDCRedirectURL != "" || cfg.OIDCProblem != nil {
+		t.Errorf("OIDC off: redirect = %q, %v; want none", cfg.OIDCRedirectURL, cfg.OIDCProblem)
 	}
 
 	t.Setenv("UPTIME_OIDC_ISSUER", "https://sso.example.com/realms/corp")
 	t.Setenv("UPTIME_OIDC_CLIENT_ID", "kubeat")
-	if cfg, err := Load(); err != nil || cfg.OIDCRedirectURL != "https://kubeat.apps.example/auth/callback" {
-		t.Errorf("from the public URL: %q, %v", cfg.OIDCRedirectURL, err)
+	if cfg := load(); cfg.OIDCProblem != nil || cfg.OIDCRedirectURL != "https://kubeat.apps.example/auth/callback" {
+		t.Errorf("from the public URL: %q, %v", cfg.OIDCRedirectURL, cfg.OIDCProblem)
 	}
 	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "https://sso-entry.example/auth/callback")
-	if cfg, err := Load(); err != nil || cfg.OIDCRedirectURL != "https://sso-entry.example/auth/callback" {
-		t.Errorf("set: %q, %v; it wins over the public URL", cfg.OIDCRedirectURL, err)
+	if cfg := load(); cfg.OIDCProblem != nil || cfg.OIDCRedirectURL != "https://sso-entry.example/auth/callback" {
+		t.Errorf("set: %q, %v; it wins over the public URL", cfg.OIDCRedirectURL, cfg.OIDCProblem)
 	}
 	t.Setenv("UPTIME_PUBLIC_URL", "")
 	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "")
-	if cfg, err := Load(); err != nil || cfg.OIDCRedirectURL != "" {
-		t.Errorf("neither set: %q, %v; main warns about it", cfg.OIDCRedirectURL, err)
+	if cfg := load(); cfg.OIDCProblem != nil || cfg.OIDCRedirectURL != "" {
+		t.Errorf("neither set: %q, %v; main warns about it", cfg.OIDCRedirectURL, cfg.OIDCProblem)
 	}
 
 	// Plain HTTP only on this machine; private addresses and internal
@@ -279,33 +298,39 @@ func TestOIDCRedirectURL(t *testing.T) {
 		"https://10.0.0.5/auth/callback", "https://kubeat.shop.svc:3000/auth/callback",
 	} {
 		t.Setenv("UPTIME_OIDC_REDIRECT_URL", good)
-		if _, err := Load(); err != nil {
-			t.Errorf("UPTIME_OIDC_REDIRECT_URL=%q: %v", good, err)
+		if cfg := load(); cfg.OIDCProblem != nil {
+			t.Errorf("UPTIME_OIDC_REDIRECT_URL=%q: %v", good, cfg.OIDCProblem)
 		}
 	}
 	for _, bad := range []string{
 		"http://kubeat.apps.example/auth/callback", "kubeat.apps.example/auth/callback", "/auth/callback", "https:///auth/callback",
-		"https://kubeat.apps.example/", "https://kubeat.apps.example/auth/callback?x=1", "https://kubeat.apps.example/auth/callback#x",
-		"https://user@kubeat.apps.example/auth/callback",
+		"https://kubeat.apps.example/", "https://kubeat.apps.example/auth/callback/", "https://kubeat.apps.example/auth/callback?x=1",
+		"https://kubeat.apps.example/auth/callback#x", "https://user@kubeat.apps.example/auth/callback",
 	} {
 		t.Setenv("UPTIME_OIDC_REDIRECT_URL", bad)
-		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), "UPTIME_OIDC_REDIRECT_URL: ") {
-			t.Errorf("UPTIME_OIDC_REDIRECT_URL=%q: err = %v, want a refusal naming it", bad, err)
+		if p := load().OIDCProblem; p == nil || !strings.HasPrefix(p.Error(), "UPTIME_OIDC_REDIRECT_URL: ") {
+			t.Errorf("UPTIME_OIDC_REDIRECT_URL=%q: problem = %v, want one naming it", bad, p)
 		}
 	}
-	// A public URL that cannot make one is refused as well, with what to set.
+	// A public URL that cannot make one is a problem as well, with what to set.
 	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "")
 	for _, bad := range []string{"http://kubeat.apps.example", "https://example.com/kubeat"} {
 		t.Setenv("UPTIME_PUBLIC_URL", bad)
-		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), "UPTIME_PUBLIC_URL") || !strings.Contains(err.Error(), "set UPTIME_OIDC_REDIRECT_URL") {
-			t.Errorf("UPTIME_PUBLIC_URL=%q: err = %v", bad, err)
+		if p := load().OIDCProblem; p == nil || !strings.HasPrefix(p.Error(), "UPTIME_PUBLIC_URL") || !strings.Contains(p.Error(), "set UPTIME_OIDC_REDIRECT_URL") {
+			t.Errorf("UPTIME_PUBLIC_URL=%q: problem = %v", bad, p)
 		}
+	}
+	// So is an issuer without a client id.
+	t.Setenv("UPTIME_PUBLIC_URL", "https://kubeat.apps.example")
+	t.Setenv("UPTIME_OIDC_CLIENT_ID", "")
+	if p := load().OIDCProblem; p == nil || !strings.Contains(p.Error(), "UPTIME_OIDC_CLIENT_ID") {
+		t.Errorf("no client id: problem = %v", p)
 	}
 	// Without OIDC neither is used, so neither is checked.
 	t.Setenv("UPTIME_OIDC_ISSUER", "")
 	t.Setenv("UPTIME_OIDC_REDIRECT_URL", "http://kubeat.apps.example/auth/callback")
-	if _, err := Load(); err != nil {
-		t.Errorf("unused redirect URL rejected: %v", err)
+	if p := load().OIDCProblem; p != nil {
+		t.Errorf("unused redirect URL is a problem: %v", p)
 	}
 }
 

@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"container/list"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -192,15 +194,51 @@ func HashToken(token string) string {
 type Throttle struct {
 	MaxFailures int
 	Lockout     time.Duration
-	// MaxKeys bounds how many keys are tracked at once; zero means no
-	// bound. While all are taken, a key not tracked yet is refused as if
-	// locked: a flood of made-up names can neither grow the memory without
-	// end nor push out the failures of the names it is aimed at.
+	// MaxKeys bounds how many keys that are not locked are tracked at
+	// once; zero means no bound. A new key that finds them all taken is
+	// not refused: it makes room. The keys whose attempts have all aged
+	// out go first, then the key with the fewest attempts, of those the
+	// one tried longest ago. A locked key is never pushed out, and takes
+	// no room either: were it counted, names locked on purpose, each for
+	// MaxFailures checked passwords, could fill the bound and leave a name
+	// being guessed at the only one to push out, for a single attempt
+	// each time. A flood of made-up names, each tried once, thus pushes
+	// out its own names: it neither grows the memory without end nor
+	// locks anyone out, and pushing out a name with k failures takes about
+	// k attempts at each of MaxKeys other names.
 	MaxKeys int
+	// Logger, if set, is told about refused attempts, about keys forgotten
+	// to make room and about keys tracked beyond MaxKeys, at most once a
+	// minute.
+	Logger *slog.Logger
 
-	mu       sync.Mutex
-	attempts map[string][]time.Time
+	mu   sync.Mutex
+	keys map[string]*tracked
+	// byCount holds the keys by their number of attempts, each list from
+	// the key tried longest ago to the one tried last; the locked keys are
+	// those with MaxFailures. An empty list is dropped, so that finding the
+	// fewest attempts looks at few lists.
+	byCount map[int]*list.List
+	// What the next report tells, and when the last one was made.
+	refused, forgotten, forgottenRepeated, overBound int
+	refusedName                                      string
+	reported                                         time.Time
 }
+
+// tracked is a key's attempts within the lockout period, oldest first, the
+// labels First was told about, and its place in the lists: under how many
+// attempts it is listed, and where.
+type tracked struct {
+	key      string
+	attempts []time.Time
+	labels   []string
+	listed   int
+	at       *list.Element
+}
+
+// reportEvery bounds how often the throttle logs: a flood of attempts must
+// not become a flood of log lines.
+const reportEvery = time.Minute
 
 // Begin reserves an attempt for key at now. It returns the attempt's
 // number within the lockout period, 1 for the first, and true; or, when
@@ -208,35 +246,43 @@ type Throttle struct {
 func (t *Throttle) Begin(key string, now time.Time) (attempt int, locked time.Duration, ok bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	recent := t.prune(key, now)
-	if len(recent) >= t.MaxFailures {
-		return 0, recent[0].Add(t.Lockout).Sub(now), false
+	k := t.prune(key, now)
+	if k != nil && len(k.attempts) >= t.MaxFailures {
+		if t.refused == 0 {
+			t.refusedName = key
+		}
+		t.refused++
+		t.report(now, false)
+		return 0, k.attempts[0].Add(t.Lockout).Sub(now), false
 	}
-	if len(recent) == 0 && t.MaxKeys > 0 && len(t.attempts) >= t.MaxKeys {
-		// Room comes back as Sweep forgets keys, within a lockout period.
-		return 0, t.Lockout, false
+	if k == nil {
+		if t.MaxKeys > 0 && len(t.keys) >= t.MaxKeys {
+			t.makeRoom(now)
+		}
+		if t.keys == nil {
+			t.keys = make(map[string]*tracked)
+		}
+		k = &tracked{key: key}
+		t.keys[key] = k
 	}
-	if t.attempts == nil {
-		t.attempts = make(map[string][]time.Time)
-	}
-	t.attempts[key] = append(recent, now)
-	return len(recent) + 1, 0, true
+	k.attempts = append(k.attempts, now)
+	t.touch(k)
+	return len(k.attempts), 0, true
 }
 
 // Undo takes back the attempt for key that began at at: one that was not
 // a guess, because the password could not be checked, or was right for an
-// account that may not sign in.
+// account that is disabled.
 func (t *Throttle) Undo(key string, at time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	recent := t.attempts[key]
-	if i := slices.IndexFunc(recent, at.Equal); i >= 0 {
-		recent = slices.Delete(recent, i, i+1)
+	k := t.keys[key]
+	if k == nil {
+		return
 	}
-	if len(recent) == 0 {
-		delete(t.attempts, key)
-	} else {
-		t.attempts[key] = recent
+	if i := slices.IndexFunc(k.attempts, at.Equal); i >= 0 {
+		k.attempts = slices.Delete(k.attempts, i, i+1)
+		t.relist(k)
 	}
 }
 
@@ -244,34 +290,196 @@ func (t *Throttle) Undo(key string, at time.Time) {
 func (t *Throttle) Reset(key string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.attempts, key)
+	if k := t.keys[key]; k != nil {
+		t.forget(k)
+	}
+}
+
+// First reports whether label is new to key within its lockout period,
+// and remembers it from now on, until the key is forgotten: when its
+// attempts have aged out, one succeeded, or it made room for another. The
+// audit log asks it about the first refusal of each kind a name gets, so
+// as not to write one a guess. A key that is not tracked remembers
+// nothing, and every label is new to it.
+func (t *Throttle) First(key, label string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	k := t.keys[key]
+	if k == nil {
+		return true
+	}
+	if slices.Contains(k.labels, label) {
+		return false
+	}
+	k.labels = append(k.labels, label)
+	return true
 }
 
 // Sweep forgets the keys whose attempts have all aged out. Begin does that
-// only for the key it is asked about, so a name tried once and never again
-// would otherwise be kept until the process ends. Sweep returns how many
-// keys are still tracked.
+// only for the key it is asked about, and for the oldest keys while the
+// throttle is full, so a name tried once and never again would otherwise
+// be kept until the process ends. Sweep also logs what is left to report,
+// and returns how many keys are still tracked.
 func (t *Throttle) Sweep(now time.Time) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for key, recent := range t.attempts {
-		if len(recent) == 0 || now.Sub(slices.MaxFunc(recent, time.Time.Compare)) >= t.Lockout {
-			delete(t.attempts, key)
+	for _, k := range t.keys {
+		if now.Sub(latest(k)) >= t.Lockout {
+			t.forget(k)
 		}
 	}
-	return len(t.attempts)
+	t.report(now, true)
+	return len(t.keys)
 }
 
-// prune drops the attempts of key older than the lockout; call with mu held.
-func (t *Throttle) prune(key string, now time.Time) []time.Time {
-	recent := t.attempts[key]
-	for len(recent) > 0 && now.Sub(recent[0]) >= t.Lockout {
-		recent = recent[1:]
+// prune drops the attempts of key older than the lockout, and the key once
+// none is left; it returns the key, or nil if it is not tracked. Call with
+// mu held.
+func (t *Throttle) prune(key string, now time.Time) *tracked {
+	k := t.keys[key]
+	if k == nil {
+		return nil
 	}
-	if len(recent) == 0 {
-		delete(t.attempts, key)
-	} else {
-		t.attempts[key] = recent
+	aged := 0
+	for aged < len(k.attempts) && now.Sub(k.attempts[aged]) >= t.Lockout {
+		aged++
 	}
-	return recent
+	if aged == 0 {
+		return k
+	}
+	k.attempts = k.attempts[aged:]
+	t.relist(k)
+	if len(k.attempts) == 0 {
+		return nil
+	}
+	return k
+}
+
+// makeRoom makes room for one more key: it forgets the keys whose attempts
+// have all aged out, which are at the front of the lists, and then, while
+// MaxKeys keys that are not locked are left, the one with the fewest
+// attempts that was tried longest ago. Locked keys stay: when they fill
+// the bound, the new key is tracked beyond it. Call with mu held.
+func (t *Throttle) makeRoom(now time.Time) {
+	for _, l := range t.byCount {
+		for e := l.Front(); e != nil && now.Sub(latest(e.Value.(*tracked))) >= t.Lockout; e = l.Front() {
+			t.forget(e.Value.(*tracked))
+		}
+	}
+	for len(t.keys)-t.lockedKeys() >= t.MaxKeys {
+		k := t.fewest()
+		if k == nil {
+			break
+		}
+		if len(k.attempts) > 1 {
+			t.forgottenRepeated++
+		}
+		t.forget(k)
+		t.forgotten++
+	}
+	if len(t.keys) >= t.MaxKeys {
+		t.overBound++
+	}
+	t.report(now, false)
+}
+
+// lockedKeys returns how many keys are locked: those with MaxFailures
+// attempts, which no key has more of. Call with mu held.
+func (t *Throttle) lockedKeys() int {
+	if l := t.byCount[t.MaxFailures]; l != nil {
+		return l.Len()
+	}
+	return 0
+}
+
+// fewest returns the key with the fewest attempts that is not locked, of
+// those the one tried longest ago, or nil if every key is locked. Call
+// with mu held.
+func (t *Throttle) fewest() *tracked {
+	least := 0
+	for n := range t.byCount {
+		if n < t.MaxFailures && (least == 0 || n < least) {
+			least = n
+		}
+	}
+	if least == 0 {
+		return nil
+	}
+	return t.byCount[least].Front().Value.(*tracked)
+}
+
+// touch puts k at the end of the list for its number of attempts, as the
+// key tried last. Call with mu held.
+func (t *Throttle) touch(k *tracked) {
+	t.unlist(k)
+	n := len(k.attempts)
+	l := t.byCount[n]
+	if l == nil {
+		if t.byCount == nil {
+			t.byCount = make(map[int]*list.List)
+		}
+		l = list.New()
+		t.byCount[n] = l
+	}
+	k.listed, k.at = n, l.PushBack(k)
+}
+
+// relist follows k's attempts after some were dropped: it forgets k when
+// none is left, and otherwise moves it to the list for their number. It
+// goes to the end of that list, though its last attempt is no newer, which
+// keeps it a little longer than its due. Call with mu held.
+func (t *Throttle) relist(k *tracked) {
+	if len(k.attempts) == 0 {
+		t.forget(k)
+		return
+	}
+	t.touch(k)
+}
+
+// unlist takes k out of its list, and drops the list once it is empty.
+// Call with mu held.
+func (t *Throttle) unlist(k *tracked) {
+	if k.at == nil {
+		return
+	}
+	l := t.byCount[k.listed]
+	l.Remove(k.at)
+	if l.Len() == 0 {
+		delete(t.byCount, k.listed)
+	}
+	k.listed, k.at = 0, nil
+}
+
+// forget stops tracking k. Call with mu held.
+func (t *Throttle) forget(k *tracked) {
+	t.unlist(k)
+	delete(t.keys, k.key)
+}
+
+// report logs the attempts refused, the keys forgotten to make room and
+// those tracked beyond MaxKeys since the last report, if the last report
+// was a minute ago or more, or in any case with flush. Call with mu held.
+func (t *Throttle) report(now time.Time, flush bool) {
+	if (t.refused == 0 && t.forgotten == 0 && t.overBound == 0) || (!flush && now.Sub(t.reported) < reportEvery) {
+		return
+	}
+	if t.Logger != nil && t.refused > 0 {
+		t.Logger.Warn("sign-in attempts refused: the name is locked after too many failed attempts",
+			"refused", t.refused, "name", t.refusedName)
+	}
+	if t.Logger != nil && t.forgotten > 0 {
+		t.Logger.Warn("the sign-in throttle is full, perhaps from a flood of made-up usernames: the names with the fewest recent attempts are forgotten to make room",
+			"forgotten", t.forgotten, "tried_more_than_once", t.forgottenRepeated, "max", t.MaxKeys)
+	}
+	if t.Logger != nil && t.overBound > 0 {
+		t.Logger.Warn("locked names fill the sign-in throttle: they are kept, and new names are tracked beyond its bound until the locks expire",
+			"admitted", t.overBound, "locked", t.lockedKeys(), "max", t.MaxKeys)
+	}
+	t.refused, t.forgotten, t.forgottenRepeated, t.overBound, t.refusedName = 0, 0, 0, 0, ""
+	t.reported = now
+}
+
+// latest returns when k was last tried.
+func latest(k *tracked) time.Time {
+	return slices.MaxFunc(k.attempts, time.Time.Compare)
 }

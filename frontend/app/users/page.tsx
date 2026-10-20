@@ -59,6 +59,10 @@ async function Users() {
               ? ` ${t("users.groups.defaultRole", { role: oidc.default_role })}`
               : ` ${t("users.groups.noDefaultRole")}`}
           </p>
+        ) : oidc.problem ? (
+          <p className="text-xs text-muted">
+            {t("users.oidc.problem")} <code className="break-all font-mono">{oidc.problem}</code>
+          </p>
         ) : (
           <p className="text-xs text-muted">
             {t("users.oidc.offBefore")} <code className="font-mono">UPTIME_OIDC_ISSUER</code>,{" "}

@@ -88,18 +88,81 @@ func (s *SQLite) Backup(ctx context.Context, dest string) error {
 // Vacuum rewrites the database file without its free space, where deleted
 // and overwritten values stay readable unless they were zeroed when they
 // went, and empties the write-ahead log, which holds earlier versions of
-// the pages too. The rewrite holds the write lock and needs free disk
-// about the size of the database, so it is for occasions, not routine.
+// the pages too. Once both are done, a compaction owed (see
+// SetCompactionPending) is no longer. The rewrite holds the write lock and
+// needs free disk about the size of the database, so it is for occasions,
+// not routine.
 func (s *SQLite) Vacuum(ctx context.Context) error {
-	if _, err := s.write.ExecContext(ctx, "VACUUM"); err != nil {
+	_, vacuumErr := s.write.ExecContext(ctx, "VACUUM")
+	// The log is emptied also when VACUUM failed or was cut short: one that
+	// ran out of disk leaves it grown by about the size of the database.
+	// What a failed VACUUM wrote was not committed, so this is quick.
+	checkpointErr := s.checkpoint(context.WithoutCancel(ctx))
+	if vacuumErr != nil {
+		return errors.Join(fmt.Errorf("vacuum: %w", vacuumErr), checkpointErr)
+	}
+	if checkpointErr != nil {
+		return checkpointErr
+	}
+	if _, err := s.write.ExecContext(ctx, "DELETE FROM compaction_pending"); err != nil {
 		return fmt.Errorf("vacuum: %w", err)
 	}
+	return nil
+}
+
+// checkpoint copies the write-ahead log into the database and empties it.
+func (s *SQLite) checkpoint(ctx context.Context) error {
 	var busy, frames, checkpointed int
 	if err := s.write.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &frames, &checkpointed); err != nil {
 		return fmt.Errorf("vacuum: checkpoint: %w", err)
 	}
 	if busy != 0 {
 		return errors.New("vacuum: checkpoint: a reader kept the write-ahead log from being emptied")
+	}
+	return nil
+}
+
+// SetCompactionPending records that the database is owed a compaction, if
+// that is not recorded already: call it before writing what must not stay
+// behind in the free space of the file, so that a start cut short before
+// Vacuum is done leaves the compaction to the next. Vacuum forgets it.
+func (s *SQLite) SetCompactionPending(ctx context.Context, since time.Time) error {
+	if _, err := s.write.ExecContext(ctx, "INSERT OR IGNORE INTO compaction_pending (id, since) VALUES (1, ?)", since.UnixMilli()); err != nil {
+		return fmt.Errorf("record a pending compaction: %w", err)
+	}
+	return nil
+}
+
+// PendingCompaction is a compaction the database is owed: since when, and
+// how many starts in a row tried it and did not finish.
+type PendingCompaction struct {
+	Since    time.Time
+	Attempts int
+}
+
+// CompactionPending reports whether the database is owed a compaction, and
+// what is known about it.
+func (s *SQLite) CompactionPending(ctx context.Context) (PendingCompaction, bool, error) {
+	var at int64
+	var p PendingCompaction
+	err := s.read.QueryRowContext(ctx, "SELECT since, attempts FROM compaction_pending").Scan(&at, &p.Attempts)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return PendingCompaction{}, false, nil
+	case err != nil:
+		return PendingCompaction{}, false, fmt.Errorf("read a pending compaction: %w", err)
+	}
+	p.Since = time.UnixMilli(at).UTC()
+	return p, true, nil
+}
+
+// SetCompactionAttempts records how many starts in a row tried the
+// compaction owed and did not finish it, if one is owed. A start counts
+// its own attempt before Vacuum, so that being cut short during it still
+// counts.
+func (s *SQLite) SetCompactionAttempts(ctx context.Context, attempts int) error {
+	if _, err := s.write.ExecContext(ctx, "UPDATE compaction_pending SET attempts = ?", attempts); err != nil {
+		return fmt.Errorf("count a compaction attempt: %w", err)
 	}
 	return nil
 }
@@ -516,6 +579,24 @@ func (s *SQLite) GetMonitorByPushToken(ctx context.Context, token string) (Monit
 		return Monitor{}, fmt.Errorf("get monitor by push token: %w", err)
 	}
 	return m, nil
+}
+
+func (s *SQLite) SetPushToken(ctx context.Context, id int64, token string) error {
+	res, err := s.write.ExecContext(ctx, "UPDATE monitors SET push_token = ? WHERE id = ? AND type = ?", token, id, MonitorPush)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	if err != nil {
+		return fmt.Errorf("set push token: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set push token: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *SQLite) RecordPush(ctx context.Context, report PushReport) error {

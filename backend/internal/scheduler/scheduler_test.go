@@ -396,7 +396,12 @@ func TestSchedulerRecordsMetrics(t *testing.T) {
 	opts := testOptions()
 	opts.Metrics = m
 	stop := start(st, &fakeChecker{}, opts)
-	waitFor(t, "stored results", func() bool { return st.countFor(1) >= 5 })
+	// Both monitors run every 5ms, but not in step: when the first has
+	// five results stored, the second may have run only four times.
+	waitFor(t, "stored results and checks of both monitors", func() bool {
+		got, err := m.Gather()
+		return err == nil && st.countFor(1) >= 5 && got["kubeat_checks_total{result=up}{type=http}"] >= 10
+	})
 	stop()
 
 	got, err := m.Gather()

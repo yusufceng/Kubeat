@@ -17,27 +17,52 @@ Open the UI:
 {{- end }}
 {{- else if .Values.ingress.enabled }}
   {{ include "kubeat.publicURL" . | default (printf "through the Ingress %q" .Release.Name) }}
-{{- if .Values.ingress.tls.enabled }}
+{{- if include "kubeat.ingressTLS" . }}
   The Ingress serves it over HTTPS with the certificate in the Secret
-  "{{ .Values.ingress.tls.secretName | default (printf "%s-tls" .Release.Name) }}"; create the Secret, or let cert-manager make it
+  "{{ include "kubeat.ingressTLSSecret" . }}"; create the Secret, or let cert-manager make it
   (see ingress.annotations).
+{{- if not (lookup "v1" "Secret" .Release.Namespace (include "kubeat.ingressTLSSecret" .)) }}
+
+WARNING: the Secret "{{ include "kubeat.ingressTLSSecret" . }}" does not exist yet. That is expected while
+cert-manager is issuing it. Otherwise create it (type kubernetes.io/tls), or,
+for an Ingress without TLS, upgrade with ingress.tls.enabled=false. Until
+then the ingress controller serves its own default certificate or plain
+HTTP, and over plain HTTP browsers drop the session cookie, which is Secure
+for an https:// address: nobody can sign in.
+{{- end }}
 {{- else }}
 
 WARNING: the Ingress has no TLS. Unless TLS ends in front of the ingress
 controller, passwords and session tokens cross the network in clear text.
-Where it does, publicURL (and oidc.redirectURL) must be the https:// address.
+Where it does, publicURL must be the https:// address.
+{{- if .Values.oidc.issuer }}
+SSO needs HTTPS in front of the ingress controller: the identity provider
+sends users back to an https:// address. Without it, end TLS somewhere or
+turn SSO off (leave oidc.issuer empty).
+{{- end }}
 {{- end }}
 {{- else }}
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-frontend 3000:3000
   then http://localhost:3000
 {{- end }}
-{{- if and .Values.oidc.issuer (not (include "kubeat.oidcRedirectURL" .)) }}
+{{- if .Values.oidc.issuer }}
+{{- with include "kubeat.oidcRedirectURL" . }}
+
+SSO sends users back to this address; register exactly it with the
+identity provider:
+  {{ . }}
+{{- if and $.Values.publicURL (not $.Values.oidc.redirectURL) }}
+With publicURL set it follows publicURL, no longer the Route or Ingress
+host as up to 0.37.0.
+{{- end }}
+{{- else }}
 
 SSO is configured, but no address of Kubeat is known to send users back
 to after it, so SSO will not work yet. Set publicURL to the address users
 open (for a Route, the host the router gave it), or oidc.redirectURL.
 {{- end }}
-{{- if .Values.metrics.auth.enabled }}
+{{- end }}
+{{- if include "kubeat.metricsAuth" . }}
 
 /metrics answers only scrapes that present the token in the Secret
 "{{ include "kubeat.metricsTokenSecret" . }}" (key "token") as a bearer token.
@@ -60,6 +85,14 @@ The NetworkPolicy lets only these connect to the backend:
   - the sources in networkPolicy.backendIngressFrom
 Jobs in other namespaces send push reports through the frontend:
   http://{{ .Release.Name }}-frontend.{{ .Release.Namespace }}.svc:3000/api/push/<token>
+{{- end }}
+{{- if and (contains ":9091" .Values.prometheus.url) .Values.discovery.enabled (not .Values.discovery.namespaces) (not .Values.prometheus.openshiftMonitoringView) }}
+
+WARNING: prometheus.url is on port 9091, where OpenShift's Thanos Querier
+answers queries across the cluster, and only to service accounts with
+cluster-monitoring-view. Set prometheus.openshiftMonitoringView=true, or the
+pods' CPU and memory stay empty. The discovery role no longer grants "get"
+on namespaces, which OpenShift 4.14 and older accepted there instead.
 {{- end }}
 {{- if and .Values.prometheus.url .Values.prometheus.tokenFile .Values.prometheus.insecureSkipVerify }}
 

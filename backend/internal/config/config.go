@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -19,9 +20,10 @@ type Config struct {
 	// APIToken, if set, is required as a bearer token on API requests.
 	APIToken string // UPTIME_API_TOKEN
 	// SecretKey encrypts the secrets kept in the database. It can also be
-	// read from SecretKeyFile, a mounted Secret for instance, but not be
-	// given both ways. Without a key the server does not start, unless
-	// AllowPlaintextSecrets says to keep the secrets unencrypted.
+	// read from SecretKeyFile, a mounted Secret for instance, byte for byte
+	// as the variable is, but not be given both ways. Without a key the
+	// server does not start, unless AllowPlaintextSecrets says to keep the
+	// secrets unencrypted.
 	SecretKey             string // UPTIME_SECRET_KEY
 	SecretKeyFile         string // UPTIME_SECRET_KEY_FILE
 	AllowPlaintextSecrets bool   // UPTIME_ALLOW_PLAINTEXT_SECRETS
@@ -41,17 +43,24 @@ type Config struct {
 	LoginLockout       time.Duration // UPTIME_LOGIN_LOCKOUT
 	PasswordMinLength  int           // UPTIME_PASSWORD_MIN_LENGTH
 	AuditRetention     time.Duration // UPTIME_AUDIT_RETENTION
-	// LoginThrottleMaxKeys bounds how many usernames the sign-in throttle
-	// tracks at once; while all are taken, a name it does not track yet
-	// is refused as if locked.
+	// LoginThrottleMaxKeys bounds how many usernames that are not locked
+	// the sign-in throttle tracks at once; while all are taken, a new name
+	// makes room by pushing out the one with the fewest recent attempts,
+	// tried longest ago of those. Locked names are kept beyond it.
+	// It bounds the SSO sign-ins under way as well
+	// (oidcauth.Config.MaxPending); past it the oldest are forgotten.
 	LoginThrottleMaxKeys int // UPTIME_LOGIN_THROTTLE_MAX_KEYS
-	// LoginConcurrency is how many password checks (bcrypt comparisons and
-	// directory binds) run at once, zero meaning half the CPUs; a sign-in
-	// waits at most LoginQueueWait for its turn.
+	// LoginConcurrency is how many bcrypt comparisons run at once, zero
+	// meaning half the CPUs, at least one, and two with LDAP, whose
+	// sign-ins take a comparison each too; directory binds have a queue of
+	// their own. A sign-in waits at most LoginQueueWait for its turn in
+	// either.
 	LoginConcurrency int           // UPTIME_LOGIN_CONCURRENCY
 	LoginQueueWait   time.Duration // UPTIME_LOGIN_QUEUE_WAIT
 	// LoginAuditPerMinute caps the failed sign-ins written to the audit
-	// log in a minute; what is left out is counted in a warning.
+	// log in a minute, but for the wrong passwords of names with an
+	// account here (local, or a directory or SSO user who signed in
+	// before); what is left out is counted in a warning.
 	LoginAuditPerMinute int // UPTIME_LOGIN_AUDIT_PER_MINUTE
 
 	// LDAP; see ldapauth.Config. Empty LDAPURL means local accounts only.
@@ -79,7 +88,10 @@ type Config struct {
 	// issuer is set. The redirect URL is the frontend's /auth/callback as
 	// the provider knows it; left empty, it is PublicURL's /auth/callback.
 	// Without either, only a frontend on localhost (next dev) can sign in
-	// through the provider: see oidcauth.Config.RedirectURL.
+	// through the provider: see oidcauth.Config.RedirectURL. Settings with
+	// which SSO cannot work do not stop the server, which runs without SSO
+	// and says why (OIDCProblem): a sign-in setting must not take the
+	// monitoring down.
 	OIDCIssuer             string        // UPTIME_OIDC_ISSUER
 	OIDCClientID           string        // UPTIME_OIDC_CLIENT_ID
 	OIDCClientSecret       string        // UPTIME_OIDC_CLIENT_SECRET
@@ -95,6 +107,7 @@ type Config struct {
 	OIDCTimeout            time.Duration // UPTIME_OIDC_TIMEOUT
 	OIDCDefaultRole        string        // UPTIME_OIDC_DEFAULT_ROLE
 	OIDCDefaultNamespaces  string        // UPTIME_OIDC_DEFAULT_NAMESPACES
+	OIDCProblem            error         // why SSO cannot work with the above, or nil; see checkOIDC
 	DBPath                 string        // UPTIME_DB_PATH
 	DBBusyTimeout          time.Duration // UPTIME_DB_BUSY_TIMEOUT
 	ReadHeaderTimeout      time.Duration // UPTIME_READ_HEADER_TIMEOUT
@@ -438,8 +451,10 @@ func Load() (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("UPTIME_SECRET_KEY_FILE: %w", err)
 		}
-		// A file written by hand or by a tool usually ends in a newline.
-		if cfg.SecretKey = strings.TrimSpace(string(key)); cfg.SecretKey == "" {
+		// Byte for byte, as UPTIME_SECRET_KEY is: one Secret gives one key,
+		// whether it arrives as a variable or as a file. A file written with
+		// a trailing newline has that newline in its key.
+		if cfg.SecretKey = string(key); strings.TrimSpace(cfg.SecretKey) == "" {
 			return Config{}, fmt.Errorf("UPTIME_SECRET_KEY_FILE: %s is empty", cfg.SecretKeyFile)
 		}
 	}
@@ -455,23 +470,8 @@ func Load() (Config, error) {
 	if cfg.Language != "en" && cfg.Language != "tr" {
 		return Config{}, fmt.Errorf("UPTIME_LANGUAGE: must be en or tr, got %q", cfg.Language)
 	}
-	if cfg.OIDCIssuer != "" && cfg.OIDCClientID == "" {
-		return Config{}, fmt.Errorf("UPTIME_OIDC_ISSUER is set: UPTIME_OIDC_CLIENT_ID is required with it")
-	}
 	if cfg.OIDCIssuer != "" {
-		// The provider sends the user's code to the redirect URL, so it is
-		// checked here rather than at the first sign-in. Left empty, it is
-		// the /auth/callback of the address users reach Kubeat at.
-		if cfg.OIDCRedirectURL != "" {
-			if err := checkCallbackURL(cfg.OIDCRedirectURL); err != nil {
-				return Config{}, fmt.Errorf("UPTIME_OIDC_REDIRECT_URL: %w", err)
-			}
-		} else if cfg.PublicURL != "" {
-			cfg.OIDCRedirectURL = cfg.PublicURL + "/auth/callback"
-			if err := checkCallbackURL(cfg.OIDCRedirectURL); err != nil {
-				return Config{}, fmt.Errorf("UPTIME_PUBLIC_URL does not make a usable OIDC redirect URL (set UPTIME_OIDC_REDIRECT_URL): %w", err)
-			}
-		}
+		cfg.OIDCProblem = checkOIDC(&cfg)
 	}
 	switch cfg.LDAPDefaultRole {
 	case "", "admin", "editor", "viewer":
@@ -587,6 +587,29 @@ func envBool(key string, def bool) (bool, error) {
 		return false, fmt.Errorf("%s: %w", key, err)
 	}
 	return b, nil
+}
+
+// checkOIDC says what keeps SSO from working with the settings given, and
+// fills in the redirect URL: left empty, it is the /auth/callback of the
+// address users reach Kubeat at. The provider sends the user's code to the
+// redirect URL, so it is checked here rather than at the first sign-in.
+func checkOIDC(cfg *Config) error {
+	if cfg.OIDCClientID == "" {
+		return errors.New("UPTIME_OIDC_ISSUER is set: UPTIME_OIDC_CLIENT_ID is required with it")
+	}
+	if cfg.OIDCRedirectURL != "" {
+		if err := checkCallbackURL(cfg.OIDCRedirectURL); err != nil {
+			return fmt.Errorf("UPTIME_OIDC_REDIRECT_URL: %w", err)
+		}
+		return nil
+	}
+	if cfg.PublicURL != "" {
+		cfg.OIDCRedirectURL = cfg.PublicURL + "/auth/callback"
+		if err := checkCallbackURL(cfg.OIDCRedirectURL); err != nil {
+			return fmt.Errorf("UPTIME_PUBLIC_URL does not make a usable OIDC redirect URL (set UPTIME_OIDC_REDIRECT_URL): %w", err)
+		}
+	}
+	return nil
 }
 
 // checkCallbackURL checks an address the identity provider is to send the

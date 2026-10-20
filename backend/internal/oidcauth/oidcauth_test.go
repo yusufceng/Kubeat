@@ -1,6 +1,7 @@
 package oidcauth
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -199,6 +201,68 @@ func TestRefusals(t *testing.T) {
 	c.now = func() time.Time { return time.Now().Add(time.Hour) }
 	if _, err := c.Finish(context.Background(), state, "good-code"); !errors.Is(err, ErrInvalidState) {
 		t.Errorf("expired state: err = %v", err)
+	}
+}
+
+// Anyone can start a sign-in, so the ones under way are bounded: past the
+// bound the oldest are forgotten, never the new one refused, and a warning
+// says so, once per state lifetime rather than once per sign-in.
+func TestPendingBound(t *testing.T) {
+	f := newFakeProvider(t)
+	var logs bytes.Buffer
+	c, err := New(Config{Issuer: f.srv.URL, ClientID: "kubeat", RedirectURL: "https://kubeat.example/auth/callback",
+		MaxPending: 3, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var states []string
+	for range 5 {
+		states = append(states, begin(t, c, f))
+	}
+	if len(c.pending) != 3 || c.order.Len() != 3 {
+		t.Fatalf("%d sign-ins kept, %d in order; want the bound, 3", len(c.pending), c.order.Len())
+	}
+	for _, s := range states[:2] {
+		if _, err := c.Finish(context.Background(), s, "good-code"); !errors.Is(err, ErrInvalidState) {
+			t.Errorf("a sign-in pushed out: err = %v, want ErrInvalidState", err)
+		}
+	}
+	// The newest goes through, and leaves both the map and the order.
+	if _, err := c.Finish(context.Background(), states[4], "good-code"); err != nil {
+		t.Errorf("the newest sign-in: %v", err)
+	}
+	if len(c.pending) != 2 || c.order.Len() != 2 {
+		t.Errorf("after a finish: %d kept, %d in order; want 2", len(c.pending), c.order.Len())
+	}
+	if n := strings.Count(logs.String(), "too many SSO sign-ins under way"); n != 1 || !strings.Contains(logs.String(), "level=WARN") {
+		t.Errorf("warned %d times, want once: %q", n, logs.String())
+	}
+}
+
+// Sign-ins that never came back are forgotten as new ones start, oldest
+// first: they all live as long, so the first still in time ends the search.
+func TestPendingExpireInOrder(t *testing.T) {
+	f := newFakeProvider(t)
+	c := newClient(t, f)
+	at := time.Now()
+	c.now = func() time.Time { return at }
+	old := begin(t, c, f)
+	c.now = func() time.Time { return at.Add(6 * time.Minute) }
+	recent := begin(t, c, f)
+	c.now = func() time.Time { return at.Add(11 * time.Minute) } // the first is 11 minutes old, past StateTTL
+	newest := begin(t, c, f)
+
+	if _, kept := c.pending[old]; kept {
+		t.Error("a sign-in past its time was kept")
+	}
+	if _, kept := c.pending[recent]; !kept {
+		t.Error("a sign-in still in time was forgotten")
+	}
+	if len(c.pending) != 2 || c.order.Len() != 2 {
+		t.Errorf("%d kept, %d in order; want 2", len(c.pending), c.order.Len())
+	}
+	if _, err := c.Finish(context.Background(), newest, "good-code"); err != nil {
+		t.Errorf("the newest sign-in: %v", err)
 	}
 }
 

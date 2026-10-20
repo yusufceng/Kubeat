@@ -553,6 +553,10 @@ type Store interface {
 
 	// GetMonitorByPushToken returns ErrNotFound for an unknown token.
 	GetMonitorByPushToken(ctx context.Context, token string) (Monitor, error)
+	// SetPushToken gives the push monitor with the id a new token, and the
+	// old one stops working. It returns ErrNotFound when there is no push
+	// monitor with the id, ErrConflict when another has the token.
+	SetPushToken(ctx context.Context, id int64, token string) error
 	// RecordPush stores a push monitor's report, replacing its previous one.
 	RecordPush(ctx context.Context, report PushReport) error
 	// LastPush returns ErrNotFound when the monitor never reported.

@@ -578,6 +578,35 @@ func TestMonitorExtras(t *testing.T) {
 		t.Errorf("updated = %+v, %v", updated, err)
 	}
 
+	// SetPushToken does, and the old token finds nothing after.
+	if err := s.SetPushToken(ctx, created.ID, "tok-2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetMonitorByPushToken(ctx, "tok-1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the old token: err = %v", err)
+	}
+	if byToken, err := s.GetMonitorByPushToken(ctx, "tok-2"); err != nil || byToken.ID != created.ID {
+		t.Errorf("the new token: %+v, %v", byToken, err)
+	}
+	third := newMonitor("job-3")
+	third.Type, third.PushToken = MonitorPush, "tok-3"
+	other, err := s.CreateMonitor(ctx, third)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPushToken(ctx, other.ID, "tok-2"); !errors.Is(err, ErrConflict) {
+		t.Errorf("another monitor's token: err = %v, want ErrConflict", err)
+	}
+	web, err := s.CreateMonitor(ctx, newMonitor("web"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{web.ID, 999} {
+		if err := s.SetPushToken(ctx, id, "tok-4"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("monitor %d, no push monitor: err = %v, want ErrNotFound", id, err)
+		}
+	}
+
 	// The latest report replaces the one before it.
 	if _, err := s.LastPush(ctx, created.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("no report yet: err = %v, want ErrNotFound", err)

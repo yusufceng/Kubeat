@@ -61,6 +61,13 @@ export const CopyIcon = (p: Props) => (
   </Icon>
 );
 
+export const RenewIcon = (p: Props) => (
+  <Icon {...p}>
+    <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8" />
+    <path d="M21 3v5h-5" />
+  </Icon>
+);
+
 export const TrashIcon = (p: Props) => (
   <Icon {...p}>
     <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
