@@ -22,6 +22,22 @@ jobs:
       - run: go test -race ./...
       - run: go build ./...
 
+  # Known vulnerabilities in the code the backend actually calls, its
+  # dependencies' and the standard library's. The standard library is that
+  # of the toolchain line in go.mod, which the release image's builder
+  # matches, so a Go security release fails this until both are raised.
+  govulncheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -36,6 +52,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   chart:
@@ -45,3 +62,4 @@ jobs:
       - uses: azure/setup-helm@v5
       - run: helm lint deploy/helm/kubeat
       - run: helm template kubeat deploy/helm/kubeat > /dev/null
+      - run: deploy/helm/test-chart.sh
