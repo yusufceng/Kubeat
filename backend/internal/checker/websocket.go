@@ -8,9 +8,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 
+	"github.com/yusufceng/Kubeat/backend/internal/explain"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -21,6 +23,8 @@ const websocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 // checkWebSocket performs the opening handshake of a WebSocket connection
 // and closes it. It succeeds when the server switches protocols and proves,
 // through the accept key, that it understood the request as a WebSocket one.
+// The handshake is an HTTP request, and a failed one says why as an HTTP
+// check does (see checkHTTPAt).
 func (c *Checker) checkWebSocket(ctx context.Context, m store.Monitor) outcome {
 	u, err := url.Parse(m.Target)
 	if err != nil {
@@ -39,7 +43,8 @@ func (c *Checker) checkWebSocket(ctx context.Context, m store.Monitor) outcome {
 	_, _ = rand.Read(key)
 	clientKey := base64.StdEncoding.EncodeToString(key)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	rec := newRecorder()
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, rec.trace()), http.MethodGet, u.String(), nil)
 	if err != nil {
 		return failed(err)
 	}
@@ -66,26 +71,29 @@ func (c *Checker) checkWebSocket(ctx context.Context, m store.Monitor) outcome {
 	defer transport.CloseIdleConnections()
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
-		return failed(shortened(c.notHTTP(m, err)))
+		return rec.finish(m, failed(shortened(c.notHTTP(m, err))), nil, rec.explain(err))
 	}
 	defer resp.Body.Close()
 
 	out := outcome{statusCode: resp.StatusCode, certExpiry: leafExpiry(resp.TLS)}
 	if resp.StatusCode != http.StatusSwitchingProtocols {
+		// A Route or Ingress without pods answers the handshake with its own
+		// page, as it does any request.
+		e := explain.Response(resp.StatusCode, peek(resp.Body))
 		out.err = fmt.Errorf("the server answered %d instead of switching to WebSocket", resp.StatusCode)
-		return out
+		return rec.finish(m, out, resp, e)
 	}
 	digest := sha1.Sum([]byte(clientKey + websocketGUID))
 	if resp.Header.Get("Sec-WebSocket-Accept") != base64.StdEncoding.EncodeToString(digest[:]) {
 		out.err = fmt.Errorf("the server's Sec-WebSocket-Accept does not match the request")
-		return out
+		return rec.finish(m, out, resp, nil)
 	}
 	if want := m.WebSocket.Subprotocol; want != "" {
 		if got := resp.Header.Get("Sec-WebSocket-Protocol"); !strings.EqualFold(got, want) {
 			out.err = fmt.Errorf("the server did not accept the subprotocol %q", want)
-			return out
+			return rec.finish(m, out, resp, nil)
 		}
 		out.detail = want
 	}
-	return out
+	return rec.finish(m, out, resp, nil)
 }

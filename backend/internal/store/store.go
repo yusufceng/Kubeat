@@ -231,6 +231,83 @@ type CheckResult struct {
 	// CertExpiresAt is when the target's TLS certificate expires; zero when
 	// the check saw no certificate.
 	CertExpiresAt time.Time
+	// Diagnostics says why a failed check failed, as far as the check could
+	// tell; nil for a successful one, which keeps none.
+	Diagnostics *Diagnostics
+}
+
+// Diagnostics is what a failed check found out about why it failed: what
+// the failure most likely means and, for an HTTP(S) or WebSocket check,
+// where the time went and who answered how. It never holds any of an
+// answer's body, and only a few of its headers (see the checker): a target
+// is set by whoever may edit a monitor, and its results must not become a
+// way to read what an internal service answers.
+type Diagnostics struct {
+	// Explanation is what the failure most likely means; nil when nothing
+	// recognized it.
+	Explanation *Explanation `json:"explanation,omitempty"`
+	// Timing is where the time of the request went; nil for checks that are
+	// not HTTP(S) requests.
+	Timing *Timing `json:"timing,omitempty"`
+	// RemoteAddr is the address the check connected to ("ip:port"), or the
+	// last one it tried when it could not connect.
+	RemoteAddr string `json:"remote_addr,omitempty"`
+	// TLS describes the TLS connection and the certificate the server
+	// presented, one that failed verification included; nil for a plain
+	// connection.
+	TLS *TLSDetails `json:"tls,omitempty"`
+	// StatusLine is the status line of the answer that was judged, such as
+	// "HTTP/1.1 503 Service Unavailable"; empty when none came.
+	StatusLine string `json:"status_line,omitempty"`
+	// Headers are the few headers of that answer that are kept, by their
+	// lower-case names.
+	Headers map[string]string `json:"headers,omitempty"`
+	// Redirects is how many redirects were followed before that answer.
+	Redirects int `json:"redirects,omitempty"`
+	// Pod is the pod these details are about, for a monitor that checks
+	// each pod behind its service: the first of those that failed.
+	Pod string `json:"pod,omitempty"`
+}
+
+// Explanation is what a failure most likely means: a stable code (see the
+// explain package) with the few values its wording needs, so that each
+// reader can have it in their own language.
+type Explanation struct {
+	Code   string            `json:"code"`
+	Params map[string]string `json:"params,omitempty"`
+}
+
+// Timing is where the time of an HTTP(S) request went, in milliseconds. The
+// phases are those of the last request, the one whose answer was judged
+// when redirects were followed; a phase that did not happen is nil: no name
+// lookup for an IP address, no connection for one that was reused, no
+// handshake for plain HTTP, no first byte when no answer came.
+type Timing struct {
+	DNS     *float64 `json:"dns_ms,omitempty"`
+	Connect *float64 `json:"connect_ms,omitempty"`
+	TLS     *float64 `json:"tls_ms,omitempty"`
+	// FirstByte is from the start of the request until the first byte of
+	// its answer, the phases above included.
+	FirstByte *float64 `json:"first_byte_ms,omitempty"`
+	// Total is the whole check, redirects included.
+	Total float64 `json:"total_ms"`
+}
+
+// TLSDetails describes a TLS connection and the leaf certificate of its
+// server.
+type TLSDetails struct {
+	// Version is the negotiated protocol, such as "TLS 1.3"; empty when the
+	// handshake failed before one was agreed.
+	Version string `json:"version,omitempty"`
+	// Subject and Issuer are the common names of the certificate and of
+	// whoever signed it.
+	Subject string `json:"subject,omitempty"`
+	Issuer  string `json:"issuer,omitempty"`
+	// SANs are the first few names and addresses the certificate is valid
+	// for; MoreSANs counts the rest.
+	SANs     []string  `json:"sans,omitempty"`
+	MoreSANs int       `json:"more_sans,omitempty"`
+	NotAfter time.Time `json:"not_after,omitzero"`
 }
 
 // IncidentKind says what an incident is about.
@@ -679,7 +756,8 @@ type Store interface {
 	// began and how it ended.
 	FailedChecksEnds(ctx context.Context, monitorID int64, from, to time.Time, keep int) ([]CheckResult, int, error)
 	// RecentCheckResults returns up to limit results, newest first, for each
-	// of the given monitors, keyed by monitor ID.
+	// of the given monitors, keyed by monitor ID. They come without their
+	// diagnostics: a history of many monitors at once has no use for them.
 	RecentCheckResults(ctx context.Context, monitorIDs []int64, limit int) (map[int64][]CheckResult, error)
 	// DeleteCheckResultsBefore removes results older than cutoff and reports
 	// how many rows were deleted.

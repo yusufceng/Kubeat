@@ -28,6 +28,146 @@ export type CheckResult = {
   detail: string | null;
   /** When the target's TLS certificate expires; null if the check saw none. */
   cert_expires_at: string | null;
+  /**
+   * Why a failed check failed, as far as it could tell; null for a successful
+   * check and for a failure with nothing to add. Missing from backends before
+   * API revision 25.
+   */
+  diagnostics?: Diagnostics | null;
+};
+
+/**
+ * What a failed check found out about why it failed. It never holds anything
+ * of the answer's body, and only the headers in KeptHeader.
+ */
+export type Diagnostics = {
+  /** What the failure most likely means; null when no rule recognized it. */
+  explanation: Explanation | null;
+  /** Where the time of an HTTP(S) or WebSocket check went; null for the other types. */
+  timing: DiagnosticTiming | null;
+  /** The address connected to ("ip:port"), or the last one tried when no connection was made. */
+  remote_addr: string | null;
+  /** The TLS connection and the certificate the server presented, also one that failed verification. */
+  tls: DiagnosticTls | null;
+  /** The status line of the answer that was judged, e.g. "HTTP/1.1 503 Service Unavailable"; null when none came. */
+  status_line: string | null;
+  /** The kept headers of that answer, by lower-case name; empty when none. */
+  headers: Partial<Record<KeptHeader, string>>;
+  /** How many redirects were followed before that answer. */
+  redirects: number;
+  /** For a monitor that checks each pod: the pod these details are about, the first one that failed. */
+  pod: string | null;
+};
+
+/**
+ * The only headers a failed check keeps, values cut to 100 bytes. A location
+ * loses its user, query (shown as "?…") and fragment; www-authenticate keeps
+ * only the challenges' schemes ("Basic, Bearer").
+ */
+export type KeptHeader =
+  | "content-type"
+  | "content-length"
+  | "server"
+  | "via"
+  | "location"
+  | "retry-after"
+  | "x-envoy-upstream-service-time"
+  | "x-request-id"
+  | "www-authenticate";
+
+/**
+ * Milliseconds (to the microsecond) of the last request, the one whose answer
+ * was judged. A phase that did not happen is null: no lookup for an IP
+ * address, no connection or handshake on a reused connection, no handshake for
+ * plain HTTP, no first byte when no answer came.
+ */
+export type DiagnosticTiming = {
+  dns_ms: number | null;
+  connect_ms: number | null;
+  tls_ms: number | null;
+  /** From the start of the request to the first byte of its answer, the phases above included. */
+  first_byte_ms: number | null;
+  /** The whole check, redirects included. */
+  total_ms: number;
+};
+
+export type DiagnosticTls = {
+  /** E.g. "TLS 1.3"; null when the handshake failed before one was agreed. */
+  version: string | null;
+  /** Common names of the certificate and of its issuer; null when it has none. */
+  subject: string | null;
+  issuer: string | null;
+  /** The first five names and addresses the certificate is valid for; more_sans counts the others. */
+  sans: string[];
+  more_sans: number;
+  not_after: string | null;
+};
+
+/**
+ * What a failure most likely means: a stable code and the values its wording
+ * needs (ExplanationParams), to be worded in the user's language. text is the
+ * English wording, for a code this frontend does not know; it is empty for a
+ * code the backend itself does not know (written by a later version).
+ */
+export type Explanation = {
+  code: ExplanationCode | (string & {});
+  params: Record<string, string>;
+  text: string;
+};
+
+/**
+ * Every code the backend gives. The backend's English and Turkish wordings
+ * are in backend/internal/explain/texts.go; README "Başarısız kontrolün
+ * ayrıntıları" lists what each means.
+ */
+export type ExplanationCode =
+  // Pages the cluster's routing answers with.
+  | "route_no_endpoints"
+  | "ingress_default_backend"
+  | "ingress_no_endpoints"
+  | "proxy_no_healthy_upstream"
+  | "proxy_upstream_connect_error"
+  | "proxy_upstream_tls_error"
+  | "mesh_access_denied"
+  | "http_to_tls_port"
+  // Error statuses no page explains.
+  | "http_401"
+  | "http_403"
+  | "http_404"
+  | "http_429"
+  | "http_500"
+  | "http_502"
+  | "http_503"
+  | "http_504"
+  // Failures to get an answer at all.
+  | "blocked_by_policy"
+  | "dns_service_not_found"
+  | "dns_not_found"
+  | "dns_failed"
+  | "connection_refused"
+  | "connection_reset"
+  | "connection_closed"
+  | "host_unreachable"
+  | "connect_timeout"
+  | "response_timeout"
+  | "timeout"
+  | "tls_hostname_mismatch"
+  | "tls_expired"
+  | "tls_unknown_authority"
+  | "tls_certificate"
+  | "tls_to_plain_port"
+  | "tls_handshake_failed"
+  | "too_many_redirects";
+
+/** The params of the codes that have any; every other code has none. */
+export type ExplanationParams = {
+  /** proxy: "Envoy", "HAProxy" or "Traefik". */
+  proxy_no_healthy_upstream: { proxy: string };
+  proxy_upstream_connect_error: { proxy: string };
+  proxy_upstream_tls_error: { proxy: string };
+  dns_service_not_found: { service: string; namespace: string };
+  dns_not_found: { host: string };
+  tls_hostname_mismatch: { host: string };
 };
 
 export type MonitorType =

@@ -116,6 +116,10 @@ type outcome struct {
 	latency time.Duration
 	hasTime bool
 	err     error
+	// diag is what the engine saw of why the check failed, or for an
+	// inverted monitor of what answered; Check keeps it only for a failed
+	// result, explained by err where the engine did not explain it.
+	diag *store.Diagnostics
 }
 
 func failed(err error) outcome { return outcome{err: err} }
@@ -176,6 +180,11 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	// failure an inverted monitor expects, and the policy's error stands.
 	if m.Inverted && !errors.Is(out.err, netguard.ErrBlocked) {
 		invert(&result)
+	}
+	// A successful check keeps nothing more; a failed one what it found out
+	// about why, which for an inverted monitor is what answered.
+	if !result.Up {
+		result.Diagnostics = diagnose(m.Type, out)
 	}
 	return result
 }
@@ -303,7 +312,7 @@ func (c *Checker) checkTCPAt(ctx context.Context, m store.Monitor, addr string) 
 	}
 	secured := tls.Client(conn, c.tlsConfig(host, m.TCP.SkipTLSVerify))
 	if err := secured.HandshakeContext(ctx); err != nil {
-		return failedf("tls handshake: %w", err)
+		return afterConnect(failedf("tls handshake: %w", err))
 	}
 	state := secured.ConnectionState()
 	return outcome{certExpiry: leafExpiry(&state), detail: tls.VersionName(state.Version)}

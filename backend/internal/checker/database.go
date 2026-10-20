@@ -154,7 +154,7 @@ func (c *Checker) checkRedis(ctx context.Context, m store.Monitor) outcome {
 	if cfg := c.databaseTLS(m, host); cfg != nil {
 		secured := tls.Client(conn, cfg)
 		if err := secured.HandshakeContext(ctx); err != nil {
-			return failedf("tls handshake: %w", err)
+			return afterConnect(failedf("tls handshake: %w", err))
 		}
 		conn = secured
 	}
@@ -195,12 +195,12 @@ func (c *Checker) checkRedis(ctx context.Context, m store.Monitor) outcome {
 			auth = []string{"AUTH", o.Username, o.Password}
 		}
 		if _, err := command(auth...); err != nil {
-			return failedf("login: %w", err)
+			return afterConnect(failedf("login: %w", err))
 		}
 	}
 	answer, err := command("PING")
 	if err != nil {
-		return failed(err)
+		return afterConnect(failed(err))
 	}
 	if answer != "+PONG" {
 		return failed(c.targetSaid(m, "unexpected answer to PING", answer))

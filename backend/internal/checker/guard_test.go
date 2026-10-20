@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/explain"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -64,6 +65,10 @@ func TestGuardHoldsEveryEngine(t *testing.T) {
 				got := c.Check(ctx, m)
 				if got.Up || !strings.Contains(got.Error, "is blocked by the target policy") || !strings.Contains(got.Error, "UPTIME_TARGET_ALLOW_CIDRS") {
 					t.Errorf("result = %+v", got)
+				}
+				// And the explanation says so, not that nothing answered.
+				if code := explanation(got); code != explain.BlockedByPolicy {
+					t.Errorf("explained as %q: %+v", code, got.Diagnostics)
 				}
 			})
 		}

@@ -36,6 +36,9 @@ type Notification struct {
 	Incident store.Incident
 	// CertExpiresAt is set for the certificate events.
 	CertExpiresAt time.Time
+	// Explanation is what the failure that opened an outage most likely
+	// means, for EventDown; nil when nothing recognized it.
+	Explanation *store.Explanation
 	// At is when what the notification reports happened, as Kubeat saw
 	// it: the check that confirmed the outage or the recovery or that saw
 	// the certificate, and for a reminder the moment it fell due. A
@@ -298,7 +301,11 @@ func (e *Engine) maybeOpen(ctx context.Context, m store.Monitor, at time.Time) e
 	}
 	incident.MonitorName = m.Name
 	e.opts.Logger.Warn("incident opened", "monitor", m.Name, "incident_id", incident.ID, "cause", incident.Cause)
-	e.enqueue(Notification{Event: EventDown, Monitor: m, Incident: incident, At: incident.OpenedAt})
+	down := Notification{Event: EventDown, Monitor: m, Incident: incident, At: incident.OpenedAt}
+	if d := streak[0].Diagnostics; d != nil {
+		down.Explanation = d.Explanation // of the error that became the cause
+	}
+	e.enqueue(down)
 	return nil
 }
 

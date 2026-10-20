@@ -57,3 +57,18 @@ Güncelleme (2026-10-16, sonra): Mattermost için yapıldı. Ona giden metinde
 her `@` ve `]` işaretinden sonra görünmez bir boşluk (U+200B) var: hiçbir
 bahsetme kimseyi çağırmıyor, `[etiket](adres)` bağlantı ya da resim
 olmuyor ve metin aynı okunuyor. Teams ve Gotify hâlâ açık.
+
+## Başarısız kontrollerin ayrıntılarında kalanlar
+
+2026-10-16'da başarısız kontroller nedenlerini saklamaya başladı (README,
+"Başarısız kontrolün ayrıntıları"). Bilerek sonraya bırakılanlar:
+
+- Webhook gövdesinde açıklamanın kodu: genel webhook kanalı şimdilik
+  yalnızca hata metnini (`incident.cause`) alır; ayrıntı alanı olan
+  kanallarda (PagerDuty dahil) "Neden" alanı açıklamayı taşır.
+- TCP, gRPC ve veritabanı kontrollerinde zamanlama, adres ve sertifika
+  ayrıntıları; bu tiplerde yalnızca açıklama saklanır.
+- Olayın kendisinde açıklama: bugün yalnızca kesinti bildirimi taşır; olay
+  sayfası gelince açılıştaki başarısızlığın açıklaması olaya yazılabilir.
+- Monitor listesindeki kısa geçmişte (`history`) ve ızgaranın en sık
+  hatalarında açıklama kodu.

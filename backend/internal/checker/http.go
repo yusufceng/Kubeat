@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
 	"strings"
 
+	"github.com/yusufceng/Kubeat/backend/internal/explain"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -32,6 +34,12 @@ func (c *Checker) checkHTTP(ctx context.Context, m store.Monitor) outcome {
 
 // checkHTTPAt sends the request to addr ("ip:port") instead of where the
 // URL leads, when addr is given; the request itself is unchanged.
+//
+// A failed check also says why, as far as the request tells: the phases of
+// the request and where its time went, the address and certificate that
+// answered, the status line and a few headers of the answer, and what the
+// failure most likely means. Of the body, only the beginning of an answer
+// with an unexpected status is looked at, to recognize the page it is.
 func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string) outcome {
 	o := m.HTTP
 	expected, err := ParseStatusSet(o.ExpectedStatus)
@@ -39,11 +47,13 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 		return failedf("expected status: %w", err)
 	}
 
+	rec := newRecorder()
+
 	var body io.Reader
 	if o.Body != "" {
 		body = strings.NewReader(o.Body)
 	}
-	req, err := http.NewRequestWithContext(ctx, o.Method, m.Target, body)
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, rec.trace()), o.Method, m.Target, body)
 	if err != nil {
 		return failed(err)
 	}
@@ -101,7 +111,7 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 				return http.ErrUseLastResponse // judge the redirect itself
 			}
 			if len(via) > o.MaxRedirects {
-				return fmt.Errorf("stopped after %d redirects", o.MaxRedirects)
+				return redirectLimit(o.MaxRedirects)
 			}
 			if store.SameServer(server, store.Endpoint(next.URL.String())) {
 				if site != "" {
@@ -118,7 +128,9 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return failed(shortened(c.notHTTP(m, err)))
+		// Stopped by the redirect limit, the last redirect comes along,
+		// its body closed: where it pointed tells a loop.
+		return rec.finish(m, failed(shortened(c.notHTTP(m, err))), resp, rec.explain(err))
 	}
 	defer resp.Body.Close()
 
@@ -126,36 +138,37 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 	out := outcome{statusCode: resp.StatusCode, certExpiry: leafExpiry(resp.TLS)}
 
 	if !expected.Contains(resp.StatusCode) {
-		// Drain a bounded amount so the connection can be reused.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
+		// The beginning of the body tells a router's or a proxy's own page,
+		// which explains more than the status; it goes no further than that.
+		e := explain.Response(resp.StatusCode, peek(resp.Body))
 		out.err = fmt.Errorf("unexpected status %d", resp.StatusCode)
-		return out
+		return rec.finish(m, out, resp, e)
 	}
 	if o.Keyword == "" && o.JSONPath == "" {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
-		return out
+		return rec.finish(m, out, resp, nil)
 	}
 
 	content, err := io.ReadAll(io.LimitReader(resp.Body, c.opts.BodyLimit))
 	if err != nil {
 		out.err = fmt.Errorf("read body: %w", err)
-		return out
+		return rec.finish(m, out, resp, rec.explain(err))
 	}
 	if o.Keyword != "" {
 		found := bytes.Contains(content, []byte(o.Keyword))
 		switch {
 		case !found && !o.InvertKeyword:
 			out.err = fmt.Errorf("keyword %q not found in the first %d bytes of the response", o.Keyword, len(content))
-			return out
+			return rec.finish(m, out, resp, nil)
 		case found && o.InvertKeyword:
 			out.err = fmt.Errorf("keyword %q is in the response, and must not be", o.Keyword)
-			return out
+			return rec.finish(m, out, resp, nil)
 		}
 	}
 	if o.JSONPath != "" {
 		out.detail, out.err = matchJSON(content, o.JSONPath, o.JSONOperator, o.JSONExpected)
 	}
-	return out
+	return rec.finish(m, out, resp, nil)
 }
 
 // maxErrorURL bounds the address that a failed request's error repeats:

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/explain"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -99,9 +100,23 @@ func Facts(n Notification) []Fact {
 		facts = append(facts, Fact{w.factEnd, n.Incident.ResolvedAt.UTC().Format(time.RFC3339)})
 	}
 	if n.Incident.Cause != "" {
-		facts = append(facts, Fact{w.factCause, n.Incident.Cause})
+		facts = append(facts, Fact{w.factCause, cause(n)})
 	}
 	return facts
+}
+
+// cause is the cause of an incident as its notification states it: the
+// error, followed for an outage that just opened by what it most likely
+// means, in the notification's language.
+func cause(n Notification) string {
+	if n.Event != EventDown || n.Explanation == nil {
+		return n.Incident.Cause
+	}
+	text := explain.Text(*n.Explanation, n.Language)
+	if text == "" {
+		return n.Incident.Cause
+	}
+	return n.Incident.Cause + " — " + text
 }
 
 // Subject is a short line for channels that have one.

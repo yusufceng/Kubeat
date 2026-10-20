@@ -12,6 +12,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
+	"github.com/yusufceng/Kubeat/backend/internal/explain"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -53,7 +54,13 @@ func (c *Checker) checkGRPC(ctx context.Context, m store.Monitor) outcome {
 		case codes.DeadlineExceeded:
 			return failed(context.DeadlineExceeded)
 		}
-		return failed(refusal.wrap(fmt.Errorf("%s: %s", st.Code(), st.Message())))
+		out := failed(refusal.wrap(fmt.Errorf("%s: %s", st.Code(), st.Message())))
+		// A status carries the transport error behind it, or what a proxy in
+		// front of the server said, as text only.
+		if e := explain.Message(st.Message()); e != nil {
+			out.diag = &store.Diagnostics{Explanation: e}
+		}
+		return out
 	}
 	if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 		return failedf("health status is %s", resp.GetStatus())

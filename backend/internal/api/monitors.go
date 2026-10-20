@@ -104,10 +104,16 @@ type resultResponse struct {
 	Detail *string `json:"detail"`
 	// CertExpiresAt is set when the check saw a TLS certificate.
 	CertExpiresAt *time.Time `json:"cert_expires_at"`
+	// Diagnostics says why a failed check failed, as far as it could tell;
+	// null for a successful check, and for a failure with nothing to add.
+	Diagnostics *diagnosticsResponse `json:"diagnostics"`
 }
 
 func toResultResponse(r store.CheckResult) resultResponse {
 	resp := resultResponse{CheckedAt: r.CheckedAt, Up: r.Up, LatencyMS: r.Latency.Milliseconds()}
+	if r.Diagnostics != nil {
+		resp.Diagnostics = toDiagnosticsResponse(*r.Diagnostics)
+	}
 	if r.StatusCode != 0 {
 		resp.StatusCode = &r.StatusCode
 	}

@@ -670,7 +670,7 @@ func isUniqueViolation(err error) bool {
 // took seconds at a few hundred monitors.
 var statusQuery = `
 SELECT ` + monitorColumnsOf("m") + `,
-       r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.detail, r.cert_expires_at,
+       r.checked_at, r.up, r.latency_ms, r.status_code, r.error, r.detail, r.cert_expires_at, r.diagnostics,
        COALESCE(a.checks, 0), COALESCE(a.up_checks, 0), COALESCE(a.up_latency_sum_ms, 0),
        i.id, i.started_at, i.cause, i.opened_at, c.id IS NOT NULL
 FROM monitors m
@@ -728,6 +728,7 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			up                        sql.NullBool
 			statusCode                sql.NullInt64
 			errText, detail           sql.NullString
+			diagnostics               sql.NullString
 			upLatencySumMS            int64
 			incidentID, incidentStart sql.NullInt64
 			incidentCause             sql.NullString
@@ -735,7 +736,7 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 			certExpires               sql.NullInt64
 		)
 		err := rows.Scan(append(row.dest(),
-			&checkedAt, &up, &latencyMS, &statusCode, &errText, &detail, &certExpires,
+			&checkedAt, &up, &latencyMS, &statusCode, &errText, &detail, &certExpires, &diagnostics,
 			&st.Checks, &st.UpChecks, &upLatencySumMS,
 			&incidentID, &incidentStart, &incidentCause, &incidentOpened, &st.CertWarning)...)
 		if err != nil {
@@ -764,6 +765,7 @@ func (s *SQLite) queryStatuses(ctx context.Context, since time.Time, id int64) (
 				Detail:     detail.String,
 
 				CertExpiresAt: unixMilliOrZero(certExpires),
+				Diagnostics:   decodeDiagnostics(diagnostics),
 			}
 		}
 		if incidentID.Valid {
@@ -860,8 +862,8 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO check_results (monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO check_results (monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at, diagnostics)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("insert check results: %w", err)
 	}
@@ -874,6 +876,10 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 			detail      sql.NullString
 			certExpires sql.NullInt64
 		)
+		diagnostics, err := encodeDiagnostics(r)
+		if err != nil {
+			return fmt.Errorf("insert check results: %w", err)
+		}
 		if r.Detail != "" {
 			detail = sql.NullString{String: r.Detail, Valid: true}
 		}
@@ -886,7 +892,7 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 		if r.Error != "" {
 			errText = sql.NullString{String: r.Error, Valid: true}
 		}
-		_, err := stmt.ExecContext(ctx, r.MonitorID, r.CheckedAt.UnixMilli(), r.Up, r.Latency.Milliseconds(), statusCode, errText, detail, certExpires)
+		_, err = stmt.ExecContext(ctx, r.MonitorID, r.CheckedAt.UnixMilli(), r.Up, r.Latency.Milliseconds(), statusCode, errText, detail, certExpires, diagnostics)
 		if err != nil {
 			return fmt.Errorf("insert check results: %w", err)
 		}
@@ -897,7 +903,48 @@ func (s *SQLite) InsertCheckResults(ctx context.Context, results []CheckResult) 
 	return nil
 }
 
-const recentResultsQuery = `SELECT monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at
+// encodeDiagnostics is the diagnostics column of a result: compact JSON for
+// a failed result that has any, NULL otherwise. A successful result keeps
+// none, whatever it carries.
+func encodeDiagnostics(r CheckResult) (sql.NullString, error) {
+	if r.Up || r.Diagnostics == nil {
+		return sql.NullString{}, nil
+	}
+	b, err := json.Marshal(r.Diagnostics)
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("encode diagnostics: %w", err)
+	}
+	return sql.NullString{String: string(b), Valid: true}, nil
+}
+
+// decodeDiagnostics reads the diagnostics column back. Diagnostics are an
+// aid to the result they belong to: a value that cannot be read, such as
+// one a later version wrote in a shape this one does not know, is left out
+// rather than failing the result, or every list it is in.
+func decodeDiagnostics(v sql.NullString) *Diagnostics {
+	if !v.Valid || v.String == "" {
+		return nil
+	}
+	var d Diagnostics
+	if err := json.Unmarshal([]byte(v.String), &d); err != nil {
+		return nil
+	}
+	return &d
+}
+
+// resultColumns are the columns of a result, in the order scanCheckResults
+// reads them.
+const resultColumns = "monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at, diagnostics"
+
+const recentResultsQuery = `SELECT ` + resultColumns + `
+		 FROM check_results WHERE monitor_id = ?
+		 ORDER BY checked_at DESC, id DESC LIMIT ?`
+
+// historyQuery is recentResultsQuery without the diagnostics, which the
+// histories of many monitors at once leave out: reading and decoding them
+// for every failed check of every monitor listed would cost most of such a
+// request during a wide outage, for details nobody looks at there.
+const historyQuery = `SELECT monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at, NULL
 		 FROM check_results WHERE monitor_id = ?
 		 ORDER BY checked_at DESC, id DESC LIMIT ?`
 
@@ -922,7 +969,7 @@ func (s *SQLite) RecentCheckResults(ctx context.Context, monitorIDs []int64, lim
 		return nil, fmt.Errorf("recent check results: %w", err)
 	}
 	defer conn.Close()
-	stmt, err := conn.PrepareContext(ctx, recentResultsQuery)
+	stmt, err := conn.PrepareContext(ctx, historyQuery)
 	if err != nil {
 		return nil, fmt.Errorf("recent check results: %w", err)
 	}
@@ -949,13 +996,13 @@ func scanCheckResults(rows *sql.Rows) ([]CheckResult, error) {
 	var results []CheckResult
 	for rows.Next() {
 		var (
-			r                    CheckResult
-			checkedAt, latencyMS int64
-			statusCode           sql.NullInt64
-			errText, detail      sql.NullString
-			certExpires          sql.NullInt64
+			r                            CheckResult
+			checkedAt, latencyMS         int64
+			statusCode                   sql.NullInt64
+			errText, detail, diagnostics sql.NullString
+			certExpires                  sql.NullInt64
 		)
-		if err := rows.Scan(&r.MonitorID, &checkedAt, &r.Up, &latencyMS, &statusCode, &errText, &detail, &certExpires); err != nil {
+		if err := rows.Scan(&r.MonitorID, &checkedAt, &r.Up, &latencyMS, &statusCode, &errText, &detail, &certExpires, &diagnostics); err != nil {
 			return nil, fmt.Errorf("list check results: %w", err)
 		}
 		r.CheckedAt = time.UnixMilli(checkedAt).UTC()
@@ -964,6 +1011,7 @@ func scanCheckResults(rows *sql.Rows) ([]CheckResult, error) {
 		r.Error = errText.String
 		r.Detail = detail.String
 		r.CertExpiresAt = unixMilliOrZero(certExpires)
+		r.Diagnostics = decodeDiagnostics(diagnostics)
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {

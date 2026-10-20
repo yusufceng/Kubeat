@@ -42,7 +42,7 @@ func (s *SQLite) SummarizeChecks(ctx context.Context, monitorID int64, from, to 
 // window, newest first.
 func (s *SQLite) ListFailedChecks(ctx context.Context, monitorID int64, from, to time.Time, limit int) ([]CheckResult, error) {
 	rows, err := s.read.QueryContext(ctx,
-		`SELECT monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at
+		`SELECT `+resultColumns+`
 		 FROM check_results WHERE monitor_id = ? AND checked_at >= ? AND checked_at < ? AND NOT up
 		 ORDER BY checked_at DESC, id DESC LIMIT ?`,
 		monitorID, from.UnixMilli(), to.UnixMilli(), limit)
@@ -58,7 +58,7 @@ func (s *SQLite) ListFailedChecks(ctx context.Context, monitorID int64, from, to
 // only moves the newest along, away from the oldest.
 func (s *SQLite) FailedChecksEnds(ctx context.Context, monitorID int64, from, to time.Time, keep int) ([]CheckResult, int, error) {
 	const where = ` FROM check_results WHERE monitor_id = ? AND checked_at >= ? AND checked_at < ? AND NOT up`
-	const columns = `monitor_id, checked_at, up, latency_ms, status_code, error, detail, cert_expires_at`
+	const columns = resultColumns // with the diagnostics, which say why each one failed
 	var total int
 	if err := s.read.QueryRowContext(ctx, "SELECT COUNT(*)"+where, monitorID, from.UnixMilli(), to.UnixMilli()).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed checks: %w", err)

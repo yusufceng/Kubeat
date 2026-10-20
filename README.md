@@ -372,6 +372,12 @@ ağına bağlıdır.
 Lokal geliştirmede `make backend` loopback'i istisna tutar
 (`TARGET_ALLOW_CIDRS`), böylece makinedeki servisler kontrol edilebilir.
 
+Kontrollerin sonuçları da hedefin yanıtını taşımaz: başarısız bir kontrol
+nedenini anlatırken yanıt gövdesini saklamaz, başlıklardan yalnızca
+birkaçını kısaltarak saklar (bkz. "Başarısız kontrolün ayrıntıları"); JSON
+değeri arayan kontrol de bulduğu değerin en fazla ilk 100 karakterini
+gösterir.
+
 **Yöneticinin uç noktaları.** `HTTP_PROXY`/`HTTPS_PROXY` vekilleri, SMTP
 sunucusu (`UPTIME_SMTP_HOST` ve `UPTIME_SMTP_PORT`),
 `UPTIME_TELEGRAM_API_URL` ve `UPTIME_PAGERDUTY_EVENTS_URL` kullanıcıların
@@ -1031,11 +1037,11 @@ eklenmelidir.
 | `POST` | `/api/v1/monitors/{id}/clone` | Monitor'un `{"name"}` adıyla bir kopyasını oluşturur; gizli değerler de kopyalanır, kopyanın hedefi başka bir sunucuya çevrilirse yeniden girilmeleri gerekir |
 | `POST` | `/api/v1/monitors/{id}/push-token` | Push monitor'una yeni bir token verir ve monitor'u yeni `push_token` ile döner; eski token hemen çalışmaz olur. Monitor'u değiştirebilenler kullanabilir, denetim kaydına yazılır |
 | `GET`, `POST` | `/api/push/{token}?status=up&msg=...&ping=...` | Push monitor'unun raporu; API anahtarı gerekmez |
-| `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye |
+| `GET` | `/api/v1/monitors/{id}/results?limit=100` | Son kontrol sonuçları, yeniden eskiye; başarısızlar nedenleriyle (`diagnostics`, bkz. "Başarısız kontrolün ayrıntıları") |
 | `GET` | `/api/v1/monitors/{id}/series?range=24h` | Yanıt süresi ve erişilebilirlik, zaman dilimlerine bölünmüş; `range` yerine `from=&to=` ile belirli bir aralık |
 | `GET` | `/api/v1/monitors/{id}/uptime?windows=24h,168h` | İstenen her dönem için uptime |
 | `GET` | `/api/v1/monitors/{id}/workload` | Monitor'un arkasındaki pod'lar; hazır olma, restart, CPU ve bellek |
-| `GET` | `/api/v1/monitors/{id}/window?from=&to=` | İki an arasında olanlar: kontrol özeti, başarısız kontroller, kesişen olaylar, cluster olayları |
+| `GET` | `/api/v1/monitors/{id}/window?from=&to=` | İki an arasında olanlar: kontrol özeti, başarısız kontroller (`diagnostics` ile), kesişen olaylar, cluster olayları |
 | `GET` | `/api/v1/monitors/{id}/grid?range=24h` | Kontrol geçmişi zaman dilimlerine bölünmüş: dilim başına kontrol, başarısız, ortalama yanıt, en sık hata; aralığın en sık hataları |
 | `GET` | `/api/v1/monitors/{id}/channels` | Monitor'un alarmının gittiği etkin kanallar |
 | `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
@@ -1422,6 +1428,99 @@ incele" bağlantısı o aralığı grafikte seçer. Izgaranın yanında aralıkt
 en sık beş hata, kaç kez ve ne zaman görüldükleriyle listelenir. Son
 kontrollerin tek tek dökümü "tablo olarak göster" altında durur. Izgara ham
 sonuçlardan hesaplanır, yani `UPTIME_RETENTION` kadar geriye gider.
+
+### Başarısız kontrolün ayrıntıları
+
+Başarısız bir kontrol, hatasının yanında nedenine dair bulduklarını da
+saklar (`diagnostics`); başarılı kontroller yeni bir şey saklamaz.
+Ayrıntılar sonuçla birlikte `UPTIME_RETENTION` boyunca tutulur ve sonuçla
+silinir; bir sonucunki en fazla 1 KiB'tır.
+
+HTTP(S) ve WebSocket kontrolleri şunları saklar:
+
+- **Zamanlama**: ad çözme (DNS), bağlantı, TLS el sıkışması, ilk bayta
+  kadar geçen süre ve toplam süre, milisaniye. Yönlendirme izlendiyse
+  aşamalar son isteğinkidir, toplam süre hepsini kapsar. Olmayan aşama boş
+  kalır: IP adresinde ad çözme, yeniden kullanılan bağlantıda bağlantı ve
+  el sıkışma, düz HTTP'de el sıkışma yoktur.
+- Bağlanılan **adres** (`ip:port`); bağlanılamadıysa son denenen adres.
+  Her pod'u ayrı kontrol eden monitor'da ayrıntılar başarısız olan ilk
+  pod'undur ve pod'un adı da yazılır.
+- **TLS**: sürüm, sertifikanın adı (CN), vereninin adı, geçerli olduğu ilk
+  beş ad ya da adres (kalanlar sayılır) ve bitiş tarihi. Doğrulamadan
+  geçemeyen sertifika da böyle anlatılır: hangi adlar için verildiği,
+  sorunun kendisidir.
+- **Durum satırı** (`HTTP/1.1 503 Service Unavailable`) ve izlenen
+  yönlendirme sayısı.
+- Yalnızca şu **başlıklar**: `content-type`, `content-length`, `server`,
+  `via`, `location`, `retry-after`, `x-envoy-upstream-service-time`,
+  `x-request-id`, `www-authenticate`.
+
+Bilerek **saklanmayanlar**: yanıt gövdesi hiçbir zaman saklanmaz ve
+gösterilmez. Beklenmeyen bir durum kodunda gövdenin yalnızca ilk 4 KiB'ı,
+aşağıdaki tanınmış sayfaları ayırt etmek için bellekte okunur; sonuçta
+yalnızca açıklamanın kodu kalır. `Set-Cookie`, `Authorization` ve listede
+olmayan hiçbir başlık saklanmaz. `location` kullanıcı adı ve parolası,
+sorgusu (`?…` olarak gösterilir) ve parçası olmadan; `www-authenticate`
+yalnızca şemalarıyla (`Bearer`, `Basic`; realm ve hata açıklaması olmadan)
+saklanır. Değerler 100 bayta kısaltılır, kontrol karakterleri atılır.
+Monitor'u düzenleyebilen biri hedefi cluster içindeki herhangi bir servise
+çevirebilir (bkz. "Hedef politikası"); sonuçlar o servisin yanıtını okumanın
+bir yolu olmamalıdır. Bu sınırlar bu yüzden ayar değil, sabittir.
+
+**Açıklama.** Başarısızlığın büyük olasılıkla ne anlama geldiği sabit bir
+kodla ve kodun cümlesinin istediği birkaç değerle saklanır:
+`explanation: {code, params, text}`. Arayüz kodu kullanıcının dilinde
+yazar; `text` aynı cümlenin İngilizcesidir, kodu tanımayan istemciler
+içindir. Kurallar `backend/internal/explain` paketindeki tablodadır ve
+sırayla denenir, ilk eşleşen kazanır:
+
+| Kod (`params`) | Ne zaman | Büyük olasılıkla |
+| --- | --- | --- |
+| `route_no_endpoints` | 503 ve OpenShift router'ın "Application is not available" sayfası | Host ve yolla eşleşen bir Route yok ya da Route'un Service'inde hazır pod yok |
+| `ingress_default_backend` | ingress-nginx'in "default backend - 404" yanıtı | Host ve yolla eşleşen bir Ingress kuralı yok |
+| `ingress_no_endpoints` | 503 ve nginx'in kendi hata sayfası | ingress-nginx arkasında Ingress'in Service'inde hazır pod yok |
+| `proxy_no_healthy_upstream` (`proxy`) | 503 ve "no healthy upstream" (Envoy), "No server is available to handle this request" (HAProxy), "no available server" (Traefik) | Vekilin bu servis için sağlıklı bir arka ucu yok |
+| `proxy_upstream_connect_error`, `proxy_upstream_tls_error` (`proxy`) | 503 ve Envoy'un "upstream connect error or disconnect/reset before headers" yanıtı; içinde "TLS error" geçerse ikincisi | Envoy servise bağlanamadı ya da bağlantı yanıt gelmeden koptu; ikincisinde iki tarafın TLS ya da mTLS ayarları uyuşmuyor |
+| `mesh_access_denied` | 403 ve "RBAC: access denied" | Mesh'in yetkilendirme politikası (Istio AuthorizationPolicy) bu istemciye izin vermiyor |
+| `http_to_tls_port` | 400 ve Go sunucularının "Client sent an HTTP request to an HTTPS server" ya da nginx'in "The plain HTTP request was sent to HTTPS port" yanıtı | TLS bekleyen porta düz HTTP gönderildi |
+| `http_401`, `http_403`, `http_404`, `http_429`, `http_500`, `http_502`, `http_503`, `http_504` | Yukarıdaki sayfalardan biri değilse durum kodu | Kodun genel anlamı; 404'te Ingress ya da Route kuralı eşleşmiyor olabilir |
+| `blocked_by_policy` | Hedef politikasının reddi | Adres yasak bir aralıkta; `UPTIME_TARGET_ALLOW_CIDRS` izin verebilir |
+| `dns_service_not_found` (`service`, `namespace`) | `<service>.<namespace>.svc[...]` biçimindeki ad çözülmüyor | O namespace'te o adda Service yok; çoğu zaman adreste yanlış namespace |
+| `dns_not_found` (`host`) | Başka bir ad çözülmüyor | Ad yanlış ya da gösterdiği şey yok |
+| `dns_failed` | DNS sunucusu yanıt vermedi ya da hata döndü | Cluster DNS'i |
+| `connection_refused` | Bağlantı reddedildi | Dinleyen yok: süreç çalışmıyor ya da port (Service'in `targetPort`'u) yanlış |
+| `connect_timeout` | Bağlantı denemesine zaman aşımına kadar yanıt gelmedi | Trafiği bir NetworkPolicy ya da güvenlik duvarı düşürüyor veya pod ya da node yok |
+| `response_timeout` | Bağlanıldı ama yanıt (TLS el sıkışması dahil) zaman aşımına kadar gelmedi | Uygulama yavaş, takılmış ya da aşırı yüklü |
+| `timeout` | Zaman aşımı, hangi aşamada olduğu bilinmiyor | İkisinden biri |
+| `connection_reset`, `connection_closed` | Bağlantı sıfırlandı ya da yanıt gelmeden kapandı | Süreç çöktü, yeniden başladı ya da başka bir protokol (TLS, HTTP/2) bekliyor |
+| `host_unreachable` | Adrese yol yok | Arkasındaki pod ya da node gitmiş |
+| `tls_unknown_authority`, `tls_hostname_mismatch` (`host`), `tls_expired`, `tls_certificate` | Sertifika doğrulanamadı | Güvenilmeyen bir CA, başka adlar için verilmiş, süresi dolmuş ya da başka bir sorun |
+| `tls_to_plain_port` | TLS isteğine düz metinle yanıt geldi | Port TLS konuşmuyor |
+| `tls_handshake_failed` | Sunucu el sıkışmayı reddetti | İstemci sertifikası (mTLS) istiyor ya da ortak bir TLS sürümü veya şifre yok |
+| `too_many_redirects` | `max_redirects` aşıldı | Çoğu zaman bir döngü: TLS'i sonlandıran bir Route ya da Ingress arkasında HTTPS'e yönlendiren uygulama |
+
+Sayfa ve durum kodu kuralları HTTP ve WebSocket kontrollerine uygulanır;
+bağlantı, DNS ve TLS kuralları TCP, gRPC, DNS, ping, veritabanı ve
+WebSocket kontrollerinin hatalarına da. gRPC hatalarını metin olarak verir;
+gRPC monitor'unda bilinen ifadeler, Envoy'un bir gRPC durumuna yazdığı
+"no healthy upstream" gibileri de dahil, bu metinde aranır. Push ve
+workload monitor'larının hataları açıklanmaz: biri kaynağın kendi raporu,
+öbürü cluster API'sinin söylediğidir.
+
+Ayrıntılar `GET /api/v1/monitors/{id}/results` yanıtında, `/window`'un
+başarısız kontrollerinde ve monitor'un `last_result` alanında
+`diagnostics` olarak gelir; başarılı kontrolde ve söyleyecek bir şeyi
+olmayan başarısızlıkta `null`dur. Monitor listesindeki kısa geçmiş
+(`history`) onları içermez.
+
+**Bildirimlerde.** Kesinti bildiriminin "Neden" alanı (Slack, Mattermost,
+Google Chat, Teams, Discord, Telegram, Gotify, e-posta ve PagerDuty
+ayrıntıları) hatanın arkasına açıklamayı `UPTIME_LANGUAGE` dilinde ekler:
+"unexpected status 503 — OpenShift router bu isteği gönderecek bir yer
+bulamadı: …". Tek satırlık metin (ntfy'nin mesajı dahil), hatırlatmalar,
+gruplanmış mesajlar ve webhook gövdesindeki `incident.cause` yalnızca
+hatayı yazar.
 
 ### Raporlar
 
@@ -1847,6 +1946,8 @@ tıklanabilir bir eylem; PagerDuty olayda `client_url`; webhook gövdesinde
 olayın sayfasına (`/incidents/<id>`; bkz. "Olay sayfası"), gruplanmış
 mesajda namespace sayfasına gider ve `UPTIME_PUBLIC_URL` (chart'ta
 `publicURL`, Route/Ingress host'undan türetilir) ayarlı değilse hiç konmaz.
+Kesinti bildiriminin "Neden" alanı, tanınan bir başarısızlıkta hatanın ne
+anlama geldiğini de yazar (bkz. "Başarısız kontrolün ayrıntıları").
 
 Monitor adları, hedefler ve hata metinleri (push raporunun mesajı dahil)
 yazıldığı gibi görünür. Slack, Mattermost ve Google Chat'te `&`, `<` ve `>`

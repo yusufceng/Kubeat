@@ -94,6 +94,13 @@ func (c *Checker) checkEachPod(ctx context.Context, m store.Monitor) outcome {
 			if errors.Is(r.err, netguard.ErrBlocked) {
 				refusal = r.err
 			}
+			// The details of the first failed pod that has any stand for the
+			// result, with the pod's name; the error names the others.
+			if combined.diag == nil {
+				if combined.diag = diagnose(m.Type, r.outcome); combined.diag != nil {
+					combined.diag.Pod = clean(r.Pod, maxName)
+				}
+			}
 		}
 	}
 	sort.Strings(failures)
