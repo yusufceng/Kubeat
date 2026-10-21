@@ -16,7 +16,6 @@ import {
   createChannel,
   createMaintenance,
   createMonitor,
-  createStatusPage,
   createUser,
   deleteChannel,
   deleteGroupRole,
@@ -32,14 +31,14 @@ import {
   type MaintenanceRepeat,
   type Monitor,
   type MonitorChanges,
+  type MonitorTestResult,
   type MonitorType,
   type NewMonitor,
   type Role,
-  type StatusPageSettings,
   testChannel,
+  testMonitorNotification,
   updateChannel,
   updateMonitor,
-  updateStatusPage,
   updateUser,
 } from "@/lib/api";
 
@@ -79,6 +78,8 @@ export async function saveMonitorAction(formData: FormData): Promise<{ error: st
     inverted: !push && checked("inverted"),
   };
   if (formData.get("each_pod") !== null) settings.each_pod = checked("each_pod");
+  // Milliseconds, 0 for off; the backend keeps it below the timeout.
+  if (formData.get("slow_above_ms") !== null) settings.slow_above_ms = number("slow_above_ms");
   // Discovered monitors are named after their source and stay in its
   // namespace; their form has neither field.
   if (formData.get("name") !== null) settings.name = text("name");
@@ -238,6 +239,9 @@ export async function saveChannelAction(formData: FormData): Promise<{ error: st
       .map((tag) => tag.trim())
       .filter(Boolean),
     events: formData.getAll("event").map(String) as ChannelEvent[],
+    // Whole seconds from the duration fields; the backend keeps them in bounds.
+    delay_seconds: Number(formData.get("delay_seconds") ?? 0),
+    repeat_seconds: Number(formData.get("repeat_seconds") ?? 0),
   };
   // Every kind ticked means no limit, so a kind added later is heard too.
   if (settings.events.length === Object.keys(channelEventLabels).length) settings.events = [];
@@ -264,36 +268,6 @@ export async function deleteChannelAction(formData: FormData): Promise<void> {
   refresh();
 }
 
-/**
- * Creates a status page, or with an id saves changes to one. Returns what
- * was wrong, or nothing when it was saved.
- */
-export async function saveStatusPageAction(formData: FormData): Promise<{ error: string } | undefined> {
-  const t = await getT();
-  const text = (name: string) => String(formData.get(name) ?? "").trim();
-  const id = Number(formData.get("id") ?? 0);
-  const settings: StatusPageSettings = {
-    slug: text("slug"),
-    title: text("title"),
-    description: text("description"),
-    announcement: text("announcement"),
-    published: formData.get("published") === "on",
-    // The checked monitors, in the order the form lists them.
-    monitors: formData.getAll("monitor").map((value) => ({
-      monitor_id: Number(value),
-      display_name: text(`name_${value}`),
-    })),
-  };
-  try {
-    if (id) await updateStatusPage(id, settings);
-    else await createStatusPage(settings);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 409) return { error: t("monitorForm.actions.slugTaken") };
-    return { error: await describe(err) };
-  }
-  refresh();
-}
-
 export async function deleteStatusPageAction(formData: FormData): Promise<void> {
   try {
     await deleteStatusPage(Number(formData.get("id")));
@@ -315,6 +289,27 @@ export async function testChannelAction(
     return { delivered: result.delivered, error: result.error ?? null };
   } catch (err) {
     return { delivered: false, error: await describe(err) };
+  }
+}
+
+/** How a test sent from a monitor went, per channel; or why it could not be sent at all. */
+export type MonitorTestOutcome = { results: MonitorTestResult[] } | { error: string; noChannel: boolean };
+
+/**
+ * Sends a test notification naming the monitor to every enabled channel
+ * that hears about it. A 422 means no channel does: said in the viewer's
+ * words, apart from other failures.
+ */
+export async function testMonitorNotificationAction(id: number): Promise<MonitorTestOutcome> {
+  try {
+    const results = await testMonitorNotification(id);
+    refresh(); // the channels' last deliveries changed
+    return { results };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 422) {
+      return { error: (await getT())("monitorPage.test.noChannel"), noChannel: true };
+    }
+    return { error: await describe(err), noChannel: false };
   }
 }
 

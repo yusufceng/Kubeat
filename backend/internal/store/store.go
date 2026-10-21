@@ -86,6 +86,15 @@ type Monitor struct {
 	// empty for other types.
 	PushToken string
 	CreatedAt time.Time
+	// SlowAbove is the response time above which a successful check counts
+	// as slow; zero turns the slow-response state off.
+	SlowAbove time.Duration
+	// SlowSince is since when the monitor's last FailureThreshold checks
+	// have all succeeded but taken longer than SlowAbove: it is "degraded".
+	// Zero while it responds in time. Kept by the alert engine as results
+	// arrive (SetMonitorSlowSince), not set by writers of the monitor; it
+	// is cleared when the monitor is paused or the threshold turned off.
+	SlowSince time.Time
 
 	// The options of the check. Only the part of the monitor's own type is
 	// used and stored.
@@ -482,7 +491,15 @@ type Channel struct {
 	Tags       []string
 	// Events limits what the channel hears about, from ChannelEvents;
 	// empty means everything.
-	Events    []string
+	Events []string
+	// Delay is how long an outage must still be going on before the channel
+	// hears of it; zero tells it at once. An outage over before then is not
+	// told to the channel at all, neither its start nor its end. Repeat is
+	// the channel's own reminder interval for an outage it was told of;
+	// zero follows the engine's reminder interval. Neither applies to the
+	// certificate and slow-response events, which go at once.
+	Delay     time.Duration
+	Repeat    time.Duration
 	Enabled   bool
 	CreatedAt time.Time
 	// The last delivery attempt: when (zero before the first), whether it
@@ -494,9 +511,10 @@ type Channel struct {
 }
 
 // ChannelEvents are the kinds of notification a channel can be limited to:
-// an outage opening, an outage ending, the reminders while it lasts, and
-// the certificate warnings.
-var ChannelEvents = []string{"down", "up", "reminder", "cert"}
+// an outage opening, an outage ending, the reminders while it lasts, the
+// certificate warnings, and a monitor turning slow and responding in time
+// again.
+var ChannelEvents = []string{"down", "up", "reminder", "cert", "slow", "slow_resolved"}
 
 // Covers reports whether notifications about the monitor go to the channel.
 func (c Channel) Covers(m Monitor) bool {
@@ -600,13 +618,36 @@ type StatusPage struct {
 	Slug        string
 	Title       string
 	Description string
-	// Announcement is a notice shown at the top of the page; empty for none.
+	// Announcement is a notice pinned at the top of the page; empty for none.
 	Announcement string
 	// Published says whether the page is served.
 	Published bool
-	// Monitors are shown in this order.
-	Monitors  []StatusPageMonitor
-	CreatedAt time.Time
+	// Sections are the named groups of the page, in order. A monitor or a
+	// rule names its section; one that names none is in the unnamed group
+	// shown before the sections.
+	Sections []StatusPageSection
+	// Monitors are shown in this order, each in its section.
+	Monitors []StatusPageMonitor
+	// Rules add the monitors they match (see StatusPageRule.Matches) after
+	// the explicit ones of their section, when the page is served.
+	Rules []StatusPageRule
+	// NoIndex asks search engines to stay away; HidePaused leaves paused
+	// monitors off the page; DetailPages lets a monitor be opened on a page
+	// of its own.
+	NoIndex     bool
+	HidePaused  bool
+	DetailPages bool
+	// Language is "" for the instance default, else "tr" or "en".
+	Language string
+	// PasswordHash is the bcrypt hash of the password visitors must give;
+	// empty for a page open to all.
+	PasswordHash string
+	CreatedAt    time.Time
+}
+
+// StatusPageSection is a named group of monitors on a status page.
+type StatusPageSection struct {
+	Name string
 }
 
 // StatusPageMonitor is one monitor on a status page.
@@ -615,6 +656,92 @@ type StatusPageMonitor struct {
 	// DisplayName is shown instead of the monitor's own name, which is
 	// often an internal one; empty shows the monitor's name.
 	DisplayName string
+	// Section is the name of the section the monitor is in; empty for the
+	// unnamed group at the top.
+	Section string
+}
+
+// StatusPageRule adds monitors to a status page by what they are instead
+// of by name: those of Namespace ("" for any) carrying Tag ("" for any).
+type StatusPageRule struct {
+	Namespace string
+	Tag       string
+	// Section is the name of the section the matched monitors go in; empty
+	// for the unnamed group at the top.
+	Section string
+}
+
+// Matches reports whether the rule adds the monitor to its page.
+func (r StatusPageRule) Matches(m Monitor) bool {
+	if r.Namespace != "" && r.Namespace != m.Namespace {
+		return false
+	}
+	return r.Tag == "" || slices.Contains(m.Tags, r.Tag)
+}
+
+// Shows reports whether the page shows the monitor: listed by name, or
+// matched by one of its rules.
+func (p StatusPage) Shows(m Monitor) bool {
+	for _, pm := range p.Monitors {
+		if pm.MonitorID == m.ID {
+			return true
+		}
+	}
+	for _, r := range p.Rules {
+		if r.Matches(m) {
+			return true
+		}
+	}
+	return false
+}
+
+// UpdateKind says what an update on a status page is: a step of an
+// incident's handling, a notice, or a maintenance announcement.
+type UpdateKind string
+
+const (
+	UpdateInvestigating UpdateKind = "investigating"
+	UpdateIdentified    UpdateKind = "identified"
+	UpdateMonitoring    UpdateKind = "monitoring"
+	UpdateResolved      UpdateKind = "resolved"
+	UpdateNotice        UpdateKind = "notice"
+	UpdateMaintenance   UpdateKind = "maintenance"
+)
+
+// UpdateKinds lists every kind an update can be written with. The view
+// also shows incident notes flagged for the page, as "note".
+var UpdateKinds = []UpdateKind{
+	UpdateInvestigating, UpdateIdentified, UpdateMonitoring, UpdateResolved, UpdateNotice, UpdateMaintenance,
+}
+
+// StatusPageUpdate is one entry of what a status page tells its visitors
+// over time.
+type StatusPageUpdate struct {
+	ID     int64
+	PageID int64
+	// IncidentID is the incident the update is about; zero for none, and
+	// once the incident is gone.
+	IncidentID int64
+	Kind       UpdateKind
+	Title      string
+	Body       string
+	CreatedAt  time.Time
+	// CreatedBy is the username of the writer, as it was.
+	CreatedBy string
+	UpdatedAt time.Time
+}
+
+// StatusPageNote is an incident note flagged for status pages, with the
+// monitor its incident is about, which says on which pages it is shown.
+type StatusPageNote struct {
+	IncidentNote
+	MonitorID int64
+}
+
+// UptimeCount is the checks of a monitor over one window of time.
+type UptimeCount struct {
+	Checks   int
+	UpChecks int
 }
 
 // Role is what a user may do. Admins do everything; editors change and
@@ -730,6 +857,10 @@ type Store interface {
 	UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error)
 	// DeleteMonitor removes the monitor and all of its check results.
 	DeleteMonitor(ctx context.Context, id int64) error
+	// SetMonitorSlowSince records since when the monitor has been slow, or
+	// with the zero time that it responds in time again. It returns
+	// ErrNotFound for an unknown id.
+	SetMonitorSlowSince(ctx context.Context, id int64, since time.Time) error
 
 	// GetMonitorByPushToken returns ErrNotFound for an unknown token.
 	GetMonitorByPushToken(ctx context.Context, token string) (Monitor, error)
@@ -803,6 +934,10 @@ type Store interface {
 	// and how long it is; of more than keep entries, the oldest half of
 	// keep (rounded up) and the newest half.
 	DeliveriesEnds(ctx context.Context, incidentID int64, keep int) ([]Delivery, int, error)
+	// DeliveryAt reports whether the log has an attempt, delivered or
+	// not, to tell the channel the event about the incident, and when the
+	// first of them ended.
+	DeliveryAt(ctx context.Context, incidentID, channelID int64, event string) (at time.Time, found bool, err error)
 	// DeleteDeliveriesBefore removes log entries older than cutoff and
 	// reports how many rows were deleted.
 	DeleteDeliveriesBefore(ctx context.Context, cutoff time.Time) (int64, error)
@@ -841,25 +976,43 @@ type Store interface {
 	ListChannels(ctx context.Context) ([]Channel, error)
 	DeleteChannel(ctx context.Context, id int64) error
 
-	// CreateStatusPage returns ErrConflict when the slug is taken.
+	// CreateStatusPage returns ErrConflict when the slug is taken. The
+	// sections a monitor or a rule names must be among the page's.
 	CreateStatusPage(ctx context.Context, p StatusPage) (StatusPage, error)
 	GetStatusPage(ctx context.Context, id int64) (StatusPage, error)
 	GetStatusPageBySlug(ctx context.Context, slug string) (StatusPage, error)
 	// ListStatusPages returns every page, by title.
 	ListStatusPages(ctx context.Context) ([]StatusPage, error)
 	// UpdateStatusPage changes everything about the page with p.ID,
-	// including which monitors it shows.
+	// including its sections, monitors and rules.
 	UpdateStatusPage(ctx context.Context, p StatusPage) (StatusPage, error)
 	DeleteStatusPage(ctx context.Context, id int64) error
 	// Report summarizes every monitor over [from, to); monitors without
 	// checks in the period are included with zero counts.
 	Report(ctx context.Context, from, to time.Time) ([]MonitorReport, error)
-	// StatusPageDailyUptime summarizes the checks of the page's monitors per
-	// UTC day in [from, to), keyed by monitor; days without checks are left
-	// out. Only Start, Checks and UpChecks of the points are set.
-	StatusPageDailyUptime(ctx context.Context, pageID int64, from, to time.Time) (map[int64][]SeriesPoint, error)
-	// MonitorIsPublic reports whether a published status page shows the monitor.
-	MonitorIsPublic(ctx context.Context, monitorID int64) (bool, error)
+	// DailyUptime summarizes the checks of the given monitors per UTC day in
+	// [from, to), keyed by monitor; days without checks are left out. Only
+	// Start, Checks and UpChecks of the points are set.
+	DailyUptime(ctx context.Context, monitorIDs []int64, from, to time.Time) (map[int64][]SeriesPoint, error)
+	// UptimeWindows counts the checks of the given monitors over each
+	// window ending at now, from the hourly summaries (a window starts on
+	// the hour at or before its start), keyed by monitor; the counts are in
+	// the order of the windows. Monitors without any check are left out.
+	UptimeWindows(ctx context.Context, monitorIDs []int64, now time.Time, windows []time.Duration) (map[int64][]UptimeCount, error)
+
+	// CreateStatusPageUpdate returns ErrNotFound when the page is gone.
+	CreateStatusPageUpdate(ctx context.Context, u StatusPageUpdate) (StatusPageUpdate, error)
+	GetStatusPageUpdate(ctx context.Context, id int64) (StatusPageUpdate, error)
+	// ListStatusPageUpdates returns up to limit updates of a page, newest first.
+	ListStatusPageUpdates(ctx context.Context, pageID int64, limit int) ([]StatusPageUpdate, error)
+	// UpdateStatusPageUpdate changes the kind, title, body and incident of
+	// the update with u.ID, and marks it updated now.
+	UpdateStatusPageUpdate(ctx context.Context, u StatusPageUpdate) (StatusPageUpdate, error)
+	DeleteStatusPageUpdate(ctx context.Context, id int64) error
+	// ListStatusPageNotes returns up to limit incident notes flagged for
+	// status pages whose incidents are about the given monitors, newest
+	// first.
+	ListStatusPageNotes(ctx context.Context, monitorIDs []int64, limit int) ([]StatusPageNote, error)
 
 	// CreateUser returns ErrConflict when the username is taken (whatever
 	// its case).

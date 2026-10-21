@@ -27,6 +27,9 @@ const (
 
 	EventCertExpiring Event = "cert_expiring" // a certificate is about to expire
 	EventCertRenewed  Event = "cert_renewed"  // it was replaced in time
+
+	EventSlow         Event = "slow"          // a monitor answers, but slower than its threshold
+	EventSlowResolved Event = "slow_resolved" // it answers in time again
 )
 
 // Notification is one message to deliver to every enabled channel.
@@ -56,18 +59,29 @@ type Notification struct {
 	// Monitor and Incident are then those of the first. Empty for a
 	// notification about one monitor.
 	Group []Notification
+	// For the slow-response events, which are about no incident: Since is
+	// when the monitor turned slow, Threshold its limit, and Latency the
+	// response time of the check that turned it slow or fast again.
+	Since              time.Time
+	Threshold, Latency time.Duration
 }
 
 // Kind is the channel-facing class of an event (store.ChannelEvents): the
 // two certificate events are one kind, a test is none.
 func (e Event) Kind() string {
 	switch e {
-	case EventDown, EventUp, EventReminder:
+	case EventDown, EventUp, EventReminder, EventSlow, EventSlowResolved:
 		return string(e)
 	case EventCertExpiring, EventCertRenewed:
 		return "cert"
 	}
 	return ""
+}
+
+// Outage reports whether the event is about an outage: the events a
+// channel's delay and repeat interval apply to.
+func (e Event) Outage() bool {
+	return e == EventDown || e == EventUp || e == EventReminder
 }
 
 // machine says whether a channel type is read by software rather than by
@@ -89,6 +103,15 @@ type Store interface {
 	RecordChannelDelivery(ctx context.Context, id int64, at time.Time, deliveryError string) error
 	RecordDeliveries(ctx context.Context, deliveries []store.Delivery) error
 	InMaintenance(ctx context.Context, m store.Monitor, at time.Time) (bool, error)
+	// FilterIncidents lists the outages open now, for what channels with
+	// a delay or a repeat interval are still owed about them after a
+	// restart.
+	FilterIncidents(ctx context.Context, f store.IncidentFilter) ([]store.Incident, error)
+	// DeliveryAt says whether the channel was told the event about the
+	// incident before a restart, and when: whether the log has an attempt,
+	// delivered or not, and when the first ended.
+	DeliveryAt(ctx context.Context, incidentID, channelID int64, event string) (at time.Time, found bool, err error)
+	SetMonitorSlowSince(ctx context.Context, id int64, since time.Time) error
 }
 
 // Sender delivers one notification to one channel.
@@ -138,11 +161,16 @@ type Engine struct {
 	sender Sender
 	opts   Options
 	queue  chan Notification
+	// owed is what the channels with a delay or a repeat interval are
+	// still owed about the open outages; only Run's goroutine touches it.
+	owed *schedule
+	// now is the clock of the delivery loop; tests set their own.
+	now func() time.Time
 }
 
 // New returns an Engine. Run must be started for notifications to be sent.
 func New(st Store, sender Sender, opts Options) *Engine {
-	return &Engine{store: st, sender: sender, opts: opts, queue: make(chan Notification, opts.QueueSize)}
+	return &Engine{store: st, sender: sender, opts: opts, queue: make(chan Notification, opts.QueueSize), owed: newSchedule(), now: time.Now}
 }
 
 // Evaluate updates incidents for the monitors in results, which must already
@@ -188,9 +216,9 @@ func (e *Engine) evaluate(ctx context.Context, monitorID int64, at time.Time) er
 		return err
 	}
 
-	// The two kinds are independent: a failing evaluation of one must not
-	// hide the other.
-	return errors.Join(e.evaluateDown(ctx, m, at, quiet), e.evaluateCert(ctx, m, quiet))
+	// The three are independent: a failing evaluation of one must not hide
+	// the others.
+	return errors.Join(e.evaluateDown(ctx, m, at, quiet), e.evaluateCert(ctx, m, quiet), e.evaluateSlow(ctx, m, quiet))
 }
 
 func (e *Engine) evaluateDown(ctx context.Context, m store.Monitor, at time.Time, quiet bool) error {
@@ -426,23 +454,28 @@ func takeDue(groups map[groupKey]*pendingGroup, now time.Time, everything bool) 
 // Run delivers queued notifications until ctx is cancelled, then delivers
 // what is still queued (without retries) and returns. With GroupWait set,
 // notifications are held for that long and delivered together with the
-// others of their group.
+// others of their group. What channels with a delay or a repeat interval
+// are owed (see schedule) is delivered when it falls due; at shutdown what
+// is due by then goes, and the rest is worked out again from the open
+// outages at the next start.
 func (e *Engine) Run(ctx context.Context) {
 	groups := make(map[groupKey]*pendingGroup)
 	started := 0
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
-	// rearm sets the timer for the group due first.
+	// rearm sets the timer for whatever is due first: a group, or what a
+	// channel is owed. Since Go 1.23 a stopped timer is reset without
+	// draining its channel.
 	rearm := func() {
 		timer.Stop()
-		var next time.Time
+		next := e.owed.next()
 		for _, g := range groups {
 			if next.IsZero() || g.due.Before(next) {
 				next = g.due
 			}
 		}
 		if !next.IsZero() {
-			timer.Reset(max(time.Until(next), 0))
+			timer.Reset(max(next.Sub(e.now()), 0))
 		}
 	}
 	add := func(n Notification) {
@@ -458,18 +491,26 @@ func (e *Engine) Run(ctx context.Context) {
 		g, ok := groups[key]
 		if !ok {
 			started++
-			g = &pendingGroup{event: n.Event, due: time.Now().Add(e.opts.GroupWait), seq: started}
+			g = &pendingGroup{event: n.Event, due: e.now().Add(e.opts.GroupWait), seq: started}
 			groups[key] = g
 		}
 		g.notes = append(g.notes, n)
 	}
 	flush := func(everything bool) {
-		for _, g := range takeDue(groups, time.Now(), everything) {
-			e.deliverGroup(ctx, g.event, g.notes)
+		for _, g := range takeDue(groups, e.now(), everything) {
+			e.deliverGroup(ctx, g.event, g.notes, func(ch store.Channel) bool { return !machine(ch.Type) })
 		}
+		e.deliverOwed(ctx)
 	}
 
-	for {
+	// What the open outages owe the channels is due from the start: the
+	// timer is set for it before anything passes through the queue.
+	e.restore(ctx)
+	rearm()
+	// The loop ends as soon as ctx is done, before a timer that is due at
+	// the same moment: the queue is then drained first, and what is owed
+	// goes after it.
+	for ctx.Err() == nil {
 		select {
 		case n := <-e.queue:
 			add(n)
@@ -478,27 +519,29 @@ func (e *Engine) Run(ctx context.Context) {
 			flush(false)
 			rearm()
 		case <-ctx.Done():
-			timer.Stop()
-			for {
-				select {
-				case n := <-e.queue:
-					add(n)
-				default:
-					// Shutting down: what is waiting goes now.
-					flush(true)
-					return
-				}
-			}
+		}
+	}
+	timer.Stop()
+	for {
+		select {
+		case n := <-e.queue:
+			add(n)
+		default:
+			// Shutting down: what is waiting goes now.
+			flush(true)
+			return
 		}
 	}
 }
 
-// deliverGroup sends the notifications of one group to the channels
-// people read, as one message where more than one is for that channel.
-// The machine channels got each notification when it arose.
-func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notification) {
+// deliverGroup sends the notifications of one group to the channels that
+// include accepts, as one message where more than one is for that channel.
+// With GroupWait those are the channels people read; the machine channels
+// got each notification when it arose.
+func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notification, include func(store.Channel) bool) {
 	if len(notes) == 1 {
-		e.deliverTo(ctx, notes[0], func(ch store.Channel) bool { return !machine(ch.Type) })
+		e.deliverTo(ctx, notes[0], include)
+		e.outagesOver(notes)
 		return
 	}
 	channels, err := e.store.ListChannels(context.WithoutCancel(ctx))
@@ -506,30 +549,57 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 		e.opts.Logger.Error("list channels failed, notifications lost", "event", event, "count", len(notes), "error", err)
 		return
 	}
+	now := e.now()
 	for _, ch := range channels {
-		if !ch.Enabled || machine(ch.Type) || !ch.Wants(event.Kind()) {
+		if !ch.Enabled || (include != nil && !include(ch)) {
 			continue
 		}
+		// route notes what the channel is owed even about an event it
+		// does not want, so that its own reminders can follow.
 		var mine []Notification
 		for _, n := range notes {
-			if ch.Covers(n.Monitor) {
+			if ch.Covers(n.Monitor) && e.route(ch, n, now) && ch.Wants(event.Kind()) {
 				mine = append(mine, n)
 			}
 		}
-		switch {
-		case len(mine) == 0:
-		case len(mine) == 1:
-			e.send(ctx, ch, mine[0])
-		default:
-			first := mine[0]
-			e.send(ctx, ch, Notification{Event: event, Monitor: first.Monitor, Incident: first.Incident, CertExpiresAt: first.CertExpiresAt,
-				At: first.At, Language: first.Language, PublicURL: first.PublicURL, Group: mine})
+		e.sendGrouped(ctx, ch, event, mine)
+	}
+	e.outagesOver(notes)
+}
+
+// outagesOver forgets what the channels were owed about the outages that
+// the notifications end, once every channel has had its chance to hear
+// of the end: those that route did not reach (disabled, narrowed or
+// deleted meanwhile) must not stay owed anything about an outage that is
+// over.
+func (e *Engine) outagesOver(notes []Notification) {
+	for _, n := range notes {
+		if n.Event == EventUp {
+			e.owed.forgetOutage(n.Monitor.ID, n.Incident.ID)
 		}
 	}
 }
 
+// sendGrouped sends what a channel gets of a group: nothing, the one
+// notification, or the lot as one message.
+func (e *Engine) sendGrouped(ctx context.Context, ch store.Channel, event Event, mine []Notification) {
+	switch {
+	case len(mine) == 0:
+	case len(mine) == 1:
+		e.send(ctx, ch, mine[0])
+	default:
+		first := mine[0]
+		e.send(ctx, ch, Notification{Event: event, Monitor: first.Monitor, Incident: first.Incident, CertExpiresAt: first.CertExpiresAt,
+			At: first.At, Language: first.Language, PublicURL: first.PublicURL, Group: mine})
+	}
+}
+
 // deliverTo sends one notification to every enabled channel whose scope
-// covers it and that include accepts; nil includes them all.
+// covers it and that include accepts; nil includes them all. A channel
+// whose delay or repeat interval says otherwise hears of it later (route).
+// With no filter it is the notification's only pass through the channels,
+// and the end of an outage is forgotten after it (outagesOver); with one,
+// the pass through the channels people read (deliverGroup) is the last.
 func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(store.Channel) bool) {
 	// Reads and sends must still work while shutting down.
 	channels, err := e.store.ListChannels(context.WithoutCancel(ctx))
@@ -537,11 +607,19 @@ func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(sto
 		e.opts.Logger.Error("list channels failed, notification lost", "event", n.Event, "monitor", n.Monitor.Name, "error", err)
 		return
 	}
+	now := e.now()
 	for _, ch := range channels {
-		if !ch.Enabled || !ch.Covers(n.Monitor) || !ch.Wants(n.Event.Kind()) || (include != nil && !include(ch)) {
+		if !ch.Enabled || !ch.Covers(n.Monitor) || (include != nil && !include(ch)) {
 			continue
 		}
-		e.send(ctx, ch, n)
+		// route notes what the channel is owed even about an event it
+		// does not want, so that its own reminders can follow.
+		if e.route(ch, n, now) && ch.Wants(n.Event.Kind()) {
+			e.send(ctx, ch, n)
+		}
+	}
+	if include == nil {
+		e.outagesOver([]Notification{n})
 	}
 }
 
@@ -555,7 +633,8 @@ func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
 	if err != nil {
 		deliveryError = err.Error()
 	}
-	now := time.Now().UTC()
+	// The loop's clock, which restore reads the log against.
+	now := e.now().UTC()
 	if recordErr := e.store.RecordChannelDelivery(context.WithoutCancel(ctx), ch.ID, now, deliveryError); recordErr != nil {
 		e.opts.Logger.Error("channel delivery not recorded", "channel", ch.Name, "error", recordErr)
 	}

@@ -31,7 +31,7 @@ function earliest(moments: (string | null | undefined)[]): string | null {
  * window), idle (paused, new).
  */
 export function stateReadouts(counts: StateCounts, monitors: Monitor[], windows: Maintenance[], t: T, asOf: number): Readout[] {
-  const degraded = counts.verifying + counts.recovering;
+  const degraded = counts.verifying + counts.recovering + counts.degraded;
   const idle = counts.paused + counts.pending;
   const downSince = earliest(monitors.filter((m) => displayState(m) === "down").map((m) => m.open_incident?.started_at));
   const maintenanceEnds = earliest(monitors.filter((m) => displayState(m) === "maintenance").map((m) => m.maintenance_until));
@@ -67,6 +67,7 @@ export function stateReadouts(counts: StateCounts, monitors: Monitor[], windows:
           ? parts([
               [counts.verifying, "monitorsList.readouts.verifying"],
               [counts.recovering, "monitorsList.readouts.recovering"],
+              [counts.degraded, "monitorsList.readouts.slow"],
             ])
           : t("monitorsList.readouts.noneFailing"),
     },

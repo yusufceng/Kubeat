@@ -18,7 +18,7 @@ import { Chevron, groupCount, HealthBar, HoverCard, Row } from "@/app/ui/monitor
 import { type ListFilter, useListFilter } from "@/app/ui/shell-state";
 import type { DisplayState } from "@/app/ui/status";
 
-const degradedStates: DisplayState[] = ["verifying", "recovering"];
+const degradedStates: DisplayState[] = ["verifying", "recovering", "degraded"];
 const idleStates: DisplayState[] = ["paused", "pending", "maintenance"];
 
 /** How long the pointer rests on a row before its card shows (the design's 400ms). */

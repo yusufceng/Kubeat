@@ -66,6 +66,7 @@ export function LatencyChart({
   selection,
   incidents,
   maintenance = [],
+  readOnly = false,
 }: {
   series: Series;
   /** The page's address with its query; a timeframe's from and to are added to it. */
@@ -76,6 +77,8 @@ export function LatencyChart({
   incidents: Span[];
   /** The maintenance that covered the monitor, drawn hatched. */
   maintenance?: { from: number; to: number }[];
+  /** Hover and read only: no span to mark, nothing to zoom into (a public status page). */
+  readOnly?: boolean;
 }) {
   const t = useT();
   const router = useRouter();
@@ -266,12 +269,12 @@ export function LatencyChart({
         ref={wrapper}
         className={`relative select-none rounded-sm outline-offset-4 ${intro ? "mon-intro" : ""}`}
         // Horizontal drags select; vertical ones still scroll the page.
-        style={{ height: HEIGHT, touchAction: "pan-y", cursor: overEdge || gesture?.kind === "edge" ? "ew-resize" : "crosshair" }}
+        style={{ height: HEIGHT, touchAction: "pan-y", cursor: readOnly ? "default" : overEdge || gesture?.kind === "edge" ? "ew-resize" : "crosshair" }}
         tabIndex={0}
         role="group"
         aria-label={t("monitorPage.chart.aria")}
         onPointerDown={(e) => {
-          if (e.button !== 0 || !geometry || gesture) return;
+          if (readOnly || e.button !== 0 || !geometry || gesture) return;
           // The toolbar's buttons are not part of the plot.
           if ((e.target as HTMLElement).closest("[data-selection-toolbar]")) return;
           // No native text selection while dragging; keep keyboard focus,
@@ -332,7 +335,7 @@ export function LatencyChart({
             setActive((i) =>
               Math.min(Math.max((i ?? (delta > 0 ? -1 : points.length)) + delta, 0), points.length - 1),
             );
-          } else if ((e.key === "Enter" || e.key === " ") && geometry && (draft || active !== null)) {
+          } else if (!readOnly && (e.key === "Enter" || e.key === " ") && geometry && (draft || active !== null)) {
             e.preventDefault();
             // Enter marks the point in hand; once something is marked it zooms in.
             if (draft) zoom(draft);
@@ -678,7 +681,7 @@ export function LatencyChart({
             {t("monitorPage.chart.band.maintenance")}
           </span>
         )}
-        <HelpTip label={t("monitorPage.chart.help")}>{t("monitorPage.chart.selectHint")}</HelpTip>
+        {!readOnly && <HelpTip label={t("monitorPage.chart.help")}>{t("monitorPage.chart.selectHint")}</HelpTip>}
       </figcaption>
 
       <details className="mon-more mt-3 px-0 pb-0">

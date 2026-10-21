@@ -116,6 +116,10 @@ export const config = {
   refreshIntervalMs: positiveInt(process.env.REFRESH_INTERVAL_MS, 5000),
   /** How often an open status page reloads; visitors are many, so slower. */
   statusPageRefreshMs: positiveInt(process.env.STATUS_PAGE_REFRESH_MS, 30000),
+  /** Above this many services a status page draws each one on a single line. */
+  statusPageCompactAbove: positiveInt(process.env.STATUS_PAGE_COMPACT_ABOVE, 12),
+  /** Number of a status page's updates its editor lists. */
+  statusPageUpdatesLimit: positiveInt(process.env.STATUS_PAGE_UPDATES_LIMIT, 50),
   /** Number of recent checks drawn in a monitor's heartbeat bar. */
   historyLimit: positiveInt(process.env.HISTORY_LIMIT, 60),
   /** Number of recent checks drawn next to each monitor in the list. */
@@ -160,6 +164,8 @@ export const config = {
     interval: positiveInt(process.env.NEW_MONITOR_INTERVAL_SECONDS, 60),
     timeout: positiveInt(process.env.NEW_MONITOR_TIMEOUT_SECONDS, 10),
     failureThreshold: positiveInt(process.env.NEW_MONITOR_FAILURE_THRESHOLD, 3),
+    /** The slow response threshold, in milliseconds; 0 leaves it off. */
+    slowAboveMs: nonNegativeInt(process.env.NEW_MONITOR_SLOW_ABOVE_MS, 0),
   },
   /** Number of recent checks listed on a monitor's page. */
   resultsLimit: positiveInt(process.env.RESULTS_LIMIT, 30),

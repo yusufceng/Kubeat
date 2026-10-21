@@ -45,6 +45,15 @@ export const monitorForm = defineMessages(
     "monitorForm.timing.retryInterval": "Tekrar aralığı",
     "monitorForm.timing.retryInterval.hint":
       "Hata sonrası, kesinti kesinleşene kadar kontrolün ne kadar sonra tekrarlanacağı. 0: normal aralık.",
+    "monitorForm.timing.slowAbove": "Yavaş yanıt eşiği",
+    "monitorForm.timing.slowAbove.off": "Kapalı: yanıt ne kadar sürerse sürsün yavaşlık bildirilmez.",
+    "monitorForm.timing.slowAbove.hint.one":
+      "Tek bir kontrol {ms} ms'den uzun sürerse monitor Sorunlu görünür ve yavaşlama bildirimi gider; olay açılmaz.",
+    "monitorForm.timing.slowAbove.hint.other":
+      "Art arda {count} kontrol {ms} ms'den uzun sürerse monitor Sorunlu görünür ve yavaşlama bildirimi gider; olay açılmaz.",
+    "monitorForm.timing.slowAbove.aboveTimeout":
+      "Zaman aşımından ({timeout}) kısa olmalı: ondan uzun süren kontrol zaten başarısızdır.",
+    "monitorForm.timing.slowAbove.invalid": "Milisaniye olarak, 0 ya da daha büyük bir tam sayı girin.",
     "monitorForm.unit.seconds": "sn",
     "monitorForm.unit.checks": "kontrol",
     "monitorForm.echo.check": "{interval} arayla kontrol edilir; yanıt {timeout} içinde gelmezse kontrol başarısız sayılır.",
@@ -217,6 +226,15 @@ export const monitorForm = defineMessages(
     "monitorForm.timing.retryInterval": "Retry interval",
     "monitorForm.timing.retryInterval.hint":
       "After a failure, how soon the check is repeated until the outage is confirmed. 0: the normal interval.",
+    "monitorForm.timing.slowAbove": "Slow response threshold",
+    "monitorForm.timing.slowAbove.off": "Off: however long a response takes, no slowness is reported.",
+    "monitorForm.timing.slowAbove.hint.one":
+      "A single check longer than {ms} ms shows the monitor as Degraded and sends a slow-response notification; no incident is opened.",
+    "monitorForm.timing.slowAbove.hint.other":
+      "{count} checks in a row longer than {ms} ms show the monitor as Degraded and send a slow-response notification; no incident is opened.",
+    "monitorForm.timing.slowAbove.aboveTimeout":
+      "Must be below the timeout ({timeout}): a check that takes longer has already failed.",
+    "monitorForm.timing.slowAbove.invalid": "Enter whole milliseconds, 0 or more.",
     "monitorForm.unit.seconds": "s",
     "monitorForm.unit.checks": "checks",
     "monitorForm.echo.check": "Checked every {interval}; a check fails when no answer comes within {timeout}.",

@@ -192,6 +192,22 @@ func TestDeliveryLog(t *testing.T) {
 		t.Errorf("ends = %v of %d, %v", minutes, total, err)
 	}
 
+	// Whether a channel was told an event about an incident, and when the
+	// first attempt was: a failed attempt counts, another channel's or
+	// event's does not.
+	for key, want := range map[struct {
+		incident, channel int64
+		event             string
+	}]time.Time{
+		{incident.ID, 5, "down"}: base, {other.ID, 1, "down"}: later,
+		{incident.ID, 1, "down"}: {}, {incident.ID, 5, "up"}: {}, {12345, 5, "down"}: {},
+	} {
+		at, found, err := s.DeliveryAt(ctx, key.incident, key.channel, key.event)
+		if err != nil || found != !want.IsZero() || !at.Equal(want) {
+			t.Errorf("DeliveryAt(%+v) = %v, %v, %v; want %v", key, at, found, err, want)
+		}
+	}
+
 	// Retention deletes by age; deleting the monitor deletes the rest.
 	if n, err := s.DeleteDeliveriesBefore(ctx, base.Add(3*time.Minute)); err != nil || n != 3 {
 		t.Errorf("deleted %d, %v; want the 3 older entries", n, err)

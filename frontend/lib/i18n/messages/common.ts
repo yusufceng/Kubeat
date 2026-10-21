@@ -14,6 +14,13 @@ export const common = defineMessages(
     "format.span.d": "{count} gün",
     "format.justNow": "şimdi",
 
+    // app/ui/duration-field.tsx: a count beside its unit.
+    "duration.unit.s": "saniye",
+    "duration.unit.m": "dakika",
+    "duration.unit.h": "saat",
+    "duration.unit.d": "gün",
+    "duration.unitOf": "{label}: birim",
+
     // Tables.
     "table.actions": "İşlemler",
 
@@ -50,6 +57,12 @@ export const common = defineMessages(
     "format.span.h": "{count}h",
     "format.span.d": "{count}d",
     "format.justNow": "just now",
+
+    "duration.unit.s": "seconds",
+    "duration.unit.m": "minutes",
+    "duration.unit.h": "hours",
+    "duration.unit.d": "days",
+    "duration.unitOf": "{label}: unit",
 
     "table.actions": "Actions",
 

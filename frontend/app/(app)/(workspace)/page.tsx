@@ -31,7 +31,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const t = await getT();
   try {
     const c = countStates(await workspaceMonitors());
-    const degraded = c.verifying + c.recovering;
+    const degraded = c.verifying + c.recovering + c.degraded;
     if (c.down > 0) return { title: t.n("monitorsList.hero.down", c.down) };
     if (degraded > 0) return { title: t.n("monitorsList.hero.degraded", degraded) };
   } catch {

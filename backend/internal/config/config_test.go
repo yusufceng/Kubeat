@@ -53,6 +53,10 @@ func TestLoadDefaults(t *testing.T) {
 
 		StatusPageDays:           90,
 		StatusPageIncidentWindow: 14 * 24 * time.Hour,
+		StatusPageUpdates:        20,
+		StatusPageUpcoming:       7 * 24 * time.Hour,
+		StatusPageSession:        12 * time.Hour,
+		StatusPageSeries:         24 * time.Hour,
 
 		DefaultFailureThreshold: 3,
 		RecoveryThreshold:       1,

@@ -5,7 +5,7 @@ import { config } from "@/lib/config";
 import { getT, titled } from "@/lib/i18n/server";
 import { BackendError } from "@/app/ui/backend-error";
 import { EmptyState } from "@/app/ui/empty-state";
-import { EditIcon, PlusIcon, TrashIcon } from "@/app/ui/icons";
+import { BellIcon, EditIcon, PlusIcon, TrashIcon } from "@/app/ui/icons";
 import { LockIcon, LogIcon, SignInIcon, WarningIcon } from "@/app/ui/page-icons";
 import { PageHead } from "@/app/ui/page-head";
 import { TableTime } from "@/app/ui/table-time";
@@ -21,6 +21,7 @@ const actionLabels: Record<string, string> = {
   login_denied: "audit.action.loginDenied",
   setup: "audit.action.setup",
   password_change: "audit.action.passwordChange",
+  test: "audit.action.test",
 };
 
 const objectLabels: Record<string, string> = {
@@ -28,6 +29,7 @@ const objectLabels: Record<string, string> = {
   channel: "audit.object.channel",
   maintenance: "audit.object.maintenance",
   status_page: "audit.object.statusPage",
+  status_page_update: "audit.object.statusPageUpdate",
   user: "audit.object.user",
   ldap_group: "audit.object.ldapGroup",
   incident_note: "audit.object.incidentNote",
@@ -120,6 +122,7 @@ const actionLooks: Record<string, { icon: React.ReactNode; tone?: string }> = {
   login_denied: { icon: <WarningIcon />, tone: "pg-audit-down" },
   setup: { icon: <PlusIcon /> },
   password_change: { icon: <LockIcon /> },
+  test: { icon: <BellIcon /> },
 };
 
 export const generateMetadata = titled("nav.audit");

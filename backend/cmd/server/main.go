@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -325,6 +327,11 @@ func main() {
 
 			StatusPageDays:           cfg.StatusPageDays,
 			StatusPageIncidentWindow: cfg.StatusPageIncidentWindow,
+			StatusPageUpdates:        cfg.StatusPageUpdates,
+			StatusPageUpcoming:       cfg.StatusPageUpcoming,
+			StatusPageSeries:         cfg.StatusPageSeries,
+			StatusPageSession:        cfg.StatusPageSession,
+			StatusPageTokenKey:       statusPageTokenKey(cfg.SecretKey, logger),
 			Token:                    cfg.APIToken,
 			SessionTTL:               cfg.SessionTTL,
 			Throttle:                 throttle,
@@ -664,6 +671,25 @@ func runSessionCleanup(ctx context.Context, db *store.SQLite, auditRetention tim
 		case <-ticker.C:
 		}
 	}
+}
+
+// statusPageTokenKey is the key that signs the tokens of visitors who gave
+// a protected status page's password: derived from the instance's secret
+// key, so that the tokens outlive a restart, and never the key itself.
+// Without a secret key (UPTIME_ALLOW_PLAINTEXT_SECRETS) a key is drawn for
+// this run, and a restart asks the visitors for the password again.
+func statusPageTokenKey(secretKey string, logger *slog.Logger) []byte {
+	if secretKey != "" {
+		sum := sha256.Sum256([]byte("kubeat status page tokens\x00" + secretKey))
+		return sum[:]
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		logger.Error("no key for the status page tokens could be drawn", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("UPTIME_SECRET_KEY is not set: the tokens of password-protected status pages are signed with a key of this run, and a restart asks their visitors for the password again")
+	return key
 }
 
 // sweepThrottle forgets, every lockout period, the sign-in names whose

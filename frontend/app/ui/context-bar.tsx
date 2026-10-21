@@ -62,7 +62,7 @@ async function FleetPulse() {
   }
   if (monitors.length === 0) return null;
   const c = countStates(monitors);
-  return <PulsePill up={c.up} down={c.down} degraded={c.verifying + c.recovering} />;
+  return <PulsePill up={c.up} down={c.down} degraded={c.verifying + c.recovering + c.degraded} />;
 }
 
 async function NewMonitorButton() {

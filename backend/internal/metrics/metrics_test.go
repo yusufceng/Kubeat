@@ -112,6 +112,9 @@ func TestPerMonitorMetrics(t *testing.T) {
 	if _, err := db.OpenIncident(ctx, store.Incident{MonitorID: db2.ID, StartedAt: checked, Cause: "refused"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.SetMonitorSlowSince(ctx, api.ID, checked); err != nil {
+		t.Fatal(err)
+	}
 
 	m := New("test")
 	m.WatchMonitors(db, 5*time.Second, discard)
@@ -130,8 +133,10 @@ func TestPerMonitorMetrics(t *testing.T) {
 		"kubeat_monitor_last_check_timestamp_seconds" + apiLabels:                   1_800_000_000,
 		"kubeat_monitor_cert_expiry_timestamp_seconds" + apiLabels:                  float64(expiry.Unix()),
 		"kubeat_monitor_incident_open" + apiLabels:                                  0,
+		"kubeat_monitor_slow" + apiLabels:                                           1,
 		"kubeat_monitor_up" + dbLabels:                                              0,
 		"kubeat_monitor_incident_open" + dbLabels:                                   1,
+		"kubeat_monitor_slow" + dbLabels:                                            0,
 		"kubeat_monitor_incident_open{monitor=fresh}{monitor_namespace=}{type=tcp}": 0,
 	}
 	for key, value := range want {

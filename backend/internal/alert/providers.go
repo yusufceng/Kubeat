@@ -214,6 +214,13 @@ func (s *PagerDutySender) Send(ctx context.Context, ch store.Channel, n Notifica
 	switch n.Event {
 	case EventUp, EventCertRenewed:
 		event.EventAction = "resolve"
+	case EventSlow, EventSlowResolved:
+		// A slow monitor is one alert there, about no incident here: the
+		// recovery closes what the slowness opened.
+		event.DedupKey = fmt.Sprintf("kubeat-slow-%d", n.Monitor.ID)
+		if n.Event == EventSlowResolved {
+			event.EventAction = "resolve"
+		}
 	case EventTest:
 		// A test must not page anyone: it is raised as information and
 		// resolved by the second request below.
@@ -249,7 +256,7 @@ func (s *PagerDutySender) Send(ctx context.Context, ch store.Channel, n Notifica
 
 func pagerDutySeverity(e Event) string {
 	switch e {
-	case EventCertExpiring:
+	case EventCertExpiring, EventSlow:
 		return "warning"
 	case EventTest:
 		return "info"
@@ -323,7 +330,9 @@ func (s *NtfySender) Send(ctx context.Context, ch store.Channel, n Notification)
 		message["priority"], message["tags"] = 5, []string{"rotating_light"}
 	case EventCertExpiring:
 		message["priority"], message["tags"] = 4, []string{"warning"}
-	case EventUp, EventCertRenewed:
+	case EventSlow:
+		message["priority"], message["tags"] = 4, []string{"snail"}
+	case EventUp, EventCertRenewed, EventSlowResolved:
 		message["tags"] = []string{"white_check_mark"}
 	}
 	var headers map[string]string

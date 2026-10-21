@@ -24,15 +24,21 @@ type phrases struct {
 	certToday   string
 	certDays    string // days
 	test        string
+	testMonitor string // name, target
+	// slow: name, target, threshold count, threshold, latency;
+	// slowResolved: name, target, latency, how long it was slow
+	slow, slowResolved string
 
 	// a group: where ("shop: " or empty), count, list
-	groupDown, groupUp, groupReminder, groupCertExpires, groupCertRenewed string
-	groupMore                                                             string // how many more
+	groupDown, groupUp, groupReminder, groupCertExpires, groupCertRenewed, groupSlow, groupSlowResolved string
+	groupMore                                                                                           string // how many more
 
-	subjectDown, subjectUp, subjectReminder, subjectCertExpires, subjectCertRenewed, subjectTest             string // name
-	subjectGroupDown, subjectGroupUp, subjectGroupReminder, subjectGroupCertExpires, subjectGroupCertRenewed string // where, count
+	subjectDown, subjectUp, subjectReminder, subjectCertExpires, subjectCertRenewed, subjectTest, subjectTestMonitor string // name
+	subjectSlow, subjectSlowResolved                                                                                 string // name
+	subjectGroupDown, subjectGroupUp, subjectGroupReminder, subjectGroupCertExpires, subjectGroupCertRenewed         string // where, count
+	subjectGroupSlow, subjectGroupSlowResolved                                                                       string // where, count
 
-	factMonitor, factTarget, factNamespace, factStart, factEnd, factCause string
+	factMonitor, factTarget, factNamespace, factStart, factEnd, factCause, factThreshold, factLatency string
 
 	// the unit words of a duration: day, hour, minute, second
 	unitDay, unitHour, unitMin, unitSec string
@@ -44,62 +50,78 @@ type phrases struct {
 
 var languages = map[string]phrases{
 	LanguageEnglish: {
-		down:        "🔴 %s is down%s. %d checks in a row failed. Last error: %s",
-		up:          "🟢 %s is back up%s. Outage: %s",
-		reminder:    "🔴 %s is still down%s. Outage so far: %s. Last error: %s",
-		certExpires: "🟡 The certificate of %s %s (%s)%s",
-		certRenewed: "🟢 The certificate of %s was renewed; it now expires on %s%s",
-		certExpired: "has already expired",
-		certToday:   "expires within 24 hours",
-		certDays:    "expires in %d days",
-		test:        "Kubeat test notification: this channel works.",
+		down:         "🔴 %s is down%s. %d checks in a row failed. Last error: %s",
+		up:           "🟢 %s is back up%s. Outage: %s",
+		reminder:     "🔴 %s is still down%s. Outage so far: %s. Last error: %s",
+		certExpires:  "🟡 The certificate of %s %s (%s)%s",
+		certRenewed:  "🟢 The certificate of %s was renewed; it now expires on %s%s",
+		certExpired:  "has already expired",
+		certToday:    "expires within 24 hours",
+		certDays:     "expires in %d days",
+		test:         "Kubeat test notification: this channel works.",
+		testMonitor:  "Kubeat test notification: the alarms of %s%s reach this channel.",
+		slow:         "🟠 %s is slow%s. %d checks in a row took longer than %s; the last one took %s",
+		slowResolved: "🟢 %s responds in time again%s: %s. It was slow for %s",
 
-		groupDown:        "🔴 %s%d monitors are down: %s",
-		groupUp:          "🟢 %s%d monitors are back up: %s",
-		groupReminder:    "🔴 %s%d monitors are still down: %s",
-		groupCertExpires: "🟡 %s%d certificates are expiring: %s",
-		groupCertRenewed: "🟢 %s%d certificates were renewed: %s",
-		groupMore:        "and %d more",
+		groupDown:         "🔴 %s%d monitors are down: %s",
+		groupUp:           "🟢 %s%d monitors are back up: %s",
+		groupReminder:     "🔴 %s%d monitors are still down: %s",
+		groupCertExpires:  "🟡 %s%d certificates are expiring: %s",
+		groupCertRenewed:  "🟢 %s%d certificates were renewed: %s",
+		groupSlow:         "🟠 %s%d monitors are slow: %s",
+		groupSlowResolved: "🟢 %s%d monitors respond in time again: %s",
+		groupMore:         "and %d more",
 
 		subjectDown: "[Kubeat] %s is down", subjectUp: "[Kubeat] %s is back up", subjectReminder: "[Kubeat] %s is still down",
 		subjectCertExpires: "[Kubeat] The certificate of %s is expiring", subjectCertRenewed: "[Kubeat] The certificate of %s was renewed",
-		subjectTest:      "[Kubeat] Test notification",
+		subjectTest: "[Kubeat] Test notification", subjectTestMonitor: "[Kubeat] Test notification: %s",
+		subjectSlow: "[Kubeat] %s is slow", subjectSlowResolved: "[Kubeat] %s responds in time again",
 		subjectGroupDown: "[Kubeat] %s%d monitors are down", subjectGroupUp: "[Kubeat] %s%d monitors are back up",
 		subjectGroupReminder: "[Kubeat] %s%d monitors are still down", subjectGroupCertExpires: "[Kubeat] %s%d certificates are expiring",
 		subjectGroupCertRenewed: "[Kubeat] %s%d certificates were renewed",
+		subjectGroupSlow:        "[Kubeat] %s%d monitors are slow", subjectGroupSlowResolved: "[Kubeat] %s%d monitors respond in time again",
 
 		factMonitor: "Monitor", factTarget: "Target", factNamespace: "Namespace", factStart: "Started", factEnd: "Ended", factCause: "Cause",
+		factThreshold: "Threshold", factLatency: "Response time",
 
 		unitDay: "d", unitHour: "h", unitMin: "m", unitSec: "s",
 
 		openInKubeat: "Open in Kubeat", monitorsWord: "monitors",
 	},
 	LanguageTurkish: {
-		down:        "🔴 %s erişilemiyor%s. Art arda %d kontrol başarısız. Son hata: %s",
-		up:          "🟢 %s tekrar çalışıyor%s. Kesinti süresi: %s",
-		reminder:    "🔴 %s hâlâ erişilemiyor%s. Kesinti süresi: %s. Son hata: %s",
-		certExpires: "🟡 %s sertifikasının süresi bitiyor: %s (%s)%s",
-		certRenewed: "🟢 %s sertifikası yenilendi; yeni bitiş tarihi %s%s",
-		certExpired: "süresi doldu",
-		certToday:   "24 saat içinde",
-		certDays:    "%d gün sonra",
-		test:        "Kubeat test bildirimi: bu kanal çalışıyor.",
+		down:         "🔴 %s erişilemiyor%s. Art arda %d kontrol başarısız. Son hata: %s",
+		up:           "🟢 %s tekrar çalışıyor%s. Kesinti süresi: %s",
+		reminder:     "🔴 %s hâlâ erişilemiyor%s. Kesinti süresi: %s. Son hata: %s",
+		certExpires:  "🟡 %s sertifikasının süresi bitiyor: %s (%s)%s",
+		certRenewed:  "🟢 %s sertifikası yenilendi; yeni bitiş tarihi %s%s",
+		certExpired:  "süresi doldu",
+		certToday:    "24 saat içinde",
+		certDays:     "%d gün sonra",
+		test:         "Kubeat test bildirimi: bu kanal çalışıyor.",
+		testMonitor:  "Kubeat test bildirimi: %s%s alarmları bu kanala ulaşıyor.",
+		slow:         "🟠 %s yavaş yanıt veriyor%s. Art arda %d kontrol %s eşiğinden uzun sürdü; sonuncusu %s",
+		slowResolved: "🟢 %s yeniden zamanında yanıt veriyor%s: %s. Yavaşlık süresi: %s",
 
-		groupDown:        "🔴 %s%d monitor erişilemiyor: %s",
-		groupUp:          "🟢 %s%d monitor tekrar çalışıyor: %s",
-		groupReminder:    "🔴 %s%d monitor hâlâ erişilemiyor: %s",
-		groupCertExpires: "🟡 %s%d sertifikanın süresi bitiyor: %s",
-		groupCertRenewed: "🟢 %s%d sertifika yenilendi: %s",
-		groupMore:        "ve %d monitor daha",
+		groupDown:         "🔴 %s%d monitor erişilemiyor: %s",
+		groupUp:           "🟢 %s%d monitor tekrar çalışıyor: %s",
+		groupReminder:     "🔴 %s%d monitor hâlâ erişilemiyor: %s",
+		groupCertExpires:  "🟡 %s%d sertifikanın süresi bitiyor: %s",
+		groupCertRenewed:  "🟢 %s%d sertifika yenilendi: %s",
+		groupSlow:         "🟠 %s%d monitor yavaş yanıt veriyor: %s",
+		groupSlowResolved: "🟢 %s%d monitor yeniden zamanında yanıt veriyor: %s",
+		groupMore:         "ve %d monitor daha",
 
 		subjectDown: "[Kubeat] %s erişilemiyor", subjectUp: "[Kubeat] %s tekrar çalışıyor", subjectReminder: "[Kubeat] %s hâlâ erişilemiyor",
 		subjectCertExpires: "[Kubeat] %s sertifikasının süresi bitiyor", subjectCertRenewed: "[Kubeat] %s sertifikası yenilendi",
-		subjectTest:      "[Kubeat] Test bildirimi",
+		subjectTest: "[Kubeat] Test bildirimi", subjectTestMonitor: "[Kubeat] Test bildirimi: %s",
+		subjectSlow: "[Kubeat] %s yavaş yanıt veriyor", subjectSlowResolved: "[Kubeat] %s yeniden zamanında yanıt veriyor",
 		subjectGroupDown: "[Kubeat] %s%d monitor erişilemiyor", subjectGroupUp: "[Kubeat] %s%d monitor tekrar çalışıyor",
 		subjectGroupReminder: "[Kubeat] %s%d monitor hâlâ erişilemiyor", subjectGroupCertExpires: "[Kubeat] %s%d sertifikanın süresi bitiyor",
 		subjectGroupCertRenewed: "[Kubeat] %s%d sertifika yenilendi",
+		subjectGroupSlow:        "[Kubeat] %s%d monitor yavaş yanıt veriyor", subjectGroupSlowResolved: "[Kubeat] %s%d monitor yeniden zamanında yanıt veriyor",
 
 		factMonitor: "Monitor", factTarget: "Hedef", factNamespace: "Namespace", factStart: "Başlangıç", factEnd: "Bitiş", factCause: "Neden",
+		factThreshold: "Eşik", factLatency: "Yanıt süresi",
 
 		unitDay: "gün", unitHour: "sa", unitMin: "dk", unitSec: "sn",
 
@@ -140,6 +162,15 @@ func humanDuration(d time.Duration, w phrases) string {
 	default:
 		return unit(total, w.unitSec)
 	}
+}
+
+// latencyText writes a response time or a threshold: in milliseconds,
+// which every language reads, up to ten seconds, and as a duration above.
+func latencyText(d time.Duration, w phrases) string {
+	if d < 10*time.Second {
+		return fmt.Sprintf("%d ms", d.Milliseconds())
+	}
+	return humanDuration(d, w)
 }
 
 // ValidLanguage reports whether notifications can be written in it.

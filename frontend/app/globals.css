@@ -3,6 +3,8 @@
 @import "./styles/fleet.css";
 @import "./styles/monitor.css";
 @import "./styles/incidents.css";
+@import "./styles/statuspage.css";
+@import "./styles/alerting.css";
 
 /* The theme is chosen by data-theme on <html>, set before the first paint by
    the script in the root layout: the viewer's choice, or the system's. */

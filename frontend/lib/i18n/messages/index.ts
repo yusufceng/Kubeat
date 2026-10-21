@@ -8,11 +8,13 @@ import { monitorPage } from "./monitor-page";
 import { monitorsList } from "./monitors-list";
 import { reports } from "./reports";
 import { shell } from "./shell";
+import { statusPage } from "./status-page";
 
 export const locales = ["en", "tr"] as const;
 export type Locale = (typeof locales)[number];
 
-const modules = [shell, auth, monitorsList, monitorPage, monitorForm, discovery, channels, common, incidents, reports];
+// A later module's key wins: status-page.ts rewords a few of channels.ts's.
+const modules = [shell, auth, monitorsList, monitorPage, monitorForm, discovery, channels, common, incidents, reports, statusPage];
 
 /** Every message of every area, by locale. */
 export const messages: Record<Locale, Record<string, string>> = {

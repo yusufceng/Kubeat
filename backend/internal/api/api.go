@@ -71,8 +71,14 @@ type Store interface {
 	ListStatusPages(ctx context.Context) ([]store.StatusPage, error)
 	UpdateStatusPage(ctx context.Context, p store.StatusPage) (store.StatusPage, error)
 	DeleteStatusPage(ctx context.Context, id int64) error
-	StatusPageDailyUptime(ctx context.Context, pageID int64, from, to time.Time) (map[int64][]store.SeriesPoint, error)
-	MonitorIsPublic(ctx context.Context, monitorID int64) (bool, error)
+	DailyUptime(ctx context.Context, monitorIDs []int64, from, to time.Time) (map[int64][]store.SeriesPoint, error)
+	UptimeWindows(ctx context.Context, monitorIDs []int64, now time.Time, windows []time.Duration) (map[int64][]store.UptimeCount, error)
+	CreateStatusPageUpdate(ctx context.Context, u store.StatusPageUpdate) (store.StatusPageUpdate, error)
+	GetStatusPageUpdate(ctx context.Context, id int64) (store.StatusPageUpdate, error)
+	ListStatusPageUpdates(ctx context.Context, pageID int64, limit int) ([]store.StatusPageUpdate, error)
+	UpdateStatusPageUpdate(ctx context.Context, u store.StatusPageUpdate) (store.StatusPageUpdate, error)
+	DeleteStatusPageUpdate(ctx context.Context, id int64) error
+	ListStatusPageNotes(ctx context.Context, monitorIDs []int64, limit int) ([]store.StatusPageNote, error)
 
 	CreateUser(ctx context.Context, u store.User) (store.User, error)
 	CreateFirstUser(ctx context.Context, u store.User) (store.User, error)
@@ -130,8 +136,19 @@ type Options struct {
 	SeriesPoints int
 	// StatusPageDays is how many days of history a status page shows, and
 	// StatusPageIncidentWindow how far back it lists resolved outages.
+	// StatusPageUpdates is how many updates it lists, StatusPageUpcoming
+	// how far ahead it lists maintenance windows, and StatusPageSeries how
+	// far back a monitor's detail page draws response times.
 	StatusPageDays           int
 	StatusPageIncidentWindow time.Duration
+	StatusPageUpdates        int
+	StatusPageUpcoming       time.Duration
+	StatusPageSeries         time.Duration
+	// StatusPageTokenKey signs the tokens visitors of a password-protected
+	// status page hold once they gave the password, which stay good for
+	// StatusPageSession. Without a key no page can be protected.
+	StatusPageTokenKey []byte
+	StatusPageSession  time.Duration
 	// DefaultFailureThreshold applies to monitors created without one.
 	DefaultFailureThreshold int
 	Notifier                Notifier
@@ -209,7 +226,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 26
+const Revision = 27
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -256,6 +273,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/monitors/{id}/window", h.monitorWindow)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/grid", h.monitorGrid)
 	mux.HandleFunc("GET /api/v1/monitors/{id}/channels", h.monitorChannels)
+	mux.HandleFunc("POST /api/v1/monitors/{id}/test-notification", h.testNotification)
 	mux.HandleFunc("GET /api/v1/discovery", h.discoveryStatus)
 	mux.HandleFunc("GET /api/v1/discovery/namespaces", h.discoveryNamespaces)
 	mux.HandleFunc("GET /api/v1/discovery/candidates", h.discoveryCandidates)
@@ -282,7 +300,14 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/v1/status-pages/{id}", h.getStatusPage)
 	mux.HandleFunc("PATCH /api/v1/status-pages/{id}", h.updateStatusPage)
 	mux.HandleFunc("DELETE /api/v1/status-pages/{id}", h.deleteStatusPage)
+	mux.HandleFunc("GET /api/v1/status-pages/{id}/monitors", h.previewStatusPage)
+	mux.HandleFunc("GET /api/v1/status-pages/{id}/updates", h.listStatusPageUpdates)
+	mux.HandleFunc("POST /api/v1/status-pages/{id}/updates", h.createStatusPageUpdate)
+	mux.HandleFunc("PATCH /api/v1/status-pages/{id}/updates/{update}", h.updateStatusPageUpdate)
+	mux.HandleFunc("DELETE /api/v1/status-pages/{id}/updates/{update}", h.deleteStatusPageUpdate)
 	mux.HandleFunc("GET /api/v1/status-pages/by-slug/{slug}/view", h.viewStatusPage)
+	mux.HandleFunc("POST /api/v1/status-pages/by-slug/{slug}/unlock", h.unlockStatusPage)
+	mux.HandleFunc("GET /api/v1/status-pages/by-slug/{slug}/monitors/{monitor}", h.statusPageMonitorDetail)
 	mux.HandleFunc("GET /api/v1/badges/{id}/{kind}", h.badge)
 	// Whatever the source has at hand reports: curl, wget, an HTTP client.
 	mux.HandleFunc("GET "+pushPath+"{token}", h.push)
@@ -311,6 +336,18 @@ func NewHandler(opts Options) http.Handler {
 	}
 	if h.opts.TimelineLimit < 2 {
 		h.opts.TimelineLimit = 100
+	}
+	if h.opts.StatusPageUpdates < 1 {
+		h.opts.StatusPageUpdates = 20
+	}
+	if h.opts.StatusPageUpcoming <= 0 {
+		h.opts.StatusPageUpcoming = 7 * 24 * time.Hour
+	}
+	if h.opts.StatusPageSeries <= 0 {
+		h.opts.StatusPageSeries = 24 * time.Hour
+	}
+	if h.opts.StatusPageSession <= 0 {
+		h.opts.StatusPageSession = 12 * time.Hour
 	}
 	return h.authenticate(mux)
 }

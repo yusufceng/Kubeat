@@ -46,8 +46,23 @@ export const channels = defineMessages(
     "channelForm.tags.hint":
       "Virgülle ayırın. Verilirse yalnızca bu etiketlerden birini taşıyan monitor'lar; monitor başına yönlendirme böyle yapılır.",
     "channelForm.events.legend": "Olaylar",
-    "channelForm.events.hint": "Örneğin PagerDuty yalnızca kesinti ve düzelme, sohbet kanalı hepsi.",
+    "channelForm.events.hint":
+      "Örneğin PagerDuty yalnızca kesinti ve düzelme, sohbet kanalı hepsi. Yavaşlık olay açmaz ve gecikmeden gider.",
     "channelForm.create": "Kanalı ekle",
+    "channelForm.sec.timing": "Zamanlama",
+    "channelForm.sec.timingBody":
+      "Kesinti bildirimlerinin ne kadar sonra ve ne sıklıkta gideceği. Sertifika ve yavaşlık bildirimleri her zaman anında gider.",
+    "channelForm.delay.label": "Gecikme",
+    "channelForm.delay.hint":
+      "Kesinti bu kadar sürdükten sonra hâlâ sürüyorsa kanal haber alır; daha kısa süren kesintiyi hiç duymaz. 0 anında; en çok 24 saat.",
+    "channelForm.repeat.label": "Tekrar",
+    "channelForm.repeat.hint":
+      "Duyduğu bir kesintiyi bu aralıkla yeniden hatırlatır. 0 genel ayarı izler (UPTIME_REMINDER_INTERVAL); verilirse en az 1 dakika, en çok 7 gün.",
+    "channelForm.echo.timing.delay": "Kesinti {delay} sürerse haber verir",
+    "channelForm.echo.timing.atOnce": "Hemen",
+    "channelForm.echo.timing.repeat": "sonra her {repeat} tekrar hatırlatır",
+    "channelForm.echo.timing.repeatGlobal": "tekrar genel ayar",
+    "channelForm.echo.timing.invalid": "Süreleri 0 ya da daha büyük tam sayılarla girin.",
 
     // app/ui/channel-forms.tsx — one channel in the list
     "channelRow.paused": "Durduruldu",
@@ -66,6 +81,8 @@ export const channels = defineMessages(
     "channelRow.resume": "Devam ettir",
     "channelRow.delete.title": "“{name}” kanalı silinsin mi?",
     "channelRow.delete.body": "Bu kanala bir daha bildirim gitmez. Monitor'lar ve olaylar etkilenmez.",
+    "channelRow.delay": "{duration} gecikmeli",
+    "channelRow.repeat": "her {duration}",
 
     // app/status-pages/page.tsx
     "statusPages.intro": "Seçtiğiniz servislerin durumu, giriş istemeyen bir adreste.",
@@ -214,8 +231,23 @@ export const channels = defineMessages(
     "channelForm.tags.hint":
       "Comma-separated. If given, only monitors that carry one of these tags; this is how routing per monitor is done.",
     "channelForm.events.legend": "Events",
-    "channelForm.events.hint": "For example PagerDuty only outages and recoveries, a chat channel all of them.",
+    "channelForm.events.hint":
+      "For example PagerDuty only outages and recoveries, a chat channel all of them. Slowness opens no incident and is not delayed.",
     "channelForm.create": "Add channel",
+    "channelForm.sec.timing": "Timing",
+    "channelForm.sec.timingBody":
+      "How long after an outage begins, and how often, this channel hears of it. Certificate and slowness notifications always go at once.",
+    "channelForm.delay.label": "Delay",
+    "channelForm.delay.hint":
+      "The channel is told once an outage has lasted this long and is still going on; a shorter one it never hears of. 0 is at once; at most 24 hours.",
+    "channelForm.repeat.label": "Repeat",
+    "channelForm.repeat.hint":
+      "Reminds of an outage it was told of at this interval. 0 follows the global setting (UPTIME_REMINDER_INTERVAL); otherwise at least 1 minute and at most 7 days.",
+    "channelForm.echo.timing.delay": "Told once an outage has lasted {delay}",
+    "channelForm.echo.timing.atOnce": "Told at once",
+    "channelForm.echo.timing.repeat": "then reminded every {repeat}",
+    "channelForm.echo.timing.repeatGlobal": "reminders follow the global setting",
+    "channelForm.echo.timing.invalid": "Enter the times as whole numbers of 0 or more.",
 
     // app/ui/channel-forms.tsx — one channel in the list
     "channelRow.paused": "Paused",
@@ -234,6 +266,8 @@ export const channels = defineMessages(
     "channelRow.resume": "Resume",
     "channelRow.delete.title": "Delete the channel “{name}”?",
     "channelRow.delete.body": "No more notifications go to this channel. Monitors and incidents are not affected.",
+    "channelRow.delay": "after {duration}",
+    "channelRow.repeat": "every {duration}",
 
     // app/status-pages/page.tsx
     "statusPages.intro": "The state of the services you choose, at an address that needs no sign-in.",

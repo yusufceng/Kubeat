@@ -8,7 +8,7 @@ import { sessionToken } from "@/lib/session";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 26;
+export const REQUIRED_API_REVISION = 27;
 
 export type Health = {
   status: string;
@@ -326,6 +326,17 @@ export type Channel = {
   tags: string[];
   /** The kinds of event it hears about; empty for all of them. */
   events: ChannelEvent[];
+  /**
+   * How long an outage must still be going on before the channel hears of it
+   * (0: at once); an outage over before then is not told to it at all, nor
+   * its end. Bounded by the backend (at most 24 hours).
+   */
+  delay_seconds: number;
+  /**
+   * The channel's own reminder interval for an outage it was told of; 0
+   * follows UPTIME_REMINDER_INTERVAL. 60 seconds to 7 days when set.
+   */
+  repeat_seconds: number;
   enabled: boolean;
   created_at: string;
   /** The last delivery attempt; null before the first. */
@@ -342,15 +353,40 @@ export type ChannelSettings = {
   namespaces: string[];
   tags: string[];
   events: ChannelEvent[];
+  delay_seconds?: number;
+  repeat_seconds?: number;
 };
 
 /** A channel that hears about a monitor; nothing a reader should not see. */
 export type { ChannelEvent };
-export type MonitorChannel = { id: number; name: string; type: ChannelType; events: ChannelEvent[] };
+export type MonitorChannel = {
+  id: number;
+  name: string;
+  type: ChannelType;
+  events: ChannelEvent[];
+  delay_seconds: number;
+  repeat_seconds: number;
+};
 
 export const getMonitorChannels = (id: number) => request<MonitorChannel[]>(`/monitors/${id}/channels`);
 
 export type ChannelTest = { delivered: boolean; error?: string };
+
+/**
+ * The outcome of a test notification sent from a monitor, per channel its
+ * alarm reaches. error is absent for a caller who may not manage the channel.
+ */
+export type MonitorTestResult = {
+  channel_id: number;
+  name: string;
+  type: ChannelType;
+  delivered: boolean;
+  error?: string;
+};
+
+/** 422 when no enabled channel hears about the monitor; editors of its namespace may call it. */
+export const testMonitorNotification = (id: number) =>
+  request<MonitorTestResult[]>(`/monitors/${id}/test-notification`, { method: "POST" });
 
 export type Monitor = CheckOptions & {
   id: number;
@@ -383,7 +419,12 @@ export type Monitor = CheckOptions & {
    * for those who may not change the monitor, since it lets one report it up or down.
    */
   push_token?: string;
-  status: "up" | "down" | "pending" | "paused";
+  /** degraded: up, but slower than slow_above_ms for failure_threshold checks in a row. */
+  status: "up" | "down" | "degraded" | "pending" | "paused";
+  /** The response time above which a successful check counts as slow; 0 for off. */
+  slow_above_ms: number;
+  /** Set while the monitor is slow (status "degraded", or "down" while it also fails): since when. */
+  slow_since: string | null;
   last_result: CheckResult | null;
   open_incident: Incident | null;
   /** True while the target's certificate is close to its expiry. */
@@ -414,6 +455,8 @@ export type MonitorSettings = {
   namespace?: string;
   tags?: string[];
   retry_interval_seconds?: number;
+  /** Milliseconds, below the timeout; 0 or absent for no slow threshold. */
+  slow_above_ms?: number;
   inverted?: boolean;
   each_pod?: boolean;
   http?: Partial<HttpOptions>;
@@ -432,6 +475,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The backend's whole answer, for the few that say more than `error`: a locked status page's title. */
+    readonly body?: unknown,
   ) {
     super(message);
   }
@@ -480,7 +525,7 @@ async function requestWithHeaders<T>(
   }
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new ApiError(res.status, body?.error ?? `backend responded with ${res.status}`);
+    throw new ApiError(res.status, body?.error ?? `backend responded with ${res.status}`, body ?? undefined);
   }
   return { body: res.status === 204 ? (undefined as T) : await res.json(), headers: res.headers };
 }
@@ -515,6 +560,8 @@ function withDefaults(m: Monitor): Monitor {
     open_incident: m.open_incident ?? null,
     cert_warning: m.cert_warning ?? false,
     maintenance_until: m.maintenance_until ?? null,
+    slow_above_ms: m.slow_above_ms ?? 0,
+    slow_since: m.slow_since ?? null,
     history: m.history ?? [],
   };
 }
@@ -631,10 +678,15 @@ export type Stats = {
   open_cert_warnings: number;
 };
 
-/** namespaces narrows the figures to these; "" stands for the monitors without one. */
-export const getStats = (days: number, namespaces?: string[]) => {
+/**
+ * namespaces narrows the figures to these; "" stands for the monitors without
+ * one. monitorId narrows them to one monitor (its MTTR, MTBF, outages and
+ * downtime over the period; 404 for one the user may not read).
+ */
+export const getStats = (days: number, namespaces?: string[], monitorId?: number) => {
   const params = new URLSearchParams({ days: String(days) });
   for (const ns of namespaces ?? []) params.append("namespace", ns);
+  if (monitorId) params.set("monitor_id", String(monitorId));
   return request<Stats>(`/stats?${params}`);
 };
 
@@ -1056,11 +1108,26 @@ export type MonitorWindow = {
 export const getWindow = (id: number, from: string, to: string) =>
   request<MonitorWindow>(`/monitors/${id}/window?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
 
+/** A named group of a page's monitors, in the page's order. */
+export type StatusPageSection = { name: string };
+
 export type StatusPageMonitor = {
   monitor_id: number;
   /** Shown instead of the monitor's own name; empty for that. */
   display_name: string;
+  /** The section the monitor is in; empty for the unnamed group at the top. */
+  section: string;
 };
+
+/**
+ * A membership rule: the monitors of a namespace ("" for any) carrying a
+ * tag ("" for any) appear in the section after its explicit monitors,
+ * under their own names, as of when the page is served. An editor writes
+ * rules for their own namespaces only.
+ */
+export type StatusPageRule = { namespace: string; tag: string; section: string };
+
+export type StatusPageLanguage = "" | "tr" | "en";
 
 export type StatusPage = {
   id: number;
@@ -1068,20 +1135,33 @@ export type StatusPage = {
   slug: string;
   title: string;
   description: string;
-  /** A notice at the top of the page; empty for none. */
+  /** A notice pinned at the top of the page; empty for none. */
   announcement: string;
   /** An unpublished page is not served. */
   published: boolean;
-  /** In the order the page shows them. */
+  sections: StatusPageSection[];
+  /** In the order the page shows them, each in its section. */
   monitors: StatusPageMonitor[];
+  rules: StatusPageRule[];
+  /** Asks search engines to stay away: the page renders a robots meta. */
+  noindex: boolean;
+  /** Leaves paused monitors off the page. */
+  hide_paused: boolean;
+  /** "" for the instance default. */
+  language: StatusPageLanguage;
+  /** Lets a monitor be opened on a page of its own. */
+  detail_pages: boolean;
+  /** Whether visitors must give a password; the password itself never comes back. */
+  has_password: boolean;
   created_at: string;
 };
 
-export type StatusPageSettings = Omit<StatusPage, "id" | "created_at">;
+/** What a page is made or changed with; password sets the visitors' password, "" clears it. */
+export type StatusPageSettings = Omit<StatusPage, "id" | "created_at" | "has_password"> & { password?: string };
 
 export const listStatusPages = () => request<StatusPage[]>("/status-pages");
 
-export const createStatusPage = (page: StatusPageSettings) =>
+export const createStatusPage = (page: Partial<StatusPageSettings>) =>
   request<StatusPage>("/status-pages", { method: "POST", body: JSON.stringify(page) });
 
 export const updateStatusPage = (id: number, changes: Partial<StatusPageSettings>) =>
@@ -1090,8 +1170,89 @@ export const updateStatusPage = (id: number, changes: Partial<StatusPageSettings
 export const deleteStatusPage = (id: number) =>
   request<void>(`/status-pages/${id}`, { method: "DELETE" });
 
+/** What a page shows at this moment, for whoever edits it: explicit monitors and those its rules match. */
+export type StatusPagePreview = {
+  sections: {
+    name: string;
+    monitors: {
+      monitor_id: number;
+      /** What the page shows; monitor_name and namespace say which monitor that is. */
+      name: string;
+      monitor_name: string;
+      namespace: string;
+      /** True for a monitor listed by name, false for one a rule matched. */
+      explicit: boolean;
+      enabled: boolean;
+    }[];
+  }[];
+};
+
+export const previewStatusPage = (id: number) => request<StatusPagePreview>(`/status-pages/${id}/monitors`);
+
+/** What an update on a status page is; the view also shows incident notes as "note". */
+export type StatusPageUpdateKind = "investigating" | "identified" | "monitoring" | "resolved" | "notice" | "maintenance";
+
+export type StatusPageUpdate = {
+  id: number;
+  page_id: number;
+  /** The incident the update is about; null for none. */
+  incident_id: number | null;
+  kind: StatusPageUpdateKind;
+  title: string;
+  body: string;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+};
+
+export type StatusPageUpdateSettings = {
+  kind: StatusPageUpdateKind;
+  title: string;
+  body?: string;
+  /** 0 detaches an update from its incident on a change. */
+  incident_id?: number;
+};
+
+export const listStatusPageUpdates = (id: number, limit?: number) =>
+  request<StatusPageUpdate[]>(`/status-pages/${id}/updates${limit ? `?limit=${limit}` : ""}`);
+
+export const createStatusPageUpdate = (id: number, update: StatusPageUpdateSettings) =>
+  request<StatusPageUpdate>(`/status-pages/${id}/updates`, { method: "POST", body: JSON.stringify(update) });
+
+export const updateStatusPageUpdate = (id: number, update: number, changes: Partial<StatusPageUpdateSettings>) =>
+  request<StatusPageUpdate>(`/status-pages/${id}/updates/${update}`, { method: "PATCH", body: JSON.stringify(changes) });
+
+export const deleteStatusPageUpdate = (id: number, update: number) =>
+  request<void>(`/status-pages/${id}/updates/${update}`, { method: "DELETE" });
+
 /** What a status page tells the public about a monitor. */
 export type PublicState = "up" | "down" | "maintenance" | "pending" | "paused";
+
+/** Uptime over one window; null without any check in it. */
+export type StatusPageUptime = { window_seconds: number; uptime_percent: number | null };
+
+export type StatusPageViewMonitor = {
+  id: number;
+  name: string;
+  state: PublicState;
+  /** Over all the page's days. */
+  uptime_percent: number | null;
+  /** Over a day, a week, a month and the page's days, shortest first. */
+  uptime: StatusPageUptime[];
+  /** One entry per day, oldest first; null for a day without checks. */
+  history: (number | null)[];
+};
+
+/** An update as visitors see it; a "note" is an incident note flagged for the page, titled with the monitor's name. */
+export type StatusPageViewUpdate = {
+  kind: StatusPageUpdateKind | "note";
+  title: string;
+  body: string;
+  /** The page's name of the monitor the update is about, when it is about an incident of a shown monitor. */
+  monitor_name?: string;
+  created_at: string;
+  updated_at: string;
+};
 
 export type StatusPageView = {
   slug: string;
@@ -1100,30 +1261,82 @@ export type StatusPageView = {
   announcement: string;
   /** The page as a whole. */
   state: "up" | "degraded" | "down" | "maintenance";
+  /** The page's own, or the instance's: "tr" or "en". */
+  language: "tr" | "en";
+  /** Render a robots noindex meta. */
+  noindex: boolean;
+  /** Whether a monitor can be opened on a page of its own (getStatusPageMonitor). */
+  detail_pages: boolean;
   /** How many days each history covers, ending today (UTC). */
   days: number;
   /** The start of the first of those days. */
   from: string;
-  monitors: {
-    id: number;
-    name: string;
-    state: PublicState;
-    uptime_percent: number | null;
-    /** One entry per day, oldest first; null for a day without checks. */
-    history: (number | null)[];
-  }[];
+  /** The page's uptime over each window: the mean of its monitors' that have checks. */
+  uptime: StatusPageUptime[];
+  /** The groups in order; the unnamed one, when it has monitors, comes first with name "". Empty ones are left out. */
+  sections: { name: string; monitors: StatusPageViewMonitor[] }[];
   /** Outages, newest first. */
-  incidents: { monitor_name: string; started_at: string; resolved_at: string | null }[];
+  incidents: { monitor_id: number; monitor_name: string; started_at: string; resolved_at: string | null }[];
+  /** What the page told its visitors, newest first, grouped by UTC day (YYYY-MM-DD). */
+  updates: { day: string; updates: StatusPageViewUpdate[] }[];
+  /** Maintenance windows covering a shown monitor, in progress or starting soon, earliest first; monitors are the page's names. */
+  maintenance: { name: string; starts_at: string; ends_at: string; monitors: string[] }[];
 };
+
+/** A protected page's answer without its token: 401 with the title alone, for the unlock screen. */
+export type StatusPageLocked = { error: string; locked: true; title: string };
 
 /**
  * What a published status page shows. It is read without a session: the
- * page is public, and the backend puts nothing internal in it.
+ * page is public, and the backend puts nothing internal in it. A protected
+ * page takes the token its unlock gave (unlockStatusPage), and answers 401
+ * with a StatusPageLocked body without it.
  */
-export const getStatusPageView = (slug: string) =>
-  request<StatusPageView>(`/status-pages/by-slug/${encodeURIComponent(slug)}/view`, undefined, {
-    open: true,
-  });
+export const getStatusPageView = (slug: string, token?: string) =>
+  request<StatusPageView>(`/status-pages/by-slug/${encodeURIComponent(slug)}/view`, { headers: statusPageTokenHeader(token) }, { open: true });
+
+/**
+ * The header a protected page's token travels in. Its own header, not
+ * Authorization: the backend reads a Bearer as a session first, and a
+ * visitor has none.
+ */
+function statusPageTokenHeader(token?: string): Record<string, string> {
+  return token ? { "X-Status-Page-Token": token } : {};
+}
+
+/** The token a visitor holds for a protected page, and when it stops working. */
+export type StatusPageSession = { token: string; expires_at: string };
+
+/** Trades a protected page's password for a token; 401 for a wrong one, 429 after too many. */
+export const unlockStatusPage = (slug: string, password: string) =>
+  request<StatusPageSession>(
+    `/status-pages/by-slug/${encodeURIComponent(slug)}/unlock`,
+    { method: "POST", body: JSON.stringify({ password }) },
+    { open: true },
+  );
+
+/** A monitor on a page of its own: what the page says about it, its response times and its outages. */
+export type StatusPageMonitorDetail = {
+  slug: string;
+  title: string;
+  language: "tr" | "en";
+  noindex: boolean;
+  monitor: StatusPageViewMonitor;
+  days: number;
+  from: string;
+  /** Response times over the last UPTIME_STATUS_PAGE_SERIES, bucketed like a monitor's series. */
+  series: Series;
+  /** Outages of the last days, newest first: when, and how long, nothing else. */
+  incidents: { started_at: string; resolved_at: string | null; duration_seconds: number }[];
+};
+
+/** 404 unless the page has detail pages and shows the monitor; 401 for a protected page without its token. */
+export const getStatusPageMonitor = (slug: string, monitorId: number, token?: string) =>
+  request<StatusPageMonitorDetail>(
+    `/status-pages/by-slug/${encodeURIComponent(slug)}/monitors/${monitorId}`,
+    { headers: statusPageTokenHeader(token) },
+    { open: true },
+  );
 
 export type Role = "admin" | "editor" | "viewer";
 

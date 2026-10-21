@@ -31,6 +31,18 @@ type webhookBody struct {
 	URL      string           `json:"url,omitempty"`
 	Monitor  *webhookMonitor  `json:"monitor,omitempty"`
 	Incident *webhookIncident `json:"incident,omitempty"`
+	// Slow is set for the slow-response events, which are about no
+	// incident.
+	Slow *webhookSlow `json:"slow,omitempty"`
+}
+
+type webhookSlow struct {
+	// Since is when the monitor turned slow; ThresholdMS its limit and
+	// LatencyMS the response time of the check that turned it slow, or
+	// fast again.
+	Since       time.Time `json:"since"`
+	ThresholdMS int64     `json:"threshold_ms"`
+	LatencyMS   int64     `json:"latency_ms"`
 }
 
 type webhookMonitor struct {
@@ -50,10 +62,17 @@ type webhookIncident struct {
 
 func newWebhookBody(n Notification) webhookBody {
 	body := webhookBody{Event: n.Event, Text: Text(n), URL: URL(n)}
-	if n.Event == EventTest {
+	if n.Event == EventTest && n.Monitor.ID == 0 {
 		return body
 	}
 	body.Monitor = &webhookMonitor{ID: n.Monitor.ID, Name: n.Monitor.Name, Type: string(n.Monitor.Type), Target: n.Monitor.Target}
+	switch n.Event {
+	case EventTest:
+		return body
+	case EventSlow, EventSlowResolved:
+		body.Slow = &webhookSlow{Since: n.Since, ThresholdMS: n.Threshold.Milliseconds(), LatencyMS: n.Latency.Milliseconds()}
+		return body
+	}
 	kind := n.Incident.Kind
 	if kind == "" {
 		kind = store.IncidentDown
@@ -89,6 +108,10 @@ func groupDetail(n Notification) string {
 		return humanDuration(n.At.Sub(n.Incident.StartedAt), w)
 	case EventCertExpiring, EventCertRenewed:
 		return n.CertExpiresAt.Format("2006-01-02")
+	case EventSlow:
+		return latencyText(n.Latency, w)
+	case EventSlowResolved:
+		return humanDuration(n.At.Sub(n.Since), w)
 	}
 	return ""
 }
@@ -134,6 +157,10 @@ func groupText(n Notification) string {
 		return fmt.Sprintf(w.groupCertExpires, where, count, list)
 	case EventCertRenewed:
 		return fmt.Sprintf(w.groupCertRenewed, where, count, list)
+	case EventSlow:
+		return fmt.Sprintf(w.groupSlow, where, count, list)
+	case EventSlowResolved:
+		return fmt.Sprintf(w.groupSlowResolved, where, count, list)
 	}
 	return ""
 }
@@ -164,7 +191,14 @@ func Text(n Notification) string {
 		return fmt.Sprintf(w.certExpires, n.Monitor.Name, when, n.CertExpiresAt.Format("2006-01-02"), target(n.Monitor))
 	case EventCertRenewed:
 		return fmt.Sprintf(w.certRenewed, n.Monitor.Name, n.CertExpiresAt.Format("2006-01-02"), target(n.Monitor))
+	case EventSlow:
+		return fmt.Sprintf(w.slow, n.Monitor.Name, target(n.Monitor), n.Monitor.FailureThreshold, latencyText(n.Threshold, w), latencyText(n.Latency, w))
+	case EventSlowResolved:
+		return fmt.Sprintf(w.slowResolved, n.Monitor.Name, target(n.Monitor), latencyText(n.Latency, w), humanDuration(n.At.Sub(n.Since), w))
 	default:
+		if n.Monitor.Name != "" {
+			return fmt.Sprintf(w.testMonitor, n.Monitor.Name, target(n.Monitor))
+		}
 		return w.test
 	}
 }

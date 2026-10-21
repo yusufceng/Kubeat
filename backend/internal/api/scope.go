@@ -67,16 +67,18 @@ func (h *handler) monitorNamespaces(ctx context.Context) (map[int64]string, erro
 }
 
 // canEditPage reports whether the principal may manage a status page:
-// admins any, editors those showing only monitors they may change. A page
-// that shows no monitor, whether made so or emptied when its monitors were
-// deleted, belongs to no namespace and so to no editor: it is the admins'.
+// admins any, editors those showing only monitors they may change, by
+// name or by rule (a rule for any namespace reaches every monitor, so it
+// takes an editor of every namespace). A page that shows no monitor and
+// has no rule, whether made so or emptied when its monitors were deleted,
+// belongs to no namespace and so to no editor: it is the admins'.
 // Otherwise every editor, of whatever namespace, could rewrite or remove
 // what such a page tells the public.
 func canEditPage(p auth.Principal, page store.StatusPage, namespaces map[int64]string) bool {
 	if p.IsAdmin() {
 		return true
 	}
-	if p.Role != store.RoleEditor || len(page.Monitors) == 0 {
+	if p.Role != store.RoleEditor || (len(page.Monitors) == 0 && len(page.Rules) == 0) {
 		return false
 	}
 	for _, m := range page.Monitors {
@@ -84,5 +86,20 @@ func canEditPage(p auth.Principal, page store.StatusPage, namespaces map[int64]s
 			return false
 		}
 	}
+	for _, r := range page.Rules {
+		if !canEditRule(p, r) {
+			return false
+		}
+	}
 	return true
+}
+
+// canEditRule reports whether the principal may write a membership rule:
+// one for a namespace takes an editor of it, one for any namespace an
+// editor of all of them.
+func canEditRule(p auth.Principal, r store.StatusPageRule) bool {
+	if r.Namespace == "" {
+		return p.CanEditAll()
+	}
+	return p.CanEdit(r.Namespace)
 }

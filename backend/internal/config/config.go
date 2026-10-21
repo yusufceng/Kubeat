@@ -157,6 +157,15 @@ type Config struct {
 
 	StatusPageDays           int           // UPTIME_STATUS_PAGE_DAYS
 	StatusPageIncidentWindow time.Duration // UPTIME_STATUS_PAGE_INCIDENT_WINDOW
+	// StatusPageUpdates is how many updates a status page lists;
+	// StatusPageUpcoming how far ahead it lists maintenance windows;
+	// StatusPageSession how long a visitor's password stays good for a
+	// protected page; StatusPageSeries how far back a monitor's detail
+	// page draws response times.
+	StatusPageUpdates  int           // UPTIME_STATUS_PAGE_UPDATES
+	StatusPageUpcoming time.Duration // UPTIME_STATUS_PAGE_UPCOMING
+	StatusPageSession  time.Duration // UPTIME_STATUS_PAGE_SESSION
+	StatusPageSeries   time.Duration // UPTIME_STATUS_PAGE_SERIES
 
 	DefaultFailureThreshold int           // UPTIME_DEFAULT_FAILURE_THRESHOLD
 	RecoveryThreshold       int           // UPTIME_RECOVERY_THRESHOLD
@@ -338,6 +347,9 @@ func Load() (Config, error) {
 		{&cfg.DiscoveryDefaultTimeout, "UPTIME_DISCOVERY_DEFAULT_TIMEOUT", 5 * time.Second},
 		{&cfg.StatsWindow, "UPTIME_STATS_WINDOW", 24 * time.Hour},
 		{&cfg.StatusPageIncidentWindow, "UPTIME_STATUS_PAGE_INCIDENT_WINDOW", 14 * 24 * time.Hour},
+		{&cfg.StatusPageUpcoming, "UPTIME_STATUS_PAGE_UPCOMING", 7 * 24 * time.Hour},
+		{&cfg.StatusPageSession, "UPTIME_STATUS_PAGE_SESSION", 12 * time.Hour},
+		{&cfg.StatusPageSeries, "UPTIME_STATUS_PAGE_SERIES", 24 * time.Hour},
 		{&cfg.SessionTTL, "UPTIME_SESSION_TTL", 12 * time.Hour},
 		{&cfg.LoginLockout, "UPTIME_LOGIN_LOCKOUT", 15 * time.Minute},
 		{&cfg.LoginQueueWait, "UPTIME_LOGIN_QUEUE_WAIT", 3 * time.Second},
@@ -372,6 +384,7 @@ func Load() (Config, error) {
 		{&cfg.ResultBatchSize, "UPTIME_RESULT_BATCH_SIZE", 100},
 		{&cfg.MaxResults, "UPTIME_MAX_RESULTS", 1000},
 		{&cfg.StatusPageDays, "UPTIME_STATUS_PAGE_DAYS", 90},
+		{&cfg.StatusPageUpdates, "UPTIME_STATUS_PAGE_UPDATES", 20},
 		{&cfg.LoginMaxFailures, "UPTIME_LOGIN_MAX_FAILURES", 10},
 		{&cfg.LoginThrottleMaxKeys, "UPTIME_LOGIN_THROTTLE_MAX_KEYS", 100000},
 		{&cfg.LoginAuditPerMinute, "UPTIME_LOGIN_AUDIT_PER_MINUTE", 60},

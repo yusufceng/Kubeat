@@ -54,6 +54,11 @@ func newTestAPIWith(t *testing.T, customize func(*Options)) (*httptest.Server, *
 
 		StatusPageDays:           3,
 		StatusPageIncidentWindow: 48 * time.Hour,
+		StatusPageUpdates:        4,
+		StatusPageUpcoming:       7 * 24 * time.Hour,
+		StatusPageSeries:         24 * time.Hour,
+		StatusPageSession:        time.Hour,
+		StatusPageTokenKey:       []byte("a key for the tests' status page tokens"),
 
 		DefaultFailureThreshold: 3,
 		RawRetention:            48 * time.Hour,

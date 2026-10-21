@@ -13,7 +13,7 @@ import { TimeAgo } from "@/app/ui/time-ago";
 
 /** The state of a fleet in one sentence, its glyph, and the color of its aura. */
 function fleetState(counts: StateCounts, t: Awaited<ReturnType<typeof getT>>): { sentence: string; glyph: GlyphKind; tone: string } {
-  const degraded = counts.verifying + counts.recovering;
+  const degraded = counts.verifying + counts.recovering + counts.degraded;
   if (counts.down > 0) return { sentence: t.n("monitorsList.hero.down", counts.down), glyph: "down", tone: "down" };
   if (degraded > 0) return { sentence: t.n("monitorsList.hero.degraded", degraded), glyph: "warn", tone: "warn" };
   if (counts.up === 0) return { sentence: t("monitorsList.hero.noneActive"), glyph: "paused", tone: "idle" };

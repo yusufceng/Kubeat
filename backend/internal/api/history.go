@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -135,11 +136,23 @@ func (h *handler) monitorSeries(w http.ResponseWriter, r *http.Request) {
 	if !h.monitorExists(w, r, id) {
 		return
 	}
+	resp, err := h.seriesBetween(r.Context(), id, from, to, now)
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
+// seriesBetween reads a monitor's history over [from, to) in round
+// buckets sized so that there are about SeriesPoints of them; empty buckets
+// are left out. Raw results are exact but only reach back RawRetention;
+// hourly summaries cover the rest and are enough once buckets are that
+// coarse.
+func (h *handler) seriesBetween(ctx context.Context, id int64, from, to, now time.Time) (seriesResponse, error) {
+	span := to.Sub(from)
 	bucket := bucketFor(span, h.opts.SeriesPoints)
 	source := store.SeriesRaw
-	// Raw results are exact but only reach back RawRetention; hourly
-	// summaries cover the rest and are enough once buckets are that coarse.
 	if from.Before(now.Add(-h.opts.RawRetention)) || bucket >= store.RollupBucket {
 		source = store.SeriesRollup
 		if bucket < store.RollupBucket {
@@ -151,10 +164,9 @@ func (h *handler) monitorSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	from = from.Truncate(bucket)
 
-	points, err := h.opts.Store.Series(r.Context(), id, source, from, to, bucket)
+	points, err := h.opts.Store.Series(ctx, id, source, from, to, bucket)
 	if err != nil {
-		h.internalError(w, r, err)
-		return
+		return seriesResponse{}, err
 	}
 	resp := seriesResponse{
 		RangeSeconds:  int(span / time.Second),
@@ -172,7 +184,7 @@ func (h *handler) monitorSeries(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Points = append(resp.Points, sp)
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 type uptimeWindow struct {

@@ -82,15 +82,15 @@ export type StateCounts = Record<DisplayState, number> & { total: number };
 
 export function countStates(monitors: Pick<Monitor, "status" | "open_incident" | "maintenance_until">[]): StateCounts {
   const counts: StateCounts = {
-    up: 0, down: 0, verifying: 0, recovering: 0, maintenance: 0, pending: 0, paused: 0, total: monitors.length,
+    up: 0, down: 0, degraded: 0, verifying: 0, recovering: 0, maintenance: 0, pending: 0, paused: 0, total: monitors.length,
   };
   for (const m of monitors) counts[displayState(m)]++;
   return counts;
 }
 
-/** A monitor whose latest check failed or that has an open outage. */
+/** A monitor whose latest check failed or was slow, or that has an open outage. */
 export function isProblem(state: DisplayState): boolean {
-  return state === "down" || state === "recovering" || state === "verifying";
+  return state === "down" || state === "recovering" || state === "verifying" || state === "degraded";
 }
 
 /** The groups monitors entered by hand are in, for the form to suggest. */

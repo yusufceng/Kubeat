@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { listMonitors, listStatusPages, type StatusPage } from "@/lib/api";
+import { type Incident, listIncidents, listMonitors, listStatusPages, listStatusPageUpdates, previewStatusPage, queryIncidents, type StatusPage } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
+import { config } from "@/lib/config";
 import { getT, titled } from "@/lib/i18n/server";
 import { compareNamespaces } from "@/lib/namespaces";
 import { BackendError } from "@/app/ui/backend-error";
@@ -9,9 +10,46 @@ import { EmptyState, NoMonitors } from "@/app/ui/empty-state";
 import { PlusIcon, StatusPagesIcon } from "@/app/ui/icons";
 import { monitorLabel } from "@/app/ui/monitor-name";
 import { PageHead } from "@/app/ui/page-head";
-import { type PageMonitorOption, StatusPageForm, StatusPageRow } from "@/app/ui/status-page-forms";
+import { type PageExtras, type PageMonitorOption, StatusPageForm, StatusPageRow } from "@/app/ui/status-page-forms";
+import type { IncidentOption } from "@/app/ui/status-page-updates";
 
 type Search = PageProps<"/status-pages">["searchParams"];
+
+/**
+ * What the editor of a page sees besides its form: what the page shows now,
+ * the updates it has published, and the recent incidents of the monitors
+ * it shows, for an update to point at. Each part fails on its own: the
+ * form is still there without them.
+ */
+async function readExtras(page: StatusPage, names: Map<number, string>): Promise<PageExtras> {
+  // The outages still going on, whenever they began, and the newest ones:
+  // a flapping monitor must not push a long outage off the list.
+  const [preview, updates, open, recent] = await Promise.all([
+    previewStatusPage(page.id).catch(() => null),
+    listStatusPageUpdates(page.id, config.statusPageUpdatesLimit).catch(() => null),
+    queryIncidents({ kind: "down", state: "open", limit: config.incidentsLimit }).catch(() => [] as Incident[]),
+    listIncidents(config.incidentsLimit).catch(() => [] as Incident[]),
+  ]);
+  const incidents = [...open, ...recent.filter((i) => !open.some((o) => o.id === i.id))];
+  // The monitors the page shows: by name, and by rule as of now.
+  const shown = new Set<number>(page.monitors.map((m) => m.monitor_id));
+  const pageNames = new Map<number, string>();
+  for (const s of preview?.sections ?? []) {
+    for (const m of s.monitors) {
+      shown.add(m.monitor_id);
+      pageNames.set(m.monitor_id, m.name);
+    }
+  }
+  const options: IncidentOption[] = incidents
+    .filter((i) => i.kind === "down" && shown.has(i.monitor_id))
+    .map((i) => ({
+      id: i.id,
+      monitor: pageNames.get(i.monitor_id) ?? names.get(i.monitor_id) ?? i.monitor_name,
+      started_at: i.started_at,
+      resolved_at: i.resolved_at,
+    }));
+  return { preview, updates, incidents: options };
+}
 
 async function StatusPages({ searchParams }: { searchParams: Search }) {
   const t = await getT();
@@ -23,7 +61,7 @@ async function StatusPages({ searchParams }: { searchParams: Search }) {
     const [list, all] = await Promise.all([listStatusPages(), listMonitors()]);
     pages = list;
     monitors = all
-      .map((m) => ({ id: m.id, label: monitorLabel(m).name, namespace: m.namespace }))
+      .map((m) => ({ id: m.id, label: monitorLabel(m).name, namespace: m.namespace, tags: m.tags }))
       .sort((a, b) => compareNamespaces(a.namespace, b.namespace) || a.label.localeCompare(b.label, t.intl));
   } catch (err) {
     return <BackendError what={t("nav.statusPages")} err={err} />;
@@ -32,12 +70,16 @@ async function StatusPages({ searchParams }: { searchParams: Search }) {
   if (pages.length === 0 && monitors.length === 0) return <NoMonitors canEdit={me.can_edit} />;
   const adding = me.can_edit && params.new !== undefined;
   const editing = me.can_edit ? Number(params.edit) || null : null;
+  const edited = pages.find((p) => p.id === editing);
+  const extras = edited ? await readExtras(edited, new Map(monitors.map((m) => [m.id, m.label]))) : undefined;
+  // A rule for every namespace is for those who edit every namespace.
+  const anyNamespace = me.admin || me.sees_all;
 
   return (
     <>
       {adding && (
         <section className="panel pg-create" aria-label={t("statusPages.new.title")}>
-          <StatusPageForm monitors={monitors} needsMonitor={!me.admin} closeHref="/status-pages" />
+          <StatusPageForm monitors={monitors} needsMonitor={!me.admin} anyNamespace={anyNamespace} closeHref="/status-pages" />
         </section>
       )}
       {pages.length === 0 ? (
@@ -80,8 +122,10 @@ async function StatusPages({ searchParams }: { searchParams: Search }) {
                   page={p}
                   monitors={monitors}
                   needsMonitor={!me.admin}
+                  anyNamespace={anyNamespace}
                   canEdit={me.can_edit}
                   editing={editing === p.id}
+                  extras={editing === p.id ? extras : undefined}
                 />
               ))}
             </tbody>

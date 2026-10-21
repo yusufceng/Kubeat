@@ -1,8 +1,8 @@
 import type { DisplayState } from "@/app/ui/status";
 
-/** Down first, then degraded (verifying, recovering), then the rest. */
+/** Down first, then degraded (verifying, recovering, slow), then the rest. */
 export function urgencyRank(state: DisplayState): number {
-  return state === "down" ? 0 : state === "verifying" || state === "recovering" ? 1 : 2;
+  return state === "down" ? 0 : state === "verifying" || state === "recovering" || state === "degraded" ? 1 : 2;
 }
 
 /** Orders monitors problems first, then by name, in the viewer's language. */

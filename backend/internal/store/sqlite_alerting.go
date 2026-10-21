@@ -146,7 +146,7 @@ func (s *SQLite) ListIncidents(ctx context.Context, monitorID int64, limit int) 
 	return incidents, nil
 }
 
-const channelColumns = "id, name, type, target, secret, namespaces, enabled, created_at, tags, events, last_attempt_at, last_ok, last_error"
+const channelColumns = "id, name, type, target, secret, namespaces, enabled, created_at, tags, events, last_attempt_at, last_ok, last_error, delay_seconds, repeat_seconds"
 
 // scanChannel reads a channel and decrypts its target and secret.
 func (s *SQLite) scanChannel(row rowScanner) (Channel, error) {
@@ -181,11 +181,14 @@ func scanRawChannel(row rowScanner) (Channel, error) {
 		lastAttempt              sql.NullInt64
 		lastOK                   bool
 		lastError                string
+		delay, repeat            int64
 		err                      error
 	)
-	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Secret, &namespaces, &c.Enabled, &createdAt, &tags, &events, &lastAttempt, &lastOK, &lastError); err != nil {
+	if err := row.Scan(&c.ID, &c.Name, &c.Type, &c.Target, &c.Secret, &namespaces, &c.Enabled, &createdAt, &tags, &events, &lastAttempt, &lastOK, &lastError, &delay, &repeat); err != nil {
 		return Channel{}, err
 	}
+	c.Delay = time.Duration(delay) * time.Second
+	c.Repeat = time.Duration(repeat) * time.Second
 	// The delivery columns mean nothing until something was attempted.
 	if lastAttempt.Valid {
 		c.LastAttemptAt = time.UnixMilli(lastAttempt.Int64).UTC()
@@ -247,9 +250,10 @@ func (s *SQLite) CreateChannel(ctx context.Context, c Channel) (Channel, error) 
 		return Channel{}, fmt.Errorf("create channel: %w", err)
 	}
 	c.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
+	c.Delay, c.Repeat = c.Delay.Truncate(time.Second), c.Repeat.Truncate(time.Second)
 	res, err := s.write.ExecContext(ctx,
-		"INSERT INTO notification_channels (name, type, target, secret, namespaces, enabled, created_at, tags, events) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		c.Name, c.Type, target, secret, namespaces, c.Enabled, c.CreatedAt.UnixMilli(), tags, events)
+		"INSERT INTO notification_channels (name, type, target, secret, namespaces, enabled, created_at, tags, events, delay_seconds, repeat_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		c.Name, c.Type, target, secret, namespaces, c.Enabled, c.CreatedAt.UnixMilli(), tags, events, int64(c.Delay/time.Second), int64(c.Repeat/time.Second))
 	if isUniqueViolation(err) {
 		return Channel{}, ErrConflict
 	}
@@ -284,8 +288,8 @@ func (s *SQLite) UpdateChannel(ctx context.Context, c Channel) (Channel, error) 
 		return Channel{}, fmt.Errorf("update channel: %w", err)
 	}
 	res, err := s.write.ExecContext(ctx,
-		"UPDATE notification_channels SET name = ?, target = ?, secret = ?, namespaces = ?, enabled = ?, tags = ?, events = ? WHERE id = ?",
-		c.Name, target, secret, namespaces, c.Enabled, tags, events, c.ID)
+		"UPDATE notification_channels SET name = ?, target = ?, secret = ?, namespaces = ?, enabled = ?, tags = ?, events = ?, delay_seconds = ?, repeat_seconds = ? WHERE id = ?",
+		c.Name, target, secret, namespaces, c.Enabled, tags, events, int64(c.Delay/time.Second), int64(c.Repeat/time.Second), c.ID)
 	if isUniqueViolation(err) {
 		return Channel{}, ErrConflict
 	}

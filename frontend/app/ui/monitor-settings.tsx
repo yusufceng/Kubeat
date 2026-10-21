@@ -16,6 +16,7 @@ import { ConfirmDialog, PromptDialog } from "@/app/ui/confirm";
 import { CopyIcon, EditIcon, MoreIcon, PauseIcon, PlayIcon, TrashIcon } from "@/app/ui/icons";
 import { ChevronDownIcon, SilenceIcon } from "@/app/ui/monitor-icons";
 import { Menu } from "@/app/ui/monitor-menu";
+import { useTestNotification } from "@/app/ui/monitor-test";
 
 const silenced: MaintenanceFormState = { error: null, created: false };
 
@@ -29,9 +30,16 @@ const silenced: MaintenanceFormState = { error: null, created: false };
 export function MonitorActions({
   monitor,
   silence,
+  channelCount,
 }: {
   monitor: Pick<Monitor, "id" | "name" | "enabled" | "managed">;
   silence: number[] | null;
+  /**
+   * How many channels hear about the monitor, for the menu's test
+   * notification: 0 disables it, null (unknown) leaves it on, and left out
+   * does not offer it.
+   */
+  channelCount?: number | null;
 }) {
   const t = useT();
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +47,7 @@ export function MonitorActions({
   const [naming, setNaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const deleteForm = useRef<HTMLFormElement>(null);
+  const test = useTestNotification(monitor, channelCount);
 
   function clone(name: string) {
     setNaming(false);
@@ -69,8 +78,10 @@ export function MonitorActions({
         buttonLabel={t("monitorPage.actions.more")}
         button={<MoreIcon />}
         buttonClassName="btn btn-ghost px-2"
-        className="w-52"
+        className="w-56"
       >
+        {test.item}
+        {test.item && <hr className="menu-sep" />}
         <button type="button" role="menuitem" className="menu-item" disabled={cloning} onClick={() => setNaming(true)}>
           <CopyIcon />
           {cloning ? t("monitorPage.actions.copying") : t("monitorPage.copy")}
@@ -113,6 +124,7 @@ export function MonitorActions({
           {monitor.managed && <span className="mt-2 block">{t("monitorPage.actions.confirmDelete.managed")}</span>}
         </ConfirmDialog>
       )}
+      {test.dialog}
       {error && (
         <p role="alert" className="basis-full text-right text-sm text-down-ink">
           {error}

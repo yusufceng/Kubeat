@@ -8,8 +8,9 @@ import (
 )
 
 // Colors of the events, for the channels that show one. Red for an outage,
-// green for a recovery, amber for a certificate running out, grey for a
-// test. Chosen to stay legible on light and dark chat themes.
+// green for a recovery, amber for a certificate running out or a slow
+// monitor, grey for a test. Chosen to stay legible on light and dark chat
+// themes.
 const (
 	colorDown    = "#d7263d"
 	colorUp      = "#1f9d55"
@@ -22,9 +23,9 @@ func Color(n Notification) string {
 	switch n.Event {
 	case EventDown, EventReminder:
 		return colorDown
-	case EventUp, EventCertRenewed:
+	case EventUp, EventCertRenewed, EventSlowResolved:
 		return colorUp
-	case EventCertExpiring:
+	case EventCertExpiring, EventSlow:
 		return colorWarning
 	default:
 		return colorNeutral
@@ -50,10 +51,12 @@ func Emoji(n Notification) string {
 	switch n.Event {
 	case EventDown, EventReminder:
 		return "🔴"
-	case EventUp, EventCertRenewed:
+	case EventUp, EventCertRenewed, EventSlowResolved:
 		return "🟢"
 	case EventCertExpiring:
 		return "🟡"
+	case EventSlow:
+		return "🟠"
 	default:
 		return "🔵"
 	}
@@ -88,12 +91,20 @@ func URL(n Notification) string {
 		return base
 	}
 	link := base + "/monitors/" + strconv.FormatInt(n.Monitor.ID, 10)
-	// The page selects the incident's span, so the reader lands on the
-	// moment rather than on the chart's last hour.
-	if !n.Incident.StartedAt.IsZero() {
-		link += "?from=" + url.QueryEscape(n.Incident.StartedAt.UTC().Format(time.RFC3339))
-		if !n.Incident.ResolvedAt.IsZero() {
-			link += "&to=" + url.QueryEscape(n.Incident.ResolvedAt.UTC().Format(time.RFC3339))
+	// The page selects the incident's span, or for a slow monitor the
+	// time it has been slow, so the reader lands on the moment rather
+	// than on the chart's last hour.
+	from, to := n.Incident.StartedAt, n.Incident.ResolvedAt
+	if from.IsZero() && !n.Since.IsZero() {
+		from = n.Since
+		if n.Event == EventSlowResolved {
+			to = n.At
+		}
+	}
+	if !from.IsZero() {
+		link += "?from=" + url.QueryEscape(from.UTC().Format(time.RFC3339))
+		if !to.IsZero() {
+			link += "&to=" + url.QueryEscape(to.UTC().Format(time.RFC3339))
 		}
 	}
 	return link

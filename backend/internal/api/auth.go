@@ -50,7 +50,9 @@ var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]*$`)
 // metrics for the cluster, push reports and public status pages, which
 // carry their own secrets or are public by design, and signing in itself.
 // The metrics may ask for a token of their own (metricsAuth), but never for
-// a session: a scrape has none.
+// a session: a scrape has none. Everything of a status page by its slug is
+// public: its view, the unlocking of a protected one and the pages of its
+// monitors; a protected page asks for its own token there (statusPageToken).
 func openPath(r *http.Request) bool {
 	path := r.URL.Path
 	if token, isPush := strings.CutPrefix(path, pushPath); isPush {
@@ -61,9 +63,7 @@ func openPath(r *http.Request) bool {
 	case path == "/api/v1/health", path == "/metrics",
 		path == "/api/v1/auth/login", path == "/api/v1/auth/setup", path == "/api/v1/auth/providers",
 		path == "/api/v1/auth/oidc/start", path == "/api/v1/auth/oidc/callback",
-		strings.HasPrefix(path, "/api/v1/badges/"):
-		return true
-	case strings.HasPrefix(path, "/api/v1/status-pages/by-slug/") && strings.HasSuffix(path, "/view"):
+		strings.HasPrefix(path, "/api/v1/badges/"), strings.HasPrefix(path, "/api/v1/status-pages/by-slug/"):
 		return true
 	}
 	return false

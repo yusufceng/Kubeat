@@ -1,0 +1,873 @@
+/*
+ * The status pages: the editor's form (sections, rules, the preview, the
+ * settings, the updates panel) under the pg- prefix, then the public page
+ * under sp- (what polish.css does not draw already: the windows, the
+ * groups, the compact rows, the updates, the unlock, a service's own page,
+ * and the wall screen).
+ */
+
+/* ---------- The editor ---------- */
+@layer components {
+  /* The page's sections: a numbered row each, moved and removed from its end. */
+  .pg-sections {
+    display: grid;
+    gap: 6px;
+  }
+  .pg-section-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pg-section-no {
+    flex: none;
+    width: 18px;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .pg-section-row > .field {
+    max-width: 24rem;
+  }
+  .field.pg-section-select {
+    flex: 0 1 12rem;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    font-size: 12.5px;
+  }
+  /* A chosen monitor's name for the page and its section, beside its tick. */
+  .pg-picker-fields {
+    display: flex;
+    flex: 1 1 22rem;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+  }
+  .pg-picker-fields > .field.pg-picker-name {
+    flex: 1 1 12rem;
+    max-width: none;
+  }
+
+  /* The rules: namespace, tag and section on one line, read back under it. */
+  .pg-rules {
+    display: grid;
+    gap: 10px;
+  }
+  .pg-rule {
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+  }
+  .pg-rule-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .pg-rule-fields > .field {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    font-size: 12.5px;
+  }
+  .pg-rule-fields > .field.pg-section-select {
+    flex: none;
+  }
+  .pg-rule-echo {
+    margin-top: 8px;
+    color: var(--ink-2);
+    font-size: 12.5px;
+    line-height: 18px;
+    text-wrap: pretty;
+  }
+  @container pgfields (width < 34rem) {
+    .pg-rule-fields {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+  }
+
+  /* What the saved page shows now, section by section. */
+  .pg-preview-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 12px;
+    font-size: 13px;
+  }
+  .pg-preview {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+  }
+  .pg-preview-sec + .pg-preview-sec {
+    border-top: 1px solid var(--line);
+  }
+  .pg-preview-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--hover);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+  }
+  .pg-preview-empty {
+    padding: 8px 12px;
+    color: var(--ink-3);
+    font-size: 12.5px;
+  }
+  .pg-preview-row {
+    display: grid;
+    grid-template-columns: 10px minmax(8rem, 1fr) minmax(8rem, 1.4fr) auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 36px;
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .pg-preview-sec > .pg-preview-row:last-child {
+    border-bottom: 0;
+  }
+  .pg-preview-paused {
+    color: var(--ink-3);
+  }
+  /* The row's health is not the editor's business here: a plain dot marks a live monitor. */
+  .pg-preview-dot {
+    width: 6px;
+    height: 6px;
+    margin-left: 2px;
+    border-radius: 50%;
+    background: var(--line-strong);
+  }
+  .pg-preview-name {
+    overflow: hidden;
+    font-weight: 550;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pg-preview-source {
+    overflow: hidden;
+    font: 400 12px/16px var(--font-plex), ui-monospace, monospace;
+    color: var(--ink-2);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pg-tag-rule {
+    border-style: dashed;
+  }
+  @container pgfields (width < 34rem) {
+    .pg-preview-row {
+      grid-template-columns: 10px minmax(0, 1fr) auto;
+    }
+    .pg-preview-source {
+      display: none;
+    }
+  }
+
+  /* The password: its state, the field, and the way to drop it. */
+  .pg-password {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+  }
+  .pg-password-state {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-2);
+    font-size: 12.5px;
+    font-weight: 550;
+  }
+  .pg-password > label > .field {
+    max-width: 20rem;
+  }
+
+  /* The updates panel under the form. */
+  .pg-updates {
+    container: updates / inline-size;
+  }
+  .pg-updates-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px 16px;
+    padding: 16px 20px;
+  }
+  .pg-updates-head h3 {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .pg-updates-head p {
+    margin-top: 2px;
+    color: var(--ink-3);
+    font-size: 12.5px;
+    line-height: 18px;
+  }
+  .pg-updates-compose {
+    padding: 0 20px 16px;
+  }
+  .pg-update-editor {
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--well);
+  }
+  .pg-update-editor .field {
+    background: var(--panel);
+  }
+  .pg-update-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .pg-update-actions > [role="alert"] {
+    flex: 1 1 14rem;
+    min-width: 0;
+    color: var(--down-ink);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  /* The kinds, each with its glyph. */
+  .pg-kinds > label {
+    gap: 7px;
+  }
+  .pg-kinds svg {
+    flex: none;
+    color: var(--ink-3);
+  }
+  .pg-updates-list {
+    border-top: 1px solid var(--line);
+  }
+  .pg-updates-day {
+    padding: 12px 20px 4px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+  }
+  .pg-update {
+    position: relative;
+    display: grid;
+    grid-template-columns: 44px 20px minmax(0, 1fr);
+    column-gap: 10px;
+    align-items: start;
+    padding: 8px 20px 10px;
+  }
+  .pg-update + .pg-update {
+    border-top: 1px solid var(--line);
+  }
+  .pg-update-time {
+    padding-top: 1px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 18px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .pg-update-mark,
+  .sp-update-mark {
+    display: grid;
+    place-items: center;
+    height: 20px;
+    color: var(--ink-3);
+  }
+  /* A notice and a note are words, not states: their icons stay in ink. */
+  .pg-update-mark-notice,
+  .sp-update-mark-notice,
+  .pg-update-mark-note,
+  .sp-update-mark-note {
+    color: var(--ink-2);
+  }
+  .pg-update-body {
+    position: relative;
+    min-width: 0;
+    padding-right: 64px;
+  }
+  .pg-update-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .pg-update-title > b {
+    font-weight: 600;
+  }
+  .pg-update-incident {
+    color: var(--ink-2);
+    font: 400 12px/16px var(--font-plex), ui-monospace, monospace;
+  }
+  .pg-update-text {
+    margin-top: 4px;
+    max-width: 60rem;
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 19px;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .pg-update-meta {
+    margin-top: 4px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .pg-update-tools {
+    position: absolute;
+    top: -3px;
+    right: 0;
+    display: flex;
+    gap: 2px;
+  }
+  .pg-update-error {
+    margin-top: 6px;
+    color: var(--down-ink);
+    font-size: 12.5px;
+  }
+  .pg-update-body > .pg-update-editor {
+    margin-top: 2px;
+  }
+  .pg-update-body:has(> .pg-update-editor) {
+    padding-right: 0;
+  }
+  /* Narrow: the time above the title, the mark beside the time. */
+  @container updates (width < 34rem) {
+    .pg-update {
+      grid-template-columns: 20px minmax(0, 1fr);
+      row-gap: 2px;
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+    .pg-update-time {
+      grid-column: 2;
+      grid-row: 1;
+      text-align: left;
+    }
+    .pg-update-mark {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    .pg-update-body {
+      grid-column: 2;
+      grid-row: 2;
+      padding-right: 60px;
+    }
+    .pg-updates-head,
+    .pg-updates-compose,
+    .pg-updates-day {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+  }
+  /* The badges in a panel of their own, under the updates. */
+  .pg-badges-own {
+    border-top: 0;
+  }
+  .pg-badges-own > .pg-help {
+    margin-top: 8px;
+  }
+}
+
+/* ---------- The public page ---------- */
+@layer components {
+  .sp-head-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+  }
+  .sp-wall-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .sp-wall-controls > .btn[aria-pressed="true"] {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+  }
+
+  /* The uptime over each window, split by hairlines. */
+  .sp-windows {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, auto));
+    gap: 0;
+  }
+  .sp-window {
+    display: flex;
+    /* The figure above its label, though the label comes first in the markup. */
+    flex-direction: column-reverse;
+    gap: 2px;
+    min-width: 0;
+    padding: 2px 18px;
+    border-left: 1px solid var(--line);
+  }
+  .sp-window:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .sp-window:last-child {
+    padding-right: 0;
+  }
+  .sp-window-value {
+    font-size: 24px;
+    line-height: 28px;
+    font-weight: 700;
+    font-stretch: 88%;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .sp-window-value > .sp-kpi-unit {
+    font-size: 13px;
+  }
+  .sp-window-label {
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
+  }
+  /* In the hero they stand to the right of the sentence. */
+  .sp-hero-windows {
+    flex: none;
+  }
+  /* On a service's own page they fill a panel. */
+  .sp-windows-panel {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 14px 20px;
+  }
+  .sp-windows-panel .sp-window {
+    padding: 2px 20px;
+  }
+  .sp-windows-panel .sp-window:first-child {
+    padding-left: 0;
+  }
+  @media (width < 48rem) {
+    .sp-hero-windows {
+      flex: 1 1 100%;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .sp-windows {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .sp-window {
+      padding: 2px 10px;
+    }
+    .sp-windows-panel .sp-window {
+      padding: 2px 12px;
+    }
+    .sp-window-value {
+      font-size: 18px;
+      line-height: 22px;
+    }
+    .sp-window-value > .sp-kpi-unit {
+      font-size: 11px;
+    }
+    .sp-window-label {
+      font-size: 11px;
+    }
+  }
+
+  /* The groups of services. */
+  .sp-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .sp-group-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 24px 0 8px;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .sp-group-count {
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .sp-group:first-child .sp-group-title {
+    margin-top: 24px;
+  }
+  .sp-group:first-child > .sp-services {
+    margin-top: 16px;
+  }
+  .sp-group > .sp-services {
+    margin-top: 0;
+  }
+  .sp-group-title + .sp-services {
+    margin-top: 0;
+  }
+  .sp-service-link {
+    color: inherit;
+    text-decoration: none;
+  }
+  .sp-service-link:hover {
+    color: var(--accent-text);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .sp-state-up {
+    color: var(--up-ink);
+  }
+  .sp-state-down {
+    color: var(--down-ink);
+  }
+  .sp-state-warn {
+    color: var(--warn-ink);
+  }
+  .sp-state-maint {
+    color: var(--maint-ink);
+  }
+  .sp-state-paused,
+  .sp-state-pending {
+    color: var(--ink-2);
+  }
+  /* A service's windows on the axis line, between "90 days ago" and "today". */
+  .sp-axis-windows {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px 12px;
+    min-width: 0;
+    color: var(--ink-2);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .sp-win > small {
+    margin-right: 2px;
+    color: var(--ink-3);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  /* Many services: one line each. */
+  .sp-services-compact > .sp-service-compact {
+    grid-template-columns: minmax(9rem, 1fr) minmax(8rem, 2fr) auto minmax(7rem, auto);
+    gap: 14px;
+    align-items: center;
+    padding: 9px 16px;
+  }
+  .sp-service-compact > .sp-service-name {
+    font-size: 13.5px;
+  }
+  .sp-compact-uptime {
+    color: var(--ink-2);
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .sp-service-compact > .sp-service-state {
+    justify-content: flex-start;
+    font-size: 12.5px;
+  }
+  @media (width < 40rem) {
+    .sp-services-compact > .sp-service-compact {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px 12px;
+      padding: 10px 16px;
+    }
+    .sp-service-compact > .sp-compact-strip {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+    .sp-service-compact > .sp-compact-uptime {
+      grid-column: 1;
+      grid-row: 3;
+      font-size: 12px;
+    }
+    .sp-service-compact > .sp-service-state {
+      grid-column: 2;
+      grid-row: 1;
+    }
+  }
+
+  /* The updates: a thread by day, each with the glyph of its kind. */
+  .sp-updates {
+    padding-bottom: 4px;
+  }
+  .sp-updates-day + .sp-updates-day {
+    border-top: 1px solid var(--line);
+  }
+  .sp-day {
+    padding: 12px 16px 4px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+  }
+  .sp-update {
+    display: grid;
+    grid-template-columns: 40px 20px minmax(0, 1fr);
+    column-gap: 10px;
+    align-items: start;
+    padding: 7px 16px 9px;
+  }
+  .sp-update-time {
+    padding-top: 1px;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 18px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .sp-update-body {
+    min-width: 0;
+  }
+  .sp-update-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    font-size: 13.5px;
+    line-height: 20px;
+  }
+  .sp-update-title > b {
+    font-weight: 600;
+  }
+  .sp-update-kind,
+  .sp-update-monitor {
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+  .sp-update-monitor::before {
+    content: "· ";
+  }
+  .sp-update-text {
+    margin-top: 2px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+  /* Which services a maintenance window covers. */
+  .sp-event-who {
+    margin-top: 2px;
+    color: var(--ink-2);
+    font-size: 12.5px;
+    line-height: 18px;
+  }
+  /* Updates and outages side by side only on a wall screen; one column otherwise. */
+  .sp-wall-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* A protected page before its password. */
+  .sp-unlock {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 24px;
+    padding: 28px;
+  }
+  .sp-unlock-title {
+    margin-top: 10px;
+    font-size: 20px;
+    line-height: 26px;
+    font-weight: 620;
+    text-wrap: balance;
+  }
+  .sp-unlock-body {
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 20px;
+    text-wrap: pretty;
+  }
+  .sp-unlock-form {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    width: min(100%, 22rem);
+    margin-top: 12px;
+  }
+  .sp-unlock-form > label {
+    display: block;
+    width: 100%;
+  }
+  .sp-unlock-error {
+    color: var(--down-ink);
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  /* A service's own page. */
+  .sp-back {
+    margin-bottom: 8px;
+  }
+  .sp-back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ink-2);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 550;
+  }
+  .sp-back-link:hover {
+    color: var(--accent-text);
+  }
+  .sp-detail-state {
+    margin-top: 8px;
+  }
+  .sp-days {
+    display: grid;
+    gap: 10px;
+    padding: 16px 20px;
+  }
+  .sp-chart {
+    padding: 16px 16px 4px;
+  }
+  .sp-chart .mon-more {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .sp-table-panel {
+    overflow: hidden;
+  }
+  .sp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    line-height: 20px;
+  }
+  .sp-table th {
+    height: 34px;
+    padding: 0 16px;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .sp-table td {
+    height: 40px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--line);
+    vertical-align: middle;
+    font-variant-numeric: tabular-nums;
+  }
+  .sp-table .num {
+    text-align: right;
+  }
+  .sp-table-glyph {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+}
+
+/* ---------- The wall screen ---------- */
+/* A visitor's choice, read before the first paint: bigger words, the
+   whole width, no footer, outages beside the updates. The pulse of a live
+   outage and every other motion already stand still for those who ask. */
+@layer components {
+  html[data-wall="on"] .sp-page {
+    max-width: 1480px;
+    padding: 28px 40px 24px;
+  }
+  html[data-wall="on"] .sp-title {
+    font-size: 36px;
+    line-height: 40px;
+  }
+  html[data-wall="on"] .sp-desc {
+    font-size: 16px;
+    line-height: 22px;
+  }
+  html[data-wall="on"] .sp-hero {
+    padding: 28px 32px;
+  }
+  html[data-wall="on"] .sp-state {
+    font-size: 44px;
+    line-height: 48px;
+  }
+  html[data-wall="on"] .sp-summary {
+    font-size: 16px;
+    line-height: 22px;
+  }
+  html[data-wall="on"] .sp-window-value {
+    font-size: 32px;
+    line-height: 36px;
+  }
+  html[data-wall="on"] .sp-window-label {
+    font-size: 13px;
+  }
+  html[data-wall="on"] .sp-group-title {
+    font-size: 18px;
+    line-height: 24px;
+  }
+  html[data-wall="on"] .sp-service {
+    padding: 18px 24px;
+  }
+  html[data-wall="on"] .sp-service-name {
+    font-size: 18px;
+    line-height: 24px;
+  }
+  html[data-wall="on"] .sp-service-state {
+    font-size: 15px;
+    gap: 10px;
+  }
+  html[data-wall="on"] .sp-service-state > .glyph {
+    --g: 12px;
+  }
+  /* The strip's height is set inline by the component; the wall screen needs it taller. */
+  html[data-wall="on"] .sp-service:not(.sp-service-compact) > .beat-strip {
+    height: 40px !important;
+  }
+  html[data-wall="on"] .sp-services-compact > .sp-service-compact {
+    padding: 12px 24px;
+  }
+  html[data-wall="on"] .sp-service-compact > .sp-service-name {
+    font-size: 16px;
+  }
+  html[data-wall="on"] .sp-compact-strip {
+    height: 20px !important;
+  }
+  html[data-wall="on"] .sp-axis,
+  html[data-wall="on"] .sp-compact-uptime {
+    font-size: 13px;
+  }
+  html[data-wall="on"] .sp-section-title {
+    font-size: 17px;
+  }
+  html[data-wall="on"] .sp-event-what,
+  html[data-wall="on"] .sp-update-title,
+  html[data-wall="on"] .sp-update-text {
+    font-size: 15px;
+    line-height: 22px;
+  }
+  html[data-wall="on"] .sp-foot {
+    display: none;
+  }
+  @media (width >= 75rem) {
+    html[data-wall="on"] .sp-wall-grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0 24px;
+    }
+  }
+}

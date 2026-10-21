@@ -3,8 +3,12 @@ import type { ChannelType } from "@/lib/api";
 /** One input of a channel's form; every text is a message key, shown with t(). */
 type FieldSpec = { label: string; placeholder: string; hint?: string };
 
-/** The kinds of event a channel can be limited to. */
-export type ChannelEvent = "down" | "up" | "reminder" | "cert";
+/**
+ * The kinds of event a channel can be limited to. slow and slow_resolved
+ * are a monitor turning slow (API state "degraded") and fast again; they
+ * open no incident and go at once, whatever the channel's delay.
+ */
+export type ChannelEvent = "down" | "up" | "reminder" | "cert" | "slow" | "slow_resolved";
 
 /** The message key of each event's name; show it with t(). */
 export const channelEventLabels: Record<ChannelEvent, string> = {
@@ -12,6 +16,8 @@ export const channelEventLabels: Record<ChannelEvent, string> = {
   up: "channelEvent.up",
   reminder: "channelEvent.reminder",
   cert: "channelEvent.cert",
+  slow: "channelEvent.slow",
+  slow_resolved: "channelEvent.slow_resolved",
 };
 
 /**

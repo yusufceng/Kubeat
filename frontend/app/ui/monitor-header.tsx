@@ -1,7 +1,9 @@
 import type { CheckResult, Monitor, MonitorChannel } from "@/lib/api";
+import { milliseconds } from "@/lib/format";
 import type { T } from "@/lib/i18n/translate";
 import { kubectlName, typeWords } from "@/lib/monitor-page";
 import { MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
+import { Callout } from "@/app/ui/monitor-callout";
 import { ChannelsChip } from "@/app/ui/monitor-channels";
 import { monitorLabel } from "@/app/ui/monitor-name";
 import { MonitorActions } from "@/app/ui/monitor-settings";
@@ -12,15 +14,17 @@ import { TagChip } from "@/app/ui/tag";
 /**
  * The top of a monitor's page: its name in the display face with what it is
  * in the cluster as kubectl says it ("svc/pricing:8080 | http"), how it
- * stands and for how long, the error of a failing check, then where it
- * points, its tags and where its alerts go. The actions sit on the right
- * as quiet buttons, for those who may use them.
+ * stands and for how long, the error of a failing check or the slowness
+ * of a degraded one, then where it points, its tags and where its alerts
+ * go. The actions sit on the right as quiet buttons, for those who may use
+ * them.
  */
 export function MonitorHeader({
   monitor,
   state,
   since,
   channels,
+  recent,
   canEdit,
   silence,
   t,
@@ -31,6 +35,8 @@ export function MonitorHeader({
   since?: string;
   /** null when they could not be read. */
   channels: MonitorChannel[] | null;
+  /** The latest checks, newest first: the slow ones a degraded monitor names. */
+  recent?: CheckResult[];
   canEdit: boolean;
   /** The silence lengths offered, or null where silencing makes no sense. */
   silence: number[] | null;
@@ -40,6 +46,10 @@ export function MonitorHeader({
   const name = monitorLabel(monitor).name;
   const last = monitor.last_result;
   const failing = monitor.enabled && last !== null && !last.up;
+  // Degraded: up, but slower than the threshold; the chip counts since the
+  // first slow check and says what the answers are slower than.
+  const slow = state === "degraded";
+  const thresholdMs = monitor.slow_above_ms.toLocaleString(t.intl);
   return (
     <header className="mon-head">
       <div className="mon-head-main">
@@ -66,9 +76,16 @@ export function MonitorHeader({
         </div>
         {monitor.description && <p className="mon-desc">{monitor.description}</p>}
         <div className="mon-stline">
-          <StatusPill state={state} t={t} since={since} incident={monitor.open_incident?.id} />
+          <StatusPill
+            state={state}
+            t={t}
+            since={slow ? (monitor.slow_since ?? undefined) : since}
+            incident={monitor.open_incident?.id}
+            note={slow ? t("monitorPage.slow.note", { ms: thresholdMs }) : undefined}
+          />
           {failing && <ErrorLine last={last} />}
         </div>
+        {slow && <SlowLine monitor={monitor} recent={recent ?? []} t={t} />}
         <div className="mon-meta">
           {monitor.target && (
             <span className="mon-target">
@@ -104,6 +121,8 @@ export function MonitorHeader({
           // Only what the buttons need goes to the browser.
           monitor={{ id: monitor.id, name, enabled: monitor.enabled, managed: monitor.managed }}
           silence={silence}
+          // How many channels hear about the monitor; null when that could not be read.
+          channelCount={channels === null ? null : channels.length}
         />
       )}
     </header>
@@ -118,4 +137,28 @@ function ErrorLine({ last }: { last: CheckResult }) {
       {text}
     </span>
   ) : null;
+}
+
+/**
+ * Why the monitor is degraded, in amber under the state line: the
+ * threshold its answers are slower than, how long the last checks took
+ * (the newest failure_threshold, which the backend judged), and that no
+ * incident comes of it.
+ */
+function SlowLine({ monitor, recent, t }: { monitor: Monitor; recent: CheckResult[]; t: T }) {
+  const latencies = recent
+    .slice(0, monitor.failure_threshold)
+    .filter((r) => r.up)
+    .map((r) => milliseconds(r.latency_ms, t));
+  const ms = monitor.slow_above_ms.toLocaleString(t.intl);
+  return (
+    <Callout tone="warn" className="mt-2.5">
+      {latencies.length > 0
+        ? t.n("monitorPage.slow.line", latencies.length, {
+            ms,
+            latencies: new Intl.ListFormat(t.intl, { type: "conjunction" }).format(latencies),
+          })
+        : t("monitorPage.slow.lineNoChecks", { ms })}
+    </Callout>
+  );
 }

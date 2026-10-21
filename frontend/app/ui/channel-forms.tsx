@@ -13,9 +13,11 @@ import {
 import type { Channel, ChannelType } from "@/lib/api";
 import { type ChannelEvent, channelEventLabels, channelTypeOrder, channelTypes } from "@/lib/channel-types";
 import { MASKED_VALUE } from "@/lib/constants";
+import { duration } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 import type { T } from "@/lib/i18n/translate";
 import { ConfirmForm } from "@/app/ui/confirm";
+import { DurationField } from "@/app/ui/duration-field";
 import { EditIcon, PauseIcon, PlayIcon, TrashIcon } from "@/app/ui/icons";
 import { CheckIcon, CloseIcon, SendIcon } from "@/app/ui/page-icons";
 import { StatusGlyph } from "@/app/ui/status-glyph";
@@ -89,11 +91,40 @@ function routing(namespaces: string[], tags: string[], events: ChannelEvent[], t
   );
 }
 
+/** A message with its {values} set in bold: the help that reads the form back. */
+function echo(text: string, values: Record<string, React.ReactNode>): React.ReactNode[] {
+  return text.split(/(\{\w+\})/).map((part, i) => {
+    const name = /^\{(\w+)\}$/.exec(part)?.[1];
+    return name && name in values ? <b key={i}>{values[name]}</b> : part;
+  });
+}
+
+/**
+ * The sentence that reads the timing back: "Kesinti 10 dk sürerse haber
+ * verir; sonra her 1 sa tekrar hatırlatır", or "Hemen; tekrar genel ayar"
+ * with both at zero. null is a count that is not a whole number yet.
+ */
+function timingEcho(delay: number | null, repeat: number | null, t: T): React.ReactNode {
+  if (delay === null || repeat === null) return t("channelForm.echo.timing.invalid");
+  const told =
+    delay > 0 ? echo(t("channelForm.echo.timing.delay"), { delay: duration(delay, t) }) : t("channelForm.echo.timing.atOnce");
+  const reminded =
+    repeat > 0
+      ? echo(t("channelForm.echo.timing.repeat"), { repeat: duration(repeat, t) })
+      : t("channelForm.echo.timing.repeatGlobal");
+  return (
+    <>
+      {told}; {reminded}.
+    </>
+  );
+}
+
 /**
  * The form of a channel. With a channel it edits that one; without, it
  * creates one of the type picked at the top. Its sections are what the
- * channel is, where it sends, and what it hears about, the last read back
- * as a sentence. closeHref is where Cancel and a successful save lead.
+ * channel is, where it sends, what it hears about, and when: the last two
+ * read back as sentences. closeHref is where Cancel and a successful save
+ * lead.
  */
 export function ChannelForm({
   channel,
@@ -116,6 +147,9 @@ export function ChannelForm({
   const [events, setEvents] = useState<ChannelEvent[]>(
     !channel || channel.events.length === 0 ? allEvents : channel.events,
   );
+  // What the timing sentence reads, in seconds; null while a count is not a number.
+  const [delay, setDelay] = useState<number | null>(channel?.delay_seconds ?? 0);
+  const [repeat, setRepeat] = useState<number | null>(channel?.repeat_seconds ?? 0);
   const spec = channelTypes[type];
   // A namespace the channel is limited to may no longer have monitors.
   const offered = [...new Set([...namespaces, ...(channel?.namespaces ?? [])])].sort();
@@ -297,6 +331,45 @@ export function ChannelForm({
         </div>
       </div>
 
+      <div className="pg-sec">
+        <div className="pg-sec-intro">
+          <h2>{t("channelForm.sec.timing")}</h2>
+          <p>{t("channelForm.sec.timingBody")}</p>
+        </div>
+        <div className="pg-fields">
+          <div className="pg-grid">
+            <div className="pg-span-3">
+              {/* The fields name themselves to screen readers; the label is for the eye. */}
+              <span className="pg-label" aria-hidden>
+                {t("channelForm.delay.label")}
+              </span>
+              <DurationField
+                name="delay_seconds"
+                label={t("channelForm.delay.label")}
+                seconds={channel?.delay_seconds ?? 0}
+                onChange={setDelay}
+              />
+              <span className="pg-help">{t("channelForm.delay.hint")}</span>
+            </div>
+            <div className="pg-span-3">
+              <span className="pg-label" aria-hidden>
+                {t("channelForm.repeat.label")}
+              </span>
+              <DurationField
+                name="repeat_seconds"
+                label={t("channelForm.repeat.label")}
+                seconds={channel?.repeat_seconds ?? 0}
+                onChange={setRepeat}
+              />
+              <span className="pg-help">{t("channelForm.repeat.hint")}</span>
+            </div>
+          </div>
+          <p className="pg-echo" aria-live="polite">
+            {timingEcho(delay, repeat, t)}
+          </p>
+        </div>
+      </div>
+
       <div className="pg-savebar pg-savebar-sticky">
         {error && <p role="alert">{error}</p>}
         <div className="pg-savebar-end">
@@ -373,11 +446,19 @@ function routingLine(channel: Channel, t: T): string {
   return parts.join(" · ");
 }
 
+/** When the channel hears of an outage, in a few words: "10 dk gecikmeli · her 1 sa"; null when at once and on the global cadence. */
+function timingLine(channel: Channel, t: T): string | null {
+  const parts: string[] = [];
+  if (channel.delay_seconds > 0) parts.push(t("channelRow.delay", { duration: duration(channel.delay_seconds, t) }));
+  if (channel.repeat_seconds > 0) parts.push(t("channelRow.repeat", { duration: duration(channel.repeat_seconds, t) }));
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 /**
  * One channel as a row of the table: its name and type, where it sends,
- * what it hears about, how its last delivery went, and what can be done
- * with it. While it is edited (editHref leads back out), its form opens
- * in a row of its own under it.
+ * what it hears about and when, how its last delivery went, and what can
+ * be done with it. While it is edited (editHref leads back out), its form
+ * opens in a row of its own under it.
  */
 export function ChannelRow({
   channel,
@@ -395,6 +476,7 @@ export function ChannelRow({
   const typeName = t(spec?.label ?? channel.type);
   const last = channel.last_delivery;
   const routes = routingLine(channel, t);
+  const timing = timingLine(channel, t);
 
   return (
     <>
@@ -423,6 +505,7 @@ export function ChannelRow({
           <span className="pg-trunc max-w-48 text-ink-2 xl:max-w-72" title={routes}>
             {routes}
           </span>
+          {timing && <span className="pg-sub block tabular-nums">{timing}</span>}
         </td>
         <td className="pg-shrink">
           {last ? (

@@ -10,6 +10,7 @@ import {
   getMonitorChannels,
   getSeries,
   getSeriesBetween,
+  getStats,
   getUptime,
   type Incident,
   listIncidents,
@@ -19,6 +20,7 @@ import {
   type Monitor,
   type MonitorChannel,
   type Series,
+  type Stats,
   type UptimeWindow,
 } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
@@ -32,6 +34,7 @@ import { MANUAL_LABEL, namespaceHref } from "@/lib/namespaces";
 import { BackendError } from "@/app/ui/backend-error";
 import { BeatStrip } from "@/app/ui/beat-strip";
 import { CheckGrid } from "@/app/ui/check-grid";
+import { DurationFigure } from "@/app/ui/figures";
 import { ChevronIcon, EditIcon } from "@/app/ui/icons";
 import { LatencyChart, type Span } from "@/app/ui/latency-chart";
 import { DayTime } from "@/app/ui/local-time";
@@ -244,9 +247,10 @@ async function MonitorDetail({
   let series: Series;
   let maintenance: Maintenance[];
   let channels: MonitorChannel[] | null;
+  let stats: Stats | null;
   try {
     let ranged: Series | null;
-    [monitor, results, incidents, windows, ranged, maintenance, channels] = await Promise.all([
+    [monitor, results, incidents, windows, ranged, maintenance, channels, stats] = await Promise.all([
       readMonitor(id),
       listResults(id, Math.max(config.historyLimit, config.resultsLimit)),
       listIncidents(config.incidentsLimit, id),
@@ -256,6 +260,8 @@ async function MonitorDetail({
       // Only the chart's bands need these; the page does without them.
       listMaintenance(config.maintenanceLimit).catch(() => []),
       getMonitorChannels(id).catch(() => null),
+      // The reliability figures of this monitor alone, over the overview's period; one readout does without them.
+      getStats(config.statsDays, undefined, id).catch(() => null),
     ]);
     // A link to an outage that has since ended ("down" messages carry no
     // end) is framed on the incident, not on everything since.
@@ -342,6 +348,18 @@ async function MonitorDetail({
         hint: <OutagesWithin incidents={outages} seconds={w.window_seconds} />,
       }),
     ),
+    {
+      // Beside the uptimes: how long it stays up between outages, over the same period as the overview's MTTR.
+      label: t("monitorPage.readout.mtbf", { window: duration(config.statsDays * 86400, t) }),
+      abbr: t("monitorPage.readout.mtbf.abbr"),
+      value: stats?.mtbf_seconds != null ? <DurationFigure seconds={stats.mtbf_seconds} t={t} /> : t("common.none"),
+      tone: stats?.mtbf_seconds != null ? undefined : "muted",
+      hint: !stats
+        ? t("monitorsList.readouts.unavailable")
+        : stats.outages > 0
+          ? t.n("monitorsList.readouts.outages", stats.outages)
+          : t("monitorPage.readout.noOutages"),
+    },
   ];
   if (hasPods) {
     readouts.push({
@@ -416,6 +434,7 @@ async function MonitorDetail({
         state={state}
         since={since}
         channels={channels}
+        recent={results}
         canEdit={me.can_edit}
         silence={monitor.enabled && !monitor.maintenance_until ? config.maintenanceDurations : null}
         t={t}

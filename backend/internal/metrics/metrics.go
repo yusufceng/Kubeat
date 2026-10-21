@@ -256,6 +256,8 @@ var (
 		"When the monitor was last checked.", monitorLabels, nil)
 	monitorIncident = prometheus.NewDesc("kubeat_monitor_incident_open",
 		"1 while the monitor has an open outage.", monitorLabels, nil)
+	monitorSlow = prometheus.NewDesc("kubeat_monitor_slow",
+		"1 while the monitor answers, but slower than its slow_above_ms threshold; 0 otherwise, also for monitors without a threshold.", monitorLabels, nil)
 	monitorCertExpiry = prometheus.NewDesc("kubeat_monitor_cert_expiry_timestamp_seconds",
 		"When the certificate seen by the monitor's latest check expires.", monitorLabels, nil)
 	monitorsTotal = prometheus.NewDesc("kubeat_monitors",
@@ -277,7 +279,7 @@ func (m *Metrics) WatchMonitors(st StatusLister, timeout time.Duration, logger *
 }
 
 func (c *monitorCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, d := range []*prometheus.Desc{monitorUp, monitorLatency, monitorLastCheck, monitorIncident, monitorCertExpiry, monitorsTotal, scrapeOK} {
+	for _, d := range []*prometheus.Desc{monitorUp, monitorLatency, monitorLastCheck, monitorIncident, monitorSlow, monitorCertExpiry, monitorsTotal, scrapeOK} {
 		ch <- d
 	}
 }
@@ -315,6 +317,11 @@ func (c *monitorCollector) Collect(ch chan<- prometheus.Metric) {
 			incident = 1
 		}
 		gauge(monitorIncident, incident, labels...)
+		slow := 0.0
+		if !st.SlowSince.IsZero() {
+			slow = 1
+		}
+		gauge(monitorSlow, slow, labels...)
 
 		if st.Last == nil {
 			continue

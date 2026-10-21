@@ -67,13 +67,16 @@ type Fact struct {
 	Label, Value string
 }
 
-// Facts lists the details of a notification; none for a test. A grouped
-// notification lists its monitors instead.
+// Facts lists the details of a notification; for a test, the monitor it is
+// about, if any. A grouped notification lists its monitors instead.
 func Facts(n Notification) []Fact {
-	if n.Event == EventTest {
-		return nil
-	}
 	w := wording(n)
+	if n.Event == EventTest {
+		if n.Monitor.Name == "" {
+			return nil
+		}
+		return monitorFacts(n, w)
+	}
 	if len(n.Group) > 1 {
 		var facts []Fact
 		if n.Monitor.Namespace != "" {
@@ -88,12 +91,13 @@ func Facts(n Notification) []Fact {
 		}
 		return facts
 	}
-	facts := []Fact{{w.factMonitor, n.Monitor.Name}}
-	if n.Monitor.Target != "" { // a push monitor has none
-		facts = append(facts, Fact{w.factTarget, n.Monitor.Target})
-	}
-	if n.Monitor.Namespace != "" {
-		facts = append(facts, Fact{w.factNamespace, n.Monitor.Namespace})
+	facts := monitorFacts(n, w)
+	if n.Event == EventSlow || n.Event == EventSlowResolved {
+		facts = append(facts, Fact{w.factStart, n.Since.UTC().Format(time.RFC3339)})
+		if n.Event == EventSlowResolved {
+			facts = append(facts, Fact{w.factEnd, n.At.UTC().Format(time.RFC3339)})
+		}
+		return append(facts, Fact{w.factThreshold, latencyText(n.Threshold, w)}, Fact{w.factLatency, latencyText(n.Latency, w)})
 	}
 	facts = append(facts, Fact{w.factStart, n.Incident.StartedAt.UTC().Format(time.RFC3339)})
 	if !n.Incident.Open() {
@@ -101,6 +105,18 @@ func Facts(n Notification) []Fact {
 	}
 	if n.Incident.Cause != "" {
 		facts = append(facts, Fact{w.factCause, cause(n)})
+	}
+	return facts
+}
+
+// monitorFacts names the monitor a notification is about.
+func monitorFacts(n Notification, w phrases) []Fact {
+	facts := []Fact{{w.factMonitor, n.Monitor.Name}}
+	if n.Monitor.Target != "" { // a push monitor has none
+		facts = append(facts, Fact{w.factTarget, n.Monitor.Target})
+	}
+	if n.Monitor.Namespace != "" {
+		facts = append(facts, Fact{w.factNamespace, n.Monitor.Namespace})
 	}
 	return facts
 }
@@ -135,6 +151,10 @@ func Subject(n Notification) string {
 			return fmt.Sprintf(w.subjectGroupCertExpires, where, count)
 		case EventCertRenewed:
 			return fmt.Sprintf(w.subjectGroupCertRenewed, where, count)
+		case EventSlow:
+			return fmt.Sprintf(w.subjectGroupSlow, where, count)
+		case EventSlowResolved:
+			return fmt.Sprintf(w.subjectGroupSlowResolved, where, count)
 		}
 	}
 	switch n.Event {
@@ -148,7 +168,14 @@ func Subject(n Notification) string {
 		return fmt.Sprintf(w.subjectCertExpires, n.Monitor.Name)
 	case EventCertRenewed:
 		return fmt.Sprintf(w.subjectCertRenewed, n.Monitor.Name)
+	case EventSlow:
+		return fmt.Sprintf(w.subjectSlow, n.Monitor.Name)
+	case EventSlowResolved:
+		return fmt.Sprintf(w.subjectSlowResolved, n.Monitor.Name)
 	default:
+		if n.Monitor.Name != "" {
+			return fmt.Sprintf(w.subjectTestMonitor, n.Monitor.Name)
+		}
 		return w.subjectTest
 	}
 }

@@ -252,9 +252,9 @@ func teamsColor(n Notification) string {
 	switch n.Event {
 	case EventDown, EventReminder:
 		return "Attention"
-	case EventUp, EventCertRenewed:
+	case EventUp, EventCertRenewed, EventSlowResolved:
 		return "Good"
-	case EventCertExpiring:
+	case EventCertExpiring, EventSlow:
 		return "Warning"
 	default:
 		return "Default"

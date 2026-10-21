@@ -318,6 +318,7 @@ func (s *SQLite) Close() error {
 var monitorFields = []string{
 	"id", "name", "description", "type", "target", "interval_seconds", "timeout_seconds", "retry_interval_seconds",
 	"failure_threshold", "inverted", "enabled", "push_token", "created_at", "namespace", "source", "tags", "settings", "managed", "each_pod",
+	"slow_above_ms", "slow_since",
 }
 
 var monitorColumns = strings.Join(monitorFields, ", ")
@@ -336,6 +337,8 @@ type monitorRow struct {
 	m                                   Monitor
 	interval, timeout, retry, createdAt int64
 	tags, settings                      string
+	slowAboveMS                         int64
+	slowSince                           sql.NullInt64
 	// box decrypts the monitor's secrets. With raw set they are left in
 	// their stored form instead.
 	box *secretbox.Box
@@ -347,6 +350,7 @@ func (r *monitorRow) dest() []any {
 	return []any{
 		&r.m.ID, &r.m.Name, &r.m.Description, &r.m.Type, &r.m.Target, &r.interval, &r.timeout, &r.retry,
 		&r.m.FailureThreshold, &r.m.Inverted, &r.m.Enabled, &r.m.PushToken, &r.createdAt, &r.m.Namespace, &r.m.Source, &r.tags, &r.settings, &r.m.Managed, &r.m.EachPod,
+		&r.slowAboveMS, &r.slowSince,
 	}
 }
 
@@ -357,6 +361,8 @@ func (r *monitorRow) monitor() (Monitor, error) {
 	m.Timeout = time.Duration(r.timeout) * time.Second
 	m.RetryInterval = time.Duration(r.retry) * time.Second
 	m.CreatedAt = time.UnixMilli(r.createdAt).UTC()
+	m.SlowAbove = time.Duration(r.slowAboveMS) * time.Millisecond
+	m.SlowSince = unixMilliOrZero(r.slowSince)
 	if err := decodeSettings(r.settings, &m); err != nil {
 		return Monitor{}, fmt.Errorf("monitor %d: %w", m.ID, err)
 	}
@@ -535,13 +541,19 @@ func (s *SQLite) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 	}
 	m.Tags = sorted
 	m.CreatedAt = time.Now().UTC().Truncate(time.Millisecond)
+	// The slow state is the engine's to set, from results the monitor
+	// does not have yet.
+	m.SlowAbove = m.SlowAbove.Truncate(time.Millisecond)
+	m.SlowSince = time.Time{}
 
 	res, err := s.write.ExecContext(ctx,
 		`INSERT INTO monitors (name, description, type, target, interval_seconds, timeout_seconds, retry_interval_seconds,
-		                       failure_threshold, inverted, enabled, push_token, created_at, namespace, source, tags, settings, managed, each_pod)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                       failure_threshold, inverted, enabled, push_token, created_at, namespace, source, tags, settings, managed, each_pod,
+		                       slow_above_ms)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.Name, m.Description, m.Type, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), int64(m.RetryInterval/time.Second),
-		m.FailureThreshold, m.Inverted, m.Enabled, m.PushToken, m.CreatedAt.UnixMilli(), m.Namespace, m.Source, tags, encoded, m.Managed, m.EachPod)
+		m.FailureThreshold, m.Inverted, m.Enabled, m.PushToken, m.CreatedAt.UnixMilli(), m.Namespace, m.Source, tags, encoded, m.Managed, m.EachPod,
+		m.SlowAbove.Milliseconds())
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}
@@ -808,13 +820,19 @@ func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 	if err != nil {
 		return Monitor{}, fmt.Errorf("update monitor: %w", err)
 	}
+	// The slow state is the engine's; it ends, without a notification, when
+	// the threshold is turned off or the monitor paused, since no result
+	// would come to end it.
+	slowAboveMS := m.SlowAbove.Milliseconds()
 	res, err := s.write.ExecContext(ctx,
 		`UPDATE monitors
 		 SET name = ?, description = ?, target = ?, interval_seconds = ?, timeout_seconds = ?, retry_interval_seconds = ?,
-		     failure_threshold = ?, inverted = ?, enabled = ?, namespace = ?, tags = ?, settings = ?, each_pod = ?
+		     failure_threshold = ?, inverted = ?, enabled = ?, namespace = ?, tags = ?, settings = ?, each_pod = ?,
+		     slow_above_ms = ?, slow_since = CASE WHEN ? = 0 OR NOT ? THEN NULL ELSE slow_since END
 		 WHERE id = ?`,
 		m.Name, m.Description, m.Target, int64(m.Interval/time.Second), int64(m.Timeout/time.Second), int64(m.RetryInterval/time.Second),
-		m.FailureThreshold, m.Inverted, m.Enabled, m.Namespace, tags, encoded, m.EachPod, m.ID)
+		m.FailureThreshold, m.Inverted, m.Enabled, m.Namespace, tags, encoded, m.EachPod,
+		slowAboveMS, slowAboveMS, m.Enabled, m.ID)
 	if isUniqueViolation(err) {
 		return Monitor{}, ErrConflict
 	}
@@ -834,6 +852,22 @@ func (s *SQLite) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) 
 		return Monitor{}, fmt.Errorf("update monitor: %w", err)
 	}
 	return updated, nil
+}
+
+func (s *SQLite) SetMonitorSlowSince(ctx context.Context, id int64, since time.Time) error {
+	stored, _ := nullMilli(since)
+	res, err := s.write.ExecContext(ctx, "UPDATE monitors SET slow_since = ? WHERE id = ?", stored, id)
+	if err != nil {
+		return fmt.Errorf("set monitor slow since: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set monitor slow since: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *SQLite) DeleteMonitor(ctx context.Context, id int64) error {

@@ -144,6 +144,15 @@ gövdesini görmez; ters çevrilmiş monitor'lar politikanın reddini beklenen
 hata saymaz; kullanılamayan bir SSO ayarı backend'i durdurmaz, yalnızca
 SSO'yu kapatır; `helm upgrade --reuse-values` 0.37.0'dan da çalışır.
 
+### 0.40'a yükseltme
+
+0.40 veritabanı şemasını 26'ya çıkarır (durum sayfası bölümleri, kuralları,
+güncellemeleri ve ayarları; kanal gecikme ve tekrarı; yavaş yanıt eşiği).
+Yükseltmeden önce yedek alın: 0.39 ve öncesi yükseltilmiş veritabanını
+açmaz. Başka bir şey yapmak gerekmez; mevcut durum sayfaları tek bir adsız
+bölümle, kanallar gecikmesiz ve genel hatırlatma aralığıyla, monitor'lar
+yavaş yanıt eşiği kapalı olarak sürer.
+
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
 Chart dört Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde
@@ -975,6 +984,8 @@ Arayüz İngilizce ve Türkçe'dir: tarayıcının istediği dil kullanılır, m
 altındaki düğme değiştirir ve seçim bir çerezde kalır; ikisi de yoksa
 `DEFAULT_LOCALE` geçerlidir. Bildirim metinlerinin dili backend'de ayrıdır
 (`UPTIME_LANGUAGE`); chart'ta ikisini birden `language` değeri ayarlar.
+Herkese açık durum sayfaları bunun dışındadır: her sayfa kendi ayarındaki
+dilde (ayarsızsa `UPTIME_LANGUAGE`) gösterilir (bkz. "Durum sayfaları").
 
 Durum her yerde renkle olduğu kadar şekille de okunur: çalışan daire, kesinti
 elmas, sorunlu yarım daire, bakım taralı, duraklatılmış içi boş; renk körü
@@ -999,17 +1010,29 @@ biri de listeyi okuyabilir.
   namespace'e ya da bir sayfaya gider, yeni monitor açar; yalnızca klavyeyle
   kullanılır.
 - **Monitor sayfası**: durum ve ne kadar süredir sürdüğü ("Erişilemiyor · 4
-  gün 1 sa", "Çalışıyor · 5 gün 14 sa"), son 60 kontrol, yanıt süresi ve
-  uptime özetleri, kesinti ve bakım bantlı grafik, pod'lar, olaylar, kontrol
-  geçmişi ve ayarların özeti. Son kontrol başarısızsa **Neden?** bölümü
-  hatanın ne anlama geldiğini, bağlantının hangi adımda (DNS, bağlantı, TLS,
-  ilk bayt) takıldığını, ulaşılan adresi ve sertifikayı gösterir (bkz.
-  "Başarısız kontrolün ayrıntıları"). Buradan durdurulur, susturulur,
-  düzenlenir, kopyalanır ya da silinir.
+  gün 1 sa", "Çalışıyor · 5 gün 14 sa", yavaş yanıt verende "Sorunlu · 12 dk
+  · yanıtlar 800 ms'den uzun" ve altında eşiği ve son kontrollerin sürelerini
+  sayan kehribar bir satır), son 60 kontrol, yanıt süresi, uptime ve
+  "MTBF · 7 gün" özetleri (`STATS_DAYS`), kesinti ve bakım bantlı grafik,
+  pod'lar, olaylar, kontrol geçmişi ve ayarların özeti. Son kontrol
+  başarısızsa **Neden?** bölümü hatanın ne anlama geldiğini, bağlantının
+  hangi adımda (DNS, bağlantı, TLS, ilk bayt) takıldığını, ulaşılan adresi
+  ve sertifikayı gösterir (bkz. "Başarısız kontrolün ayrıntıları"). Buradan
+  durdurulur, susturulur, düzenlenir, kopyalanır ya da silinir; ⋯ menüsündeki
+  **Bildirimi test et** monitor'u duyan her kanala birer test gönderir ve
+  kanal başına sonucu listeler (bkz. "Monitor'den test").
 - **Olay sayfası**: bir kesintinin baştan sona hikâyesi; bkz. "Olay
   sayfası".
 - **Yeni monitor / düzenle**: tipe göre değişen tek form; yardım metinleri
-  girilen değerleri okuyarak ne olacağını söyler.
+  girilen değerleri okuyarak ne olacağını söyler ("Art arda 3 kontrol 800
+  ms'den uzun sürerse monitor Sorunlu görünür ve yavaşlama bildirimi gider").
+  Yavaş yanıt eşiği `NEW_MONITOR_SLOW_ABOVE_MS` ile başlar; 0 kapalıdır.
+- **Bildirimler**: kanalların listesi (kapsamının altında "10 dk gecikmeli ·
+  her 1 sa" gibi zamanlaması) ve formu. Formun **Zamanlama** bölümü gecikme
+  ve tekrarı sayı ve birimle alır, cümle olarak geri okur ("Kesinti 10 dk
+  sürerse haber verir; sonra her 1 sa tekrar hatırlatır"; ikisi de sıfırken
+  "Hemen; tekrar genel ayar"). Olaylar arasında "yavaşladı" ve "yeniden
+  hızlı" da seçilir.
 - **Tema**: menünün altındaki düğme sistem, açık ve koyu arasında geçer;
   seçim tarayıcıda saklanır.
 - **Logo**: kelimenin kendisidir, k'si işarettir (menüdeki mavi karo,
@@ -1022,20 +1045,97 @@ Bir durum sayfası, seçilen monitor'ların durumunu **giriş gerektirmeyen** bi
 adreste yayınlar: `/status/<adres>`. Ekip dışındakiler, müşteriler ya da
 duvardaki bir ekran içindir. **Durum sayfaları** menüsünden oluşturulur.
 
-- Sayfa bir başlık, açıklama, isteğe bağlı bir **duyuru** ve seçilen
+- Sayfa bir başlık, açıklama, isteğe bağlı sabit bir **duyuru** ve seçilen
   monitor'lardan oluşur. Her monitor'a sayfada görünecek ayrı bir ad
-  verilebilir; verilmezse keşfedilen monitor'larda nesnenin adı (`web:80`),
-  diğerlerinde monitor'un adı görünür.
+  verilebilir; verilmezse monitor'un arayüzdeki adı görünür: adı keşfin
+  verdiği ad olan monitor'larda nesnenin adı (`web:80`), yeniden
+  adlandırılmış ya da elle girilmiş olanlarda monitor'un adı.
 - Her monitor için durum, son `UPTIME_STATUS_PAGE_DAYS` günün gün gün uptime
-  çubuğu ve toplam uptime gösterilir; altında son kesintiler listelenir.
+  çubuğu ve toplam uptime gösterilir; ayrıca son 24 saat, 7 gün, 30 gün ve
+  sayfanın gün sayısı için uptime, hem monitor başına hem sayfanın bütünü
+  için (bütünü, o dönemde kontrolü olan monitor'ların ortalamasıdır).
+  Altında son kesintiler listelenir.
 - Sayfa yalnızca adı, durumu, uptime'ı ve kesintilerin zamanını gösterir.
   Adresler, hata mesajları ve sayfada olmayan monitor'lar dışarı verilmez.
 - Tek bir başarısız kontrol sayfada "kesinti" görünmez; kesinti, alarm eşiği
   aşılıp olay açıldığında görünür.
 - "Yayında" işareti kaldırılan sayfa açılmaz (404).
 - Editörler yalnızca kapsamlarındaki monitor'ları gösteren sayfaları yönetir.
-  Monitor'u olmayan bir sayfa (yalnızca duyuru taşıyan ya da monitor'ları
-  silinmiş bir sayfa) yöneticilerindir.
+  Monitor'u ve kuralı olmayan bir sayfa (yalnızca duyuru taşıyan ya da
+  monitor'ları silinmiş bir sayfa) yöneticilerindir.
+
+**Bölümler.** Sayfanın monitor'ları sıralı bölümlerde gruplanır ("Vitrin",
+"Arka plan"); bölümü olmayanlar en üstte adsız bir grupta görünür. Bölümler
+sayfayla birlikte verilir (`sections`), her monitor bölümünü adıyla
+belirtir (`section`). Bir bölüm, içinde monitor ya da kural varken
+kaldırılamaz.
+
+**Üyelik kuralları.** Monitor'ları tek tek seçmek yerine sayfaya kural da
+yazılabilir: "`shop` namespace'indeki monitor'lar", "`public` etiketini
+taşıyanlar" ya da ikisi birden (`rules: [{namespace, tag, section}]`; boş
+namespace her namespace, boş etiket her etiket demektir). Kurallar sayfa her
+açıldığında değerlendirilir: annotation ile keşfedilen yeni bir monitor
+kuralı tutuyorsa sayfada kendiliğinden belirir. Eşleşen monitor'lar kuralın
+bölümünde, elle seçilenlerden sonra ve ada göre sıralı görünür; adları kendi
+adlarıdır (arayüzdeki gibi). Bir monitor sayfada bir kez
+görünür: elle seçilmişse kural onu bir daha eklemez, iki kural tutuyorsa
+ilki alır. Editörler yalnızca kendi namespace'leri için kural yazabilir;
+"her namespace" kuralı bütün namespace'lere yetkili bir editör ya da
+yönetici ister. `GET /api/v1/status-pages/{id}/monitors` sayfanın o an
+gösterdiklerini (elle seçilenler ve eşleşenler) bölüm bölüm verir; arayüz
+önizlemeyi bununla gösterir.
+
+**Güncellemeler.** Sabit duyurunun yanında sayfanın bir de tarihçesi vardır:
+"İnceliyoruz", "Nedeni bulundu", "İzliyoruz", "Çözüldü", bir bildirim ya da
+bakım duyurusu (`kind`: `investigating`, `identified`, `monitoring`,
+`resolved`, `notice`, `maintenance`), başlık ve metinle; isteğe bağlı olarak
+bir olaya bağlanır, sayfa o zaman olayın monitor'unun sayfadaki adını da
+yazar. Güncellemeler sayfayı yönetebilenlerce yazılır, düzenlenir ve
+silinir; her işlem kayda geçer. Sayfa son `UPTIME_STATUS_PAGE_UPDATES`
+güncellemeyi yeniden eskiye, güne göre gruplanmış (UTC) gösterir. Olay
+sayfasında "durum sayfasında göster" işaretlenen notlar da buraya karışır:
+`note` türünde, başlığı olayın monitor'unun sayfadaki adı olan bir
+güncelleme olarak; notun yazarı dışarı verilmez.
+
+**Bakım pencereleri.** Sayfadaki bir monitor'u kapsayan (monitor'a,
+namespace'e ya da herkese tanımlı) bakım pencerelerinden süren ya da
+`UPTIME_STATUS_PAGE_UPCOMING` içinde başlayacak olanlar adı, başlangıcı,
+bitişi ve kapsadığı monitor'ların sayfadaki adlarıyla listelenir;
+tekrarlayan pencere süren ya da bir sonraki tekrarıyla.
+
+**Ayarlar.** Sayfa başına: `noindex` (arama motorlarına "indeksleme" der;
+arayüz robots meta'sını buna göre basar), `hide_paused` (durdurulmuş
+monitor'lar sayfada görünmez), `language` (boşsa kurulumun dili
+`UPTIME_LANGUAGE`, yoksa `tr` ya da `en`; görünüm geçerli olanı döner),
+`detail_pages` (monitor'un kendi ayrıntı sayfası açılabilir; varsayılan
+açık) ve `password`.
+
+**Parola.** Parolalı bir sayfa yalnızca parolayı bilene açılır: parola
+yalnızca yazılır, bcrypt ile saklanır (hesap parolalarının kurallarına
+tabidir), `password: ""` kaldırır. Ziyaretçi parolayı
+`POST /api/v1/status-pages/by-slug/{slug}/unlock` ile verir ve
+`UPTIME_STATUS_PAGE_SESSION` süreli bir token alır (kurulumun gizli
+anahtarıyla imzalanmış HMAC; parola değişince eski token'lar geçersizdir).
+Görünüm, ayrıntı sayfası ve rozetler token'ı `Authorization: Bearer` ya da
+`X-Status-Page-Token` başlığında ister (ikisi de varsa sayfayı açan
+hangisiyse o geçer; Kubeat'e kendi anahtarıyla giren bir istemci sayfanın
+token'ını ikinci başlıkta verir); yoksa yalnızca sayfanın başlığını
+taşıyan `401 {"locked": true, "title": ...}` döner ki parola ekranı başlığı
+gösterebilsin. Arayüz token'ı HttpOnly bir çerezde tutar. Parola denemeleri
+girişteki gibi sayfa başına kısıtlanır (`UPTIME_LOGIN_MAX_FAILURES`,
+`UPTIME_LOGIN_LOCKOUT`); kilitliyken doğru parola da 429 alır.
+`UPTIME_SECRET_KEY` yoksa token'lar o çalıştırmaya özgü bir anahtarla
+imzalanır ve backend yeniden başlayınca ziyaretçilere parola yeniden
+sorulur.
+
+**Ayrıntı sayfası.** `detail_pages` açıkken sayfadaki her monitor
+`GET /api/v1/status-pages/by-slug/{slug}/monitors/{monitor_id}` ile kendi
+sayfasında açılır: sayfadaki adı, durumu, dört dönemin uptime'ı, gün gün
+geçmiş, son `UPTIME_STATUS_PAGE_SERIES` sürenin yanıt süresi serisi (monitor
+sayfasındaki grafikle aynı dilimleme) ve son `UPTIME_STATUS_PAGE_DAYS` günün
+kesintileri yalnızca başlangıç, bitiş ve süre olarak; neden ve adres
+verilmez. Sayfada olmayan monitor ya da kapalı ayrıntı sayfası 404, parolalı
+sayfada token yoksa 401 döner.
 
 **Rozetler.** Yayındaki bir sayfada gösterilen her monitor'un iki rozeti
 vardır; README ya da wiki sayfasına konabilir:
@@ -1046,11 +1146,64 @@ vardır; README ya da wiki sayfasına konabilir:
 ```
 
 `?label=metin` ile soldaki yazı değiştirilebilir. Hiçbir yayındaki sayfada
-olmayan monitor'un rozeti yoktur (404).
+(elle ya da kuralla) olmayan monitor'un rozeti yoktur (404). Yalnızca
+parolalı sayfalarda olan bir monitor'un rozeti o sayfalardan birinin
+token'ını ister; `<img>` başlık taşıyamadığından böyle bir rozet ancak
+token'ı gönderebilen bir istemciyle alınır.
 
 Durum sayfası başka bir sitede iframe içinde gösterilecekse o sitenin
 adresi `STATUS_PAGE_FRAME_ANCESTORS` ile verilir (bkz. "Tarayıcı
 güvenliği"); varsayılan olarak hiçbir site gösteremez.
+
+**Arayüzde düzenleme.** Durum sayfaları menüsünde bir sayfanın formu
+sırayla şunları sorar: sayfa (başlık, adres, açıklama), duyuru, bölümler
+(sıralı adlar; yukarı/aşağı taşınır, kaldırılan bölümün içindekiler en
+üstteki adsız gruba geçer), servisler (her monitor için işaret, sayfada
+görünen ad ve bölüm seçimi), üyelik kuralları (namespace, etiket, bölüm;
+her kural altında okunur: "checkout namespace'indeki tier-1 etiketli her
+monitor, Ödeme bölümünde"), sayfanın şu an gösterdikleri (kaydedilmiş
+haliyle, elle seçilenler ve kuralla gelenler ayrı işaretli; "Yenile" ile
+yeniden okunur), ayarlar (dil, arama motorlarından gizleme, durdurulmuş
+monitor'ları gösterme, ayrıntı sayfaları, parola: ayarlı olduğu söylenir,
+değiştirilir ya da kaldırılır; parolanın kendisi hiç gösterilmez) ve yayın.
+Kaydetmek her monitor'u bulunduğu bölümle gönderir; bölümler hiçbir kayıtta
+düzleşmez. Formun altında sayfanın **güncellemeleri** vardır: güne göre
+listelenir; yeni güncelleme türü (inceliyoruz, nedeni bulundu, izliyoruz,
+çözüldü, bildirim, bakım), başlığı, metni ve isteğe bağlı olarak sayfadaki
+monitor'ların açık ya da yakın olaylarından biriyle yazılır, düzenlenir ve
+silinir.
+
+**Arayüzde görünüm.** Herkese açık sayfa bölümleri başlıklı gruplar olarak
+çizer; sayfa `STATUS_PAGE_COMPACT_ABOVE` sayısından çok servis
+gösteriyorsa her servis tek satıra iner (ad, alçak gün çubuğu, uptime,
+durum). Sayfanın bütününün ve her servisin uptime'ı dört dönem için
+yazılır (24 saat, 7 gün, 30 gün, sayfanın gün sayısı). Güncellemeler
+ziyaretçinin kendi gününe göre gruplanır (sunucu UTC gününü verir,
+tarayıcı yeniden gruplar), her biri türünün işaretini ve saatini taşır;
+olay notları servis adıyla aralarına karışır. Süren ve yaklaşan bakım
+pencereleri kendi bölümünde, kapsadıkları servislerle listelenir. Sayfa
+dili için ne ayarlandıysa (yoksa kurulumun dili) o dilde gösterilir;
+ziyaretçinin tarayıcı dili ve dil düğmesi bu sayfalarda geçersizdir.
+`noindex` açık sayfa `<meta name="robots" content="noindex">` taşır.
+Parolalı sayfa, parolayı soran bir formla açılır; form JavaScript'siz de
+çalışır: `POST /status/<adres>/unlock` yoluyla arayüz parolayı backend'e
+verir ve aldığı token'ı yalnızca `/status/<adres>` yoluna bağlı, HttpOnly
+bir çerezde (`kubeat_sp_<adres>`) tutar; sayfa ve ayrıntı sayfaları token'ı
+`X-Status-Page-Token` başlığıyla gönderir. Token süresi dolunca ya da
+parola değişince backend 401 döner ve form yeniden görünür. Ayrıntı
+sayfası (`/status/<adres>/<monitor-id>`) servisin adını, durumunu, dört
+dönemin uptime'ını, gün gün geçmişini, yanıt süresi grafiğini (monitor
+sayfasındaki grafiğin salt okunur hali; seçim ve yakınlaştırma yok) ve
+kesintilerini başlangıç, bitiş ve süre olarak gösterir.
+
+**Duvar ekranı.** Sayfanın başındaki "Duvar ekranı" düğmesi sayfayı tam
+ekrana alır, yazıları ve satırları büyütür, alt bilgiyi gizler ve seçimi
+tarayıcıda (localStorage) saklar; sayfa kendini yenilemeye devam eder. Bir
+servis kesintiye düşünce ya da sayfanın durumu kötüleşince kısa bir ses
+çalar; tarayıcılar sesi ancak bir tıklamadan sonra çaldırdığından ses,
+düğmeye basıldığında açılır ve yeniden açılan bir duvar ekranında "Sesi
+aç" ile yeniden istenir. Hareket azaltma isteyen ziyaretçi için hiçbir şey
+canlanmaz.
 
 ## API
 
@@ -1075,7 +1228,8 @@ eklenmelidir.
 | `GET` | `/api/v1/monitors/{id}/workload` | Monitor'un arkasındaki pod'lar; hazır olma, restart, CPU ve bellek |
 | `GET` | `/api/v1/monitors/{id}/window?from=&to=` | İki an arasında olanlar: kontrol özeti, başarısız kontroller (`diagnostics` ile), kesişen olaylar, cluster olayları |
 | `GET` | `/api/v1/monitors/{id}/grid?range=24h` | Kontrol geçmişi zaman dilimlerine bölünmüş: dilim başına kontrol, başarısız, ortalama yanıt, en sık hata; aralığın en sık hataları |
-| `GET` | `/api/v1/monitors/{id}/channels` | Monitor'un alarmının gittiği etkin kanallar |
+| `GET` | `/api/v1/monitors/{id}/channels` | Monitor'un alarmının gittiği etkin kanallar; her birinin `delay_seconds` ve `repeat_seconds` değeriyle |
+| `POST` | `/api/v1/monitors/{id}/test-notification` | Monitor'u adıyla anan bir test bildirimini, alarmının gittiği her etkin kanala birer deneme olarak gönderir; kanal başına sonuçla döner (`channel_id`, `name`, `type`, `delivered`, kanalı yönetebilenlere `error`). Kapsamı tutan kanal yoksa `422`. Monitor'u değiştirebilenler kullanabilir, denetim kaydına yazılır |
 | `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
 | `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
@@ -1088,21 +1242,28 @@ eklenmelidir.
 | `PATCH` | `/api/v1/incidents/{id}/notes/{note}` | Notu düzenler; verilmeyen alanlar değişmez. Yalnızca yazarı ya da yönetici |
 | `DELETE` | `/api/v1/incidents/{id}/notes/{note}` | Notu siler; yalnızca yazarı ya da yönetici |
 | `GET` | `/api/v1/reports?days=30&namespace=shop&format=csv` | Namespace ve monitor başına uptime, kesinti sayısı ve süresi, MTTR ve MTBF; `format=csv` ile indirilebilir |
-| `GET` | `/api/v1/stats?days=7` | Görülebilen monitor'ların özeti: uptime, kesinti sayısı ve süresi, MTTR, MTBF, açık olaylar; `namespace` (tekrarlanabilir) ile daraltılır |
+| `GET` | `/api/v1/stats?days=7` | Görülebilen monitor'ların özeti: uptime, kesinti sayısı ve süresi, MTTR, MTBF, açık olaylar; `namespace` (tekrarlanabilir) ile daraltılır, `monitor_id` ile tek monitor'a iner (okunamayan monitor için `404`) |
 | `GET` | `/api/v1/maintenance` | Bakım pencereleri, en son başlayan önce |
 | `POST` | `/api/v1/maintenance` | Pencere ekler: `name`, `duration_seconds` ya da `ends_at`, isteğe bağlı `starts_at`, `namespace` ya da `monitor_id`, `repeat` ve `timezone` |
 | `DELETE` | `/api/v1/maintenance/{id}` | Pencereyi siler; süren pencereyi bitirir |
 | `GET` | `/api/v1/channels` | Bildirim kanalları (URL'ler maskelenir) |
-| `POST` | `/api/v1/channels` | Kanal ekler: `{"name", "type", "target", "secret", "namespaces"}` |
+| `POST` | `/api/v1/channels` | Kanal ekler: `{"name", "type", "target", "secret", "namespaces", "tags", "events", "delay_seconds", "repeat_seconds"}` |
 | `PATCH` | `/api/v1/channels/{id}` | Kanalı düzenler; `{"enabled": false}` ile durdurur |
 | `DELETE` | `/api/v1/channels/{id}` | Kanalı siler |
 | `POST` | `/api/v1/channels/{id}/test` | Kanala test bildirimi gönderir |
-| `GET` | `/api/v1/status-pages` | Durum sayfaları |
-| `POST` | `/api/v1/status-pages` | Sayfa ekler: `slug`, `title`, `description`, `announcement`, `published`, `monitors: [{monitor_id, display_name}]` |
-| `PATCH` | `/api/v1/status-pages/{id}` | Sayfayı düzenler; verilmeyen alanlar değişmez |
+| `GET` | `/api/v1/status-pages` | Durum sayfaları (yöneticiye hepsi, editöre kapsamındakiler) |
+| `POST` | `/api/v1/status-pages` | Sayfa ekler: `slug`, `title`, `description`, `announcement`, `published`, `sections: [{name}]`, `monitors: [{monitor_id, display_name, section}]`, `rules: [{namespace, tag, section}]`, `noindex`, `hide_paused`, `language`, `detail_pages`, `password` (yalnızca yazılır; yanıtta `has_password`) |
+| `PATCH` | `/api/v1/status-pages/{id}` | Sayfayı düzenler; verilmeyen alanlar değişmez. `password: ""` parolayı kaldırır |
 | `DELETE` | `/api/v1/status-pages/{id}` | Sayfayı siler; monitor'lar kalır |
-| `GET` | `/api/v1/status-pages/by-slug/{slug}/view` | Yayındaki sayfanın herkese açık içeriği |
-| `GET` | `/api/v1/badges/{id}/{status\|uptime}` | Yayındaki bir sayfada olan monitor'un SVG rozeti |
+| `GET` | `/api/v1/status-pages/{id}/monitors` | Sayfanın şu an gösterdiği monitor'lar bölüm bölüm: elle seçilenler ve kuralların eşlediği (`explicit`), önizleme için |
+| `GET` | `/api/v1/status-pages/{id}/updates?limit=` | Sayfanın güncellemeleri, yeniden eskiye |
+| `POST` | `/api/v1/status-pages/{id}/updates` | Güncelleme ekler: `{"kind", "title", "body", "incident_id"}`; `kind`: `investigating`, `identified`, `monitoring`, `resolved`, `notice`, `maintenance` |
+| `PATCH` | `/api/v1/status-pages/{id}/updates/{update}` | Güncellemeyi düzenler; verilmeyen alanlar değişmez, `incident_id: 0` olay bağını kaldırır |
+| `DELETE` | `/api/v1/status-pages/{id}/updates/{update}` | Güncellemeyi siler |
+| `GET` | `/api/v1/status-pages/by-slug/{slug}/view` | Yayındaki sayfanın herkese açık içeriği; parolalı sayfada token ister (`Authorization: Bearer` ya da `X-Status-Page-Token`), yoksa `401 {"locked": true, "title"}` |
+| `POST` | `/api/v1/status-pages/by-slug/{slug}/unlock` | Parolalı sayfanın parolasını token'a çevirir: `{"password"}` → `{"token", "expires_at"}`; yanlışsa 401, çok denemede 429 |
+| `GET` | `/api/v1/status-pages/by-slug/{slug}/monitors/{monitor_id}` | Sayfadaki bir monitor'un ayrıntısı (`detail_pages` açıksa): ad, durum, uptime dönemleri, gün gün geçmiş, yanıt süresi serisi, kesintilerin yalnızca başlangıç/bitiş/süresi |
+| `GET` | `/api/v1/badges/{id}/{status\|uptime}` | Yayındaki bir sayfada olan monitor'un SVG rozeti; yalnızca parolalı sayfalarda olan monitor'unki token ister |
 
 ```
 curl -X POST localhost:8090/api/v1/monitors -d '{
@@ -1126,6 +1287,12 @@ Her monitor'da ortak alanlar: `name`, `type`, `target`, `interval_seconds`,
   kesinleşene kadar sonraki kontrolün kaç saniye sonra yapılacağı. `0` ise
   normal aralık beklenir. Kısa bir değer, kesintiyi daha erken doğrular ya da
   geçici bir hatayı daha erken eler.
+- `slow_above_ms`: başarılı bir kontrolün "yavaş" sayılacağı yanıt süresi
+  (milisaniye); `0` kapalı. `timeout_seconds`'ın altında olmalıdır, çünkü
+  zaman aşımını geçen kontrol zaten başarısızdır. Art arda
+  `failure_threshold` kontrol başarılı ama bu eşikten yavaşsa monitor
+  `degraded` sayılır ve yanıtta `slow_since` dolar; olay açılmaz (bkz.
+  "Yavaş yanıt").
 - `inverted`: sonucu tersine çevirir; hedef **başarısız** olduğu sürece
   monitor "çalışıyor" sayılır. Erişilmemesi gereken şeyler için. Hedef
   politikasının reddettiği bir bağlantı ise beklenen başarısızlık sayılmaz:
@@ -1582,7 +1749,10 @@ görebildiği bütün monitor'lar için tek bir özet olarak verir; genel bakı�
 içindir: uptime, kesinti sayısı ve süresi, MTTR, MTBF ve şu an açık olaylar
 (`open_incidents`; ayrıca `open_outages` ve `open_cert_warnings`).
 `namespace` (tekrarlanabilir; boş değer grupsuz monitor'lar) ile daraltılır.
-`days` 1 ile 365 arasındadır, varsayılanı 7.
+`days` 1 ile 365 arasındadır, varsayılanı 7. `monitor_id` ile tek monitor'a
+iner; monitor sayfası uptime özetlerinin yanındaki "MTBF · 7 gün" okumasını
+(altında kesinti sayısı, kesinti yoksa "–") buradan alır, dönemi genel
+bakışla aynı `STATS_DAYS`'tir.
 
 Rapor ve olay listesi CSV'lerinde `=`, `+`, `-`, `@`, sekme ya da satır başı
 karakteriyle başlayan hücrelerin önüne `'` konur: monitor adları, hedefler
@@ -1687,6 +1857,7 @@ yayınlar. Başlıcaları:
 | `kubeat_monitor_up{monitor,monitor_namespace,type}` | Son kontrol başarılıysa 1, değilse 0 |
 | `kubeat_monitor_response_seconds` | Son kontrolün süresi |
 | `kubeat_monitor_incident_open` | Açık kesinti varsa 1 |
+| `kubeat_monitor_slow` | Monitor yanıt veriyor ama `slow_above_ms` eşiğinden yavaşsa 1 (bkz. "Yavaş yanıt") |
 | `kubeat_monitor_cert_expiry_timestamp_seconds` | Sertifikanın bitiş zamanı |
 | `kubeat_scheduler_last_tick_timestamp_seconds` | Scheduler'ın son çalıştığı an; ilerlemiyorsa kontrol yapılmıyordur |
 | `kubeat_scheduler_dispatch_skipped_total` | Boş worker olmadığı için bekleyen kontroller; artıyorsa `UPTIME_WORKERS` düşüktür |
@@ -1874,8 +2045,9 @@ denetim kaydına `discovery` adıyla yazılır.
 
 Bir monitor art arda `failure_threshold` kez başarısız olursa olay açılır;
 art arda `UPTIME_RECOVERY_THRESHOLD` kez başarılı olunca kapanır. Her iki
-durumda etkin tüm kanallara bir bildirim gider; olay açıkken tekrar bildirim
-gönderilmez.
+durumda etkin tüm kanallara bir bildirim gider (gecikmeli bir kanal
+kesintiyi ancak gecikmesini aşarsa duyar; bkz. "Gecikme ve tekrar"); olay
+açıkken tekrar bildirim gönderilmez.
 
 HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
 `UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir "sertifika" olayı
@@ -1886,7 +2058,45 @@ kesintilerden bağımsızdır: hedef çalışırken de açık olabilir.
 
 `UPTIME_REMINDER_INTERVAL` ayarlanırsa süren bir kesinti bu aralıkla yeniden
 bildirilir ("hâlâ erişilemiyor"). Varsayılan `0` olup hatırlatma gönderilmez.
-Bakım penceresi içinde hatırlatma gitmez.
+Bakım penceresi içinde hatırlatma gitmez. Bir kanalın kendi aralığı
+(`repeat_seconds`) varsa o kanal genel aralığı değil kendininkini izler
+(bkz. "Gecikme ve tekrar").
+
+### Yavaş yanıt
+
+Bir monitor'e `slow_above_ms` verilirse, art arda `failure_threshold`
+kontrol başarılı olup her biri bu eşikten uzun sürdüğünde monitor **yavaş**
+sayılır: API'de `status` alanı `degraded` olur, `slow_since` serinin ilk
+yavaş kontrolünü gösterir ve `kubeat_monitor_slow` metriği 1'e çıkar.
+Art arda `UPTIME_RECOVERY_THRESHOLD` kontrol eşiğin altında kalınca durum
+biter. Başarısız kontroller bu durumu değiştirmez: hedef düşmüşse zaten
+`down`'dır ve kesintinin hikâyesi olayındadır; düzelince yavaşlık yeniden
+değerlendirilir.
+
+Olay **açılmaz**; durum monitor'ün kendisinde tutulur
+(`monitors.slow_since`), böylece liste ve genel bakış onu ucuza okur. Her
+geçiş bir bildirimdir: `slow` ("yavaş yanıt veriyor", eşik ve son yanıt
+süresiyle) ve `slow_resolved` ("yeniden zamanında yanıt veriyor", ne kadar
+yavaş kaldığıyla). Kanallar bunları `events` ile seçebilir; `events` boş
+kanal her şeyi duyduğu gibi bunları da duyar. Diğer olaylar gibi gruplanır,
+bakım penceresinde yavaşlık başlatılmaz (süren yavaşlık pencere içinde
+bitebilir ve bildirilir). Bir olaya bağlı olmadığından **bildirim kaydına
+yazılmaz**: olay sayfası yoktur, kanalın son gönderim durumu yine
+güncellenir. Eşiği `0` yapmak ya da monitor'ü durdurmak durumu bildirim
+göndermeden siler.
+
+Yanıt süresi kontrolün ölçtüğü süredir: HTTP'de isteğin tamamı, TCP'de
+bağlantı (ve TLS), DNS'te sorgu, push'ta kaynağın `ping` ile bildirdiği
+değer (bildirmezse hiç yavaş sayılmaz).
+
+**Arayüzde.** Eşik monitor formunun "Zamanlama ve alarm" bölümünde "Yavaş
+yanıt eşiği" olarak girilir (ms; yardım metni ne olacağını okur, zaman
+aşımından uzun bir değeri kırmızıyla söyler). Yavaş monitor her yerde
+**Sorunlu**'dur: listede ve genel bakışta doğrulanan ve toparlananlarla aynı
+yarım daire ve sayı, monitor sayfasında "Sorunlu · 12 dk · yanıtlar 800
+ms'den uzun" çipi (süre `slow_since`'ten sayılır) ve altında eşiği ile son
+`failure_threshold` kontrolün sürelerini sayan kehribar bir satır. Olay
+açılmadığından olay listesine düşmez.
 
 ### Bakım pencereleri ve susturma
 
@@ -1937,6 +2147,22 @@ kodunu ve sağlayıcının JSON yanıtında belgelediği nedeni gösterir (Disco
 PagerDuty `errors`). Yanıt gövdesinin kendisi gösterilmez: kanalın adresi
 herhangi bir servisi gösterebilir ve test, oradaki yanıtı okumaya yaramamalıdır.
 
+**Monitor'den test.** Monitor sayfasından da test gönderilir: `POST
+/api/v1/monitors/{id}/test-notification`, monitor'u adıyla anan bir test
+bildirimini alarmının gittiği her etkin kanala (aşağıdaki kapsamla, `GET
+.../channels` ile aynı seçim) birer deneme olarak, yeniden denemeden
+gönderir ve kanal başına sonucu döner: `channel_id`, `name`, `type`,
+`delivered` ve başarısızsa `error`. Hata metni kanalın adresinden ve
+token'ından arındırılır ve yalnızca kanalı yönetebilenlere verilir
+(yöneticiler; kanalı kendi namespace'leriyle sınırlı editörler), diğerleri
+yalnızca iletilmediğini görür. Kapsamı tutan kanal yoksa yanıt `422`'dir.
+Monitor'ü değiştirebilenler kullanabilir; her çağrı **Kayıt**'a yazılır.
+Kanalın gecikmesi teste uygulanmaz; test anında gider. Arayüzde monitor
+sayfasının ⋯ menüsündeki **Bildirimi test et** bunu çağırır ve "Test
+bildirimi: api" başlıklı bir pencerede kanal başına adı, türü ve iletilip
+iletilmediğini (iletilmediyse nedenini, görebilenlere) listeler; monitor'u
+duyan kanal yoksa öğe kapalıdır ve nedenini altında söyler.
+
 **Kapsam.** Üç süzgeç birlikte uygulanır, hepsi isteğe bağlıdır:
 
 - `namespaces`: yalnızca o namespace'lerdeki monitor'lar; boşsa hepsi. Her
@@ -1944,13 +2170,72 @@ herhangi bir servisi gösterebilir ve test, oradaki yanıtı okumaya yaramamalı
 - `tags`: yalnızca bu etiketlerden birini taşıyan monitor'lar; boşsa hepsi.
   Monitor başına yönlendirme böyle yapılır: PagerDuty kanalına `pager`
   etiketi verilir, yalnızca `pager` etiketli monitor'lar gece uyandırır.
-- `events`: `down`, `up`, `reminder`, `cert` alt kümesi; boşsa hepsi.
-  PagerDuty için `down` ve `up`, sohbet kanalı için hepsi gibi.
+- `events`: `down`, `up`, `reminder`, `cert`, `slow`, `slow_resolved` alt
+  kümesi; boşsa hepsi. PagerDuty için `down` ve `up`, sohbet kanalı için
+  hepsi gibi. `slow` ve `slow_resolved` için bkz. "Yavaş yanıt".
 
 Monitor sayfası, o monitor'un alarmının hangi kanallara gittiğini yazar
-(`GET /api/v1/monitors/{id}/channels`); kapsamı tutan etkin kanal yoksa
-sayfa bunu uyarı olarak gösterir — kimsenin duymayacağı bir monitor
-olmasın.
+(`GET /api/v1/monitors/{id}/channels`, her kanalın gecikme ve tekrar
+değeriyle); kapsamı tutan etkin kanal yoksa sayfa bunu uyarı olarak
+gösterir — kimsenin duymayacağı bir monitor olmasın.
+
+**Gecikme ve tekrar.** İki süre kanal başına ayarlanır, ikisi de isteğe
+bağlıdır ve yalnızca kesinti olaylarına (`down`, `up`, `reminder`) uygulanır;
+sertifika ve yavaşlık bildirimleri anında gider.
+
+- `delay_seconds`: kanal bir kesintiyi ancak bu kadar süre sonra **hâlâ
+  sürüyorsa** duyar. Kesinti bu süre içinde biterse kanal ne kesintiyi ne
+  düzelmeyi duyar; gecikmeden sonra duyduysa düzelmeyi de duyar. `0` anında
+  (varsayılan); en çok 24 saat (86400).
+- `repeat_seconds`: kanalın, duyduğu bir kesinti için kendi hatırlatma
+  aralığı; kanala söylendiği andan itibaren bu aralıkla "hâlâ erişilemiyor"
+  gider ve kanal genel `UPTIME_REMINDER_INTERVAL` hatırlatmalarını almaz.
+  `0` genel aralığı izler (varsayılan); verilirse en az 1 dakika (60), en
+  çok 7 gün (604800).
+
+Böylece bir **kademeli alarm** kurulur: Slack kanalı anında (`0`), PagerDuty
+kanalı 10 dakika sonra hâlâ sürüyorsa (`delay_seconds: 600`), e-posta
+kanalı saatte bir hatırlatarak (`repeat_seconds: 3600`):
+
+```
+curl -X POST localhost:8090/api/v1/channels -d '{"name": "ops-slack", "type": "slack", "target": "https://hooks.slack.com/services/..."}'
+curl -X POST localhost:8090/api/v1/channels -d '{"name": "nobetci", "type": "pagerduty", "secret": "...", "delay_seconds": 600}'
+curl -X POST localhost:8090/api/v1/channels -d '{"name": "ekip-posta", "type": "email", "target": "ekip@ornek.com", "repeat_seconds": 3600}'
+```
+
+Beş dakikada düzelen bir kesintiyi Slack ve e-posta duyar, nöbetçi
+uyandırılmaz. Yarım saat süren bir kesintide nöbetçi onuncu dakikada çağrılır
+ve düzelince alarmı kapatılır; e-posta kesintiyi, birinci saatte bir
+hatırlatmayı (sürseydi) ve düzelmeyi alır. Yazılımın okuduğu kanallar
+(`webhook`, `pagerduty`) da gecikebilir; gecikmeli bildirim o kanala
+giderken yine gruplanmaz ve kendi kaydıyla gider. İnsanların okuduğu
+kanallarda aynı anda süresi dolan gecikmeli bildirimler (birlikte düşen
+monitor'lar) tek mesajda toplanır. Gecikmesi bakım penceresi içinde dolan
+kesinti o kanala hiç söylenmez; kanalın kendi hatırlatması pencere içinde
+atlanır. Her gönderim bildirim kaydına her zamanki gibi yazılır; gecikmeli
+kesinti mesajının olay anı kesintinin açıldığı andır.
+
+Bu takvim alarm motorunun belleğindedir ve kesinti düzelince, o sırada
+kapalı ya da kapsam dışı kalan kanallar dahil her kanal için iptal edilir.
+Kesintiyi duyan kanal, bu arada ayarları değişse ya da hatırlatma almasa da
+(örneğin `events: ["down", "up"]`) düzelmeyi duyar. Backend yeniden
+başlarsa takvim açık kesintilerden ve bildirim kaydından yeniden kurulur:
+gecikmesi dolmamış bildirim zamanı gelince gider; gecikmesi dolmuş olanın
+söylenip söylenmediğine bildirim kaydından bakılır — söylenmişse kanalın
+sonraki hatırlatması kendi temposunda kalır (tempo kayıttaki gönderim
+anından sayılır: geç söylenmişse o andan), yeniden başlatma sırasında
+kaçmışsa kesinti hâlâ sürüyor olduğundan yeni başlangıçta söylenir.
+Gecikmesi bakım penceresi içinde dolduğu için söylenmemiş kesinti ise
+yeniden başlatmadan sonra da söylenmez: kaydı yoktur ama kaçırılmamış,
+susturulmuştur. Yalnızca yeniden başlatma sırasında zamanı gelen bir
+hatırlatma atlanır; sonraki kendi zamanında gider.
+
+Arayüzde kanal formunun **Zamanlama** bölümü iki süreyi sayı ve birimle
+(saniye, dakika, saat, gün) alır ve ne olacağını cümle olarak geri okur:
+"Kesinti 10 dk sürerse haber verir; sonra her 1 sa tekrar hatırlatır",
+ikisi de sıfırken "Hemen; tekrar genel ayar". Kanal listesi kapsamın altında
+"10 dk gecikmeli · her 1 sa" yazar; monitor sayfasındaki kanal çipinin
+açıklaması da her kanalın zamanlamasını söyler.
 
 **Gruplama.** Aynı namespace'te aynı türden olaylar
 `UPTIME_NOTIFY_GROUP_WAIT` (30 sn) içinde art arda açılırsa, insanların
@@ -2025,8 +2310,11 @@ okunabilir özettir.
 }
 ```
 
-`event` değeri `down`, `up`, `reminder`, `cert_expiring`, `cert_renewed` ya
-da `test` olur; `incident.kind` ise `down` ya da `cert`.
+`event` değeri `down`, `up`, `reminder`, `cert_expiring`, `cert_renewed`,
+`slow`, `slow_resolved` ya da `test` olur; `incident.kind` ise `down` ya da
+`cert`. Yavaşlık olaylarında `incident` yoktur; yerine `slow` nesnesi
+gelir: `{"since": "...", "threshold_ms": 500, "latency_ms": 1200}`.
+Monitor'den gönderilen testte `monitor` nesnesi dolu, `incident` boştur.
 
 ### Olay sayfası
 
@@ -2063,7 +2351,8 @@ diğerleri için sayfa 404'tür.
 denemeler bittikten sonra olayın kaydına yazar: kanalın adı ve türü (kanal
 sonradan silinse de kalır), bildirilen olay (`down`, `up`, `reminder`,
 `cert_expiring`, `cert_renewed`) ve olduğu an, gönderimin bittiği an ve
-iletilip iletilmediği. Gruplanmış bir mesaj, kapsadığı her olaya ayrı yazılır
+iletilip iletilmediği. Yavaşlık bildirimleri (`slow`, `slow_resolved`) bir
+olaya bağlı olmadığından kayda girmez; testler de girmez. Gruplanmış bir mesaj, kapsadığı her olaya ayrı yazılır
 ve kaç monitor'ü kapsadığı da kaydedilir. Hata metni yazılmadan önce kanalın
 adresinden ve token'ından arındırılır; sayfada yalnızca kanalı
 yönetebilenlere (yöneticiler ve kanalı kendi namespace'leriyle sınırlı
@@ -2179,8 +2468,12 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |
-| `UPTIME_STATUS_PAGE_DAYS` | `90` | Durum sayfasında gösterilen gün sayısı |
+| `UPTIME_STATUS_PAGE_DAYS` | `90` | Durum sayfasında gösterilen gün sayısı; uptime dönemlerinden biri de bu kadardır |
 | `UPTIME_STATUS_PAGE_INCIDENT_WINDOW` | `336h` | Durum sayfasında listelenen çözülmüş kesintilerin ne kadar geriye gittiği |
+| `UPTIME_STATUS_PAGE_UPDATES` | `20` | Durum sayfasında listelenen en fazla güncelleme sayısı (olay notları dahil) |
+| `UPTIME_STATUS_PAGE_UPCOMING` | `168h` | Durum sayfasının ne kadar ilerideki bakım pencerelerini listeleyeceği |
+| `UPTIME_STATUS_PAGE_SERIES` | `24h` | Durum sayfasındaki monitor ayrıntı sayfasının yanıt süresi grafiğinin kapsadığı süre |
+| `UPTIME_STATUS_PAGE_SESSION` | `12h` | Parolalı durum sayfasında ziyaretçinin verdiği parolanın ne kadar süre geçerli kaldığı |
 | `UPTIME_DEFAULT_FAILURE_THRESHOLD` | `3` | Monitor'da belirtilmezse, olay açmak için gereken art arda başarısız kontrol sayısı |
 | `UPTIME_RECOVERY_THRESHOLD` | `1` | Olayı kapatmak için gereken art arda başarılı kontrol sayısı |
 | `UPTIME_CERT_WARNING` | `336h` | Sertifika bitişine bu kadar kala uyarı olayı açılır |
@@ -2236,6 +2529,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `HSTS_MAX_AGE` | `31536000` | HTTPS ile gelen tarayıcıya gönderilen `Strict-Transport-Security` süresi (saniye); `0` kapalı |
 | `REFRESH_INTERVAL_MS` | `5000` | Açık sayfaların veriyi yenileme aralığı (ms) |
 | `STATUS_PAGE_REFRESH_MS` | `30000` | Açık bir durum sayfasının yenilenme aralığı (ms) |
+| `STATUS_PAGE_COMPACT_ABOVE` | `12` | Bu sayıdan çok servis gösteren durum sayfasında her servis tek satıra iner |
+| `STATUS_PAGE_UPDATES_LIMIT` | `50` | Durum sayfası düzenlenirken listelenen güncelleme sayısı |
 | `DASHBOARD_FLAT_LIMIT` | `50` | Bu sayıya kadar monitor listesinde tüm namespace'ler açık gelir; üzerinde yalnızca sorunlu olanlar açılır |
 | `LIST_BEATS` | `24` | Monitor listesinde ve namespace tablosunda her satırda gösterilen son kontrol sayısı |
 | `WARN_UPTIME_BELOW` | `99.9` | Listede ve tablolarda uptime bu yüzdenin altındaysa kehribar renkte gösterilir; üstündeyse sessiz kalır |
@@ -2252,6 +2547,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `NEW_MONITOR_INTERVAL_SECONDS` | `60` | Yeni monitor formunun başlangıçtaki kontrol aralığı |
 | `NEW_MONITOR_TIMEOUT_SECONDS` | `10` | Yeni monitor formunun başlangıçtaki zaman aşımı |
 | `NEW_MONITOR_FAILURE_THRESHOLD` | `3` | Yeni monitor formunun başlangıçtaki alarm eşiği |
+| `NEW_MONITOR_SLOW_ABOVE_MS` | `0` | Yeni monitor formunun başlangıçtaki yavaş yanıt eşiği (ms); `0` kapalı |
 | `PUSH_INTERNAL_URL` | `BACKEND_URL` | Push monitor'larında "cluster içinden" gösterilen rapor adresinin kökü |
 | `INCIDENTS_LIMIT` | `100` | Bir sayfada listelenen olay sayısı |
 | `INCIDENT_RANGES` | `24h,168h,720h,2160h` | Olay listesinin zaman süzgecinde sunulan "son …" dönemleri |

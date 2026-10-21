@@ -49,7 +49,7 @@ const typeOrder: MonitorType[] = [
   "push",
 ];
 
-export type MonitorDefaults = { interval: number; timeout: number; failureThreshold: number };
+export type MonitorDefaults = { interval: number; timeout: number; failureThreshold: number; slowAboveMs: number };
 
 /** A whole number of 1 or more typed into a field, or null. */
 function whole(value: string, min = 1): number | null {
@@ -258,6 +258,7 @@ export function MonitorForm({
   const [within, setWithin] = useState(String(monitor?.timeout_seconds ?? defaults.timeout));
   const [threshold, setThreshold] = useState(String(monitor?.failure_threshold ?? defaults.failureThreshold));
   const [retry, setRetry] = useState(String(monitor?.retry_interval_seconds ?? 0));
+  const [slowAbove, setSlowAbove] = useState(String(monitor?.slow_above_ms ?? defaults.slowAboveMs));
   const [redirects, setRedirects] = useState(String(monitor?.http?.max_redirects ?? 10));
   const [minReady, setMinReady] = useState(String(monitor?.workload?.min_ready ?? 0));
 
@@ -287,6 +288,22 @@ export function MonitorForm({
 
   const redirectCount = whole(redirects, 0);
   const minReadyCount = whole(minReady, 0);
+  // The slow threshold read back: off, over the timeout (which the backend
+  // refuses), or what crossing it does.
+  const slowMs = whole(slowAbove, 0);
+  const timeoutSeconds = whole(within);
+  const slowHint =
+    slowMs === null ? (
+      t("monitorForm.timing.slowAbove.invalid")
+    ) : slowMs === 0 ? (
+      t("monitorForm.timing.slowAbove.off")
+    ) : timeoutSeconds !== null && slowMs >= timeoutSeconds * 1000 ? (
+      <span className="text-down-ink">
+        {t("monitorForm.timing.slowAbove.aboveTimeout", { timeout: duration(timeoutSeconds, t) })}
+      </span>
+    ) : (
+      t.n("monitorForm.timing.slowAbove.hint", whole(threshold) ?? 1, { ms: slowMs.toLocaleString(t.intl) })
+    );
 
   return (
     <form onSubmit={submit} className="panel mon-form">
@@ -445,6 +462,10 @@ export function MonitorForm({
             />
           </Field>
         )}
+        {/* Not a managed setting: editable on an annotated monitor too. */}
+        <Field label={t("monitorForm.timing.slowAbove")} optional={optional} span={3} hint={slowHint}>
+          <Seconds name="slow_above_ms" min={0} value={slowAbove} onChange={(e) => setSlowAbove(e.target.value)} unit="ms" />
+        </Field>
         <TimingEcho push={push} interval={every} timeout={within} threshold={threshold} retry={retry} t={t} />
       </Section>
 

@@ -50,6 +50,13 @@ const (
 	// maxChannelNamespaces bounds the namespaces one channel is limited to.
 	maxChannelNamespaces = 50
 	maxSecretLength      = 512
+	// maxChannelDelay bounds how long a channel may wait before it hears of
+	// an outage, and maxChannelRepeat its own reminder interval, whose
+	// shortest value is minChannelRepeat: a reminder a few seconds apart
+	// is noise, not escalation.
+	maxChannelDelay  = 24 * time.Hour
+	maxChannelRepeat = 7 * 24 * time.Hour
+	minChannelRepeat = time.Minute
 )
 
 type channelResponse struct {
@@ -65,11 +72,17 @@ type channelResponse struct {
 	// Namespaces limits the channel to the monitors of these namespaces;
 	// empty means every monitor. Tags narrows that to monitors carrying one
 	// of them; Events to the kinds of event (down, up, reminder, cert).
-	Namespaces []string  `json:"namespaces"`
-	Tags       []string  `json:"tags"`
-	Events     []string  `json:"events"`
-	Enabled    bool      `json:"enabled"`
-	CreatedAt  time.Time `json:"created_at"`
+	Namespaces []string `json:"namespaces"`
+	Tags       []string `json:"tags"`
+	Events     []string `json:"events"`
+	// DelaySeconds is how long an outage must still be going on before
+	// the channel hears of it (0: at once); an outage over before then is
+	// not told to it at all. RepeatSeconds is the channel's own reminder
+	// interval for an outage it was told of (0: UPTIME_REMINDER_INTERVAL).
+	DelaySeconds  int       `json:"delay_seconds"`
+	RepeatSeconds int       `json:"repeat_seconds"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
 	// LastDelivery is the outcome of the last attempt to send to the
 	// channel; null before the first. Its error is redacted.
 	LastDelivery *deliveryResponse `json:"last_delivery"`
@@ -99,6 +112,7 @@ func toChannelResponse(c store.Channel) channelResponse {
 	resp := channelResponse{
 		ID: c.ID, Name: c.Name, Type: string(c.Type), Target: shownTarget(c), HasSecret: c.Secret != "",
 		Namespaces: orEmpty(c.Namespaces), Tags: orEmpty(c.Tags), Events: orEmpty(c.Events), Enabled: c.Enabled, CreatedAt: c.CreatedAt,
+		DelaySeconds: int(c.Delay / time.Second), RepeatSeconds: int(c.Repeat / time.Second),
 	}
 	if !c.LastAttemptAt.IsZero() {
 		resp.LastDelivery = &deliveryResponse{At: c.LastAttemptAt, Delivered: c.LastOK, Error: redact(c.LastError, c)}
@@ -113,41 +127,134 @@ type monitorChannelResponse struct {
 	Name   string   `json:"name"`
 	Type   string   `json:"type"`
 	Events []string `json:"events"`
+	// DelaySeconds and RepeatSeconds are the channel's timing of outage
+	// notifications, as on the channel itself.
+	DelaySeconds  int `json:"delay_seconds"`
+	RepeatSeconds int `json:"repeat_seconds"`
+}
+
+func toMonitorChannelResponse(c store.Channel) monitorChannelResponse {
+	events := c.Events
+	if events == nil {
+		events = []string{}
+	}
+	return monitorChannelResponse{ID: c.ID, Name: c.Name, Type: string(c.Type), Events: events,
+		DelaySeconds: int(c.Delay / time.Second), RepeatSeconds: int(c.Repeat / time.Second)}
+}
+
+// readableMonitor answers 404 and returns false when the monitor does not
+// exist or the principal may not read it, and 500 on a store error.
+func (h *handler) readableMonitor(w http.ResponseWriter, r *http.Request) (store.Monitor, bool) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return store.Monitor{}, false
+	}
+	m, err := h.opts.Store.GetMonitor(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(m.Namespace)) {
+		writeError(w, http.StatusNotFound, "monitor not found")
+		return store.Monitor{}, false
+	}
+	if err != nil {
+		h.internalError(w, r, err)
+		return store.Monitor{}, false
+	}
+	return m, true
+}
+
+// channelsFor lists the enabled channels whose scope covers the monitor:
+// where its alerts go.
+func (h *handler) channelsFor(r *http.Request, m store.Monitor) ([]store.Channel, error) {
+	channels, err := h.opts.Store.ListChannels(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	var covering []store.Channel
+	for _, c := range channels {
+		if c.Enabled && c.Covers(m) {
+			covering = append(covering, c)
+		}
+	}
+	return covering, nil
 }
 
 // monitorChannels lists the enabled channels whose scope covers the
 // monitor: where its alerts go.
 func (h *handler) monitorChannels(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
+	m, ok := h.readableMonitor(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
-	m, err := h.opts.Store.GetMonitor(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && !principal(r).CanRead(m.Namespace)) {
-		writeError(w, http.StatusNotFound, "monitor not found")
-		return
-	}
-	if err != nil {
-		h.internalError(w, r, err)
-		return
-	}
-	channels, err := h.opts.Store.ListChannels(r.Context())
+	channels, err := h.channelsFor(r, m)
 	if err != nil {
 		h.internalError(w, r, err)
 		return
 	}
 	resp := []monitorChannelResponse{}
 	for _, c := range channels {
-		if !c.Enabled || !c.Covers(m) {
-			continue
-		}
-		events := c.Events
-		if events == nil {
-			events = []string{}
-		}
-		resp = append(resp, monitorChannelResponse{ID: c.ID, Name: c.Name, Type: string(c.Type), Events: events})
+		resp = append(resp, toMonitorChannelResponse(c))
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// monitorTestResponse is the outcome of a test notification sent from a
+// monitor, per channel its alarm reaches.
+type monitorTestResponse struct {
+	ChannelID int64  `json:"channel_id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Delivered bool   `json:"delivered"`
+	// Error says why delivery failed, redacted of the channel's address
+	// and secret, and only to whoever may manage the channel; absent
+	// otherwise.
+	Error string `json:"error,omitempty"`
+}
+
+// testNotification sends a test notification that names the monitor
+// through every enabled channel its alarm would reach (monitorChannels),
+// one attempt each, and answers with the outcome per channel: 422 when no
+// channel would hear it. Those who may change the monitor may call it.
+func (h *handler) testNotification(w http.ResponseWriter, r *http.Request) {
+	m, ok := h.readableMonitor(w, r)
+	if !ok {
+		return
+	}
+	p := principal(r)
+	if !p.CanEdit(m.Namespace) {
+		scopeError(w, p)
+		return
+	}
+	channels, err := h.channelsFor(r, m)
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	if len(channels) == 0 {
+		writeError(w, http.StatusUnprocessableEntity, "no enabled channel hears about this monitor")
+		return
+	}
+
+	resp := make([]monitorTestResponse, 0, len(channels))
+	names := make([]string, 0, len(channels))
+	for _, ch := range channels {
+		err := h.opts.Notifier.SendOnce(r.Context(), ch, alert.Notification{Event: alert.EventTest, Monitor: m})
+		outcome := monitorTestResponse{ChannelID: ch.ID, Name: ch.Name, Type: string(ch.Type), Delivered: err == nil}
+		// The test is an attempt like any other: the channel's status shows it.
+		deliveryError := ""
+		if err != nil {
+			deliveryError = err.Error()
+			h.opts.Logger.Warn("monitor test notification failed", "monitor", m.Name, "channel", ch.Name, "error", err)
+			if channelVisible(p, ch) {
+				outcome.Error = redact(deliveryError, ch)
+			}
+		}
+		if recordErr := h.opts.Store.RecordChannelDelivery(r.Context(), ch.ID, time.Now().UTC(), deliveryError); recordErr != nil {
+			h.opts.Logger.Error("channel delivery not recorded", "channel", ch.Name, "error", recordErr)
+		}
+		resp = append(resp, outcome)
+		names = append(names, ch.Name)
+	}
+	h.audit(r, "test", "monitor", m.ID, m.Name+": test notification to "+strings.Join(names, ", "))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -178,6 +285,22 @@ type createChannelRequest struct {
 	// Tags and Events narrow the channel further; both optional.
 	Tags   []string `json:"tags"`
 	Events []string `json:"events"`
+	// DelaySeconds and RepeatSeconds time the outage notifications (see
+	// channelResponse); both optional, 0 by default.
+	DelaySeconds  int `json:"delay_seconds"`
+	RepeatSeconds int `json:"repeat_seconds"`
+}
+
+// channelTiming validates a channel's delay and repeat interval.
+func channelTiming(delaySeconds, repeatSeconds int) (delay, repeat time.Duration, err error) {
+	delay, repeat = time.Duration(delaySeconds)*time.Second, time.Duration(repeatSeconds)*time.Second
+	if delay < 0 || delay > maxChannelDelay {
+		return 0, 0, fmt.Errorf("delay_seconds must be between 0 and %d", int(maxChannelDelay/time.Second))
+	}
+	if repeat != 0 && (repeat < minChannelRepeat || repeat > maxChannelRepeat) {
+		return 0, 0, fmt.Errorf("repeat_seconds must be 0 or between %d and %d", int(minChannelRepeat/time.Second), int(maxChannelRepeat/time.Second))
+	}
+	return delay, repeat, nil
 }
 
 // channelEvents validates the kinds of event a channel is limited to.
@@ -334,9 +457,15 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	delay, repeat, err := channelTiming(req.DelaySeconds, req.RepeatSeconds)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	c, err := h.opts.Store.CreateChannel(r.Context(), store.Channel{
 		Name: req.Name, Type: typ, Target: target, Secret: secret, Namespaces: namespaces, Tags: tags, Events: events, Enabled: true,
+		Delay: delay, Repeat: repeat,
 	})
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "a channel with this name already exists")
@@ -356,12 +485,14 @@ type updateChannelRequest struct {
 	// Target sent back as it was shown (masked) keeps the stored one, and
 	// so does a Secret sent as the mask, unless the target moves to another
 	// server: a stored secret goes only to the one it was entered for.
-	Target     *string   `json:"target"`
-	Secret     *string   `json:"secret"`
-	Namespaces *[]string `json:"namespaces"`
-	Tags       *[]string `json:"tags"`
-	Events     *[]string `json:"events"`
-	Enabled    *bool     `json:"enabled"`
+	Target        *string   `json:"target"`
+	Secret        *string   `json:"secret"`
+	Namespaces    *[]string `json:"namespaces"`
+	Tags          *[]string `json:"tags"`
+	Events        *[]string `json:"events"`
+	DelaySeconds  *int      `json:"delay_seconds"`
+	RepeatSeconds *int      `json:"repeat_seconds"`
+	Enabled       *bool     `json:"enabled"`
 }
 
 func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
@@ -430,6 +561,19 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Events != nil {
 		if ch.Events, err = channelEvents(*req.Events); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if req.DelaySeconds != nil || req.RepeatSeconds != nil {
+		delay, repeat := int(ch.Delay/time.Second), int(ch.Repeat/time.Second)
+		if req.DelaySeconds != nil {
+			delay = *req.DelaySeconds
+		}
+		if req.RepeatSeconds != nil {
+			repeat = *req.RepeatSeconds
+		}
+		if ch.Delay, ch.Repeat, err = channelTiming(delay, repeat); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

@@ -23,11 +23,16 @@ import (
 
 // Monitor states reported by the API.
 const (
-	statusUp      = "up"
-	statusDown    = "down"
-	statusPending = "pending" // no check has run yet
-	statusPaused  = "paused"  // disabled by a user; not being checked
+	statusUp       = "up"
+	statusDown     = "down"
+	statusDegraded = "degraded" // up, but slower than its slow_above_ms
+	statusPending  = "pending"  // no check has run yet
+	statusPaused   = "paused"   // disabled by a user; not being checked
 )
+
+// maxSlowAboveMS bounds a monitor's slow threshold; it must anyway be below
+// the monitor's timeout, past which a check is a failure.
+const maxSlowAboveMS = 3_600_000
 
 type monitorResponse struct {
 	ID          int64  `json:"id"`
@@ -47,9 +52,15 @@ type monitorResponse struct {
 	IntervalSeconds int      `json:"interval_seconds"`
 	TimeoutSeconds  int      `json:"timeout_seconds"`
 	// RetryIntervalSeconds is 0 when failed checks are not repeated early.
-	RetryIntervalSeconds int  `json:"retry_interval_seconds"`
-	FailureThreshold     int  `json:"failure_threshold"`
-	Inverted             bool `json:"inverted"`
+	RetryIntervalSeconds int `json:"retry_interval_seconds"`
+	FailureThreshold     int `json:"failure_threshold"`
+	// SlowAboveMS is the response time above which a successful check
+	// counts as slow; 0 turns that off. SlowSince is set while the
+	// monitor's last failure_threshold checks all succeeded but took
+	// longer: the "degraded" status.
+	SlowAboveMS int        `json:"slow_above_ms"`
+	SlowSince   *time.Time `json:"slow_since"`
+	Inverted    bool       `json:"inverted"`
 	// EachPod: an HTTP or TCP monitor discovered from a service port checks
 	// every ready pod behind it rather than the service's address.
 	EachPod   bool      `json:"each_pod"`
@@ -63,6 +74,7 @@ type monitorResponse struct {
 	// The check options of the monitor's type; the others are null.
 	checkOptions
 
+	// Status is up, down, degraded (up but slow), pending or paused.
 	Status string          `json:"status"`
 	Last   *resultResponse `json:"last_result"`
 	// OpenIncident is set while the monitor is in an alerting state.
@@ -156,6 +168,7 @@ func toMonitorResponse(p auth.Principal, st store.MonitorStatus, window time.Dur
 
 		RetryIntervalSeconds: int(st.RetryInterval / time.Second),
 		FailureThreshold:     st.FailureThreshold,
+		SlowAboveMS:          int(st.SlowAbove / time.Millisecond),
 		CertWarning:          st.CertWarning,
 		Namespace:            st.Namespace,
 		Source:               st.Source,
@@ -164,6 +177,9 @@ func toMonitorResponse(p auth.Principal, st store.MonitorStatus, window time.Dur
 	}
 	if resp.Tags == nil {
 		resp.Tags = []string{}
+	}
+	if !st.SlowSince.IsZero() {
+		resp.SlowSince = &st.SlowSince
 	}
 	if p.CanEdit(st.Namespace) {
 		resp.PushToken = st.PushToken
@@ -183,6 +199,11 @@ func toMonitorResponse(p auth.Principal, st store.MonitorStatus, window time.Dur
 		resp.Status = statusDown
 		if st.Last.Up {
 			resp.Status = statusUp
+			// A slow monitor is degraded while it answers; one that fails
+			// is down, slow or not.
+			if !st.SlowSince.IsZero() {
+				resp.Status = statusDegraded
+			}
 		}
 	}
 	if !st.Enabled {
@@ -336,8 +357,10 @@ type createMonitorRequest struct {
 	// normal interval.
 	RetryIntervalSeconds int `json:"retry_interval_seconds"`
 	// FailureThreshold is optional; 0 means the server default.
-	FailureThreshold int  `json:"failure_threshold"`
-	Inverted         bool `json:"inverted"`
+	FailureThreshold int `json:"failure_threshold"`
+	// SlowAboveMS is optional; 0 means no slow threshold.
+	SlowAboveMS int  `json:"slow_above_ms"`
+	Inverted    bool `json:"inverted"`
 	// EachPod is only valid on an HTTP or TCP monitor discovered from a
 	// service port; optional.
 	EachPod bool `json:"each_pod"`
@@ -540,6 +563,12 @@ func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThre
 	case req.RetryIntervalSeconds > req.IntervalSeconds:
 		return errors.New("retry_interval_seconds must not exceed interval_seconds")
 	}
+	switch {
+	case req.SlowAboveMS < 0 || req.SlowAboveMS > maxSlowAboveMS:
+		return fmt.Errorf("slow_above_ms must be between 0 and %d", maxSlowAboveMS)
+	case req.SlowAboveMS >= req.TimeoutSeconds*1000:
+		return errors.New("slow_above_ms must be below the timeout: a check that takes longer than timeout_seconds fails")
+	}
 	return nil
 }
 
@@ -554,6 +583,7 @@ func (req *createMonitorRequest) monitor(base store.Monitor) store.Monitor {
 	base.Timeout = time.Duration(req.TimeoutSeconds) * time.Second
 	base.RetryInterval = time.Duration(req.RetryIntervalSeconds) * time.Second
 	base.FailureThreshold = req.FailureThreshold
+	base.SlowAbove = time.Duration(req.SlowAboveMS) * time.Millisecond
 	base.Inverted = req.Inverted
 	base.EachPod = req.EachPod
 	base.Namespace = req.Namespace
@@ -733,6 +763,7 @@ type updateMonitorRequest struct {
 	TimeoutSeconds       *int    `json:"timeout_seconds"`
 	RetryIntervalSeconds *int    `json:"retry_interval_seconds"`
 	FailureThreshold     *int    `json:"failure_threshold"`
+	SlowAboveMS          *int    `json:"slow_above_ms"`
 	Inverted             *bool   `json:"inverted"`
 	EachPod              *bool   `json:"each_pod"`
 	Enabled              *bool   `json:"enabled"`
@@ -787,6 +818,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		TimeoutSeconds:       int(current.Timeout / time.Second),
 		RetryIntervalSeconds: int(current.RetryInterval / time.Second),
 		FailureThreshold:     current.FailureThreshold,
+		SlowAboveMS:          int(current.SlowAbove / time.Millisecond),
 		Inverted:             current.Inverted,
 		EachPod:              current.EachPod,
 		Namespace:            current.Namespace,
@@ -836,6 +868,9 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		merged.FailureThreshold = *req.FailureThreshold
+	}
+	if req.SlowAboveMS != nil {
+		merged.SlowAboveMS = *req.SlowAboveMS
 	}
 	if err := merged.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

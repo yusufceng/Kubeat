@@ -220,6 +220,23 @@ func (s *SQLite) DeliveriesEnds(ctx context.Context, incidentID int64, keep int)
 	return append(first, last...), total, nil
 }
 
+// DeliveryAt looks for any attempt, delivered or not, and returns the
+// first: the alert engine counts a channel as told of an outage once it
+// tried to tell it, and runs the channel's reminders from then.
+func (s *SQLite) DeliveryAt(ctx context.Context, incidentID, channelID int64, event string) (time.Time, bool, error) {
+	var at sql.NullInt64
+	err := s.read.QueryRowContext(ctx,
+		"SELECT MIN(at) FROM incident_deliveries WHERE incident_id = ? AND channel_id = ? AND event = ?",
+		incidentID, channelID, event).Scan(&at)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("delivery at: %w", err)
+	}
+	if !at.Valid {
+		return time.Time{}, false, nil
+	}
+	return time.UnixMilli(at.Int64).UTC(), true, nil
+}
+
 func (s *SQLite) DeleteDeliveriesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	n, err := s.deleteBefore(ctx, "incident_deliveries", "at", cutoff)
 	if err != nil {

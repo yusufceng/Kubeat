@@ -173,7 +173,7 @@ export function HealthBar({ items }: { items: FleetItem[] }) {
   const count = (states: DisplayState[]) => items.filter((i) => states.includes(i.state)).length;
   const parts: [string, number][] = [
     ["var(--down)", count(["down"])],
-    ["var(--warn)", count(["verifying", "recovering"])],
+    ["var(--warn)", count(["verifying", "recovering", "degraded"])],
     ["var(--maint)", count(["maintenance"])],
     ["var(--ok-bar)", count(["up"])],
     ["var(--line-strong)", count(["paused", "pending"])],
@@ -198,7 +198,7 @@ export function HealthBar({ items }: { items: FleetItem[] }) {
 export function groupCount(items: { state: DisplayState }[], t: T): { text: string; tone: string } {
   const down = items.filter((i) => i.state === "down").length;
   if (down > 0) return { text: t("monitorsList.list.group.down", { count: down }), tone: "text-down-ink" };
-  const degraded = items.filter((i) => i.state === "verifying" || i.state === "recovering").length;
+  const degraded = items.filter((i) => i.state === "verifying" || i.state === "recovering" || i.state === "degraded").length;
   if (degraded > 0) return { text: t("monitorsList.list.group.degraded", { count: degraded }), tone: "text-warn-ink" };
   return { text: `${items.filter((i) => i.state === "up").length}/${items.length}`, tone: "text-ink-3" };
 }

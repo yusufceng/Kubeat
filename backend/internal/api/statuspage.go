@@ -1,11 +1,12 @@
 package api
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
-	"html"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 
 const (
 	maxStatusPageMonitors = 200
+	maxStatusPageSections = 50
+	maxStatusPageRules    = 50
 	maxStatusPageTitle    = 100
 	maxStatusPageText     = 2000
 	// maxStatusPageIncidents bounds the incidents one page lists.
@@ -24,9 +27,25 @@ const (
 // A slug is part of an address: lower-case letters, digits and hyphens.
 var statusPageSlug = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 
+// statusPageSection is a named group of a page, in the page's order.
+type statusPageSection struct {
+	Name string `json:"name"`
+}
+
 type statusPageMonitor struct {
 	MonitorID   int64  `json:"monitor_id"`
 	DisplayName string `json:"display_name"`
+	// Section names the section the monitor is in; empty for the unnamed
+	// group at the top of the page.
+	Section string `json:"section"`
+}
+
+// statusPageRule adds the monitors of a namespace ("" for any) carrying a
+// tag ("" for any) to a section, after its explicit monitors.
+type statusPageRule struct {
+	Namespace string `json:"namespace"`
+	Tag       string `json:"tag"`
+	Section   string `json:"section"`
 }
 
 type statusPageResponse struct {
@@ -36,17 +55,40 @@ type statusPageResponse struct {
 	Description  string              `json:"description"`
 	Announcement string              `json:"announcement"`
 	Published    bool                `json:"published"`
+	Sections     []statusPageSection `json:"sections"`
 	Monitors     []statusPageMonitor `json:"monitors"`
-	CreatedAt    time.Time           `json:"created_at"`
+	Rules        []statusPageRule    `json:"rules"`
+	// NoIndex asks search engines to stay away (the frontend renders the
+	// robots meta); HidePaused leaves paused monitors off the page;
+	// Language is "" for the instance default, else "tr" or "en";
+	// DetailPages lets a monitor be opened on a page of its own.
+	NoIndex     bool   `json:"noindex"`
+	HidePaused  bool   `json:"hide_paused"`
+	Language    string `json:"language"`
+	DetailPages bool   `json:"detail_pages"`
+	// HasPassword says whether visitors must give a password; the password
+	// itself is never returned.
+	HasPassword bool      `json:"has_password"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func toStatusPageResponse(p store.StatusPage) statusPageResponse {
 	resp := statusPageResponse{
 		ID: p.ID, Slug: p.Slug, Title: p.Title, Description: p.Description, Announcement: p.Announcement,
-		Published: p.Published, CreatedAt: p.CreatedAt, Monitors: make([]statusPageMonitor, len(p.Monitors)),
+		Published: p.Published, CreatedAt: p.CreatedAt,
+		Sections: make([]statusPageSection, len(p.Sections)), Monitors: make([]statusPageMonitor, len(p.Monitors)),
+		Rules:   make([]statusPageRule, len(p.Rules)),
+		NoIndex: p.NoIndex, HidePaused: p.HidePaused, Language: p.Language, DetailPages: p.DetailPages,
+		HasPassword: p.PasswordHash != "",
+	}
+	for i, s := range p.Sections {
+		resp.Sections[i] = statusPageSection{Name: s.Name}
 	}
 	for i, m := range p.Monitors {
-		resp.Monitors[i] = statusPageMonitor{MonitorID: m.MonitorID, DisplayName: m.DisplayName}
+		resp.Monitors[i] = statusPageMonitor{MonitorID: m.MonitorID, DisplayName: m.DisplayName, Section: m.Section}
+	}
+	for i, r := range p.Rules {
+		resp.Rules[i] = statusPageRule{Namespace: r.Namespace, Tag: r.Tag, Section: r.Section}
 	}
 	return resp
 }
@@ -59,7 +101,16 @@ type statusPageRequest struct {
 	Description  *string              `json:"description"`
 	Announcement *string              `json:"announcement"`
 	Published    *bool                `json:"published"`
+	Sections     *[]statusPageSection `json:"sections"`
 	Monitors     *[]statusPageMonitor `json:"monitors"`
+	Rules        *[]statusPageRule    `json:"rules"`
+	NoIndex      *bool                `json:"noindex"`
+	HidePaused   *bool                `json:"hide_paused"`
+	Language     *string              `json:"language"`
+	DetailPages  *bool                `json:"detail_pages"`
+	// Password sets the password visitors must give; empty clears it. It is
+	// never returned: the page answers has_password.
+	Password *string `json:"password"`
 }
 
 // apply validates the request and sets its fields on p.
@@ -79,6 +130,18 @@ func (h *handler) applyStatusPage(r *http.Request, req statusPageRequest, p *sto
 	if req.Published != nil {
 		p.Published = *req.Published
 	}
+	if req.NoIndex != nil {
+		p.NoIndex = *req.NoIndex
+	}
+	if req.HidePaused != nil {
+		p.HidePaused = *req.HidePaused
+	}
+	if req.DetailPages != nil {
+		p.DetailPages = *req.DetailPages
+	}
+	if req.Language != nil {
+		p.Language = strings.TrimSpace(*req.Language)
+	}
 	switch {
 	case !statusPageSlug.MatchString(p.Slug):
 		return errors.New("slug must be lower-case letters, digits and hyphens, such as shop-status")
@@ -86,17 +149,71 @@ func (h *handler) applyStatusPage(r *http.Request, req statusPageRequest, p *sto
 		return fmt.Errorf("title is required and at most %d bytes", maxStatusPageTitle)
 	case len(p.Description) > maxStatusPageText || len(p.Announcement) > maxStatusPageText:
 		return fmt.Errorf("description and announcement are at most %d bytes each", maxStatusPageText)
+	case p.Language != "" && p.Language != "tr" && p.Language != "en":
+		return errors.New(`language must be "tr", "en" or empty for the instance default`)
 	}
 	who := principal(r)
+	if req.Sections != nil {
+		if err := applyPageSections(*req.Sections, p); err != nil {
+			return err
+		}
+	}
 	if req.Monitors != nil {
 		if err := h.applyPageMonitors(r, who, *req.Monitors, p); err != nil {
 			return err
 		}
 	}
-	// An editor's page must stay theirs: one without monitors would be
-	// nobody's but the admins' (see canEditPage).
-	if len(p.Monitors) == 0 && !who.IsAdmin() {
-		return errors.New("monitors: choose at least one; only an administrator manages a page without monitors")
+	if req.Rules != nil {
+		if err := applyPageRules(who, *req.Rules, p); err != nil {
+			return err
+		}
+	}
+	// Whichever of the three the request changed, every monitor and rule
+	// must be in a section the page has.
+	sections := make(map[string]bool, len(p.Sections))
+	for _, s := range p.Sections {
+		sections[s.Name] = true
+	}
+	for _, m := range p.Monitors {
+		if m.Section != "" && !sections[m.Section] {
+			return fmt.Errorf("monitors: monitor %d is in section %q, which the page does not have", m.MonitorID, m.Section)
+		}
+	}
+	for _, rule := range p.Rules {
+		if rule.Section != "" && !sections[rule.Section] {
+			return fmt.Errorf("rules: a rule is in section %q, which the page does not have", rule.Section)
+		}
+	}
+	if req.Password != nil {
+		if err := h.applyPagePassword(*req.Password, p); err != nil {
+			return err
+		}
+	}
+	// An editor's page must stay theirs: one without monitors or rules
+	// would be nobody's but the admins' (see canEditPage).
+	if len(p.Monitors) == 0 && len(p.Rules) == 0 && !who.IsAdmin() {
+		return errors.New("monitors: choose at least one monitor or rule; only an administrator manages a page without any")
+	}
+	return nil
+}
+
+// applyPageSections validates the sections of a page and sets them on p.
+func applyPageSections(sections []statusPageSection, p *store.StatusPage) error {
+	if len(sections) > maxStatusPageSections {
+		return fmt.Errorf("sections: at most %d", maxStatusPageSections)
+	}
+	p.Sections = make([]store.StatusPageSection, 0, len(sections))
+	seen := make(map[string]bool, len(sections))
+	for _, s := range sections {
+		name := strings.TrimSpace(s.Name)
+		switch {
+		case name == "" || len(name) > maxStatusPageTitle:
+			return fmt.Errorf("sections: a section needs a name of at most %d bytes", maxStatusPageTitle)
+		case seen[name]:
+			return fmt.Errorf("sections: %q is listed twice", name)
+		}
+		seen[name] = true
+		p.Sections = append(p.Sections, store.StatusPageSection{Name: name})
 	}
 	return nil
 }
@@ -127,8 +244,56 @@ func (h *handler) applyPageMonitors(r *http.Request, who auth.Principal, monitor
 			return fmt.Errorf("monitors: a display name is at most %d bytes", maxStatusPageTitle)
 		}
 		seen[m.MonitorID] = true
-		p.Monitors = append(p.Monitors, store.StatusPageMonitor{MonitorID: m.MonitorID, DisplayName: name})
+		p.Monitors = append(p.Monitors, store.StatusPageMonitor{MonitorID: m.MonitorID, DisplayName: name, Section: strings.TrimSpace(m.Section)})
 	}
+	return nil
+}
+
+// applyPageRules validates the membership rules of a page and sets them on
+// p. An editor writes rules for their own namespaces only: a rule for any
+// namespace reaches every monitor there is.
+func applyPageRules(who auth.Principal, rules []statusPageRule, p *store.StatusPage) error {
+	if len(rules) > maxStatusPageRules {
+		return fmt.Errorf("rules: at most %d", maxStatusPageRules)
+	}
+	p.Rules = make([]store.StatusPageRule, 0, len(rules))
+	for _, r := range rules {
+		rule := store.StatusPageRule{Namespace: strings.TrimSpace(r.Namespace), Tag: strings.TrimSpace(r.Tag), Section: strings.TrimSpace(r.Section)}
+		switch {
+		case rule.Namespace != "" && !validGroup(rule.Namespace):
+			return fmt.Errorf("rules: %q is not the name of a namespace or group", rule.Namespace)
+		case rule.Tag != "" && !plainName(rule.Tag, maxTagLength):
+			return fmt.Errorf("rules: %q is not a tag", rule.Tag)
+		case !canEditRule(who, rule):
+			if rule.Namespace == "" {
+				return errors.New("rules: a rule for every namespace takes an editor of every namespace; name one of yours")
+			}
+			return fmt.Errorf("rules: you may not publish the monitors of %s", rule.Namespace)
+		}
+		p.Rules = append(p.Rules, rule)
+	}
+	return nil
+}
+
+// applyPagePassword sets or clears the password visitors must give. It is
+// held to the rules of every other password: a weak one on a page that is
+// otherwise public is still a weak password.
+func (h *handler) applyPagePassword(password string, p *store.StatusPage) error {
+	if password == "" {
+		p.PasswordHash = ""
+		return nil
+	}
+	if len(h.opts.StatusPageTokenKey) == 0 {
+		return errors.New("password: a protected page needs UPTIME_SECRET_KEY, which signs its visitors' tokens")
+	}
+	if err := auth.ValidatePassword(p.Slug, password, h.opts.PasswordMinLength); err != nil {
+		return fmt.Errorf("password: %w", err)
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return internalFailure{err}
+	}
+	p.PasswordHash = hash
 	return nil
 }
 
@@ -181,8 +346,14 @@ func (h *handler) pageScope(r *http.Request, who auth.Principal) (map[int64]stri
 	return h.monitorNamespaces(r.Context())
 }
 
-// pageForEdit returns the page, or answers why it cannot be edited.
-func (h *handler) pageForEdit(w http.ResponseWriter, r *http.Request, id int64) (store.StatusPage, bool) {
+// pageForEdit returns the page of the request's {id}, or answers why it
+// cannot be edited.
+func (h *handler) pageForEdit(w http.ResponseWriter, r *http.Request) (store.StatusPage, bool) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "status page not found")
+		return store.StatusPage{}, false
+	}
 	p, err := h.opts.Store.GetStatusPage(r.Context(), id)
 	if err != nil {
 		h.statusPageError(w, r, err)
@@ -202,12 +373,7 @@ func (h *handler) pageForEdit(w http.ResponseWriter, r *http.Request, id int64) 
 }
 
 func (h *handler) getStatusPage(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
-	if !ok {
-		writeError(w, http.StatusNotFound, "status page not found")
-		return
-	}
-	p, ok := h.pageForEdit(w, r, id)
+	p, ok := h.pageForEdit(w, r)
 	if !ok {
 		return
 	}
@@ -223,7 +389,7 @@ func (h *handler) createStatusPage(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	p := store.StatusPage{Published: true}
+	p := store.StatusPage{Published: true, DetailPages: true}
 	if err := h.applyStatusPage(r, req, &p); err != nil {
 		var internal internalFailure
 		if errors.As(err, &internal) {
@@ -243,16 +409,11 @@ func (h *handler) createStatusPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) updateStatusPage(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
-	if !ok {
-		writeError(w, http.StatusNotFound, "status page not found")
-		return
-	}
 	var req statusPageRequest
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	p, ok := h.pageForEdit(w, r, id)
+	p, ok := h.pageForEdit(w, r)
 	if !ok {
 		return
 	}
@@ -275,307 +436,140 @@ func (h *handler) updateStatusPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) deleteStatusPage(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
-	if !ok {
-		writeError(w, http.StatusNotFound, "status page not found")
-		return
-	}
-	p, ok := h.pageForEdit(w, r, id)
+	p, ok := h.pageForEdit(w, r)
 	if !ok {
 		return
 	}
-	if err := h.opts.Store.DeleteStatusPage(r.Context(), id); err != nil {
+	if err := h.opts.Store.DeleteStatusPage(r.Context(), p.ID); err != nil {
 		h.statusPageError(w, r, err)
 		return
 	}
-	h.audit(r, "delete", "status_page", id, p.Slug)
+	h.audit(r, "delete", "status_page", p.ID, p.Slug)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// States a status page shows. They say less than the dashboard does: a
-// single failed check is not news for the public.
-const (
-	publicUp          = "up"
-	publicDown        = "down"
-	publicDegraded    = "degraded" // of a page: some, not all, monitors are down
-	publicMaintenance = "maintenance"
-	publicPending     = "pending"
-	publicPaused      = "paused"
-)
+// shownMonitor is a monitor a status page shows: under which name, and
+// whether it was listed by name or matched by a rule.
+type shownMonitor struct {
+	store.Monitor
+	Name     string
+	Explicit bool
+}
 
-// publicState is what a status page says about a monitor.
-func publicState(st store.MonitorStatus) string {
-	switch {
-	case !st.Enabled:
-		return publicPaused
-	case st.Incident != nil:
-		return publicDown
-	case !st.MaintenanceUntil.IsZero():
-		return publicMaintenance
-	case st.Last == nil:
-		return publicPending
-	default:
-		return publicUp
+// shownSection is a section of a status page with the monitors it shows.
+type shownSection struct {
+	Name     string
+	Monitors []shownMonitor
+}
+
+// resolvePage lists what a page shows, section by section, from the
+// monitors there are: the unnamed group first, then the sections in their
+// order, each with its explicit entries in their order and then the
+// monitors its rules match, by name. A monitor appears once: listed by
+// name it is not matched again, and of two rules matching it the first has
+// it. With HidePaused, paused monitors are left out. Sections without a
+// monitor are kept, empty.
+func resolvePage(page store.StatusPage, monitors []store.Monitor) []shownSection {
+	byID := make(map[int64]store.Monitor, len(monitors))
+	for _, m := range monitors {
+		byID[m.ID] = m
 	}
+	sections := make([]shownSection, 1+len(page.Sections))
+	index := map[string]int{"": 0}
+	for i, s := range page.Sections {
+		sections[i+1].Name = s.Name
+		index[s.Name] = i + 1
+	}
+	taken := make(map[int64]bool)
+	shown := func(m store.Monitor) bool { return !taken[m.ID] && (m.Enabled || !page.HidePaused) }
+	for _, pm := range page.Monitors {
+		m, ok := byID[pm.MonitorID]
+		if !ok || !shown(m) {
+			continue // deleted since the page was read, or paused and hidden
+		}
+		taken[m.ID] = true
+		name := pm.DisplayName
+		if name == "" {
+			name = publicName(m)
+		}
+		i := index[pm.Section]
+		sections[i].Monitors = append(sections[i].Monitors, shownMonitor{Monitor: m, Name: name, Explicit: true})
+	}
+	for _, rule := range page.Rules {
+		var matched []shownMonitor
+		for _, m := range monitors {
+			if shown(m) && rule.Matches(m) {
+				taken[m.ID] = true
+				matched = append(matched, shownMonitor{Monitor: m, Name: publicName(m)})
+			}
+		}
+		slices.SortFunc(matched, func(a, b shownMonitor) int {
+			return cmp.Or(strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), strings.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID))
+		})
+		i := index[rule.Section]
+		sections[i].Monitors = append(sections[i].Monitors, matched...)
+	}
+	return sections
 }
 
 // publicName is the name a page shows for a monitor that has no display
-// name: for a discovered monitor the object's own name, without the
-// namespace and kind in front of it.
+// name: the monitor's own, as the UI shows it (monitorLabel). Only the
+// name discovery gave, which is where the monitor came from
+// ("shop/service/web:80"), is shortened to the object's own name
+// ("web:80"); a discovered monitor the operator renamed goes by that name.
 func publicName(m store.Monitor) string {
-	if _, object, found := strings.Cut(m.Source, "/"); found {
-		return object
+	if m.Name == m.Namespace+"/"+m.Source {
+		if _, object, found := strings.Cut(m.Source, "/"); found {
+			return object
+		}
 	}
 	return m.Name
 }
 
-type statusPageView struct {
-	Slug         string `json:"slug"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	Announcement string `json:"announcement"`
-	// State is up, degraded, down or maintenance for the page as a whole.
-	State string `json:"state"`
-	// Days is the number of days each monitor's history covers, ending
-	// today (UTC), and From the start of the first of them.
-	Days      int                  `json:"days"`
-	From      time.Time            `json:"from"`
-	Monitors  []statusPageViewItem `json:"monitors"`
-	Incidents []statusPageIncident `json:"incidents"`
+// statusPagePreview is what a page shows at this moment, for whoever edits
+// it: the explicit monitors and those its rules match, in their sections.
+type statusPagePreview struct {
+	Sections []previewSection `json:"sections"`
 }
 
-type statusPageViewItem struct {
-	ID    int64  `json:"id"`
-	Name  string `json:"name"`
-	State string `json:"state"`
-	// UptimePercent is over all the days; null without any check.
-	UptimePercent *float64 `json:"uptime_percent"`
-	// History has one entry per day, oldest first: the uptime of the day,
-	// or null for a day without checks.
-	History []*float64 `json:"history"`
+type previewSection struct {
+	Name     string           `json:"name"`
+	Monitors []previewMonitor `json:"monitors"`
 }
 
-// statusPageIncident is an outage as the public sees it: when, and of what.
-// The cause stays inside, since it often names internal addresses.
-type statusPageIncident struct {
-	MonitorName string     `json:"monitor_name"`
-	StartedAt   time.Time  `json:"started_at"`
-	ResolvedAt  *time.Time `json:"resolved_at"`
+type previewMonitor struct {
+	MonitorID int64 `json:"monitor_id"`
+	// Name is what the page shows; MonitorName and Namespace say which
+	// monitor that is.
+	Name        string `json:"name"`
+	MonitorName string `json:"monitor_name"`
+	Namespace   string `json:"namespace"`
+	// Explicit is true for a monitor listed by name, false for one a rule
+	// matched.
+	Explicit bool `json:"explicit"`
+	Enabled  bool `json:"enabled"`
 }
 
-// viewStatusPage returns what a published status page shows. It is what
-// the frontend serves to visitors without a session, so it carries nothing
-// about a monitor beyond its name, state and uptime.
-func (h *handler) viewStatusPage(w http.ResponseWriter, r *http.Request) {
-	page, err := h.opts.Store.GetStatusPageBySlug(r.Context(), r.PathValue("slug"))
-	if errors.Is(err, store.ErrNotFound) || (err == nil && !page.Published) {
-		writeError(w, http.StatusNotFound, "status page not found")
+// previewStatusPage answers GET /api/v1/status-pages/{id}/monitors.
+func (h *handler) previewStatusPage(w http.ResponseWriter, r *http.Request) {
+	p, ok := h.pageForEdit(w, r)
+	if !ok {
 		return
 	}
+	monitors, err := h.opts.Store.ListMonitors(r.Context())
 	if err != nil {
 		h.internalError(w, r, err)
 		return
 	}
-
-	now := time.Now().UTC()
-	days := h.opts.StatusPageDays
-	const day = 24 * time.Hour
-	from := now.Truncate(day).Add(-time.Duration(days-1) * day)
-
-	statuses, err := h.opts.Store.ListMonitorStatuses(r.Context(), now)
-	if err != nil {
-		h.internalError(w, r, err)
-		return
-	}
-	byID := make(map[int64]store.MonitorStatus, len(statuses))
-	for _, st := range statuses {
-		byID[st.ID] = st
-	}
-	daily, err := h.opts.Store.StatusPageDailyUptime(r.Context(), page.ID, from, now.Add(time.Hour))
-	if err != nil {
-		h.internalError(w, r, err)
-		return
-	}
-
-	view := statusPageView{
-		Slug: page.Slug, Title: page.Title, Description: page.Description, Announcement: page.Announcement,
-		State: publicUp, Days: days, From: from,
-		Monitors: make([]statusPageViewItem, 0, len(page.Monitors)), Incidents: []statusPageIncident{},
-	}
-	names := make(map[int64]string, len(page.Monitors))
-	down, maintenance, counted := 0, 0, 0
-	for _, pm := range page.Monitors {
-		st, ok := byID[pm.MonitorID]
-		if !ok {
-			continue // deleted since the page was read
+	resp := statusPagePreview{Sections: []previewSection{}}
+	for _, s := range resolvePage(p, monitors) {
+		section := previewSection{Name: s.Name, Monitors: make([]previewMonitor, 0, len(s.Monitors))}
+		for _, m := range s.Monitors {
+			section.Monitors = append(section.Monitors, previewMonitor{
+				MonitorID: m.ID, Name: m.Name, MonitorName: m.Monitor.Name, Namespace: m.Namespace, Explicit: m.Explicit, Enabled: m.Enabled,
+			})
 		}
-		item := statusPageViewItem{ID: st.ID, Name: pm.DisplayName, State: publicState(st), History: make([]*float64, days)}
-		if item.Name == "" {
-			item.Name = publicName(st.Monitor)
-		}
-		names[st.ID] = item.Name
-
-		checks, up := 0, 0
-		for _, p := range daily[st.ID] {
-			index := int(p.Start.Sub(from) / day)
-			if index < 0 || index >= days || p.Checks == 0 {
-				continue
-			}
-			pct := 100 * float64(p.UpChecks) / float64(p.Checks)
-			item.History[index] = &pct
-			checks += p.Checks
-			up += p.UpChecks
-		}
-		if checks > 0 {
-			pct := 100 * float64(up) / float64(checks)
-			item.UptimePercent = &pct
-		}
-		switch item.State {
-		case publicDown:
-			down++
-			counted++
-		case publicMaintenance:
-			maintenance++
-			counted++
-		case publicUp:
-			counted++
-		}
-		view.Monitors = append(view.Monitors, item)
+		resp.Sections = append(resp.Sections, section)
 	}
-	switch {
-	case down > 0 && down == counted:
-		view.State = publicDown
-	case down > 0:
-		view.State = publicDegraded
-	case maintenance > 0:
-		view.State = publicMaintenance
-	}
-
-	incidents, err := h.opts.Store.ListIncidents(r.Context(), 0, h.opts.MaxResults)
-	if err != nil {
-		h.internalError(w, r, err)
-		return
-	}
-	since := now.Add(-h.opts.StatusPageIncidentWindow)
-	for _, i := range incidents {
-		name, shown := names[i.MonitorID]
-		if !shown || i.Kind != store.IncidentDown || (i.StartedAt.Before(since) && !i.Open()) {
-			continue
-		}
-		incident := statusPageIncident{MonitorName: name, StartedAt: i.StartedAt}
-		if !i.Open() {
-			incident.ResolvedAt = &i.ResolvedAt
-		}
-		if view.Incidents = append(view.Incidents, incident); len(view.Incidents) == maxStatusPageIncidents {
-			break
-		}
-	}
-	writeJSON(w, http.StatusOK, view)
-}
-
-// Badge colors, the ones the UI uses for the same states.
-const (
-	badgeGreen = "#12a06c"
-	badgeRed   = "#d93d3d"
-	badgeAmber = "#c98206"
-	badgeBlue  = "#2f74d0"
-	badgeGray  = "#7a8490"
-)
-
-// badge returns a small SVG image saying a monitor's state or its uptime,
-// for a README or a wiki page. Only monitors on a published status page
-// have one: anything else would tell the world about internal services.
-func (h *handler) badge(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
-	kind := r.PathValue("kind")
-	if !ok || (kind != "status" && kind != "uptime") {
-		writeError(w, http.StatusNotFound, "badge not found")
-		return
-	}
-	public, err := h.opts.Store.MonitorIsPublic(r.Context(), id)
-	if err != nil {
-		h.internalError(w, r, err)
-		return
-	}
-	if !public {
-		writeError(w, http.StatusNotFound, "badge not found")
-		return
-	}
-	st, err := h.opts.Store.GetMonitorStatus(r.Context(), id, time.Now().Add(-h.opts.StatsWindow))
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "badge not found")
-		return
-	}
-	if err != nil {
-		h.internalError(w, r, err)
-		return
-	}
-
-	label, value, color := "status", "", badgeGray
-	if kind == "status" {
-		switch publicState(st) {
-		case publicUp:
-			value, color = "up", badgeGreen
-		case publicDown:
-			value, color = "down", badgeRed
-		case publicMaintenance:
-			value, color = "maintenance", badgeBlue
-		case publicPaused:
-			value = "paused"
-		default:
-			value = "pending"
-		}
-	} else {
-		label = fmt.Sprintf("uptime %s", shortDuration(h.opts.StatsWindow))
-		value = "n/a"
-		if st.Checks > 0 {
-			pct := 100 * float64(st.UpChecks) / float64(st.Checks)
-			// Floor so that 99.996% is not shown as a perfect 100%.
-			value = fmt.Sprintf("%.2f%%", float64(int(pct*100))/100)
-			switch {
-			case pct >= 99.9:
-				color = badgeGreen
-			case pct >= 99:
-				color = badgeAmber
-			default:
-				color = badgeRed
-			}
-		}
-	}
-	if custom := strings.TrimSpace(r.URL.Query().Get("label")); custom != "" && len(custom) <= 40 {
-		label = custom
-	}
-
-	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
-	// A badge is embedded in pages that are loaded often; let caches hold
-	// it for a moment, but not so long that it lies.
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	_, _ = w.Write([]byte(badgeSVG(label, value, color)))
-}
-
-// shortDuration renders 24h0m0s as "24h" and 168h as "7d".
-func shortDuration(d time.Duration) string {
-	if d >= 48*time.Hour && d%(24*time.Hour) == 0 {
-		return fmt.Sprintf("%dd", d/(24*time.Hour))
-	}
-	if d%time.Hour == 0 {
-		return fmt.Sprintf("%dh", d/time.Hour)
-	}
-	return d.String()
-}
-
-// badgeSVG draws a two-part badge. The widths are estimated from the number
-// of characters: there is no font to measure with on the server.
-func badgeSVG(label, value, color string) string {
-	const charWidth, padding = 6.6, 12.0
-	width := func(s string) float64 { return float64(len([]rune(s)))*charWidth + padding }
-	lw, vw := width(label), width(value)
-	label, value = html.EscapeString(label), html.EscapeString(value)
-	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="20" role="img" aria-label="%s: %s">`+
-		`<title>%s: %s</title>`+
-		`<clipPath id="r"><rect width="%.0f" height="20" rx="3"/></clipPath>`+
-		`<g clip-path="url(#r)"><rect width="%.0f" height="20" fill="#3d4651"/><rect x="%.0f" width="%.0f" height="20" fill="%s"/></g>`+
-		`<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">`+
-		`<text x="%.1f" y="14">%s</text><text x="%.1f" y="14">%s</text></g></svg>`,
-		lw+vw, label, value, label, value, lw+vw, lw, lw, vw, color, lw/2, label, lw+vw/2, value)
+	writeJSON(w, http.StatusOK, resp)
 }
