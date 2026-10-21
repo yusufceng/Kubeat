@@ -72,3 +72,25 @@ olmuyor ve metin aynı okunuyor. Teams ve Gotify hâlâ açık.
   sayfası gelince açılıştaki başarısızlığın açıklaması olaya yazılabilir.
 - Monitor listesindeki kısa geçmişte (`history`) ve ızgaranın en sık
   hatalarında açıklama kodu.
+
+## UptimeRobot karşılaştırmasından ertelenenler
+
+2026-10-20'de UptimeRobot (canlı hesap ve dokümanlar) Kubeat ile
+karşılaştırıldı. Konum: UptimeRobot dışarıdan bakan bir SaaS, Kubeat
+cluster'ın içinden bakar; rakipten çok tamamlayıcıdır. Plana alınanlar
+(durum sayfası bölümleri, kurallarla üyelik, adımlı duyurular, erişim
+ayarları, servis detay sayfası, NOC modu; kanal başına gecikme ve tekrar,
+monitor'dan test bildirimi, yavaş yanıt eşiği) 0.40 turunda yapılıyor.
+Bilerek sonraya bırakılanlar:
+
+- **Durum sayfasına e-postayla abonelik.** SMTP zaten var; abone listesi,
+  doğrulama ve abonelikten çıkma akışı gerekir. Duyurular oturunca
+  değerlendirilir.
+- **Üçüncü taraf servislerin durumu** (AWS, GitHub, quay.io, registry.redhat.io
+  gibi tedarikçilerin durum sayfaları; çoğu Atlassian Statuspage JSON'u).
+  Monitor tipi olarak değil, olay sayfasında "aynı anda tedarikçi X de
+  bozukluk bildiriyordu" bağlamı olarak düşünülecek.
+- **SLO hedefi ve hata bütçesi.** Hedefin nerede tutulacağı (annotation mı,
+  monitor alanı mı) ve raporlardaki yeri ayrı bir karar.
+- **Durum sayfası markalaması** (logo, yazı tipi, renkler) yapılmayacaklar
+  listesinde kalıyor; yalnızca sıkışık yerleşim ve bölümler yapılıyor.
