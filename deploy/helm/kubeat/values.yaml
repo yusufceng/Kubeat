@@ -15,6 +15,11 @@ language: en
 # router picks, set it to that host once the Route exists.
 publicURL: ""   # https://kubeat.apps.example
 
+# How many old ReplicaSets each Deployment keeps for a rollback. Kubernetes
+# keeps ten; a namespace quota on ReplicaSets (the Developer Sandbox allows
+# thirty) fills up after a few upgrades and the next one cannot roll out.
+revisionHistoryLimit: 3
+
 backend:
   image:
     repository: ghcr.io/yusufceng/kubeat-backend

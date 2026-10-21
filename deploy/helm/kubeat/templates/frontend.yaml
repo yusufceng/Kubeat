@@ -7,6 +7,7 @@ metadata:
     app.kubernetes.io/component: frontend
 spec:
   replicas: {{ .Values.frontend.replicas }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "kubeat.selector" . | nindent 6 }}

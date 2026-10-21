@@ -42,6 +42,7 @@ spec:
   # SQLite allows a single writer, and the volume is ReadWriteOnce: never run
   # two backend pods, not even during a rollout.
   replicas: 1
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   strategy:
     type: Recreate
   selector:
