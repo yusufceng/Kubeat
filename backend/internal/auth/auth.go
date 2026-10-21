@@ -102,8 +102,17 @@ func FromContext(ctx context.Context) (Principal, bool) {
 }
 
 // bcryptCost makes a hash take tens of milliseconds, which slows guessing
-// without slowing sign-in noticeably.
-const bcryptCost = 12
+// without slowing sign-in noticeably. Only FastHashes changes it.
+var bcryptCost = 12
+
+// FastHashes makes hashes as cheap as bcrypt allows, for test suites that
+// sign in hundreds of times: at the real cost they run for minutes under
+// the race detector. The server never calls it. Call it before the first
+// hash is made, since the dummy hash is made once.
+func FastHashes() {
+	bcryptCost = bcrypt.MinCost
+	dummyHash = sync.OnceValue(newDummyHash)
+}
 
 // MaxPasswordBytes is the longest password bcrypt takes: it would ignore
 // what follows, so a longer one is refused rather than cut short.
@@ -144,12 +153,14 @@ func HashPassword(password string) (string, error) {
 // compare it with: a hash of random bytes, made with the cost of the real
 // ones, so that refusing a name without an account takes as long as
 // refusing a wrong password, and the time of the answer tells neither.
-var dummyHash = sync.OnceValue(func() []byte {
+var dummyHash = sync.OnceValue(newDummyHash)
+
+func newDummyHash() []byte {
 	secret := make([]byte, 32)
 	_, _ = rand.Read(secret)
 	hash, _ := bcrypt.GenerateFromPassword(secret, bcryptCost)
 	return hash
-})
+}
 
 // PrepareDummy makes the dummy hash now, at startup, instead of during the
 // first sign-in of an unknown name, which would take twice as long.

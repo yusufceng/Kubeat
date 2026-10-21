@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -657,4 +658,12 @@ func TestWebURLRefusesNonASCIIHosts(t *testing.T) {
 			t.Errorf("%s: accepted", target)
 		}
 	}
+}
+
+// TestMain makes password hashes cheap: these tests sign in and set up
+// accounts hundreds of times, and at the real cost they time out under the
+// race detector on a small CI runner.
+func TestMain(m *testing.M) {
+	auth.FastHashes()
+	os.Exit(m.Run())
 }
