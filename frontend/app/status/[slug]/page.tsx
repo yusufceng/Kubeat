@@ -9,7 +9,7 @@ import { getT } from "@/lib/i18n/server";
 import { translator } from "@/lib/i18n/translate";
 import { wallScript } from "@/lib/status-page";
 import { RefreshCountdown } from "@/app/ui/refresh-countdown";
-import { SystemTheme } from "@/app/ui/theme-toggle";
+import { StatusTheme } from "@/app/ui/theme-toggle";
 import { statusPagePath, statusPageToken } from "./access";
 import { allMonitors as monitorsOf, Footer, Skeleton, Unavailable } from "./shared";
 import { UnlockForm, unlockProblem } from "./unlock-form";
@@ -126,7 +126,7 @@ export default async function Page({ params, searchParams }: PageProps<"/status/
   return (
     <main className="sp-page">
       <script dangerouslySetInnerHTML={{ __html: wallScript }} />
-      <SystemTheme />
+      <StatusTheme />
       <Suspense
         fallback={
           <>

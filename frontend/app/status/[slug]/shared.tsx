@@ -1,3 +1,4 @@
+import { ThemeToggle } from "@/app/ui/theme-toggle";
 import type { PublicState, StatusPageUptime, StatusPageView } from "@/lib/api";
 import { uptime } from "@/lib/format";
 import type { T } from "@/lib/i18n/translate";
@@ -144,6 +145,7 @@ export function Footer({ t }: { t: T }) {
         <Wordmark className="text-ink-2" />
         {after}
       </span>
+      <ThemeToggle variant="inline" />
     </footer>
   );
 }

@@ -2,7 +2,7 @@ import { getT } from "@/lib/i18n/server";
 import { LanguageToggle } from "@/app/ui/language-toggle";
 import { Wordmark } from "@/app/ui/logo";
 import { SearchIcon } from "@/app/ui/icons";
-import { SystemTheme } from "@/app/ui/theme-toggle";
+import { StatusTheme } from "@/app/ui/theme-toggle";
 
 /**
  * A service address under a status page that leads nowhere: the page does
@@ -15,7 +15,7 @@ export default async function NotFound() {
   const [before, after] = t("statusPage.footer").split("{kubeat}");
   return (
     <main className="sp-page">
-      <SystemTheme />
+      <StatusTheme />
       <section className="panel pg-empty mt-6">
         <span className="pg-empty-icon" aria-hidden>
           <SearchIcon width={20} height={20} />

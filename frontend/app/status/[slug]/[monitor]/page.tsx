@@ -17,7 +17,7 @@ import { LatencyChart } from "@/app/ui/latency-chart";
 import { LiveDuration } from "@/app/ui/live-duration";
 import { RefreshCountdown } from "@/app/ui/refresh-countdown";
 import { StatusGlyph } from "@/app/ui/status-glyph";
-import { SystemTheme } from "@/app/ui/theme-toggle";
+import { StatusTheme } from "@/app/ui/theme-toggle";
 import { statusPagePath, statusPageToken } from "../access";
 import { dayBeats, Footer, NARROW_DAYS, Skeleton, StateWords, Unavailable, UptimeWindows } from "../shared";
 import { UnlockForm, unlockProblem } from "../unlock-form";
@@ -194,7 +194,7 @@ export default async function Page({ params, searchParams }: PageProps<"/status/
   return (
     <main className="sp-page">
       <script dangerouslySetInnerHTML={{ __html: wallScript }} />
-      <SystemTheme />
+      <StatusTheme />
       <Suspense
         fallback={
           <>
