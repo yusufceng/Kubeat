@@ -262,6 +262,14 @@ func TestDNSCheck(t *testing.T) {
 
 	if got := check("api.shop.example", store.DNSOptions{RecordType: "A"}); !got.Up || got.Detail != "10.0.0.1, 10.0.0.2" {
 		t.Errorf("A: %+v", got)
+	} else {
+		// The lookup is a request to the name, at the resolver's address.
+		reachedLoopback(t, "A", "api.shop.example", got)
+	}
+	// The system's resolver is asked without a connection of the check's:
+	// the one request to the name, nowhere known.
+	if got := c.Check(context.Background(), store.Monitor{Type: store.MonitorDNS, Target: "no-such-host.invalid", DNS: store.DNSOptions{RecordType: "A"}}); got.Up || len(got.Hops) != 1 || got.Hops[0].Addr != "" {
+		t.Errorf("unknown name through the system resolver: %+v; want down with one hop without an address", got)
 	}
 	if got := check("api.shop.example", store.DNSOptions{RecordType: "TXT", Expected: "SPF1"}); !got.Up || got.Detail != "v=spf1 -all" {
 		t.Errorf("TXT with an expected value: %+v", got)
@@ -283,6 +291,22 @@ func TestDNSCheck(t *testing.T) {
 	}
 }
 
+// reachedLoopback asserts that the check reports at least one request to
+// host, each at the loopback address that answered it: every engine
+// reports the address its connections reached, for the scheduler's
+// ceiling per address.
+func reachedLoopback(t *testing.T, what, host string, got store.CheckResult) {
+	t.Helper()
+	if len(got.Hops) == 0 {
+		t.Errorf("%s: no hops reported", what)
+	}
+	for _, hop := range got.Hops {
+		if hop.Host != host || hop.Addr != "127.0.0.1" {
+			t.Errorf("%s: hop = %+v, want host %s at address 127.0.0.1", what, hop, host)
+		}
+	}
+}
+
 func TestPingCheck(t *testing.T) {
 	c := New(Options{})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -295,6 +319,13 @@ func TestPingCheck(t *testing.T) {
 	if !got.Up || got.Detail != "reply from 127.0.0.1" || got.Latency <= 0 || got.Latency > time.Second {
 		t.Errorf("ping of the loopback address: %+v", got)
 	}
+	// The address the request went to, resolved by the check itself.
+	if len(got.Hops) != 1 || got.Hops[0] != (store.Hop{Host: "127.0.0.1", Addr: "127.0.0.1"}) {
+		t.Errorf("hops = %v, want the one echo request at 127.0.0.1", got.Hops)
+	}
+	if got := c.Check(ctx, store.Monitor{Type: store.MonitorPing, Target: "localhost"}); len(got.Hops) != 1 || got.Hops[0].Host != "localhost" || got.Hops[0].Addr == "" {
+		t.Errorf("ping of a name: hops = %v, want the name at the address it resolved to", got.Hops)
+	}
 
 	// An address nothing answers from; TEST-NET-1 is reserved for documentation.
 	ctx, cancel = context.WithTimeout(context.Background(), 300*time.Millisecond)
@@ -302,8 +333,8 @@ func TestPingCheck(t *testing.T) {
 	if got := c.Check(ctx, store.Monitor{Type: store.MonitorPing, Target: "192.0.2.1"}); got.Up {
 		t.Errorf("ping of an unused address: %+v", got)
 	}
-	if got := c.Check(context.Background(), store.Monitor{Type: store.MonitorPing, Target: "no-such-host.invalid"}); got.Up {
-		t.Errorf("ping of an unknown name: %+v", got)
+	if got := c.Check(context.Background(), store.Monitor{Type: store.MonitorPing, Target: "no-such-host.invalid"}); got.Up || len(got.Hops) != 1 || got.Hops[0].Addr != "" {
+		t.Errorf("ping of an unknown name: %+v; want down, with the one request to the name and no address reached", got)
 	}
 }
 
@@ -376,9 +407,13 @@ func TestGRPCCheck(t *testing.T) {
 
 	if got := check(addr, store.GRPCOptions{}); !got.Up || got.Detail != "SERVING" {
 		t.Errorf("server as a whole: %+v", got)
+	} else {
+		reachedLoopback(t, "serving", "127.0.0.1", got)
 	}
 	if got := check(addr, store.GRPCOptions{Service: "shop.Cart"}); got.Up || !strings.Contains(got.Error, "NOT_SERVING") {
 		t.Errorf("service that is not serving: %+v", got)
+	} else {
+		reachedLoopback(t, "not serving", "127.0.0.1", got)
 	}
 	if got := check(addr, store.GRPCOptions{Service: "shop.Unknown"}); got.Up || !strings.Contains(got.Error, "does not know the service") {
 		t.Errorf("unknown service: %+v", got)
@@ -402,8 +437,8 @@ func TestGRPCCheck(t *testing.T) {
 
 	closed := bare.Addr().String()
 	plain.Stop()
-	if got := check(closed, store.GRPCOptions{}); got.Up {
-		t.Errorf("closed port: %+v", got)
+	if got := check(closed, store.GRPCOptions{}); got.Up || len(got.Hops) != 1 || got.Hops[0].Addr != "" {
+		t.Errorf("closed port: %+v; want down, with the one request to the host and no address reached", got)
 	}
 }
 

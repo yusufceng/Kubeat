@@ -7,6 +7,9 @@ export const monitorPage = defineMessages(
     "monitorPage.breadcrumb.overview": "Genel bakış",
     "monitorPage.eachPod": "her pod",
     "monitorPage.eachPod.title": "Her hazır pod ayrı kontrol edilir",
+    "monitorPage.throttled": "Hedef hız sınırında bekliyor",
+    "monitorPage.throttled.title":
+      "Hedef sunucu dakikada izin verilen kontrol sayısına ulaştı; kontrol sıra gelince çalışır, bu arada sonuç yazılmaz.",
     "monitorPage.managed.title":
       "kubeat.io/monitor annotation'ı ile oluşturuldu; hedefi ve zamanlaması nesnedeki annotation'lardan gelir",
     "monitorPage.recentChecks": "Son kontroller",
@@ -375,6 +378,9 @@ export const monitorPage = defineMessages(
     "monitorPage.breadcrumb.overview": "Overview",
     "monitorPage.eachPod": "each pod",
     "monitorPage.eachPod.title": "Every ready pod is checked separately",
+    "monitorPage.throttled": "Waiting for the target's rate limit",
+    "monitorPage.throttled.title":
+      "The target host has reached its checks per minute; the check runs when a slot comes, and nothing is recorded meanwhile.",
     "monitorPage.managed.title":
       "Created through the kubeat.io/monitor annotation; its target and schedule come from the annotations on the object",
     "monitorPage.recentChecks": "Recent checks",

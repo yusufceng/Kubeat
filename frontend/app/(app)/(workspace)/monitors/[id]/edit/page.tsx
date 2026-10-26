@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache, Suspense } from "react";
-import { ApiError, getMonitor, type Monitor } from "@/lib/api";
+import { ApiError, getHealth, getMonitor, type Monitor } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { getT } from "@/lib/i18n/server";
@@ -43,7 +43,15 @@ async function EditMonitor({ params }: { params: Promise<{ id: string }> }) {
     return <BackendError what={t("monitorForm.edit.what")} err={err} />;
   }
   const me = await currentUser();
-  const groups = me.can_edit ? await workspaceMonitors().then(manualGroups, () => []) : [];
+  const [groups, externalMinInterval] = me.can_edit
+    ? await Promise.all([
+        workspaceMonitors().then(manualGroups, () => []),
+        getHealth().then(
+          (h) => h.limits?.min_check_interval_external_seconds ?? 0,
+          () => 0,
+        ),
+      ])
+    : [[], 0];
   const object = kubectlName(monitor.source);
   const name = monitorLabel(monitor).name;
   const above = [
@@ -73,7 +81,7 @@ async function EditMonitor({ params }: { params: Promise<{ id: string }> }) {
         <p className="mon-desc">{t("monitorForm.edit.title")}</p>
       </header>
       {me.can_edit ? (
-        <MonitorForm monitor={monitor} defaults={config.newMonitor} groups={groups} />
+        <MonitorForm monitor={monitor} defaults={config.newMonitor} groups={groups} externalMinInterval={externalMinInterval} />
       ) : (
         <ReadOnlyNotice />
       )}

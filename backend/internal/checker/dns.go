@@ -36,11 +36,18 @@ func resolver(server string, dial func(ctx context.Context, network, address str
 
 // checkDNS looks up the monitor's target. It succeeds when at least one
 // record comes back and, if the monitor expects a value, one contains it.
+// With a resolver of the monitor's own, the outcome reports the
+// connections made to it, at the address each reached; the system's
+// resolver is asked without a connection of the check's.
 func (c *Checker) checkDNS(ctx context.Context, m store.Monitor) outcome {
-	var refusal policyRefusal
-	records, err := lookup(ctx, resolver(m.DNS.Resolver, refusal.dial(c)), m.DNS.RecordType, m.Target)
+	d := c.dials(m)
+	return d.made(c.dnsLookup(ctx, m, d))
+}
+
+func (c *Checker) dnsLookup(ctx context.Context, m store.Monitor, d *dials) outcome {
+	records, err := lookup(ctx, resolver(m.DNS.Resolver, d.dial(c)), m.DNS.RecordType, m.Target)
 	if err != nil {
-		return failed(refusal.wrap(err))
+		return failed(d.wrap(err))
 	}
 	if len(records) == 0 {
 		return failedf("no %s records for %s", m.DNS.RecordType, m.Target)

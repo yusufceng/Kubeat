@@ -124,6 +124,21 @@ type Options struct {
 	Store   Store
 	// MinCheckInterval is the shortest interval a monitor may be created with.
 	MinCheckInterval time.Duration
+	// The guardrails on the load monitors put on their targets (see
+	// guardrails.go); zero turns each off. MinCheckIntervalExternal is the
+	// shortest interval of a monitor whose target is outside the cluster;
+	// MaxMonitorsPerHost how many monitors may check one external host;
+	// MaxMonitors and MaxMonitorsPerNamespace how many monitors may exist,
+	// in all and in one namespace, bound when one is created;
+	// MonitorCreatePerMinute how many one account may create in a minute.
+	// Throttles says which monitors' checks are waiting for their host's
+	// ceiling; nil without a scheduler.
+	MinCheckIntervalExternal time.Duration
+	MaxMonitorsPerHost       int
+	MaxMonitors              int
+	MaxMonitorsPerNamespace  int
+	MonitorCreatePerMinute   int
+	Throttles                Throttles
 	// StatsWindow is the default period over which uptime is computed.
 	StatsWindow time.Duration
 	// MaxResults caps how many check results or incidents one request may return.
@@ -226,7 +241,7 @@ type Options struct {
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 27
+const Revision = 28
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -234,6 +249,18 @@ type Health struct {
 	Version  string    `json:"version"`
 	Revision int       `json:"api_revision"`
 	Time     time.Time `json:"time"`
+	// Limits are the bounds a monitor form needs to know before the
+	// server refuses: the shortest intervals.
+	Limits HealthLimits `json:"limits"`
+}
+
+// HealthLimits are the limits the UI tells its users about beforehand.
+type HealthLimits struct {
+	// MinCheckIntervalSeconds is the shortest interval of any monitor;
+	// MinCheckIntervalExternalSeconds that of one with a target outside the
+	// cluster, 0 when there is no separate rule.
+	MinCheckIntervalSeconds         int `json:"min_check_interval_seconds"`
+	MinCheckIntervalExternalSeconds int `json:"min_check_interval_external_seconds"`
 }
 
 type handler struct {
@@ -244,6 +271,8 @@ type handler struct {
 	passwordChecks *slots
 	directoryBinds *slots
 	failedLogins   *auditCap
+	// creations bounds the monitors one account creates in a minute.
+	creations *createLimiter
 }
 
 // NewHandler returns the root HTTP handler of the server.
@@ -253,6 +282,7 @@ func NewHandler(opts Options) http.Handler {
 		passwordChecks: newSlots(passwordCheckSlots(opts.LoginConcurrency, runtime.GOMAXPROCS(0), opts.LDAP != nil), opts.LoginQueueWait),
 		directoryBinds: newSlots(directoryConcurrency, opts.LoginQueueWait),
 		failedLogins:   newAuditCap(opts.LoginAuditPerMinute, opts.Logger),
+		creations:      newCreateLimiter(opts.MonitorCreatePerMinute),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)
@@ -353,11 +383,16 @@ func NewHandler(opts Options) http.Handler {
 }
 
 func (h *handler) health(w http.ResponseWriter, _ *http.Request) {
+	limits := HealthLimits{MinCheckIntervalSeconds: int(h.opts.MinCheckInterval / time.Second)}
+	if h.opts.MinCheckIntervalExternal > h.opts.MinCheckInterval {
+		limits.MinCheckIntervalExternalSeconds = int(h.opts.MinCheckIntervalExternal / time.Second)
+	}
 	writeJSON(w, http.StatusOK, Health{
 		Status:   "ok",
 		Version:  h.opts.Version,
 		Revision: Revision,
 		Time:     time.Now().UTC(),
+		Limits:   limits,
 	})
 }
 

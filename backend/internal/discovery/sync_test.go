@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -464,5 +465,269 @@ func TestSyncLeavesADeletedMonitorDeleted(t *testing.T) {
 	}
 	if _, ok := names(t, db)["shop/service/api:80"]; !ok {
 		t.Fatal("annotating again did not create the monitor")
+	}
+}
+
+func ingressCandidate(name, host, path string, a map[string]string) k8s.Candidate {
+	return k8s.Candidate{
+		Kind: k8s.KindIngress, Namespace: "shop", Name: name, Annotations: a,
+		Type: store.MonitorHTTP, Target: "https://" + host + path, Reason: k8s.ReasonIngressRule,
+	}
+}
+
+func skipped(st Status) map[string]string {
+	out := make(map[string]string)
+	for _, s := range st.Skipped {
+		out[s.Source] = s.Reason
+	}
+	return out
+}
+
+// A managed monitor of an external host made before the external minimum,
+// at an interval now under it, is kept as it is, history and all, like
+// the API keeps such a monitor: the rule binds new monitors. The run says
+// so in the skipped list; a new candidate under the minimum is still
+// refused, and the kept monitor goes when its annotation does.
+func TestSyncKeepsAnExistingFastExternalMonitor(t *testing.T) {
+	ctx := context.Background()
+	cluster := &fakeCluster{candidates: []k8s.Candidate{
+		ingressCandidate("fast", "victim.example", "/", monitored(map[string]string{AnnotationInterval: "10s", AnnotationTimeout: "2s"})),
+	}}
+	s, db := newSyncer(t, cluster)
+	// Before the upgrade: no external minimum; the monitor is made at 10s.
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := names(t, db)["shop/ingress/fast@victim.example/"]
+	if before.ID == 0 || before.Interval != 10*time.Second {
+		t.Fatalf("before the rule: %+v", before)
+	}
+	if err := db.InsertCheckResults(ctx, []store.CheckResult{{MonitorID: before.ID, Up: true, CheckedAt: time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The upgrade: the external minimum is on, and another fast Ingress
+	// is annotated.
+	s.opts.MinIntervalExternal = 30 * time.Second
+	cluster.candidates = append(cluster.candidates,
+		ingressCandidate("new", "victim.example", "/new", monitored(map[string]string{AnnotationInterval: "10s", AnnotationTimeout: "2s"})))
+	for run := 1; run <= 2; run++ {
+		if err := s.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		st := s.Status()
+		after, ok := names(t, db)["shop/ingress/fast@victim.example/"]
+		if !ok || after.ID != before.ID || after.Interval != 10*time.Second || !after.Managed {
+			t.Fatalf("run %d: the monitor made before the rule = %+v, %v; want kept as it was (id %d, 10s, managed)", run, after, ok, before.ID)
+		}
+		if st.Removed != 0 || st.Created != 0 || st.Updated != 0 || st.Managed != 1 {
+			t.Errorf("run %d: %+v; want nothing removed, one managed", run, st)
+		}
+		rule := "kubeat.io/interval: must be at least 30s for a target outside the cluster (UPTIME_MIN_CHECK_INTERVAL_EXTERNAL)"
+		want := map[string]string{
+			"ingress/fast@victim.example/":   rule + "; the monitor made before the rule is kept at 10s",
+			"ingress/new@victim.example/new": rule,
+		}
+		if got := skipped(st); fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("run %d skipped:\n got  %v\n want %v", run, got, want)
+		}
+		if _, made := names(t, db)["shop/ingress/new@victim.example/new"]; made {
+			t.Errorf("run %d: the new fast candidate was made", run)
+		}
+	}
+	results, err := db.ListCheckResults(ctx, before.ID, 10)
+	if err != nil || len(results) != 1 {
+		t.Errorf("the kept monitor's history: %d results, err = %v; want the one", len(results), err)
+	}
+
+	// The annotation taken off: the kept monitor goes like any other.
+	cluster.candidates[0].Annotations = nil
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, still := names(t, db)["shop/ingress/fast@victim.example/"]; still || s.Status().Removed != 1 {
+		t.Errorf("after the annotation went: still there = %v, status %+v", still, s.Status())
+	}
+}
+
+// The discovery default interval is for in-cluster targets and may be
+// under the external minimum: an external Ingress without an interval of
+// its own is then skipped with the rule's sentence, the one it already
+// has is kept, and in-cluster candidates are untouched.
+func TestSyncHoldsTheDefaultIntervalToTheExternalMinimum(t *testing.T) {
+	ctx := context.Background()
+	cluster := &fakeCluster{candidates: []k8s.Candidate{
+		ingressCandidate("web", "shop.example.com", "/", monitored(nil)),
+		serviceCandidate("api", 8080, "http", monitored(nil)),
+	}}
+	s, db := newSyncer(t, cluster)
+	s.opts.DefaultInterval = 15 * time.Second
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(t, db); len(got) != 2 {
+		t.Fatalf("before the rule: %v", got)
+	}
+
+	s.opts.MinIntervalExternal = 30 * time.Second
+	cluster.candidates = append(cluster.candidates,
+		ingressCandidate("docs", "docs.example.com", "/", monitored(nil)),
+		serviceCandidate("cache", 6379, "", monitored(nil)))
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st := s.Status()
+	got := names(t, db)
+	if web, ok := got["shop/ingress/web@shop.example.com/"]; !ok || web.Interval != 15*time.Second {
+		t.Errorf("the Ingress monitor at the default interval: %+v, %v; want kept at 15s", web, ok)
+	}
+	if _, ok := got["shop/ingress/docs@docs.example.com/"]; ok {
+		t.Error("a new external Ingress at the default interval was made")
+	}
+	if _, ok := got["shop/service/cache:6379"]; !ok {
+		t.Error("a new in-cluster service at the default interval was not made")
+	}
+	want := map[string]string{
+		"ingress/web@shop.example.com/":  "kubeat.io/interval: must be at least 30s for a target outside the cluster (UPTIME_MIN_CHECK_INTERVAL_EXTERNAL); the monitor made before the rule is kept at 15s",
+		"ingress/docs@docs.example.com/": "kubeat.io/interval: must be at least 30s for a target outside the cluster (UPTIME_MIN_CHECK_INTERVAL_EXTERNAL)",
+	}
+	if got := skipped(st); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("skipped:\n got  %v\n want %v", got, want)
+	}
+	if st.Removed != 0 || st.Created != 1 || st.Managed != 3 {
+		t.Errorf("status: %+v; want nothing removed, one created, three managed", st)
+	}
+}
+
+// The syncer is held to the limits on load like the API, in the API's
+// words: an external Ingress host may not be checked faster than the
+// external minimum; the quotas and the cap per host turn candidates away,
+// the same ones on every run, since the candidates are taken in order; a
+// candidate turned away is in the status as skipped. The account's
+// creations a minute do not apply: the syncer is not an account.
+func TestSyncIsHeldToTheLoadLimits(t *testing.T) {
+	ctx := context.Background()
+	cluster := &fakeCluster{candidates: []k8s.Candidate{
+		ingressCandidate("fast", "victim.example", "/", monitored(map[string]string{AnnotationInterval: "5s", AnnotationTimeout: "2s"})),
+		ingressCandidate("web", "victim.example", "/a", monitored(nil)),
+		ingressCandidate("web", "victim.example", "/b", monitored(nil)),
+		serviceCandidate("api", 8080, "http", monitored(nil)),
+		serviceCandidate("db", 5432, "", monitored(nil)),
+		serviceCandidate("cache", 6379, "", monitored(nil)),
+	}}
+	s, db := newSyncer(t, cluster)
+	s.opts.MinIntervalExternal, s.opts.MaxMonitorsPerHost, s.opts.MaxMonitorsPerNamespace = 30*time.Second, 1, 3
+
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st := s.Status()
+	want := map[string]string{
+		"ingress/fast@victim.example/": "kubeat.io/interval: must be at least 30s for a target outside the cluster (UPTIME_MIN_CHECK_INTERVAL_EXTERNAL)",
+		"ingress/web@victim.example/b": "at most 1 monitors may check the host victim.example (UPTIME_MAX_MONITORS_PER_HOST); it has 1 already",
+		"service/db:5432":              `the namespace "shop" is at the limit of 3 monitors (UPTIME_MAX_MONITORS_PER_NAMESPACE)`,
+	}
+	if got := skipped(st); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("skipped:\n got  %v\n want %v", got, want)
+	}
+	if st.Created != 3 || st.Managed != 3 {
+		t.Errorf("first run: created %d, managed %d; want 3 and 3", st.Created, st.Managed)
+	}
+	got := names(t, db)
+	for _, name := range []string{"shop/ingress/web@victim.example/a", "shop/service/api:8080", "shop/service/cache:6379"} {
+		if _, ok := got[name]; !ok {
+			t.Errorf("%s was not created; have %v", name, got)
+		}
+	}
+
+	// The same cluster again: the same candidates are turned away, nothing
+	// flaps. (The reason given may be another rule that now binds too: the
+	// namespace, full since the first run, is checked before the host.)
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st = s.Status()
+	got2 := skipped(st)
+	if len(got2) != len(want) {
+		t.Errorf("second run skipped %v, want the same candidates as the first: %v", got2, want)
+	}
+	for source := range want {
+		if _, ok := got2[source]; !ok {
+			t.Errorf("second run no longer skips %s: %v", source, got2)
+		}
+	}
+	if st.Created != 0 || st.Updated != 0 || st.Removed != 0 || st.Managed != 3 {
+		t.Errorf("second run: %+v", st)
+	}
+
+	// An object moving its monitor onto a full host is turned away too,
+	// and its monitor stays as it was.
+	cluster.candidates[3].Annotations[AnnotationPath] = "/healthz"
+	cluster.candidates[3].Type, cluster.candidates[3].Target = store.MonitorHTTP, "https://victim.example/api"
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st = s.Status()
+	if reason := skipped(st)["service/api:8080"]; !strings.Contains(reason, "UPTIME_MAX_MONITORS_PER_HOST") {
+		t.Errorf("a managed monitor moved onto a full host: skipped = %v", skipped(st))
+	}
+	if api := names(t, db)["shop/service/api:8080"]; api.Target != "api.shop.svc:8080" || api.Type != store.MonitorTCP {
+		t.Errorf("the monitor was changed although its new target was refused: %+v", api)
+	}
+	if st.Managed != 3 {
+		t.Errorf("managed = %d after a refused change, want 3", st.Managed)
+	}
+
+	// With the limits off, everything but the too-fast one is made.
+	s.opts.MaxMonitorsPerHost, s.opts.MaxMonitorsPerNamespace = 0, 0
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st = s.Status()
+	if len(st.Skipped) != 1 || st.Skipped[0].Source != "ingress/fast@victim.example/" {
+		t.Errorf("with the quotas off, skipped = %v", st.Skipped)
+	}
+	if st.Managed != 5 {
+		t.Errorf("managed = %d with the quotas off, want 5", st.Managed)
+	}
+}
+
+// An annotation edited into something invalid keeps the monitor made from
+// it earlier: the candidate is reported, nothing is removed, until the
+// annotation itself goes.
+func TestSyncKeepsAMonitorWhoseAnnotationBroke(t *testing.T) {
+	ctx := context.Background()
+	cluster := &fakeCluster{candidates: []k8s.Candidate{
+		ingressCandidate("web", "shop.example.com", "/", monitored(map[string]string{AnnotationInterval: "60s"})),
+	}}
+	s, db := newSyncer(t, cluster)
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := names(t, db)["shop/ingress/web@shop.example.com/"]
+	if before.ID == 0 {
+		t.Fatal("the monitor was not made")
+	}
+	// kubeat.io/path applies to a Service only: the candidate is refused.
+	cluster.candidates[0].Annotations[AnnotationPath] = "/healthz"
+	for run := 1; run <= 2; run++ {
+		if err := s.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		st := s.Status()
+		after, ok := names(t, db)["shop/ingress/web@shop.example.com/"]
+		if !ok || after.ID != before.ID || !after.Managed || st.Removed != 0 {
+			t.Fatalf("run %d: monitor %+v %v, status %+v; want it kept and nothing removed", run, after, ok, st)
+		}
+		if got := skipped(st); len(got) != 1 || !strings.HasSuffix(got["ingress/web@shop.example.com/"], "; the monitor made earlier is kept as it is") {
+			t.Errorf("run %d skipped: %v", run, got)
+		}
+	}
+	cluster.candidates[0].Annotations = nil
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, still := names(t, db)["shop/ingress/web@shop.example.com/"]; still || s.Status().Removed != 1 {
+		t.Errorf("after the annotation went: still there = %v, status %+v", still, s.Status())
 	}
 }

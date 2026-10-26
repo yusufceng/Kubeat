@@ -47,6 +47,9 @@ func TestEachPodChecksEveryPodBehindTheService(t *testing.T) {
 	if !got.Up || !strings.HasPrefix(got.Detail, "2 pods ok: ") || !strings.Contains(got.Detail, good1.Pod) {
 		t.Errorf("all good: %+v", got)
 	}
+	if len(got.Hops) != 2 {
+		t.Errorf("Hops = %v, want one per pod", got.Hops)
+	}
 
 	c = New(Options{Endpoints: fakeEndpoints{endpoints: []Endpoint{good1, bad, good2}}})
 	got = c.Check(context.Background(), m)

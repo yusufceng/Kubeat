@@ -38,6 +38,8 @@ export const monitorForm = defineMessages(
     "monitorForm.timing.hint": "Ne sıklıkta kontrol edileceği ve kaç hatadan sonra kesinti sayılacağı.",
     "monitorForm.timing.reportInterval": "Rapor aralığı",
     "monitorForm.timing.interval": "Kontrol aralığı",
+    "monitorForm.timing.interval.externalHint":
+      "Cluster dışındaki bir hedef en sık {seconds} sn arayla kontrol edilebilir (UPTIME_MIN_CHECK_INTERVAL_EXTERNAL).",
     "monitorForm.timing.gracePeriod": "Gecikme payı",
     "monitorForm.timing.timeout": "Zaman aşımı",
     "monitorForm.timing.threshold": "Alarm eşiği",
@@ -219,6 +221,8 @@ export const monitorForm = defineMessages(
     "monitorForm.timing.hint": "How often it is checked and after how many failures it counts as an outage.",
     "monitorForm.timing.reportInterval": "Report interval",
     "monitorForm.timing.interval": "Check interval",
+    "monitorForm.timing.interval.externalHint":
+      "A target outside the cluster is checked at most every {seconds} s (UPTIME_MIN_CHECK_INTERVAL_EXTERNAL).",
     "monitorForm.timing.gracePeriod": "Grace period",
     "monitorForm.timing.timeout": "Timeout",
     "monitorForm.timing.threshold": "Alert threshold",

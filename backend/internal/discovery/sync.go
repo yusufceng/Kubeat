@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/guardrails"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -71,7 +72,27 @@ type Options struct {
 	DefaultTimeout          time.Duration
 	DefaultFailureThreshold int
 	MinInterval             time.Duration
+	// The guardrails on the load monitors put on their targets, which the
+	// syncer's monitors are held to like the API's (guardrails.Limits):
+	// the shortest interval of a target outside the cluster, the quotas
+	// on monitors in all and per namespace, the cap on monitors per
+	// external host. An object whose monitor would break one is skipped,
+	// with the API's own sentence, and reported in the status. Zero turns
+	// each off. The account's creations a minute are not among them: the
+	// syncer is Kubeat acting on cluster objects, not an account.
+	MinIntervalExternal     time.Duration
+	MaxMonitors             int
+	MaxMonitorsPerNamespace int
+	MaxMonitorsPerHost      int
 	Logger                  *slog.Logger
+}
+
+// limits are the guardrails the syncer's monitors are held to.
+func (o Options) limits() guardrails.Limits {
+	return guardrails.Limits{
+		MinInterval: o.MinInterval, MinIntervalExternal: o.MinIntervalExternal,
+		MaxMonitors: o.MaxMonitors, MaxMonitorsPerNamespace: o.MaxMonitorsPerNamespace, MaxMonitorsPerHost: o.MaxMonitorsPerHost,
+	}
 }
 
 // Skip says why an annotated object was not monitored.
@@ -235,7 +256,7 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 		dismissed[key(d.Namespace, d.Source)] = true
 	}
 
-	wanted, annotated := s.wanted(candidates, st)
+	wanted, annotated := s.wanted(candidates, existing, st)
 	// A dismissal lasts as long as the annotation it overrules: once the
 	// object stops asking, annotating it again starts afresh.
 	for _, d := range dismissals {
@@ -252,6 +273,14 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 	}
 	sort.Strings(keys)
 
+	// The monitors there are, kept up to date as the run creates and
+	// replaces them, for the quotas and the cap per host (admit). The keys
+	// are sorted, so which candidates a full installation turns away is
+	// the same run after run.
+	limits := s.opts.limits()
+	skip := func(want store.Monitor, r *guardrails.Refusal) {
+		st.Skipped = append(st.Skipped, Skip{Namespace: want.Namespace, Source: want.Source, Reason: r.Message})
+	}
 	for _, k := range keys {
 		want := wanted[k]
 		current, found := existing[k]
@@ -261,8 +290,16 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 			st.Skipped = append(st.Skipped, Skip{Namespace: want.Namespace, Source: want.Source, Reason: "deleted in Kubeat; restore it to monitor it again", Dismissed: true})
 			continue
 		case !found:
-			if err := s.create(ctx, want); err != nil {
+			if r := limits.Admit(want, monitors); r != nil {
+				skip(want, r)
+				continue
+			}
+			created, ok, err := s.create(ctx, want)
+			if err != nil {
 				return err
+			}
+			if ok {
+				monitors = append(monitors, created)
 			}
 			counts.Created++
 		case !current.Managed:
@@ -270,15 +307,34 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 			continue
 		case current.Type != want.Type:
 			// The type never changes on a monitor: a probe that appeared
-			// turns a port check into an HTTP one by starting over.
+			// turns a port check into an HTTP one by starting over. The
+			// new one takes the old one's place, so the quotas do not
+			// count it; a new host does.
+			replacement := want
+			replacement.ID = current.ID
+			if r := limits.Admit(replacement, monitors); r != nil {
+				skip(want, r)
+				break // the monitor stays as it is, and managed
+			}
 			if err := s.remove(ctx, current, "check type changed to "+string(want.Type)); err != nil {
 				return err
 			}
-			if err := s.create(ctx, want); err != nil {
+			created, ok, err := s.create(ctx, want)
+			if err != nil {
 				return err
 			}
+			monitors = replace(monitors, current.ID, created, ok)
 			counts.Updated++
 		case differs(current, want):
+			// A target moved to another external host is one more monitor
+			// on it.
+			if moved := current; moved.Target != want.Target {
+				moved.Target = want.Target
+				if r := limits.Admit(moved, monitors); r != nil {
+					skip(want, r)
+					break // the monitor stays as it is, and managed
+				}
+			}
 			before, from := current.Destination(), current.Target
 			current.Target, current.Interval, current.Timeout, current.FailureThreshold = want.Target, want.Interval, want.Timeout, want.FailureThreshold
 			current.GRPC.Service, current.EachPod = want.GRPC.Service, want.EachPod
@@ -300,6 +356,7 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 				return fmt.Errorf("update monitor %d: %w", current.ID, err)
 			}
 			s.audit(ctx, "update", current.ID, summary)
+			monitors = replace(monitors, current.ID, current, true)
 			counts.Updated++
 		}
 		counts.Managed++
@@ -333,18 +390,38 @@ func differs(current, want store.Monitor) bool {
 		current.EachPod != want.EachPod
 }
 
-func (s *Syncer) create(ctx context.Context, want store.Monitor) error {
+// create makes the monitor and reports it, and whether it was made: a
+// name already taken by a monitor made by hand is left be.
+func (s *Syncer) create(ctx context.Context, want store.Monitor) (store.Monitor, bool, error) {
 	m, err := s.opts.Store.CreateMonitor(ctx, want)
 	if errors.Is(err, store.ErrConflict) {
-		// A monitor by that name made by hand; leave it be.
 		s.opts.Logger.Warn("discovery sync: name taken", "name", want.Name)
-		return nil
+		return store.Monitor{}, false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("create monitor %s: %w", want.Name, err)
+		return store.Monitor{}, false, fmt.Errorf("create monitor %s: %w", want.Name, err)
 	}
 	s.audit(ctx, "create", m.ID, m.Name)
-	return nil
+	return m, true, nil
+}
+
+// replace puts m in the place of the monitor with the id in monitors, or
+// takes that one out when there is no m (ok false).
+func replace(monitors []store.Monitor, id int64, m store.Monitor, ok bool) []store.Monitor {
+	for i := range monitors {
+		if monitors[i].ID != id {
+			continue
+		}
+		if ok {
+			monitors[i] = m
+			return monitors
+		}
+		return append(monitors[:i], monitors[i+1:]...)
+	}
+	if ok {
+		monitors = append(monitors, m)
+	}
+	return monitors
 }
 
 func (s *Syncer) remove(ctx context.Context, m store.Monitor, why string) error {
@@ -367,8 +444,12 @@ func (s *Syncer) audit(ctx context.Context, action string, id int64, summary str
 // wanted turns the annotated candidates into the monitors they ask for,
 // keyed by namespace and source. Candidates whose annotations cannot be
 // honoured are reported, not guessed at; annotated names every candidate
-// that asks, honoured or not.
-func (s *Syncer) wanted(candidates []k8s.Candidate, st *Status) (out map[string]store.Monitor, annotated map[string]bool) {
+// that asks, honoured or not. A candidate whose only fault is an interval
+// under the external minimum, and whose managed monitor exists (among
+// existing, by key), keeps that monitor as it is, like the API keeps a
+// monitor made before the rule: the rule binds new monitors, it does not
+// delete, history and all, the ones there are.
+func (s *Syncer) wanted(candidates []k8s.Candidate, existing map[string]store.Monitor, st *Status) (out map[string]store.Monitor, annotated map[string]bool) {
 	out = make(map[string]store.Monitor)
 	annotated = make(map[string]bool)
 	for _, c := range candidates {
@@ -380,13 +461,28 @@ func (s *Syncer) wanted(candidates []k8s.Candidate, st *Status) (out map[string]
 				continue
 			}
 		}
-		annotated[key(c.Namespace, c.Source())] = true
+		k := key(c.Namespace, c.Source())
+		annotated[k] = true
 		m, err := s.monitorFor(c)
 		if err != nil {
-			st.Skipped = append(st.Skipped, Skip{Namespace: c.Namespace, Source: c.Source(), Reason: err.Error()})
+			// A candidate that cannot be made is reported, and a monitor
+			// made from it earlier is kept as it is: an annotation edited
+			// into something invalid, or a rule that arrived later, must
+			// not take a monitor and its history away. Removing its
+			// annotation does.
+			reason := err.Error()
+			if current, found := existing[k]; found && current.Managed {
+				out[k] = current
+				if _, under := errors.AsType[underExternalMinimum](err); under {
+					reason += fmt.Sprintf("; the monitor made before the rule is kept at %s", current.Interval)
+				} else {
+					reason += "; the monitor made earlier is kept as it is"
+				}
+			}
+			st.Skipped = append(st.Skipped, Skip{Namespace: c.Namespace, Source: c.Source(), Reason: reason})
 			continue
 		}
-		out[key(m.Namespace, m.Source)] = m
+		out[k] = m
 	}
 	return out, annotated
 }
@@ -444,8 +540,23 @@ func (s *Syncer) monitorFor(c k8s.Candidate) (store.Monitor, error) {
 		}
 		m.EachPod = true
 	}
+	// A target outside the cluster (an Ingress or Route host, which is
+	// anything) has the longer shortest interval, the API's rule in the
+	// API's words; judged on the final target, path and all. The interval
+	// may be the default's (UPTIME_DISCOVERY_DEFAULT_INTERVAL), which is
+	// meant for in-cluster targets and may be shorter.
+	if minInterval, rule := s.opts.limits().MinIntervalFor(m.Type, m.Target); rule != "" && m.Interval < minInterval {
+		return m, underExternalMinimum(fmt.Sprintf("%s: must be at least %s%s", AnnotationInterval, minInterval, rule))
+	}
 	return m, nil
 }
+
+// underExternalMinimum is the refusal of a candidate whose interval, its
+// own or the default, is under the shortest one of a target outside the
+// cluster: the API's sentence.
+type underExternalMinimum string
+
+func (e underExternalMinimum) Error() string { return string(e) }
 
 // withPath is the HTTP check of a service port at the given path. A probe's
 // scheme is kept; a port without one is taken to speak plain HTTP.

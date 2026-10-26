@@ -97,6 +97,8 @@ func TestRedisCheck(t *testing.T) {
 	open := fakeRedis(t, "", "", "+PONG")
 	if got := check(open, store.DatabaseOptions{}); !got.Up || got.Detail != "PONG" {
 		t.Errorf("without a password: %+v", got)
+	} else {
+		reachedLoopback(t, "without a password", "127.0.0.1", got)
 	}
 
 	shared := fakeRedis(t, "", "s3cret", "+PONG")
@@ -147,6 +149,42 @@ func TestDatabaseChecksOfAClosedPort(t *testing.T) {
 		if got.Up || got.Error == "" || strings.Contains(got.Error, "s3cret") {
 			t.Errorf("%s: %+v", typ, got)
 		}
+		// Nothing was reached: the one request to the host, nowhere known.
+		if len(got.Hops) != 1 || got.Hops[0] != (store.Hop{Host: "127.0.0.1"}) {
+			t.Errorf("%s: hops = %v, want one to the host without an address", typ, got.Hops)
+		}
+	}
+}
+
+// Every database check reports the connections it made, at the address
+// each reached, whether or not the server then spoke its protocol: here
+// one that accepts and hangs up, so that the check fails after connecting.
+func TestDatabaseChecksReportTheAddressReached(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	c := New(Options{})
+	for _, typ := range []store.MonitorType{store.MonitorPostgres, store.MonitorMySQL, store.MonitorRedis} {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		got := c.Check(ctx, store.Monitor{Type: typ, Target: ln.Addr().String(),
+			Database: store.DatabaseOptions{Username: "kubeat", Password: "s3cret", Database: "shop", Query: "SELECT 1"}})
+		cancel()
+		if got.Up {
+			t.Errorf("%s: up against a server that hangs up: %+v", typ, got)
+		}
+		reachedLoopback(t, string(typ), "127.0.0.1", got)
 	}
 }
 

@@ -43,7 +43,7 @@ func (c *Checker) checkWebSocket(ctx context.Context, m store.Monitor) outcome {
 	_, _ = rand.Read(key)
 	clientKey := base64.StdEncoding.EncodeToString(key)
 
-	rec := newRecorder()
+	rec := newRecorder(store.CanonicalHost(u.Hostname()))
 	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, rec.trace()), http.MethodGet, u.String(), nil)
 	if err != nil {
 		return failed(err)

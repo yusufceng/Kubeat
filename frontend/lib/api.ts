@@ -8,7 +8,7 @@ import { sessionToken } from "@/lib/session";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 27;
+export const REQUIRED_API_REVISION = 28;
 
 export type Health = {
   status: string;
@@ -16,6 +16,12 @@ export type Health = {
   /** Missing on backends older than the revision scheme itself. */
   api_revision?: number;
   time: string;
+  /** The shortest intervals a monitor may have; missing on older backends. */
+  limits?: {
+    min_check_interval_seconds: number;
+    /** For a target outside the cluster; 0 when there is no separate rule. */
+    min_check_interval_external_seconds: number;
+  };
 };
 
 export type CheckResult = {
@@ -425,6 +431,12 @@ export type Monitor = CheckOptions & {
   slow_above_ms: number;
   /** Set while the monitor is slow (status "degraded", or "down" while it also fails): since when. */
   slow_since: string | null;
+  /**
+   * Set while the monitor's due check waits because its target host is at
+   * its ceiling of checks a minute: since when. The check runs when a slot
+   * comes; nothing is recorded meanwhile.
+   */
+  throttled_since: string | null;
   last_result: CheckResult | null;
   open_incident: Incident | null;
   /** True while the target's certificate is close to its expiry. */
@@ -562,6 +574,7 @@ function withDefaults(m: Monitor): Monitor {
     maintenance_until: m.maintenance_until ?? null,
     slow_above_ms: m.slow_above_ms ?? 0,
     slow_since: m.slow_since ?? null,
+    throttled_since: m.throttled_since ?? null,
     history: m.history ?? [],
   };
 }

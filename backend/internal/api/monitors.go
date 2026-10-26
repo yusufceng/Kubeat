@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
+	"github.com/yusufceng/Kubeat/backend/internal/guardrails"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -84,6 +85,12 @@ type monitorResponse struct {
 	// MaintenanceUntil is set while a maintenance window covers the monitor;
 	// no incident is opened for it until then.
 	MaintenanceUntil *time.Time `json:"maintenance_until"`
+	// ThrottledSince is set while the monitor's due check waits because
+	// its target host, a host its last check landed on, or an address it
+	// reached is at its ceiling of checks a minute (UPTIME_TARGET_MAX_RATE,
+	// UPTIME_CLUSTER_TARGET_MAX_RATE, UPTIME_TARGET_ADDRESS_MAX_RATE): since
+	// when. The check runs when a slot comes; nothing is recorded meanwhile.
+	ThrottledSince *time.Time `json:"throttled_since"`
 
 	// Statistics over the last WindowSeconds. UptimePercent is null when no
 	// check ran in the window.
@@ -301,7 +308,7 @@ func (h *handler) listMonitors(w http.ResponseWriter, r *http.Request) {
 		if (byNamespace && st.Namespace != namespace) || (ids != nil && !ids[st.ID]) || !p.CanRead(st.Namespace) {
 			continue
 		}
-		resp = append(resp, toMonitorResponse(p, st, window))
+		resp = append(resp, h.monitorResponse(p, st, window))
 		selected = append(selected, st.ID)
 	}
 
@@ -343,7 +350,7 @@ func (h *handler) getMonitor(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toMonitorResponse(p, st, window))
+	writeJSON(w, http.StatusOK, h.monitorResponse(p, st, window))
 }
 
 type createMonitorRequest struct {
@@ -423,7 +430,43 @@ func cleanTags(tags []string) ([]string, error) {
 var hostName = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_.-]*[A-Za-z0-9_])?\.?$`)
 
 func validHost(host string) bool {
-	return net.ParseIP(host) != nil || (len(host) <= 253 && hostName.MatchString(host))
+	return net.ParseIP(host) != nil || (len(host) <= 253 && hostName.MatchString(host) && !numericHost(host))
+}
+
+// writtenAsAddress refuses a host that is a number in disguise
+// (numericHost): an address is written as one.
+func writtenAsAddress(host string) error {
+	if net.ParseIP(host) == nil && numericHost(host) {
+		return errors.New("the target's host is a number, not a host name: write an IP address as one (203.0.113.1, [2001:db8::1])")
+	}
+	return nil
+}
+
+// numericHost reports whether host, which is not an IP address as Go reads
+// one, could still be read as one by a resolver that takes inet_aton's
+// forms: a number ("2130706433"), hex ("0x7f000001"), or a dotted form of
+// fewer than four parts ("127.1"), every label digits or 0x-hex. The
+// pure-Go resolver refuses such a host and glibc's connects to the address
+// it means; a monitor must not depend on which, and a target that is an
+// address is written as one.
+func numericHost(host string) bool {
+	for _, label := range strings.Split(strings.TrimSuffix(host, "."), ".") {
+		digits := label
+		if len(label) > 1 && (label[0] == '0') && (label[1] == 'x' || label[1] == 'X') {
+			digits = label[2:]
+			if digits == "" {
+				return true
+			}
+			if strings.Trim(digits, "0123456789abcdefABCDEF") != "" {
+				return false
+			}
+			continue
+		}
+		if digits == "" || strings.Trim(digits, "0123456789") != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func validPort(port string) bool {
@@ -475,13 +518,13 @@ func validateTarget(typ store.MonitorType, target string) error {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return errors.New("target must be an http:// or https:// URL")
 		}
-		return asciiHost(u)
+		return errors.Join(asciiHost(u), writtenAsAddress(u.Hostname()))
 	case store.MonitorWebSocket:
 		u, err := url.Parse(target)
 		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
 			return errors.New("target must be a ws:// or wss:// URL")
 		}
-		return asciiHost(u)
+		return errors.Join(asciiHost(u), writtenAsAddress(u.Hostname()))
 	case store.MonitorTCP, store.MonitorGRPC, store.MonitorPostgres, store.MonitorMySQL, store.MonitorRedis:
 		host, port, err := net.SplitHostPort(target)
 		if err != nil || host == "" {
@@ -489,6 +532,9 @@ func validateTarget(typ store.MonitorType, target string) error {
 		}
 		if !validPort(port) {
 			return errors.New("target port must be between 1 and 65535")
+		}
+		if err := writtenAsAddress(host); err != nil {
+			return err
 		}
 	case store.MonitorPing, store.MonitorDNS:
 		if !validHost(target) {
@@ -517,7 +563,7 @@ func validateTarget(typ store.MonitorType, target string) error {
 }
 
 // validate normalizes the request and reports the first problem found.
-func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThreshold int) error {
+func (req *createMonitorRequest) validate(limits guardrails.Limits, defaultThreshold int) error {
 	if req.FailureThreshold == 0 {
 		req.FailureThreshold = defaultThreshold
 	}
@@ -544,9 +590,12 @@ func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThre
 	if err := validateTarget(store.MonitorType(req.Type), req.Target); err != nil {
 		return err
 	}
+	// An external target gets the longer minimum, and is told which rule
+	// it is; the general one needs no naming.
+	minInterval, rule := limits.MinIntervalFor(store.MonitorType(req.Type), req.Target)
 	minSeconds := int(minInterval / time.Second)
 	if req.IntervalSeconds < minSeconds {
-		return fmt.Errorf("interval_seconds must be at least %d", minSeconds)
+		return fmt.Errorf("interval_seconds must be at least %d%s", minSeconds, rule)
 	}
 	if req.TimeoutSeconds < 1 {
 		return errors.New("timeout_seconds must be at least 1")
@@ -559,7 +608,7 @@ func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThre
 	case store.MonitorType(req.Type) == store.MonitorPush:
 		return errors.New("retry_interval_seconds does not apply to push monitors: nothing is checked that could be retried")
 	case req.RetryIntervalSeconds < minSeconds:
-		return fmt.Errorf("retry_interval_seconds must be 0 or at least %d", minSeconds)
+		return fmt.Errorf("retry_interval_seconds must be 0 or at least %d%s", minSeconds, rule)
 	case req.RetryIntervalSeconds > req.IntervalSeconds:
 		return errors.New("retry_interval_seconds must not exceed interval_seconds")
 	}
@@ -570,6 +619,26 @@ func (req *createMonitorRequest) validate(minInterval time.Duration, defaultThre
 		return errors.New("slow_above_ms must be below the timeout: a check that takes longer than timeout_seconds fails")
 	}
 	return nil
+}
+
+// requestOf is the request that describes the monitor as it is: what a
+// change is applied on top of, and what a copy is validated as.
+func requestOf(m store.Monitor) createMonitorRequest {
+	return createMonitorRequest{
+		Name:                 m.Name,
+		Description:          m.Description,
+		Type:                 string(m.Type),
+		Target:               m.Target,
+		IntervalSeconds:      int(m.Interval / time.Second),
+		TimeoutSeconds:       int(m.Timeout / time.Second),
+		RetryIntervalSeconds: int(m.RetryInterval / time.Second),
+		FailureThreshold:     m.FailureThreshold,
+		SlowAboveMS:          int(m.SlowAbove / time.Millisecond),
+		Inverted:             m.Inverted,
+		EachPod:              m.EachPod,
+		Namespace:            m.Namespace,
+		Tags:                 m.Tags,
+	}
 }
 
 // monitor returns the monitor a validated request describes, on top of
@@ -611,12 +680,30 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 // storeMonitor creates m and answers with it, or with why it could not be
-// created.
+// created: the quotas and the cap on monitors per host (admit), then the
+// account's creations a minute, are checked here, so that a copy is held
+// to them like a new monitor.
 func (h *handler) storeMonitor(w http.ResponseWriter, r *http.Request, m store.Monitor) {
+	existing, err := h.opts.Store.ListMonitors(r.Context())
+	if err != nil {
+		h.internalError(w, r, err)
+		return
+	}
+	if status, msg := h.admit(m, existing); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
+	release, ok := h.allowCreation(w, r)
+	if !ok {
+		return
+	}
 	if m.Type == store.MonitorPush {
 		m.PushToken = newPushToken()
 	}
 	created, err := h.opts.Store.CreateMonitor(r.Context(), m)
+	if err != nil {
+		release() // not a creation: it does not count against the account's minute
+	}
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "a monitor with this name already exists")
 		return
@@ -626,7 +713,7 @@ func (h *handler) storeMonitor(w http.ResponseWriter, r *http.Request, m store.M
 		return
 	}
 	h.audit(r, "create", "monitor", created.ID, created.Name)
-	writeJSON(w, http.StatusCreated, toMonitorResponse(principal(r), store.MonitorStatus{Monitor: created}, h.opts.StatsWindow))
+	writeJSON(w, http.StatusCreated, h.monitorResponse(principal(r), store.MonitorStatus{Monitor: created}, h.opts.StatsWindow))
 }
 
 func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
@@ -634,7 +721,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	if err := req.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
+	if err := req.validate(h.limits(), h.opts.DefaultFailureThreshold); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -704,6 +791,14 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 	// The copy stays in the namespace, but it is not the discovered object:
 	// that can be monitored only once.
 	m.ID, m.Name, m.Source, m.Enabled = 0, req.Name, "", true
+	// A copy is a new monitor, held to the rules of one: a monitor made
+	// before the external minimum, or by the syncer, is no template for
+	// more at its interval.
+	copy := requestOf(m)
+	if err := copy.validate(h.limits(), h.opts.DefaultFailureThreshold); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	h.storeMonitor(w, r, m)
 }
 
@@ -751,7 +846,7 @@ func (h *handler) renewPushToken(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toMonitorResponse(p, st, h.opts.StatsWindow))
+	writeJSON(w, http.StatusOK, h.monitorResponse(p, st, h.opts.StatsWindow))
 }
 
 // updateMonitorRequest carries only the fields to change.
@@ -809,21 +904,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 
 	// Apply the changes on top of the current values and validate the result
 	// with the same rules as a new monitor.
-	merged := createMonitorRequest{
-		Name:                 current.Name,
-		Description:          current.Description,
-		Type:                 string(current.Type),
-		Target:               current.Target,
-		IntervalSeconds:      int(current.Interval / time.Second),
-		TimeoutSeconds:       int(current.Timeout / time.Second),
-		RetryIntervalSeconds: int(current.RetryInterval / time.Second),
-		FailureThreshold:     current.FailureThreshold,
-		SlowAboveMS:          int(current.SlowAbove / time.Millisecond),
-		Inverted:             current.Inverted,
-		EachPod:              current.EachPod,
-		Namespace:            current.Namespace,
-		Tags:                 current.Tags,
-	}
+	merged := requestOf(current)
 	if req.Namespace != nil && strings.TrimSpace(*req.Namespace) != current.Namespace {
 		if current.Source != "" {
 			writeError(w, http.StatusBadRequest, "a discovered monitor stays in the namespace of its object")
@@ -872,7 +953,24 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	if req.SlowAboveMS != nil {
 		merged.SlowAboveMS = *req.SlowAboveMS
 	}
-	if err := merged.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
+	// A monitor made before the external minimum keeps its interval as
+	// long as the change leaves its target and interval as they are:
+	// renaming, tagging, pausing and resuming it must work, and saving its
+	// form unchanged. Touch either and the rule holds, as it does for a
+	// new monitor; a retry interval changed on its own is held to the rule
+	// by its own name, since the interval it is judged beside is kept.
+	limits := h.limits()
+	if merged.Target == current.Target && merged.IntervalSeconds == int(current.Interval/time.Second) {
+		if merged.RetryIntervalSeconds != int(current.RetryInterval/time.Second) {
+			minInterval, rule := limits.MinIntervalFor(store.MonitorType(merged.Type), merged.Target)
+			if minSeconds := int(minInterval / time.Second); merged.RetryIntervalSeconds != 0 && merged.RetryIntervalSeconds < minSeconds {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("retry_interval_seconds must be 0 or at least %d%s", minSeconds, rule))
+				return
+			}
+		}
+		limits.MinIntervalExternal = 0
+	}
+	if err := merged.validate(limits, h.opts.DefaultFailureThreshold); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -903,6 +1001,19 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	if err := validateEachPod(change); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// A monitor moved to another external host is one more monitor on it;
+	// one moved to another namespace is one more in that namespace.
+	if change.Host() != current.Host() || change.Namespace != current.Namespace {
+		existing, err := h.opts.Store.ListMonitors(r.Context())
+		if err != nil {
+			h.internalError(w, r, err)
+			return
+		}
+		if status, msg := h.admit(change, existing); status != 0 {
+			writeError(w, status, msg)
+			return
+		}
 	}
 	if req.Enabled != nil {
 		change.Enabled = *req.Enabled
@@ -936,7 +1047,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toMonitorResponse(p, st, h.opts.StatsWindow))
+	writeJSON(w, http.StatusOK, h.monitorResponse(p, st, h.opts.StatsWindow))
 }
 
 // closeIncident resolves the monitor's open incidents, if any, without

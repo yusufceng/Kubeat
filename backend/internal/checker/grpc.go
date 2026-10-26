@@ -17,8 +17,14 @@ import (
 )
 
 // checkGRPC asks the target's health service (grpc.health.v1.Health, the
-// protocol Kubernetes gRPC probes use) whether it is serving.
+// protocol Kubernetes gRPC probes use) whether it is serving. The outcome
+// reports the connections made, at the address each reached.
 func (c *Checker) checkGRPC(ctx context.Context, m store.Monitor) outcome {
+	d := c.dials(m)
+	return d.made(c.grpcHealth(ctx, m, d))
+}
+
+func (c *Checker) grpcHealth(ctx context.Context, m store.Monitor, d *dials) outcome {
 	transport := insecure.NewCredentials()
 	if m.GRPC.TLS {
 		host, _, err := net.SplitHostPort(m.Target)
@@ -30,8 +36,7 @@ func (c *Checker) checkGRPC(ctx context.Context, m store.Monitor) outcome {
 
 	// passthrough: the address is dialled as given, without gRPC's own name
 	// resolution and its extra lookups.
-	var refusal policyRefusal
-	dial := refusal.dial(c)
+	dial := d.dial(c)
 	conn, err := grpc.NewClient("passthrough:///"+m.Target,
 		grpc.WithTransportCredentials(transport),
 		grpc.WithUserAgent(c.opts.UserAgent),
@@ -54,7 +59,7 @@ func (c *Checker) checkGRPC(ctx context.Context, m store.Monitor) outcome {
 		case codes.DeadlineExceeded:
 			return failed(context.DeadlineExceeded)
 		}
-		out := failed(refusal.wrap(fmt.Errorf("%s: %s", st.Code(), st.Message())))
+		out := failed(d.wrap(fmt.Errorf("%s: %s", st.Code(), st.Message())))
 		// A status carries the transport error behind it, or what a proxy in
 		// front of the server said, as text only.
 		if e := explain.Message(st.Message()); e != nil {

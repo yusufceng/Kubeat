@@ -10,6 +10,7 @@ import { useT } from "@/lib/i18n/client";
 import type { T } from "@/lib/i18n/translate";
 import { typeWords } from "@/lib/monitor-page";
 import { isDatabaseType, monitorTypes } from "@/lib/monitor-types";
+import { externalTarget } from "@/lib/target-class";
 
 const httpMethods: HttpMethod[] = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 // The labels are message keys; shown with t().
@@ -242,14 +243,18 @@ export function MonitorForm({
   monitor,
   defaults,
   groups,
+  externalMinInterval = 0,
 }: {
   monitor?: Monitor;
   defaults: MonitorDefaults;
   /** The groups that exist, offered as suggestions. */
   groups: string[];
+  /** The shortest interval, in seconds, of a target outside the cluster; 0 when there is no separate rule. */
+  externalMinInterval?: number;
 }) {
   const t = useT();
   const [type, setType] = useState<MonitorType>(monitor?.type ?? "http");
+  const [target, setTarget] = useState(monitor?.target ?? "");
   const [auth, setAuth] = useState(monitor?.http?.auth ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -273,6 +278,13 @@ export function MonitorForm({
   const fromService = (monitor?.source ?? "").startsWith("service/") && (type === "http" || type === "tcp");
   const optional = t("common.optional");
   const seconds = t("monitorForm.unit.seconds");
+  // Said beforehand, as the server would refuse it: an external target has
+  // a longer shortest interval. The same rule as the server's, on the name
+  // as written.
+  const externalHint =
+    externalMinInterval > 0 && externalTarget(type, target)
+      ? t("monitorForm.timing.interval.externalHint", { seconds: externalMinInterval })
+      : undefined;
 
   // Submitted by hand instead of through the form's action: React resets a
   // form after its action, which would throw away a rejected form's values.
@@ -359,7 +371,8 @@ export function MonitorForm({
               name="target"
               required
               readOnly={managed}
-              defaultValue={monitor?.target}
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
               placeholder={t(info.target.placeholder)}
               className="field font-mono"
             />
@@ -411,7 +424,7 @@ export function MonitorForm({
         title={t("monitorForm.timing.title")}
         hint={managed ? t("monitorForm.timing.managedHint") : push ? t("monitorForm.timing.pushHint") : t("monitorForm.timing.hint")}
       >
-        <Field label={push ? t("monitorForm.timing.reportInterval") : t("monitorForm.timing.interval")} span={push ? 2 : 3}>
+        <Field label={push ? t("monitorForm.timing.reportInterval") : t("monitorForm.timing.interval")} span={push ? 2 : 3} hint={externalHint}>
           <Seconds
             name="interval_seconds"
             min={1}

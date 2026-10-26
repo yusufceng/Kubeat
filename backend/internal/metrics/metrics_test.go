@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -27,6 +28,34 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.Notification("slack", "down", true)
 	m.NotificationDropped()
 	m.Heartbeat(HeartbeatSent, time.Now())
+	m.TargetThrottled("example.com")
+}
+
+// The host label is bounded: past MaxThrottledHosts hosts, new ones are
+// counted together as "other", while the hosts already labelled keep
+// their label.
+func TestTargetThrottledBoundsHosts(t *testing.T) {
+	m := New("test")
+	for i := 0; i < MaxThrottledHosts; i++ {
+		m.TargetThrottled(fmt.Sprintf("host-%d.example", i))
+	}
+	m.TargetThrottled("host-0.example")
+	m.TargetThrottled("late.example")
+	m.TargetThrottled("later.example")
+
+	got, err := m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_target_throttled_total{host=host-0.example}"] != 2 {
+		t.Errorf("host-0 = %v, want 2", got["kubeat_target_throttled_total{host=host-0.example}"])
+	}
+	if got["kubeat_target_throttled_total{host=other}"] != 2 {
+		t.Errorf("other = %v, want 2", got["kubeat_target_throttled_total{host=other}"])
+	}
+	if _, ok := got["kubeat_target_throttled_total{host=late.example}"]; ok {
+		t.Error("a host past the bound got a label of its own")
+	}
 }
 
 func TestEventCounters(t *testing.T) {

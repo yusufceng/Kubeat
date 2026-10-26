@@ -45,6 +45,18 @@ type Options struct {
 	// OnResults, if set, is called with each group of results after they
 	// have been stored. Calls are sequential.
 	OnResults func(ctx context.Context, results []store.CheckResult)
+	// TargetMaxRate and ClusterTargetMaxRate are how many checks a minute
+	// one host name gets from all monitors together, for names outside and
+	// inside the cluster (netguard.InCluster); AddressMaxRate how many one
+	// IP address gets, whatever its class, from the checks of every name
+	// that reaches it. A due check past a ceiling waits for a later tick,
+	// and is not a result. Zero means no ceiling. Every request a check
+	// makes counts: a redirect followed, charged to the host it went to,
+	// each pod of a check of every pod; and a check is held to every host
+	// and address its last check reached, before it is dispatched.
+	TargetMaxRate        int
+	ClusterTargetMaxRate int
+	AddressMaxRate       int
 	// Metrics may be nil.
 	Metrics *metrics.Metrics
 	Logger  *slog.Logger
@@ -62,6 +74,20 @@ type Scheduler struct {
 	// when a failing monitor is checked again ahead of its interval.
 	failures map[int64]int
 	retryAt  map[int64]time.Time
+	// throttled is since when each monitor's due check has been waiting
+	// for its host's ceiling (see hostLimiter); absent while it is not.
+	throttled map[int64]time.Time
+
+	// The ceilings on checks a minute per host name, by its class, and
+	// per address a check reaches, whatever its class (see hostLimiter and
+	// admit): a name is free to make up, an address is not, so both are
+	// held.
+	names classLimiters
+	addrs *hostLimiter
+	// peers is what each monitor's last check reached, charged before its
+	// next check is dispatched; charged is what a check in flight took its
+	// tokens from.
+	peers, charged map[int64]charge
 
 	lastTick atomic.Int64 // Unix nanoseconds of the last completed tick
 }
@@ -82,6 +108,11 @@ func New(st Store, checker Checker, opts Options) *Scheduler {
 	return &Scheduler{
 		store: st, checker: checker, opts: opts,
 		inFlight: make(map[int64]bool), failures: make(map[int64]int), retryAt: make(map[int64]time.Time),
+		throttled: make(map[int64]time.Time),
+		names:     newClassLimiters(opts.TargetMaxRate, opts.ClusterTargetMaxRate),
+		addrs:     newHostLimiter(opts.AddressMaxRate),
+		peers:     make(map[int64]charge),
+		charged:   make(map[int64]charge),
 	}
 }
 
@@ -147,6 +178,7 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, sched
 	}
 
 	seen := make(map[int64]bool, len(monitors))
+	hosts := make(map[string]bool)
 	var due []store.Monitor
 	dueAt := make(map[int64]time.Time)
 	for _, m := range monitors {
@@ -154,6 +186,9 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, sched
 			continue
 		}
 		seen[m.ID] = true
+		if host := m.Host(); host != "" {
+			hosts[host] = true
+		}
 
 		sc, ok := schedules[m.ID]
 		if !ok {
@@ -188,6 +223,17 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, sched
 dispatch:
 	for i, m := range due {
 		sc := schedules[m.ID]
+		// A host the check goes to, or an address it reaches, at its
+		// ceiling of checks a minute makes the check wait for a later
+		// tick, still due: no result says anything about a target that
+		// was not asked. The most overdue checks come first, so the
+		// longest wait ends first when a token comes.
+		taken, ok := s.admit(m, now)
+		if !ok {
+			s.throttle(m.ID, m.Host(), now)
+			continue
+		}
+		s.unthrottle(m.ID)
 		retry := s.start(m.ID)
 		select {
 		case jobs <- m:
@@ -199,10 +245,12 @@ dispatch:
 			// The workers were busy for the whole tick; the rest stay due
 			// and go first on the next one.
 			s.abandon(m.ID, retry)
+			s.release(m.ID, taken, now)
 			s.opts.Metrics.DispatchSkipped(len(due) - i)
 			break dispatch
 		case <-ctx.Done():
 			s.abandon(m.ID, retry)
+			s.release(m.ID, taken, now)
 			return
 		}
 	}
@@ -213,6 +261,9 @@ dispatch:
 			s.forget(id)
 		}
 	}
+	s.prune(seen)
+	s.names.keep(hosts, now)
+	s.addrs.keep(s.peerSet(), now)
 
 	s.lastTick.Store(now.UnixNano())
 	s.opts.Metrics.SchedulerTick(now)
@@ -297,6 +348,20 @@ func (s *Scheduler) forget(id int64) {
 	defer s.mu.Unlock()
 	delete(s.failures, id)
 	delete(s.retryAt, id)
+	delete(s.throttled, id)
+}
+
+// prune forgets what the last checks of monitors not among the enabled
+// ones reached: a check that finished after its monitor went would
+// otherwise leave it.
+func (s *Scheduler) prune(enabled map[int64]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.peers {
+		if !enabled[id] {
+			delete(s.peers, id)
+		}
+	}
 }
 
 func (s *Scheduler) work(ctx context.Context, jobs <-chan store.Monitor, results chan<- store.CheckResult) {
@@ -306,7 +371,12 @@ func (s *Scheduler) work(ctx context.Context, jobs <-chan store.Monitor, results
 		result := s.checker.Check(checkCtx, m)
 		s.opts.Metrics.CheckDone(string(m.Type), result.Up, result.Latency)
 		cancel()
-		s.finish(m, result.Up, time.Now())
+		now := time.Now()
+		s.finish(m, result.Up, now)
+		// The check took its tokens when it was dispatched; the requests
+		// it made beyond that (redirects, every pod) and the addresses it
+		// reached are owed now.
+		s.settle(m, result.Hops, now)
 
 		// A check interrupted by shutdown says nothing about the target.
 		if ctx.Err() != nil {

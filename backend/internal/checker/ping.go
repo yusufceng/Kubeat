@@ -14,6 +14,8 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
 // ICMP protocol numbers, as icmp.ParseMessage wants them.
@@ -27,13 +29,14 @@ const (
 const pingPayload = 56
 
 // checkPing sends one ICMP echo request and waits for its reply. The
-// outcome's latency is the round-trip time, without the name lookup.
+// outcome's latency is the round-trip time, without the name lookup; its
+// one hop is the address the request went to, which it resolved itself.
 //
 // It uses an unprivileged ICMP socket, which needs no capability but must be
 // allowed by the kernel (net.ipv4.ping_group_range on Linux); container
 // runtimes allow it by default.
-func (c *Checker) checkPing(ctx context.Context, host string) outcome {
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+func (c *Checker) checkPing(ctx context.Context, m store.Monitor) outcome {
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, m.Target)
 	if err != nil {
 		return failed(err)
 	}
@@ -50,7 +53,13 @@ func (c *Checker) checkPing(ctx context.Context, host string) outcome {
 	if err := c.opts.Guard.Check(addr); err != nil {
 		return failed(err)
 	}
+	out := c.echo(ctx, ip)
+	out.hops = []store.Hop{{Host: m.Host(), Addr: addr.Unmap().String()}}
+	return out
+}
 
+// echo sends the echo request to ip and waits for its reply.
+func (c *Checker) echo(ctx context.Context, ip net.IP) outcome {
 	network, listen, protocol := "udp4", "0.0.0.0", protocolICMPv4
 	var request icmp.Type = ipv4.ICMPTypeEcho
 	var reply icmp.Type = ipv4.ICMPTypeEchoReply

@@ -155,6 +155,38 @@ type Config struct {
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
 	MaxResults       int           // UPTIME_MAX_RESULTS
 
+	// The guardrails that keep monitors from putting load on other systems
+	// (README, "Hedef yükü"). A target is in the cluster when its host is a
+	// private address, a *.svc or *.cluster.local name or a name without a
+	// dot (netguard.InCluster); everything else is external. Push and
+	// workload monitors make no request and are held to none of them. In
+	// each, zero turns the limit off.
+	//
+	// MinCheckIntervalExternal is the shortest interval (and retry
+	// interval) of a monitor with an external target; at least
+	// MinCheckInterval. TargetMaxRate and ClusterTargetMaxRate are how many
+	// checks a minute one external, or in-cluster, host name gets from all
+	// monitors together, and TargetAddressMaxRate how many one IP address
+	// gets from the checks of every name that reaches it, whatever its
+	// class; a check due past either waits for the next tick.
+	// MaxMonitorsPerHost is how many monitors may check one external host.
+	// MaxMonitors and MaxMonitorsPerNamespace are quotas on the monitors
+	// that exist, bound only when a monitor is created. MonitorCreatePerMinute
+	// is how many monitors one account (the API token counts as one) may
+	// create in a minute.
+	MinCheckIntervalExternal time.Duration // UPTIME_MIN_CHECK_INTERVAL_EXTERNAL
+	TargetMaxRate            int           // UPTIME_TARGET_MAX_RATE
+	ClusterTargetMaxRate     int           // UPTIME_CLUSTER_TARGET_MAX_RATE
+	TargetAddressMaxRate     int           // UPTIME_TARGET_ADDRESS_MAX_RATE
+	MaxMonitorsPerHost       int           // UPTIME_MAX_MONITORS_PER_HOST
+	MaxMonitors              int           // UPTIME_MAX_MONITORS
+	MaxMonitorsPerNamespace  int           // UPTIME_MAX_MONITORS_PER_NAMESPACE
+	MonitorCreatePerMinute   int           // UPTIME_MONITOR_CREATE_PER_MINUTE
+	// UserAgent is what checks and notifications send as User-Agent; empty
+	// means DefaultUserAgent, which names the software and, with PublicURL,
+	// where its operator can be found.
+	UserAgent string // UPTIME_USER_AGENT
+
 	StatusPageDays           int           // UPTIME_STATUS_PAGE_DAYS
 	StatusPageIncidentWindow time.Duration // UPTIME_STATUS_PAGE_INCIDENT_WINDOW
 	// StatusPageUpdates is how many updates a status page lists;
@@ -246,6 +278,11 @@ type Config struct {
 	DiscoverySyncInterval    time.Duration // UPTIME_DISCOVERY_SYNC_INTERVAL
 	DiscoveryDefaultInterval time.Duration // UPTIME_DISCOVERY_DEFAULT_INTERVAL
 	DiscoveryDefaultTimeout  time.Duration // UPTIME_DISCOVERY_DEFAULT_TIMEOUT
+
+	// Warnings are what Load found worth saying about a configuration it
+	// accepted, for the log at start: settings that work together worse
+	// than they might, not wrongly.
+	Warnings []string
 }
 
 // Load reads the configuration from the environment, falling back to
@@ -294,6 +331,7 @@ func Load() (Config, error) {
 
 		TargetDenyCIDRs:  envString("UPTIME_TARGET_DENY_CIDRS", ""),
 		TargetAllowCIDRs: envString("UPTIME_TARGET_ALLOW_CIDRS", ""),
+		UserAgent:        strings.TrimSpace(envString("UPTIME_USER_AGENT", "")),
 
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
 		BackupDir:    envString("UPTIME_BACKUP_DIR", ""),
@@ -424,6 +462,30 @@ func Load() (Config, error) {
 		// Intervals are stored in whole seconds.
 		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL: must be at least 1s, got %s", cfg.MinCheckInterval)
 	}
+	if cfg.MinCheckIntervalExternal, err = envDurationOrZero("UPTIME_MIN_CHECK_INTERVAL_EXTERNAL", 30*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.MinCheckIntervalExternal != 0 && cfg.MinCheckIntervalExternal < cfg.MinCheckInterval {
+		return Config{}, fmt.Errorf("UPTIME_MIN_CHECK_INTERVAL_EXTERNAL: must be at least UPTIME_MIN_CHECK_INTERVAL (%s) or 0, got %s",
+			cfg.MinCheckInterval, cfg.MinCheckIntervalExternal)
+	}
+	for _, i := range []struct {
+		dst *int
+		key string
+		def int
+	}{
+		{&cfg.TargetMaxRate, "UPTIME_TARGET_MAX_RATE", 60},
+		{&cfg.ClusterTargetMaxRate, "UPTIME_CLUSTER_TARGET_MAX_RATE", 600},
+		{&cfg.TargetAddressMaxRate, "UPTIME_TARGET_ADDRESS_MAX_RATE", 600},
+		{&cfg.MaxMonitorsPerHost, "UPTIME_MAX_MONITORS_PER_HOST", 5},
+		{&cfg.MaxMonitors, "UPTIME_MAX_MONITORS", 1000},
+		{&cfg.MaxMonitorsPerNamespace, "UPTIME_MAX_MONITORS_PER_NAMESPACE", 200},
+		{&cfg.MonitorCreatePerMinute, "UPTIME_MONITOR_CREATE_PER_MINUTE", 30},
+	} {
+		if *i.dst, err = envIntOrZero(i.key, i.def); err != nil {
+			return Config{}, err
+		}
+	}
 	if cfg.IncidentTimelineLimit < 2 {
 		// One for how the incident began and one for how it ended.
 		return Config{}, fmt.Errorf("UPTIME_INCIDENT_TIMELINE_LIMIT: must be at least 2, got %d", cfg.IncidentTimelineLimit)
@@ -451,6 +513,14 @@ func Load() (Config, error) {
 	}
 	if cfg.DiscoveryDefaultInterval < cfg.MinCheckInterval {
 		return Config{}, fmt.Errorf("UPTIME_DISCOVERY_DEFAULT_INTERVAL: must be at least UPTIME_MIN_CHECK_INTERVAL (%s)", cfg.MinCheckInterval)
+	}
+	if cfg.DiscoveryDefaultInterval < cfg.MinCheckIntervalExternal {
+		// The default is meant for in-cluster targets; an Ingress or Route
+		// host without an interval annotation of its own gets it too, and
+		// is then skipped by the syncer, existing monitors kept.
+		cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("UPTIME_DISCOVERY_DEFAULT_INTERVAL (%s) is shorter than UPTIME_MIN_CHECK_INTERVAL_EXTERNAL (%s): "+
+			"an annotated Ingress or Route without a kubeat.io/interval of its own gets no monitor, and is reported as skipped; the monitors already there keep running",
+			cfg.DiscoveryDefaultInterval, cfg.MinCheckIntervalExternal))
 	}
 	if cfg.HTTPInsecureSkipVerify, err = envBool("UPTIME_HTTP_INSECURE_SKIP_VERIFY", false); err != nil {
 		return Config{}, err
@@ -655,6 +725,32 @@ func checkCallbackURL(raw string) error {
 		return fmt.Errorf("%q must be the UI's /auth/callback, such as https://kubeat.apps.example/auth/callback", raw)
 	}
 	return nil
+}
+
+// ProjectURL is where the software comes from; the User-Agent carries it
+// so that the operator of a checked site can tell what is calling.
+const ProjectURL = "https://github.com/yusufceng/Kubeat"
+
+// DefaultUserAgent is what checks and notifications send as User-Agent
+// when UPTIME_USER_AGENT is not set: "kubeat/<version>
+// (+https://github.com/yusufceng/Kubeat; <publicURL>)", the public URL
+// only when there is one. A site that sees too many requests can then
+// find both the software and the installation they come from.
+func DefaultUserAgent(version, publicURL string) string {
+	ua := "kubeat/" + version + " (+" + ProjectURL
+	if publicURL = strings.TrimSpace(publicURL); publicURL != "" {
+		ua += "; " + publicURL
+	}
+	return ua + ")"
+}
+
+// UserAgentFor is the User-Agent this configuration sends: UPTIME_USER_AGENT
+// when set, else DefaultUserAgent.
+func (c Config) UserAgentFor(version string) string {
+	if c.UserAgent != "" {
+		return c.UserAgent
+	}
+	return DefaultUserAgent(version, c.PublicURL)
 }
 
 // loopback reports whether host names this machine.

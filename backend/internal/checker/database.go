@@ -32,8 +32,15 @@ func (c *Checker) databaseTLS(m store.Monitor, host string) *tls.Config {
 	return c.tlsConfig(host, m.Database.SkipTLSVerify)
 }
 
-// checkPostgres logs in to a PostgreSQL server and runs the monitor's query.
+// checkPostgres logs in to a PostgreSQL server and runs the monitor's
+// query. The outcome reports the connections made, at the address each
+// reached, as do the other database checks.
 func (c *Checker) checkPostgres(ctx context.Context, m store.Monitor) outcome {
+	d := c.dials(m)
+	return d.made(c.postgresQuery(ctx, m, d))
+}
+
+func (c *Checker) postgresQuery(ctx context.Context, m store.Monitor, d *dials) outcome {
 	host, portText, err := net.SplitHostPort(m.Target)
 	if err != nil {
 		return failed(err)
@@ -55,7 +62,7 @@ func (c *Checker) checkPostgres(ctx context.Context, m store.Monitor) outcome {
 	cfg.TLSConfig = c.databaseTLS(m, host)
 	cfg.Fallbacks = nil
 	cfg.RuntimeParams = map[string]string{"application_name": "kubeat"}
-	cfg.DialFunc = c.dialer.DialContext
+	cfg.DialFunc = d.dial(c)
 	// The simple protocol runs the query as it is written, without preparing it.
 	cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
@@ -93,6 +100,11 @@ func postgresError(err error) error {
 
 // checkMySQL logs in to a MySQL or MariaDB server and runs the monitor's query.
 func (c *Checker) checkMySQL(ctx context.Context, m store.Monitor) outcome {
+	d := c.dials(m)
+	return d.made(c.mysqlQuery(ctx, m, d))
+}
+
+func (c *Checker) mysqlQuery(ctx context.Context, m store.Monitor, d *dials) outcome {
 	host, _, err := net.SplitHostPort(m.Target)
 	if err != nil {
 		return failed(err)
@@ -102,7 +114,7 @@ func (c *Checker) checkMySQL(ctx context.Context, m store.Monitor) outcome {
 	cfg.Net, cfg.Addr = "tcp", m.Target
 	// The checker's dialer, which the guard watches; the driver's own
 	// would connect anywhere.
-	cfg.DialFunc = c.dialer.DialContext
+	cfg.DialFunc = d.dial(c)
 	cfg.User, cfg.Passwd, cfg.DBName = o.Username, o.Password, o.Database
 	cfg.TLS = c.databaseTLS(m, host)
 	// The driver logs broken connections on its own; the check reports them.
@@ -139,11 +151,16 @@ func (discardLogger) Print(...any) {}
 // password, and expects PONG for a PING. The protocol is simple enough to
 // speak directly: a command is a line, and so is the answer to these.
 func (c *Checker) checkRedis(ctx context.Context, m store.Monitor) outcome {
+	d := c.dials(m)
+	return d.made(c.redisPing(ctx, m, d))
+}
+
+func (c *Checker) redisPing(ctx context.Context, m store.Monitor, d *dials) outcome {
 	host, _, err := net.SplitHostPort(m.Target)
 	if err != nil {
 		return failed(err)
 	}
-	conn, err := c.dialer.DialContext(ctx, "tcp", m.Target)
+	conn, err := d.dial(c)(ctx, "tcp", m.Target)
 	if err != nil {
 		return failed(err)
 	}

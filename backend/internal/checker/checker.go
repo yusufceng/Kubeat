@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -121,6 +122,11 @@ type outcome struct {
 	// inverted monitor of what answered; Check keeps it only for a failed
 	// result, explained by err where the engine did not explain it.
 	diag *store.Diagnostics
+	// hops are the requests the check made, where the engine counted
+	// them: one per redirect followed, per pod checked, with the address
+	// that answered where it knows it. Empty means the one request every
+	// check of a target makes, or none for a check that makes none.
+	hops []store.Hop
 }
 
 func failed(err error) outcome { return outcome{err: err} }
@@ -142,7 +148,7 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	case m.Type == store.MonitorTCP:
 		out = c.checkTCP(ctx, m)
 	case m.Type == store.MonitorPing:
-		out = c.checkPing(ctx, m.Target)
+		out = c.checkPing(ctx, m)
 	case m.Type == store.MonitorDNS:
 		out = c.checkDNS(ctx, m)
 	case m.Type == store.MonitorPush:
@@ -170,6 +176,13 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	result.StatusCode = out.statusCode
 	result.CertExpiresAt = out.certExpiry
 	result.Up = out.err == nil
+	if m.Outbound() {
+		// Every outbound check made at least one request, to its host.
+		result.Hops = out.hops
+		if len(result.Hops) == 0 {
+			result.Hops = []store.Hop{{Host: m.Host()}}
+		}
+	}
 	if out.err != nil {
 		result.Error = truncate(out.err.Error(), maxDetail)
 	} else {
@@ -207,33 +220,58 @@ func invert(r *store.CheckResult) {
 	r.Error = ""
 }
 
-// policyRefusal remembers the target policy's refusal of a connection, for
-// the engines whose libraries put a failed connection into errors of their
-// own, the DNS resolver's and gRPC's, which errors.Is cannot see through.
-type policyRefusal struct {
-	mu  sync.Mutex
-	err error
+// dials records what the connections of one check through the checker's
+// dialer came to, for the engines whose libraries dial for them (gRPC,
+// the DNS resolver, the database drivers) and the one that dials for
+// itself without a recorder of its own (Redis): the address each
+// connection reached, which is a request to the monitor's host for the
+// scheduler's ceilings (hops), and the target policy's refusal where there
+// was one, for the libraries that put a failed connection into errors of
+// their own, the DNS resolver's and gRPC's, which errors.Is cannot see
+// through. A library may dial from goroutines of its own; hence the lock.
+type dials struct {
+	host string
+
+	mu      sync.Mutex
+	hops    []store.Hop
+	refusal error
 }
 
-// dial connects through the checker's dialer and remembers a refusal.
-func (r *policyRefusal) dial(c *Checker) func(ctx context.Context, network, address string) (net.Conn, error) {
+// dials returns the recorder of a check of m.
+func (c *Checker) dials(m store.Monitor) *dials { return &dials{host: m.Host()} }
+
+// dial connects through the checker's dialer and records what came of it.
+func (d *dials) dial(c *Checker) func(ctx context.Context, network, address string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		conn, err := c.dialer.DialContext(ctx, network, address)
-		if errors.Is(err, netguard.ErrBlocked) {
-			r.mu.Lock()
-			r.err = err
-			r.mu.Unlock()
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		switch {
+		case err == nil:
+			d.hops = append(d.hops, store.Hop{Host: d.host, Addr: peerIP(conn.RemoteAddr())})
+		case errors.Is(err, netguard.ErrBlocked):
+			d.refusal = err
 		}
 		return conn, err
 	}
 }
 
+// made returns out with the connections the check made as its hops, one
+// per connection, at the address each reached; none when it connected
+// nowhere, which Check reports as the one request to the host.
+func (d *dials) made(out outcome) outcome {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out.hops = slices.Clone(d.hops)
+	return out
+}
+
 // wrap returns err, its text unchanged, so that errors.Is finds in it the
 // refusal remembered, if there is one.
-func (r *policyRefusal) wrap(err error) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return refusedTo(err, r.err)
+func (d *dials) wrap(err error) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return refusedTo(err, d.refusal)
 }
 
 // refusedTo returns err so that errors.Is also finds refusal, the target
@@ -303,8 +341,9 @@ func (c *Checker) checkTCPAt(ctx context.Context, m store.Monitor, addr string) 
 		return failed(err)
 	}
 	defer conn.Close()
+	hops := []store.Hop{{Host: m.Host(), Addr: peerIP(conn.RemoteAddr())}}
 	if !m.TCP.TLS {
-		return outcome{}
+		return outcome{hops: hops}
 	}
 
 	host, _, err := net.SplitHostPort(m.Target)
@@ -313,10 +352,25 @@ func (c *Checker) checkTCPAt(ctx context.Context, m store.Monitor, addr string) 
 	}
 	secured := tls.Client(conn, c.tlsConfig(host, m.TCP.SkipTLSVerify))
 	if err := secured.HandshakeContext(ctx); err != nil {
-		return afterConnect(failedf("tls handshake: %w", err))
+		out := afterConnect(failedf("tls handshake: %w", err))
+		out.hops = hops
+		return out
 	}
 	state := secured.ConnectionState()
-	return outcome{certExpiry: leafExpiry(&state), detail: tls.VersionName(state.Version)}
+	return outcome{certExpiry: leafExpiry(&state), detail: tls.VersionName(state.Version), hops: hops}
+}
+
+// peerIP is the IP address of a connection's peer, without the port; ""
+// when there is none to tell.
+func peerIP(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return ""
+	}
+	return host
 }
 
 func (c *Checker) checkPush(ctx context.Context, m store.Monitor, now time.Time) outcome {

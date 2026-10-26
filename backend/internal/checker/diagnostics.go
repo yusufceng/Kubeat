@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -69,18 +70,48 @@ type phases struct {
 }
 
 // recorder follows the requests of an HTTP check through their phases, for
-// the diagnostics of a check that fails. A redirect goes through them again,
-// and what is kept is the last request's: the one whose answer is judged.
-// The transport reports from goroutines of its own, and a dial it gave up on
+// the diagnostics of a check that fails, and keeps a hop per request (the
+// host it went to, the address that answered) for the scheduler's
+// ceilings. A redirect goes through the phases again, and what is kept of
+// them is the last request's: the one whose answer is judged. The
+// transport reports from goroutines of its own, and a dial it gave up on
 // may still report after the request returned; hence the lock.
 type recorder struct {
-	mu       sync.Mutex
-	start    time.Time
-	requests int // sent so far: one, and one more per redirect followed
-	last     phases
+	mu    sync.Mutex
+	start time.Time
+	// next is the host the request about to be sent is addressed to: the
+	// target's, then each redirect's (redirect). GetConn's own host:port
+	// would be the proxy's where one is used.
+	next string
+	hops []store.Hop // one per request sent: one, and one more per redirect followed
+	last phases
 }
 
-func newRecorder() *recorder { return &recorder{start: time.Now()} }
+// newRecorder records the requests of a check addressed to host.
+func newRecorder(host string) *recorder { return &recorder{start: time.Now(), next: host} }
+
+// redirect notes that the next request goes to host.
+func (r *recorder) redirect(host string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.next = host
+}
+
+// setAddr notes the address the current request connected to.
+func (p *phases) setAddr(hops []store.Hop, addr string) {
+	p.addr = addr
+	if n := len(hops); n > 0 {
+		hops[n-1].Addr = hostOf(addr)
+	}
+}
+
+// hostOf is the host of a "host:port", or addr itself when it has no port.
+func hostOf(addr string) string {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
+}
 
 // trace is the recorder's httptrace hooks.
 func (r *recorder) trace() *httptrace.ClientTrace {
@@ -95,7 +126,7 @@ func (r *recorder) trace() *httptrace.ClientTrace {
 			now := time.Now()
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			r.requests++
+			r.hops = append(r.hops, store.Hop{Host: r.next})
 			r.last = phases{request: now}
 		},
 		DNSStart: func(httptrace.DNSStartInfo) { at(func(p *phases, now time.Time) { p.dnsStart = now }) },
@@ -114,7 +145,8 @@ func (r *recorder) trace() *httptrace.ClientTrace {
 			at(func(p *phases, now time.Time) {
 				switch {
 				case err == nil && !p.connected:
-					p.connected, p.connectDone, p.addr = true, now, addr
+					p.connected, p.connectDone = true, now
+					p.setAddr(r.hops, addr)
 				case err != nil && !p.connected:
 					p.connectDone, p.addr = now, addr
 				}
@@ -128,7 +160,7 @@ func (r *recorder) trace() *httptrace.ClientTrace {
 			at(func(p *phases, now time.Time) {
 				p.gotConn = now
 				if info.Conn != nil && info.Conn.RemoteAddr() != nil {
-					p.addr = info.Conn.RemoteAddr().String()
+					p.setAddr(r.hops, info.Conn.RemoteAddr().String())
 				}
 			})
 		},
@@ -143,6 +175,9 @@ func (r *recorder) finish(m store.Monitor, out outcome, answer *http.Response, e
 	if out.err != nil || m.Inverted {
 		out.diag = r.diagnostics(answer, e)
 	}
+	r.mu.Lock()
+	out.hops = slices.Clone(r.hops)
+	r.mu.Unlock()
 	return out
 }
 
@@ -196,7 +231,7 @@ func (r *recorder) diagnostics(answer *http.Response, e *store.Explanation) *sto
 	d := &store.Diagnostics{
 		Explanation: e,
 		RemoteAddr:  clean(p.addr, maxName),
-		Redirects:   max(r.requests-1, 0),
+		Redirects:   max(len(r.hops)-1, 0),
 		Timing:      &store.Timing{Total: millis(time.Since(r.start))},
 	}
 	t := d.Timing

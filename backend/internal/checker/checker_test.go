@@ -52,11 +52,14 @@ func TestHTTPCheck(t *testing.T) {
 		path       string
 		wantUp     bool
 		wantStatus int
+		// wantHops is what the check made of the target: a redirect
+		// followed is a request more, for the ceiling on checks per host.
+		wantHops int
 	}{
-		{"/ok", true, 200},
-		{"/redirect", true, 200},
-		{"/fail", false, 503},
-		{"/slow", false, 0},
+		{"/ok", true, 200, 1},
+		{"/redirect", true, 200, 2},
+		{"/fail", false, 503, 1},
+		{"/slow", false, 0, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -67,6 +70,16 @@ func TestHTTPCheck(t *testing.T) {
 			if got.Up != tt.wantUp || got.StatusCode != tt.wantStatus {
 				t.Errorf("Up=%v StatusCode=%d Error=%q, want Up=%v StatusCode=%d",
 					got.Up, got.StatusCode, got.Error, tt.wantUp, tt.wantStatus)
+			}
+			if len(got.Hops) != tt.wantHops {
+				t.Errorf("Hops = %v, want %d", got.Hops, tt.wantHops)
+			}
+			// Every hop went to the test server, by the name its URL gave
+			// and at the address that answered.
+			for _, hop := range got.Hops {
+				if hop.Host != "127.0.0.1" || hop.Addr != "127.0.0.1" {
+					t.Errorf("hop = %+v, want host and address 127.0.0.1", hop)
+				}
 			}
 			if got.Up == (got.Error != "") {
 				t.Errorf("Up=%v but Error=%q", got.Up, got.Error)

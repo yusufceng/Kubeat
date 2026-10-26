@@ -140,8 +140,16 @@ export const Row = memo(function Row({
             {name}
             {rest && <span className="text-ink-3">{rest}</span>}
           </span>
-          {/* A certificate near its end matters more than the kind, which the card still shows. */}
-          {item.certDays !== null ? <CertChip days={item.certDays} /> : <span className="fl-kind">{item.kindShort}</span>}
+          {/* A certificate near its end, or a check held back by its target's rate limit, matters more than the kind, which the card still shows. */}
+          {item.certDays !== null ? (
+            <CertChip days={item.certDays} />
+          ) : item.throttledSince !== null ? (
+            <span className="fl-wait" title={t("monitorsList.list.throttled")}>
+              {t("monitorsList.list.throttled.short")}
+            </span>
+          ) : (
+            <span className="fl-kind">{item.kindShort}</span>
+          )}
           <span className="sr-only">, {t(style.label)}</span>
         </span>
         <BeatStrip

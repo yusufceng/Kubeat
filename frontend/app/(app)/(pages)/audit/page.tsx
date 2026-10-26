@@ -22,6 +22,7 @@ const actionLabels: Record<string, string> = {
   setup: "audit.action.setup",
   password_change: "audit.action.passwordChange",
   test: "audit.action.test",
+  monitor_create_throttled: "audit.action.monitorCreateThrottled",
 };
 
 const objectLabels: Record<string, string> = {

@@ -82,6 +82,11 @@ func (c *Checker) checkEachPod(ctx context.Context, m store.Monitor) outcome {
 	var refusal error // the target policy's, for a pod it refused
 	combined := outcome{hasTime: true}
 	for _, r := range results {
+		// Every pod got a request of its own, with its own redirects.
+		if len(r.hops) == 0 {
+			combined.hops = append(combined.hops, store.Hop{Host: m.Host(), Addr: hostOf(r.Address)})
+		}
+		combined.hops = append(combined.hops, r.hops...)
 		combined.latency = max(combined.latency, r.took)
 		if combined.certExpiry.IsZero() || (!r.certExpiry.IsZero() && r.certExpiry.Before(combined.certExpiry)) {
 			combined.certExpiry = r.certExpiry

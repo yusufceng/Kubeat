@@ -61,6 +61,9 @@ func (f *fakeStore) countFor(id int64) int {
 
 type fakeChecker struct {
 	delay time.Duration
+	// hops is what every result reports as made; none reports one request
+	// to the monitor's host, whose address is not known.
+	hops []store.Hop
 
 	mu         sync.Mutex
 	running    int
@@ -83,7 +86,11 @@ func (f *fakeChecker) Check(ctx context.Context, m store.Monitor) store.CheckRes
 	case <-ctx.Done():
 		return store.CheckResult{MonitorID: m.ID, Error: ctx.Err().Error()}
 	}
-	return store.CheckResult{MonitorID: m.ID, Up: true}
+	hops := f.hops
+	if len(hops) == 0 {
+		hops = []store.Hop{{Host: m.Host()}}
+	}
+	return store.CheckResult{MonitorID: m.ID, Up: true, Hops: hops}
 }
 
 func monitor(id int64, interval time.Duration) store.Monitor {

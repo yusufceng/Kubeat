@@ -243,6 +243,20 @@ type CheckResult struct {
 	// Diagnostics says why a failed check failed, as far as the check could
 	// tell; nil for a successful one, which keeps none.
 	Diagnostics *Diagnostics
+	// Hops are the requests the check made, in order: one, one more for
+	// every redirect followed, one per pod for a check of each pod; none
+	// for a check that makes no request. They are for the scheduler's
+	// ceilings on checks per host and per address, and are not stored.
+	Hops []Hop
+}
+
+// Hop is one request of a check: the host it was addressed to, as the
+// target or the redirect named it, and the IP address that answered,
+// where the check learnt it ("" when it did not: a name that did not
+// resolve, a check whose engine does not report it).
+type Hop struct {
+	Host string
+	Addr string
 }
 
 // Diagnostics is what a failed check found out about why it failed: what

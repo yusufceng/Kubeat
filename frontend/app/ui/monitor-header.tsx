@@ -109,6 +109,11 @@ export function MonitorHeader({
               {t("monitorPage.eachPod")}
             </span>
           )}
+          {monitor.throttled_since && (
+            <span className="mon-chip" title={t("monitorPage.throttled.title")}>
+              {t("monitorPage.throttled")}
+            </span>
+          )}
           {monitor.managed && (
             <span className="mon-chip mon-mono" title={t("monitorPage.managed.title")}>
               {t("monitorPage.managed")}

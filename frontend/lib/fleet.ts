@@ -42,6 +42,8 @@ export type FleetItem = ListItem & {
   downSince: string | null;
   /** When the latest check ran; for a paused monitor, about when it was paused. */
   lastCheck: string | null;
+  /** Since when the due check waits for its target host's ceiling of checks a minute; null while it does not. */
+  throttledSince: string | null;
 };
 
 export function toFleetItem(m: Monitor): FleetItem {
@@ -63,6 +65,7 @@ export function toFleetItem(m: Monitor): FleetItem {
     certDays,
     downSince: m.open_incident?.started_at ?? null,
     lastCheck: last?.checked_at ?? null,
+    throttledSince: m.throttled_since,
   };
 }
 

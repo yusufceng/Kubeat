@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { getHealth } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { getT, titled } from "@/lib/i18n/server";
@@ -14,9 +15,15 @@ import { Crumbs } from "@/app/ui/shell-state";
 async function NewMonitor() {
   await connection();
   if (!(await currentUser()).can_edit) return <ReadOnlyNotice />;
-  // The form works without the suggestions, should the backend be away.
-  const groups = await workspaceMonitors().then(manualGroups, () => []);
-  return <MonitorForm defaults={config.newMonitor} groups={groups} />;
+  // The form works without the suggestions and the limits, should the backend be away.
+  const [groups, externalMinInterval] = await Promise.all([
+    workspaceMonitors().then(manualGroups, () => []),
+    getHealth().then(
+      (h) => h.limits?.min_check_interval_external_seconds ?? 0,
+      () => 0,
+    ),
+  ]);
+  return <MonitorForm defaults={config.newMonitor} groups={groups} externalMinInterval={externalMinInterval} />;
 }
 
 export const generateMetadata = titled("monitorForm.new.title");

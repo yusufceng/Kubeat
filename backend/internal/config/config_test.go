@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,15 @@ func TestLoadDefaults(t *testing.T) {
 		MinCheckInterval: 5 * time.Second,
 		StatsWindow:      24 * time.Hour,
 		MaxResults:       1000,
+
+		MinCheckIntervalExternal: 30 * time.Second,
+		TargetMaxRate:            60,
+		ClusterTargetMaxRate:     600,
+		TargetAddressMaxRate:     600,
+		MaxMonitorsPerHost:       5,
+		MaxMonitors:              1000,
+		MaxMonitorsPerNamespace:  200,
+		MonitorCreatePerMinute:   30,
 
 		StatusPageDays:           90,
 		StatusPageIncidentWindow: 14 * 24 * time.Hour,
@@ -120,7 +130,7 @@ func TestLoadDefaults(t *testing.T) {
 		DiscoveryDefaultInterval: 30 * time.Second,
 		DiscoveryDefaultTimeout:  5 * time.Second,
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load() = %+v, want %+v", got, want)
 	}
 }
@@ -155,7 +165,7 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	got = Config{Addr: got.Addr, DBPath: got.DBPath, DBBusyTimeout: got.DBBusyTimeout,
 		ReadHeaderTimeout: got.ReadHeaderTimeout, ShutdownTimeout: got.ShutdownTimeout}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load() = %+v, want %+v", got, want)
 	}
 }
@@ -255,6 +265,98 @@ func TestLoadRejectsSubSecondMinInterval(t *testing.T) {
 	t.Setenv("UPTIME_MIN_CHECK_INTERVAL", "500ms")
 	if _, err := Load(); err == nil {
 		t.Error("UPTIME_MIN_CHECK_INTERVAL=500ms was accepted")
+	}
+}
+
+// The external minimum is a stricter rule on top of the general one, so
+// it cannot be the shorter; zero means there is no separate rule.
+func TestExternalMinInterval(t *testing.T) {
+	t.Setenv("UPTIME_MIN_CHECK_INTERVAL", "10s")
+	t.Setenv("UPTIME_MIN_CHECK_INTERVAL_EXTERNAL", "5s")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "UPTIME_MIN_CHECK_INTERVAL_EXTERNAL") || !strings.Contains(err.Error(), "10s") {
+		t.Errorf("5s under a 10s minimum: err = %v, want a refusal naming both", err)
+	}
+	t.Setenv("UPTIME_MIN_CHECK_INTERVAL_EXTERNAL", "0")
+	cfg, err := Load()
+	if err != nil || cfg.MinCheckIntervalExternal != 0 {
+		t.Errorf("0: cfg.MinCheckIntervalExternal = %s, err = %v; want 0 (off) and no error", cfg.MinCheckIntervalExternal, err)
+	}
+	t.Setenv("UPTIME_MIN_CHECK_INTERVAL_EXTERNAL", "10s")
+	if cfg, err = Load(); err != nil || cfg.MinCheckIntervalExternal != 10*time.Second {
+		t.Errorf("equal to the minimum: cfg.MinCheckIntervalExternal = %s, err = %v", cfg.MinCheckIntervalExternal, err)
+	}
+}
+
+// The discovery default interval is for in-cluster targets and may be
+// shorter than the external minimum, which an annotated Ingress or Route
+// without an interval of its own then falls under: Load says so, and
+// does not refuse, since the monitors there are keep running.
+func TestDiscoveryDefaultIntervalUnderTheExternalMinimumWarns(t *testing.T) {
+	t.Setenv("UPTIME_DISCOVERY_DEFAULT_INTERVAL", "15s")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("15s under the external 30s: %v", err)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "UPTIME_DISCOVERY_DEFAULT_INTERVAL (15s)") ||
+		!strings.Contains(cfg.Warnings[0], "UPTIME_MIN_CHECK_INTERVAL_EXTERNAL (30s)") {
+		t.Errorf("warnings = %q, want one naming both settings", cfg.Warnings)
+	}
+	t.Setenv("UPTIME_MIN_CHECK_INTERVAL_EXTERNAL", "0")
+	if cfg, err := Load(); err != nil || len(cfg.Warnings) != 0 {
+		t.Errorf("without the external rule: warnings = %q, err = %v; want none", cfg.Warnings, err)
+	}
+	t.Setenv("UPTIME_MIN_CHECK_INTERVAL_EXTERNAL", "15s")
+	if cfg, err := Load(); err != nil || len(cfg.Warnings) != 0 {
+		t.Errorf("default equal to the external minimum: warnings = %q, err = %v; want none", cfg.Warnings, err)
+	}
+}
+
+// Every guardrail turns off at zero and refuses a negative number.
+func TestGuardrailLimitsMayBeZero(t *testing.T) {
+	keys := []string{
+		"UPTIME_TARGET_MAX_RATE", "UPTIME_CLUSTER_TARGET_MAX_RATE", "UPTIME_TARGET_ADDRESS_MAX_RATE", "UPTIME_MAX_MONITORS_PER_HOST",
+		"UPTIME_MAX_MONITORS", "UPTIME_MAX_MONITORS_PER_NAMESPACE", "UPTIME_MONITOR_CREATE_PER_MINUTE",
+	}
+	for _, key := range keys {
+		t.Setenv(key, "0")
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("all zero: %v", err)
+	}
+	if cfg.TargetMaxRate != 0 || cfg.ClusterTargetMaxRate != 0 || cfg.TargetAddressMaxRate != 0 || cfg.MaxMonitorsPerHost != 0 ||
+		cfg.MaxMonitors != 0 || cfg.MaxMonitorsPerNamespace != 0 || cfg.MonitorCreatePerMinute != 0 {
+		t.Errorf("zero did not turn the limits off: %+v", cfg)
+	}
+	for _, key := range keys {
+		t.Setenv(key, "-1")
+		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), key+": ") {
+			t.Errorf("%s=-1: err = %v, want a refusal naming the variable", key, err)
+		}
+		t.Setenv(key, "")
+	}
+}
+
+func TestUserAgent(t *testing.T) {
+	if got, want := DefaultUserAgent("1.2.3", ""), "kubeat/1.2.3 (+https://github.com/yusufceng/Kubeat)"; got != want {
+		t.Errorf("without a public URL: %q, want %q", got, want)
+	}
+	got := DefaultUserAgent("1.2.3", "https://kubeat.apps.example")
+	if want := "kubeat/1.2.3 (+https://github.com/yusufceng/Kubeat; https://kubeat.apps.example)"; got != want {
+		t.Errorf("with a public URL: %q, want %q", got, want)
+	}
+	t.Setenv("UPTIME_PUBLIC_URL", "https://kubeat.apps.example/")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ua := cfg.UserAgentFor("dev"); ua != "kubeat/dev (+https://github.com/yusufceng/Kubeat; https://kubeat.apps.example)" {
+		t.Errorf("UserAgentFor = %q", ua)
+	}
+	t.Setenv("UPTIME_USER_AGENT", " corp-monitor/7 ")
+	if cfg, err = Load(); err != nil || cfg.UserAgentFor("dev") != "corp-monitor/7" {
+		t.Errorf("override: UserAgentFor = %q, err = %v", cfg.UserAgentFor("dev"), err)
 	}
 }
 

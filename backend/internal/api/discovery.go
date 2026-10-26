@@ -196,12 +196,14 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "sources must not be empty")
 		return
 	}
-	// Reuse the monitor rules for the settings shared by every new monitor.
+	// Reuse the monitor rules for the settings shared by every new monitor;
+	// the in-cluster probe target holds them to the general minimum
+	// interval, each candidate is held to its own below.
 	settings := createMonitorRequest{
 		Name: "x", Type: string(store.MonitorTCP), Target: "x:1",
 		IntervalSeconds: req.IntervalSeconds, TimeoutSeconds: req.TimeoutSeconds, FailureThreshold: req.FailureThreshold,
 	}
-	if err := settings.validate(h.opts.MinCheckInterval, h.opts.DefaultFailureThreshold); err != nil {
+	if err := settings.validate(h.limits(), h.opts.DefaultFailureThreshold); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -214,6 +216,13 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 	bySource := make(map[string]k8s.Candidate, len(candidates))
 	for _, c := range candidates {
 		bySource[c.Source()] = c
+	}
+	// Every monitor made here is held to the quotas and the cap per host
+	// (admit) like one made by hand, counted among those made before it.
+	existing, err := h.opts.Store.ListMonitors(r.Context())
+	if err != nil {
+		h.internalError(w, r, err)
+		return
 	}
 
 	resp := importResponse{Created: []monitorResponse{}, Skipped: []importSkip{}}
@@ -229,6 +238,14 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 			resp.Skipped = append(resp.Skipped, importSkip{Source: source, Reason: "not found in the cluster"})
 			continue
 		}
+		// A Route or an Ingress may point outside the cluster, where the
+		// shortest interval is longer: the candidate's own target decides.
+		probe := settings
+		probe.Type, probe.Target = string(c.Type), c.Target
+		if err := probe.validate(h.limits(), h.opts.DefaultFailureThreshold); err != nil {
+			resp.Skipped = append(resp.Skipped, importSkip{Source: source, Reason: err.Error()})
+			continue
+		}
 		// The check options are the defaults of a monitor made by hand.
 		monitor := defaultOptions(c.Type)
 		monitor.Name = monitorName(c)
@@ -241,7 +258,20 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 		monitor.Timeout = time.Duration(settings.TimeoutSeconds) * time.Second
 		monitor.FailureThreshold = settings.FailureThreshold
 		monitor.Enabled = true
+		if _, msg := h.admit(monitor, existing); msg != "" {
+			resp.Skipped = append(resp.Skipped, importSkip{Source: source, Reason: msg})
+			continue
+		}
+		// Each monitor of an import is a creation of the account's minute.
+		ok, retryAfter, release := h.creationAllowed(r)
+		if !ok {
+			resp.Skipped = append(resp.Skipped, importSkip{Source: source, Reason: h.creationRefused(retryAfter)})
+			continue
+		}
 		m, err := h.opts.Store.CreateMonitor(r.Context(), monitor)
+		if err != nil {
+			release() // not a creation
+		}
 		if errors.Is(err, store.ErrConflict) {
 			resp.Skipped = append(resp.Skipped, importSkip{Source: source, Reason: "already monitored"})
 			continue
@@ -250,8 +280,9 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 			h.internalError(w, r, err)
 			return
 		}
+		existing = append(existing, m)
 		h.audit(r, "create", "monitor", m.ID, m.Name)
-		resp.Created = append(resp.Created, toMonitorResponse(principal(r), store.MonitorStatus{Monitor: m}, h.opts.StatsWindow))
+		resp.Created = append(resp.Created, h.monitorResponse(principal(r), store.MonitorStatus{Monitor: m}, h.opts.StatsWindow))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

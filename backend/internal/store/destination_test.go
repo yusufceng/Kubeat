@@ -5,6 +5,62 @@ import (
 	"testing"
 )
 
+func TestHost(t *testing.T) {
+	for name, tc := range map[string]struct {
+		m    Monitor
+		want string
+	}{
+		"http URL":           {Monitor{Type: MonitorHTTP, Target: "https://API.Example.com:8443/healthz"}, "api.example.com"},
+		"http with Host":     {Monitor{Type: MonitorHTTP, Target: "http://10.0.0.1/", HTTP: HTTPOptions{Headers: map[string]string{"Host": "shop.example.com"}}}, "10.0.0.1"},
+		"IPv6 URL":           {Monitor{Type: MonitorHTTP, Target: "http://[fd00::1]:8080/"}, "fd00::1"},
+		"websocket":          {Monitor{Type: MonitorWebSocket, Target: "wss://ws.example.com/socket"}, "ws.example.com"},
+		"tcp":                {Monitor{Type: MonitorTCP, Target: "db.shop.svc:5432"}, "db.shop.svc"},
+		"tcp IPv6":           {Monitor{Type: MonitorTCP, Target: "[fe80::1%eth0]:22"}, "fe80::1"},
+		"grpc":               {Monitor{Type: MonitorGRPC, Target: "Cart.shop.svc:9000"}, "cart.shop.svc"},
+		"redis":              {Monitor{Type: MonitorRedis, Target: "cache:6379"}, "cache"},
+		"ping":               {Monitor{Type: MonitorPing, Target: "Example.COM."}, "example.com"},
+		"dns":                {Monitor{Type: MonitorDNS, Target: "example.com"}, "example.com"},
+		"push has none":      {Monitor{Type: MonitorPush}, ""},
+		"workload has none":  {Monitor{Type: MonitorWorkload, Target: "shop/deployment/api"}, ""},
+		"tcp without a port": {Monitor{Type: MonitorTCP, Target: "example.com"}, ""},
+		// Every spelling of an address is one key, else the limits per
+		// host would not hold for a target given as an address.
+		"IPv6 leading zeros":   {Monitor{Type: MonitorHTTP, Target: "http://[2001:0db8::1]/"}, "2001:db8::1"},
+		"IPv6 zero groups":     {Monitor{Type: MonitorHTTP, Target: "http://[2001:db8:0::1]/"}, "2001:db8::1"},
+		"IPv6 written out":     {Monitor{Type: MonitorTCP, Target: "[2001:db8:0:0:0:0:0:1]:443"}, "2001:db8::1"},
+		"IPv6 upper case":      {Monitor{Type: MonitorPing, Target: "2001:DB8::1"}, "2001:db8::1"},
+		"IPv4-mapped dotted":   {Monitor{Type: MonitorHTTP, Target: "http://[::ffff:203.0.113.1]/"}, "203.0.113.1"},
+		"IPv4-mapped hex":      {Monitor{Type: MonitorHTTP, Target: "http://[::ffff:cb00:7101]/"}, "203.0.113.1"},
+		"IPv4-mapped loopback": {Monitor{Type: MonitorHTTP, Target: "http://[::ffff:127.0.0.1]:18859/mapped"}, "127.0.0.1"},
+		"IPv6 with zone":       {Monitor{Type: MonitorHTTP, Target: "http://[fe80::1%25eth0]/"}, "fe80::1"},
+		"IPv4 as it is":        {Monitor{Type: MonitorHTTP, Target: "http://203.0.113.1/"}, "203.0.113.1"},
+	} {
+		if got := tc.m.Host(); got != tc.want {
+			t.Errorf("%s: Host() = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// CanonicalHost gives every spelling of a host one form; what is not an
+// address is a name, lower-cased and without its root dot.
+func TestCanonicalHost(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                       "",
+		"Example.COM.":           "example.com",
+		"203.0.113.1":            "203.0.113.1",
+		"::ffff:203.0.113.1":     "203.0.113.1",
+		"::FFFF:CB00:7101":       "203.0.113.1",
+		"2001:0db8:0000:0::0001": "2001:db8::1",
+		"fe80::1%eth0":           "fe80::1",
+		"::1":                    "::1",
+		"0x7f000001":             "0x7f000001", // not an address to netip; a name, which the API refuses
+	} {
+		if got := CanonicalHost(in); got != want {
+			t.Errorf("CanonicalHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestDestination(t *testing.T) {
 	web := func(target string, headers map[string]string) Monitor {
 		return Monitor{Type: MonitorHTTP, Target: target, HTTP: HTTPOptions{Headers: headers}}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,7 +35,23 @@ type Metrics struct {
 	lastHeartbeat     prometheus.Gauge
 	backups           *prometheus.CounterVec
 	lastBackup        prometheus.Gauge
+	targetThrottled   *prometheus.CounterVec
+
+	// hosts are the host labels targetThrottled has been given so far; past
+	// MaxThrottledHosts of them, a new host is counted as OtherHost.
+	mu    sync.Mutex
+	hosts map[string]bool
 }
+
+// MaxThrottledHosts bounds the host labels of kubeat_target_throttled_total:
+// the first this many hosts whose checks had to wait get a label of
+// their own, every host after them is counted under OtherHost. A label per
+// host would otherwise let a flood of monitors against made-up hosts grow
+// the metric without end.
+const MaxThrottledHosts = 100
+
+// OtherHost is the host label of the hosts past MaxThrottledHosts.
+const OtherHost = "other"
 
 // New returns Metrics with the Go runtime and process collectors registered.
 func New(version string) *Metrics {
@@ -91,6 +108,11 @@ func New(version string) *Metrics {
 		Name: "kubeat_backups_total",
 		Help: "Database backups attempted, by outcome.",
 	}, []string{"result"})
+	m.targetThrottled = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kubeat_target_throttled_total",
+		Help: "Waits begun by checks whose target host, a host their last check landed on, or an address it reached, had reached its checks-per-minute ceiling (UPTIME_TARGET_MAX_RATE, UPTIME_CLUSTER_TARGET_MAX_RATE, UPTIME_TARGET_ADDRESS_MAX_RATE): one per wait, however many ticks it lasts, by the monitor's host; hosts past the first 100 are counted as \"other\".",
+	}, []string{"host"})
+	m.hosts = make(map[string]bool)
 	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_backup_last_success_timestamp_seconds",
 		Help: "When a database backup last succeeded; 0 if none has since the process started.",
@@ -112,8 +134,28 @@ func New(version string) *Metrics {
 		m.notifications, m.notificationsDrop,
 		m.heartbeats, m.lastHeartbeat,
 		m.backups, m.lastBackup,
+		m.targetThrottled,
 	)
 	return m
+}
+
+// TargetThrottled records a check of a monitor of host that began to wait
+// because a host or an address it goes to had reached its ceiling of
+// checks a minute.
+func (m *Metrics) TargetThrottled(host string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	if !m.hosts[host] {
+		if len(m.hosts) >= MaxThrottledHosts {
+			host = OtherHost
+		} else {
+			m.hosts[host] = true
+		}
+	}
+	m.mu.Unlock()
+	m.targetThrottled.WithLabelValues(host).Inc()
 }
 
 // Handler serves the metrics.

@@ -62,6 +62,18 @@ backend:
     # "Hedef politikası"). Comma-separated CIDRs.
     # UPTIME_TARGET_ALLOW_CIDRS: "169.254.20.10/32"   # NodeLocal DNSCache as a DNS monitor's resolver
     # UPTIME_TARGET_DENY_CIDRS: "10.0.0.0/8"          # checks only outside the cluster
+    # Guardrails against monitors putting load on other systems (README,
+    # "Hedef yükü"); "0" turns a limit off. External: a target whose host is
+    # not a private address, a *.svc/*.cluster.local name or a bare name.
+    # UPTIME_MIN_CHECK_INTERVAL_EXTERNAL: 30s   # shortest interval of an external target
+    # UPTIME_TARGET_MAX_RATE: "60"              # checks a minute per external host name, all monitors together
+    # UPTIME_CLUSTER_TARGET_MAX_RATE: "600"     # the same per in-cluster host name
+    # UPTIME_TARGET_ADDRESS_MAX_RATE: "600"     # the same per IP address reached, whatever its class: the hosts behind one ingress/router address share it (300 at 30s)
+    # UPTIME_MAX_MONITORS_PER_HOST: "5"         # monitors per external host
+    # UPTIME_MAX_MONITORS: "1000"               # monitors in all; binds new ones only
+    # UPTIME_MAX_MONITORS_PER_NAMESPACE: "200"  # monitors per namespace; binds new ones only
+    # UPTIME_MONITOR_CREATE_PER_MINUTE: "30"    # monitors one account may create in a minute
+    # UPTIME_USER_AGENT: "kubeat (ops@example.com)"  # replaces the default User-Agent of checks
   # Extra volumes for the backend, e.g. a CA bundle for the metrics server or
   # for checks of targets signed by an internal CA.
   extraVolumes: []

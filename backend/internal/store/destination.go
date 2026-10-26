@@ -2,6 +2,7 @@ package store
 
 import (
 	"net"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -144,4 +145,60 @@ func (m *Monitor) DropSecrets() []string {
 	}
 	m.HTTP.Headers, m.HTTP.AuthSecret, m.HTTP.Body, m.HTTP.ContentType, m.Database.Password = nil, "", "", "", ""
 	return names
+}
+
+// Outbound reports whether the monitor's checks make a request to its
+// target over the network. Push monitors wait for their source to report
+// and workload monitors ask the cluster API; neither puts load on a target,
+// so neither is held to the limits on targets.
+func (m Monitor) Outbound() bool {
+	return m.Type != MonitorPush && m.Type != MonitorWorkload
+}
+
+// Host is the key the limits on targets count by: the host name or IP
+// address the monitor's check connects to, canonical (CanonicalHost),
+// without port or brackets. For an HTTP or WebSocket monitor it is the
+// URL's host (not the Host header: the connection goes to the URL's host,
+// which is who bears the load); for a host:port target the host. It is ""
+// for a monitor that is not Outbound, and for a target the type's
+// validation would refuse.
+func (m Monitor) Host() string {
+	if !m.Outbound() {
+		return ""
+	}
+	host := m.Target
+	switch m.Type {
+	case MonitorHTTP, MonitorWebSocket:
+		u, err := url.Parse(m.Target)
+		if err != nil {
+			return ""
+		}
+		host = u.Hostname()
+	case MonitorTCP, MonitorGRPC, MonitorPostgres, MonitorMySQL, MonitorRedis:
+		h, _, err := net.SplitHostPort(m.Target)
+		if err != nil {
+			return ""
+		}
+		host = h
+	}
+	return CanonicalHost(host)
+}
+
+// CanonicalHost is the one spelling of a host name or IP address that the
+// limits on targets count by: a name in lower case without its trailing
+// dot; an address as netip writes it, an IPv4-mapped IPv6 address as the
+// IPv4 address it is, without a zone. Every way of writing one address
+// ("2001:db8::1", "2001:0db8:0:0::1", "::ffff:203.0.113.1",
+// "::ffff:cb00:7101") is one key, else a cap per host would be no cap for
+// a target given as an address. A host without port or brackets is
+// expected; the empty string comes back empty.
+func CanonicalHost(host string) string {
+	host = strings.TrimSuffix(strings.TrimSpace(host), ".")
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.Unmap().WithZone("").String()
+	}
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i] // a zone on an address netip could not read
+	}
+	return lowerASCII(host)
 }

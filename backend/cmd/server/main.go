@@ -50,6 +50,9 @@ func main() {
 		logger.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
+	for _, warning := range cfg.Warnings {
+		logger.Warn(warning)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -98,7 +101,10 @@ func main() {
 	// Background work stops on the same signal as the HTTP server and is
 	// waited for before the database is closed.
 	var background sync.WaitGroup
-	userAgent := "kubeat/" + version
+	// What checks and notifications call themselves: the software, where
+	// it comes from and, when set, where this installation is reached, so
+	// that the operator of a checked site can tell who is calling.
+	userAgent := cfg.UserAgentFor(version)
 
 	meter := metrics.New(version)
 	meter.WatchMonitors(db, cfg.MetricsTimeout, logger)
@@ -176,6 +182,8 @@ func main() {
 					Cluster: client, Store: db, Interval: cfg.DiscoverySyncInterval,
 					DefaultInterval: cfg.DiscoveryDefaultInterval, DefaultTimeout: cfg.DiscoveryDefaultTimeout,
 					DefaultFailureThreshold: cfg.DefaultFailureThreshold, MinInterval: cfg.MinCheckInterval,
+					MinIntervalExternal: cfg.MinCheckIntervalExternal, MaxMonitors: cfg.MaxMonitors,
+					MaxMonitorsPerNamespace: cfg.MaxMonitorsPerNamespace, MaxMonitorsPerHost: cfg.MaxMonitorsPerHost,
 					Logger: logger,
 				})
 				sync = syncer
@@ -199,15 +207,24 @@ func main() {
 		Guard:              guard,
 		Logger:             logger,
 	}), scheduler.Options{
-		Tick:          cfg.SchedulerTick,
-		MaxJitter:     cfg.MaxJitter,
-		Workers:       cfg.Workers,
-		BatchSize:     cfg.ResultBatchSize,
-		FlushInterval: cfg.ResultFlushInterval,
-		OnResults:     alerts.Evaluate,
-		Metrics:       meter,
-		Logger:        logger,
+		Tick:                 cfg.SchedulerTick,
+		MaxJitter:            cfg.MaxJitter,
+		Workers:              cfg.Workers,
+		BatchSize:            cfg.ResultBatchSize,
+		FlushInterval:        cfg.ResultFlushInterval,
+		OnResults:            alerts.Evaluate,
+		TargetMaxRate:        cfg.TargetMaxRate,
+		ClusterTargetMaxRate: cfg.ClusterTargetMaxRate,
+		AddressMaxRate:       cfg.TargetAddressMaxRate,
+		Metrics:              meter,
+		Logger:               logger,
 	})
+	logger.Info("target guardrails in effect", "user_agent", userAgent,
+		"min_check_interval_external", cfg.MinCheckIntervalExternal.String(),
+		"target_max_rate", cfg.TargetMaxRate, "cluster_target_max_rate", cfg.ClusterTargetMaxRate,
+		"target_address_max_rate", cfg.TargetAddressMaxRate,
+		"max_monitors_per_host", cfg.MaxMonitorsPerHost, "max_monitors", cfg.MaxMonitors,
+		"max_monitors_per_namespace", cfg.MaxMonitorsPerNamespace, "monitor_create_per_minute", cfg.MonitorCreatePerMinute)
 	if cfg.BackupDir != "" {
 		background.Add(1)
 		go func() {
@@ -324,6 +341,13 @@ func main() {
 			MinCheckInterval: cfg.MinCheckInterval,
 			StatsWindow:      cfg.StatsWindow,
 			MaxResults:       cfg.MaxResults,
+
+			MinCheckIntervalExternal: cfg.MinCheckIntervalExternal,
+			MaxMonitorsPerHost:       cfg.MaxMonitorsPerHost,
+			MaxMonitors:              cfg.MaxMonitors,
+			MaxMonitorsPerNamespace:  cfg.MaxMonitorsPerNamespace,
+			MonitorCreatePerMinute:   cfg.MonitorCreatePerMinute,
+			Throttles:                sched,
 
 			StatusPageDays:           cfg.StatusPageDays,
 			StatusPageIncidentWindow: cfg.StatusPageIncidentWindow,

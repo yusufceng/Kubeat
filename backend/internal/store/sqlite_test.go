@@ -129,7 +129,7 @@ func TestCheckResults(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2", len(got))
 	}
-	if got[0] != batch[2] || got[1] != batch[1] {
+	if !reflect.DeepEqual(got[0], batch[2]) || !reflect.DeepEqual(got[1], batch[1]) {
 		t.Errorf("list = %+v, want newest first %+v, %+v", got, batch[2], batch[1])
 	}
 
@@ -293,7 +293,7 @@ func TestMonitorStatuses(t *testing.T) {
 	}
 	wantLast := CheckResult{MonitorID: api.ID, CheckedAt: base.Add(3 * time.Minute), Up: false,
 		Latency: 400 * time.Millisecond, StatusCode: 503, Error: "unexpected status 503"}
-	if got.Last == nil || *got.Last != wantLast {
+	if got.Last == nil || !reflect.DeepEqual(*got.Last, wantLast) {
 		t.Errorf("Last = %+v, want %+v", got.Last, wantLast)
 	}
 
@@ -790,7 +790,7 @@ func TestRecentCheckResults(t *testing.T) {
 	// Newest first, and the same rows ListCheckResults gives.
 	single, _ := s.ListCheckResults(ctx, a.ID, 3)
 	for i := range single {
-		if got[a.ID][i] != single[i] {
+		if !reflect.DeepEqual(got[a.ID][i], single[i]) {
 			t.Errorf("result %d = %+v, want %+v", i, got[a.ID][i], single[i])
 		}
 	}

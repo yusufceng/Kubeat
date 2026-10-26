@@ -153,6 +153,57 @@ açmaz. Başka bir şey yapmak gerekmez; mevcut durum sayfaları tek bir adsız
 bölümle, kanallar gecikmesiz ve genel hatırlatma aralığıyla, monitor'lar
 yavaş yanıt eşiği kapalı olarak sürer.
 
+### 0.41'e yükseltme
+
+0.41 monitor'ların başka sistemlere yük bindirmesine karşı sınırlar getirir
+(bkz. "Hedef yükü"). Şema değişmez. Yükseltince:
+
+- Cluster dışındaki bir hedefi 30 saniyeden sık kontrol eden mevcut
+  monitor'lar **çalışmaya devam eder** ve hedefi, aralığı ve tekrar aralığı
+  değişmedikçe **düzenlenebilir**: adını, etiketlerini, açıklamasını
+  değiştirmek, duraklatıp sürdürmek, formu olduğu gibi kaydetmek çalışır.
+  Hedefi (yolu bile), aralığı ya da tekrar aralığını değiştiren bir
+  `PATCH` ise yeni kurala tabidir ve 30 saniyenin altında
+  `interval_seconds must be at least 30 for a target outside the cluster`
+  ile reddedilir. Böyle bir monitor **olduğu gibi kopyalanamaz**: kopya yeni
+  bir monitor'dur ve aynı hatayla reddedilir; önce aralığı 30 saniyeye (ya
+  da üstüne) çekin ya da `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL` ile sınırı
+  kurulumunuza göre ayarlayın (`0` ayrı kuralı kaldırır). Şirket ağındaki
+  ama cluster dışındaki hedefler de "dış" sayılır; cluster içi adlar
+  (`*.svc`, özel IP'ler) etkilenmez. Annotation ile yönetilen monitor'lar da
+  bu kurala tabidir: 30 saniyeden kısa `kubeat.io/interval` taşıyan dış bir
+  Ingress ya da Route için **yeni** monitor oluşturulmaz, keşif durumunda
+  nedeniyle atlanmış görünür. Yükseltmeden önce oluşturulmuş böyle bir
+  monitor ise **silinmez**: geçmişiyle birlikte, aralığına dokunulmadan
+  çalışmaya devam eder ve atlananlar listesinde "the monitor made before
+  the rule is kept at 10s" notuyla görünür; annotation kaldırılınca her
+  zamanki gibi kaldırılır. `UPTIME_DISCOVERY_DEFAULT_INTERVAL` 30 saniyenin
+  altındaysa aynısı geçerlidir: kendi aralığı olmayan mevcut dış Ingress ve
+  Route monitor'ları kalır, yenileri atlanır ve sunucu açılışta bunu
+  uyararak söyler.
+- Bir dış host adına 60'tan, bir cluster içi host adına 600'den ya da bir IP
+  adresine (hangi adla ulaşılırsa ulaşılsın) 600'den çok kontrol/dakika
+  düşen kurulumlarda bazı kontroller ertelenir; monitor sayfasında "Hedef hız
+  sınırında bekliyor" notu ve `kubeat_target_throttled_total` metriği bunu
+  gösterir. Tek bir ingress ya da router adresinin arkasındaki yüzlerce host
+  için bkz. "Hedef yükü"ndeki paylaşılan adres paragrafı. Gerçekten
+  gerekiyorsa `UPTIME_TARGET_MAX_RATE` / `UPTIME_CLUSTER_TARGET_MAX_RATE` /
+  `UPTIME_TARGET_ADDRESS_MAX_RATE` değerlerini yükseltin.
+- Mevcut monitor sayısı kotaların üstündeyse (1000 toplam, 200 namespace
+  başına; 5 dış host başına) hiçbir şey durmaz, yalnızca yeni monitor
+  oluşturulamaz ve dolu bir namespace'e monitor taşınamaz; annotation ile
+  yönetilen monitor'lar da kotaya ve host sınırına tabidir (sığmayanlar
+  keşif durumunda atlanmış görünür). Kotayı `UPTIME_MAX_MONITORS*` ile
+  yükseltin ya da `0` yapın.
+- Monitor'ları toplu oluşturan betikler son altmış saniyede 30'dan sonra 429
+  alır; `Retry-After` başlığına uyun ya da `UPTIME_MONITOR_CREATE_PER_MINUTE`'i
+  yükseltin.
+- Sayıdan ibaret host'lar (`http://2130706433/`, `0x7f000001`, `127.1`)
+  artık reddedilir; adresi adres olarak yazın.
+- Kontrollerin `User-Agent`'ı `kubeat/<sürüm> (+https://github.com/yusufceng/Kubeat; <UPTIME_PUBLIC_URL>)`
+  oldu; eskisine göre süzen bir WAF kuralı varsa güncelleyin ya da
+  `UPTIME_USER_AGENT` verin.
+
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
 Chart dört Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde
@@ -418,6 +469,144 @@ bekleyen bağlantıyı `UPTIME_HTTP_IDLE_TIMEOUT` (2 dk) sonra kapatır ve en fa
 `UPTIME_HTTP_MAX_HEADER_BYTES` (1 MiB) başlık kabul eder. Gövdesini yavaş
 gönderen ya da bağlantısını boşta tutan bir istemci bağlantıları süresiz
 meşgul edemez.
+
+### Hedef yükü
+
+Hedef politikası kontrollerin *nereye* gidebileceğini sınırlar; bu bölüm
+*ne kadar* gidebileceğini. Monitor oluşturabilen her kullanıcı backend'e
+başka bir sisteme istek attırır. Bir editör, ya da ele geçirilmiş bir editör
+hesabı, tek bir dış siteye en kısa aralıkla binlerce monitor tanımlarsa
+Kubeat o siteye yük bindiren bir araca döner; yanlışlıkla da olabilir, bir
+betiğin döngüsü yüzlerce monitor açabilir. Aşağıdaki sınırlar bunun önüne
+geçer. Hepsi ortam değişkenidir ve `0` ilgili sınırı kapatır.
+
+**Cluster içi ve dış hedef.** Her sınır hedefin nerede olduğuna bakar.
+Hedefin host'u özel bir adresteyse (`10.0.0.0/8`, `172.16.0.0/12`,
+`192.168.0.0/16`, `100.64.0.0/10`, `fc00::/7`; loopback ve link-local da
+sayılır, onları zaten politika reddeder), `.svc`, `.svc.cluster.local` ya da
+`.cluster.local` ile bitiyorsa ya da noktasız bir adsa (aynı namespace'teki
+bir Service'in kısa adı) hedef **cluster içidir**; geri kalan her şey, şirket
+ağındaki bir sunucu da dahil, **dıştır**. Karar yazılan ada göre verilir, ad
+çözülmez: özel bir adrese çözülen genel bir alan adı (`intranet.corp`)
+bilerek dış sayılır, çünkü çözüm iki sorgu arasında değişebilir ve bir
+bölgeyi yöneten kişi adını ucuz sınıfa sokabilirdi. `push` ve `workload`
+monitor'ları dışarıya istek atmaz; hiçbir sınıra tabi değildir.
+
+**Dış hedefler için en kısa aralık.** `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL`
+(30 sn) dış hedefli bir monitor'un kontrol aralığının ve tekrar aralığının
+alt sınırıdır; `UPTIME_MIN_CHECK_INTERVAL`'dan (5 sn) kısa olamaz. Daha kısa
+bir aralık oluşturmada, kopyalamada ve hedefi, aralığı ya da tekrar aralığını
+değiştiren güncellemede 400 ile reddedilir (`interval_seconds must be at
+least 30 for a target outside the cluster
+(UPTIME_MIN_CHECK_INTERVAL_EXTERNAL)`); kuraldan önce oluşturulmuş daha hızlı
+bir monitor bu üçüne dokunulmadıkça düzenlenebilir, ama olduğu gibi
+kopyalanamaz. Monitor formu hedef dış göründüğünde bunu önceden söyler.
+Keşfin varsayılan aralığı (`UPTIME_DISCOVERY_DEFAULT_INTERVAL`) cluster içi
+hedefler içindir ve değişmez; dış bir Route ya da Ingress hedefi içe
+aktarmada bu kurala takılırsa atlananlar listesinde nedeniyle görünür, ve
+annotation eşitlemesi de aynı kuralı yeni monitor'lara uygular
+(`kubeat.io/interval: must be at least 30s for a target outside the cluster
+…` nedeniyle atlanır). Kuraldan önce oluşturulmuş, annotation ile yönetilen
+bir monitor ise API'deki gibi olduğu gibi kalır: silinmez, aralığı
+değiştirilmez, atlananlar listesinde "the monitor made before the rule is
+kept at 10s" notuyla görünür. Varsayılan aralık dış sınırın altındaysa
+sunucu açılışta uyarır.
+
+**Host başına kontrol tavanı.** Bir host'a tüm monitor'ların birlikte
+yapabileceği kontrol sayısı dakikada `UPTIME_TARGET_MAX_RATE` (60, dış
+host) ve `UPTIME_CLUSTER_TARGET_MAX_RATE` (600, cluster içi host) ile
+sınırlıdır. Tavan iki anahtarla tutulur: hedefin yazıldığı **ad** (küçük
+harfe çevrilmiş ad ya da tek biçime getirilmiş IP; port sayılmaz, bir IP'nin
+her yazımı — `2001:db8::1`, `2001:0db8::1`, `::ffff:203.0.113.1` — tek
+anahtardır) ve kontrolün **ulaştığı IP adresi**. Ad uydurmak bedavadır,
+adres değildir: aynı adrese çözülen `a1.example`, `a2.example`, … adlarının
+hepsi o adresin tek kovasını paylaşır. Adres kovasının tavanı kendi ayarıdır,
+`UPTIME_TARGET_ADDRESS_MAX_RATE` (600), adresin sınıfından bağımsız (özel
+de olsa genel de olsa aynı); `0` adres kovasını kapatır. Her motor ulaştığı
+adresi bildirir: HTTP, WebSocket ve TCP bağlandığı adresi, gRPC, PostgreSQL,
+MySQL, Redis ve DNS (kendi çözücüsü verilmişse) kurduğu her bağlantının
+adresini, ping ise çözdüğü adresi. Scheduler bir monitor'un son kontrolünün
+uğradığı her host adını ve adresi hatırlar ve bir sonraki kontrolü
+**göndermeden önce** hepsinin kovasından birer token alır; biri boşsa
+kontrol bekler ve alınanların tümü geri verilir. Böylece kontrolleri başka
+bir host'a yönlendirilen (redirect) bir monitor o host'un kovasına, o
+host'un kendi monitor'larıyla eşit koşullarda bağlıdır: kurbanın kovası
+boşken bekler, kurbanın kendi monitor'u aç kalmaz, kurbana düşen istek
+sayısı yönlendirenin değil kurbanın tavanıyla sınırlıdır. Kalan boşluk
+yalnızca şudur: bir adın uğradığı host'lar ve adresler ilk kontrolünde
+öğrenilir, dolayısıyla yeni bir adın **ilk** kontrolü (ve backend yeniden
+başladıktan sonraki ilk kontrol, çünkü bu bilgi bellektedir) yalnızca kendi
+ad kovasından düşer; sonrakiler uğradığı her anahtara bağlıdır.
+Yönlendirmeyle gelen istekler kurbanın kovasını kurbanın kendi
+monitor'larıyla eşit paylaştığı için, kovası zaten dolu bir host'a
+yönlendiren üçüncü bir taraf o host'un kendi kontrol sıklığını yarıya
+kadar düşürebilir; yük sınırı yine de tutar. DNS monitor'larında ad kovası
+sorulan ada aittir, çözücünün yükü yalnızca adres kovasıyla sınırlıdır. Scheduler her
+anahtar için bir token kovası tutar: tavanı aşan bir kontrol başarısız
+sayılmaz, sonuç yazılmaz, yalnızca sonraki tick'e ertelenir ve token gelince
+en uzun bekleyen önce çalışır. Bu sırada monitor'un API durumunda
+`throttled_since` dolu gelir, arayüzde listede ve monitor sayfasında "Hedef
+hız sınırında bekliyor" notu görünür, `kubeat_target_throttled_total{host}`
+metriği (etiket monitor'un kendi host'udur) her başlayan bekleme için bir
+kez artar (bekleme kaç tick sürerse sürsün; etiket sayısı sınırlıdır: ilk
+100 host'tan sonrakiler `other` altında sayılır). Her pod'u ayrı kontrol
+eden bir monitor pod başına bir istek harcar; izlenen yönlendirmelerin
+(redirect) her adımı da bir istek sayılır ve gittiği host'un (başka bir host
+ise onun) ve ulaştığı adresin kovasından düşer. Bir host'un kovası, son
+monitor'u silinse ya da duraklatılsa bile bir dakika daha yaşar: monitor'u
+silip yeniden oluşturmak dolu bir kova vermez.
+
+**Paylaşılan ingress ve router adresleri.** Bir cluster'ın Ingress ve Route
+host'larının hepsi genellikle tek bir yük dengeleyici ya da router IP'sine
+çözülür; o adresin kovasını hepsi paylaşır. Adres tavanı 600/dakika
+olduğundan tek adresin arkasına 30 saniye aralıkla **300**, 60 saniyeyle
+**600**, 5 dakikayla **3000** monitor sığar; ad tavanı ise host başınadır
+(dış ad için 60/dakika: tek bir `shop.example.com` host'una 30 saniyeyle 30
+monitor). Daha büyük bir kurulumda ertelenen kontroller `throttled_since`
+ve metrikle görünür; `UPTIME_TARGET_ADDRESS_MAX_RATE` değerini yükseltin ya
+da `0` ile adres kovasını kapatın. Adres kovası uydurma adların hilesini
+engellemek içindir: kapatılırsa aynı adrese çözülen her yeni ad kendi 60
+kontrol/dakikasını alır; açıkken bir kurulumun tek bir dış adrese
+yapabileceği istek en çok 600/dakikadır (saniyede 10), aynı tavan
+cluster içindeki bir router adresi için de geçerlidir (tek router
+arkasında 30 saniyeyle 300'den çok Route varsa yükseltin).
+
+**Host başına monitor sınırı.** Dış bir host'u en fazla
+`UPTIME_MAX_MONITORS_PER_HOST` (5) monitor kontrol edebilir (host anahtarı
+tavandaki ad anahtarıyla aynıdır); oluşturmada, kopyalamada, hedef değişen
+güncellemede, içe aktarmada ve annotation eşitlemesinde denetlenir, fazlası
+400 ile host'u ve sınırı söyleyerek reddedilir (`at most 5 monitors may
+check the host example.com (UPTIME_MAX_MONITORS_PER_HOST); it has 5
+already`; eşitleme aynı cümleyle atlar). Cluster içi host'lar için sınır
+yoktur.
+
+**Kotalar.** `UPTIME_MAX_MONITORS` (1000) toplam, `UPTIME_MAX_MONITORS_PER_NAMESPACE`
+(200) namespace ya da grup başına monitor sayısını sınırlar. Oluşturmada,
+kopyalamada, içe aktarmada ve annotation eşitlemesinde denetlenir; fazlası
+422 ile reddedilir, içe aktarma ve eşitleme atlanan adayları nedeniyle
+listeler (eşitleme adayları sıralı aldığından her çalışmada aynı adaylar
+atlanır). Bir monitor'u başka bir namespace'e taşımak o namespace'in
+kotasına tabidir. Kotalar yalnızca yeni monitor'ları bağlar: sınırın üstünde
+kalan mevcut monitor'lar çalışmaya ve düzenlenmeye devam eder.
+
+**Hesap başına oluşturma hızı.** Bir hesap son altmış saniyede en fazla
+`UPTIME_MONITOR_CREATE_PER_MINUTE` (30) monitor oluşturabilir; pencere
+kayar, saatin dakika sınırına bağlı değildir. API anahtarı tek hesap
+sayılır, içe aktarmadaki her monitor bir oluşturmadır; annotation
+eşitlemesi bir hesap olmadığı için bu kurala tabi değildir. Fazlası
+`Retry-After` başlığıyla 429 alır ve bir patlamanın ilk reddinde kayda
+(`monitor_create_throttled`) sayıyı söyleyen tek bir girdi düşer; yönetici
+bunu kayıt sayfasında görür. Reddedilen ya da geçersiz bir istek sayılmaz,
+adı alınmış olduğu için 409 alan bir istek de sayılmaz.
+
+**User-Agent.** Kontroller ve bildirimler kendilerini
+`kubeat/<sürüm> (+https://github.com/yusufceng/Kubeat; <UPTIME_PUBLIC_URL>)`
+olarak tanıtır (adres yalnızca `UPTIME_PUBLIC_URL` ayarlıysa); fazla istek
+gören bir sitenin işletmecisi hem yazılımı hem kurulumu bulabilir.
+`UPTIME_USER_AGENT` bunun yerine geçer.
+
+Açılışta `target guardrails in effect` log satırı yürürlükteki değerleri
+yazar.
 
 ### Gizli değerlerin şifrelenmesi
 
@@ -1861,6 +2050,7 @@ yayınlar. Başlıcaları:
 | `kubeat_monitor_cert_expiry_timestamp_seconds` | Sertifikanın bitiş zamanı |
 | `kubeat_scheduler_last_tick_timestamp_seconds` | Scheduler'ın son çalıştığı an; ilerlemiyorsa kontrol yapılmıyordur |
 | `kubeat_scheduler_dispatch_skipped_total` | Boş worker olmadığı için bekleyen kontroller; artıyorsa `UPTIME_WORKERS` düşüktür |
+| `kubeat_target_throttled_total{host}` | Hedef host, son kontrolün yönlendirildiği bir host ya da ulaştığı bir adres dakikalık kontrol tavanına (`UPTIME_TARGET_MAX_RATE`, `UPTIME_CLUSTER_TARGET_MAX_RATE`, `UPTIME_TARGET_ADDRESS_MAX_RATE`) takıldığı için beklemeye başlayan kontroller, monitor'un kendi host'u etiketiyle; her bekleme kaç tick sürerse sürsün bir kez sayılır; ilk 100 host kendi etiketiyle, sonrakiler `other` olarak sayılır (bkz. "Hedef yükü") |
 | `kubeat_results_dropped_total` | Veritabanına yazılamayan sonuçlar |
 | `kubeat_notifications_total{channel_type,event,result}` | Bildirim gönderimleri |
 
@@ -2010,7 +2200,16 @@ keşif sayfasındaki tabloyla aynı kuralla seçilir; `kubeat.io/path` verilirse
 Service portuna o yola HTTP isteği yapılır. Annotation kaldırılınca ya da
 nesne silinince monitor, geçmişiyle birlikte kaldırılır; hedef ya da
 annotation değişince monitor güncellenir. Cluster okunamazsa hiçbir şey
-değiştirilmez.
+değiştirilmez. Eşitleme "Hedef yükü" bölümündeki yük sınırlarına tabidir:
+dış bir Ingress ya da Route host'u için 30 saniyeden kısa bir
+`kubeat.io/interval` (ya da 30 saniyenin altında bir
+`UPTIME_DISCOVERY_DEFAULT_INTERVAL`), dolu bir host, namespace ya da kurulum
+kotası monitor'un oluşturulmamasına (ya da hedef değişikliğinin
+uygulanmamasına) yol açar; nesne keşif durumunda API'nin cümlesiyle atlanmış
+görünür. Var olan yönetilen bir monitor bu yüzden silinmez: dış sınırdan
+önce oluşturulmuş daha hızlı bir monitor aralığıyla birlikte olduğu gibi
+kalır ve atlananlar listesinde "kept at 10s" notuyla görünür. Hesap başına
+oluşturma hızı eşitlemeye uygulanmaz.
 
 Bu monitor'lar arayüzde **annotation** rozetiyle görünür. Hedefleri ve
 zamanlamaları nesneden geldiği için arayüzden ya da API'den değiştirilemez
@@ -2466,6 +2665,15 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_TARGET_DENY_CIDRS` | – | Kontrollerin ve bildirimlerin bağlanmayacağı, yerleşik listeye (loopback, link-local, metadata, multicast) eklenen aralıklar; virgülle ayrılmış CIDR. Bkz. "Hedef politikası" |
 | `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
+| `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL` | `30s` | Hedefi cluster dışında olan bir monitor'un en kısa kontrol (ve tekrar) aralığı; `UPTIME_MIN_CHECK_INTERVAL`'dan kısa olamaz, `0` ayrı kural yok demektir. Bkz. "Hedef yükü" |
+| `UPTIME_TARGET_MAX_RATE` | `60` | Cluster dışındaki bir host'a tüm monitor'ların birlikte dakikada yapabileceği en fazla kontrol; fazlası sonraki tick'i bekler. `0` sınırsız |
+| `UPTIME_CLUSTER_TARGET_MAX_RATE` | `600` | Aynısı, cluster içindeki bir host için. `0` sınırsız |
+| `UPTIME_TARGET_ADDRESS_MAX_RATE` | `600` | Kontrollerin ulaştığı bir IP adresine, hangi adla ulaşılırsa ulaşılsın ve adresin sınıfı ne olursa olsun, tüm monitor'ların birlikte dakikada yapabileceği en fazla kontrol; aynı adrese çözülen adlar bunu paylaşır (bkz. "Hedef yükü", paylaşılan adres paragrafı). `0` adres kovasını kapatır |
+| `UPTIME_MAX_MONITORS_PER_HOST` | `5` | Cluster dışındaki bir host'u kontrol edebilecek en fazla monitor sayısı. `0` sınırsız |
+| `UPTIME_MAX_MONITORS` | `1000` | Toplam monitor kotası; yalnızca yeni monitor'ları bağlar, üstündekiler çalışmaya devam eder. `0` sınırsız |
+| `UPTIME_MAX_MONITORS_PER_NAMESPACE` | `200` | Bir namespace'in (ya da grubun) monitor kotası; yalnızca yeni monitor'ları bağlar. `0` sınırsız |
+| `UPTIME_MONITOR_CREATE_PER_MINUTE` | `30` | Bir hesabın (API anahtarı tek hesap sayılır) bir dakikada oluşturabileceği monitor sayısı; fazlası 429 alır ve dakikada bir kayıt girdisi yazılır. `0` sınırsız |
+| `UPTIME_USER_AGENT` | – | Kontrollerin ve bildirimlerin gönderdiği `User-Agent`; boşsa `kubeat/<sürüm> (+https://github.com/yusufceng/Kubeat; <UPTIME_PUBLIC_URL>)` (adres yalnızca `UPTIME_PUBLIC_URL` ayarlıysa) |
 | `UPTIME_STATS_WINDOW` | `24h` | Uptime yüzdesinin hesaplandığı varsayılan süre |
 | `UPTIME_MAX_RESULTS` | `1000` | Tek istekte dönen en fazla kontrol sonucu |
 | `UPTIME_STATUS_PAGE_DAYS` | `90` | Durum sayfasında gösterilen gün sayısı; uptime dönemlerinden biri de bu kadardır |

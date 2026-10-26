@@ -47,7 +47,7 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 		return failedf("expected status: %w", err)
 	}
 
-	rec := newRecorder()
+	rec := newRecorder(store.Monitor{Type: store.MonitorHTTP, Target: m.Target}.Host())
 
 	var body io.Reader
 	if o.Body != "" {
@@ -113,6 +113,7 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 			if len(via) > o.MaxRedirects {
 				return redirectLimit(o.MaxRedirects)
 			}
+			rec.redirect(store.CanonicalHost(next.URL.Hostname()))
 			if store.SameServer(server, store.Endpoint(next.URL.String())) {
 				if site != "" {
 					next.Host = site

@@ -607,6 +607,7 @@ var auditTR = map[string]string{
 	"unknown user":                                "bilinmeyen kullanıcı",
 	"the account has no password here":            "hesabın burada parolası yok",
 	"%s; sign-in locked after %d failed attempts": "%s; %d hatalı denemeden sonra giriş kilitlendi",
+	createThrottled:                               "bir dakika içinde %d monitor oluşturuldu, sınır bu (UPTIME_MONITOR_CREATE_PER_MINUTE); dakika bitene kadar yeni monitor reddediliyor",
 }
 
 // Why a password sign-in failed, in the audit log's words.
