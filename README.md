@@ -2106,17 +2106,84 @@ kopya veritabanıyla birlikte kaybolur. Chart'ta `backup.enabled=true` bunun
 için ayrı bir PVC oluşturur. Bu yine aynı cluster'dadır: cluster'ın
 tamamını kaybetmeye karşı kopyaların dışarıya da taşınması gerekir.
 
-Geri yükleme:
+Kopyaları cluster dışına almak için (backend imajında `tar` olmadığından
+`kubectl cp` çalışmaz):
 
-1. Backend'i durdurun (`kubectl scale deploy/kubeat-backend --replicas=0`).
-2. Seçtiğiniz kopyayı veritabanı dosyasının yerine kopyalayın ve yanındaki
-   `-wal` ile `-shm` dosyalarını silin.
-3. Backend'i başlatın. Kopyadan sonraki kontrol sonuçları ve değişiklikler
-   kaybolur.
+```sh
+kubectl exec deploy/kubeat-backend -- ls /backup
+kubectl exec deploy/kubeat-backend -- cat /backup/kubeat-20261012T030000Z.db > kubeat-20261012T030000Z.db
+kubectl get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d > kubeat-secret.key
+```
 
-Kopyadaki gizli değerler, kopya alındığı sırada kullanılan
-`UPTIME_SECRET_KEY` ile şifrelidir. Başka bir kuruluma geri yüklerken o
-anahtarı da taşıyın; yoksa backend başlamaz.
+Anahtar dosyasını kopyalarla birlikte ama ayrı ve erişimi kısıtlı bir yerde
+saklayın. Kopyadaki gizli değerler, kopya alındığı sırada kullanılan
+`UPTIME_SECRET_KEY` ile şifrelidir; anahtarı olmayan bir kopya işe yaramaz.
+
+Geri yükleme bir yardımcı pod ile yapılır. Komutlar release adının `kubeat`
+olduğunu varsayar; değilse `kubeat-data`, `kubeat-backup` ve
+`kubeat-secret-key` adlarındaki ön eki değiştirin. Yardımcı pod backend
+imajını kullanır, ek bir imaj çekilmez:
+
+```yaml
+# kubeat-restore.yaml: image, kurulumdaki backend imajı olmalıdır
+# (kubectl get deploy kubeat-backend -o jsonpath='{..image}')
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubeat-restore
+spec:
+  restartPolicy: Never
+  containers:
+    - name: restore
+      image: ghcr.io/yusufceng/kubeat-backend:<sürüm>
+      command: ["sleep", "3600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities: { drop: ["ALL"] }
+        seccompProfile: { type: RuntimeDefault }
+      volumeMounts:
+        - { name: data, mountPath: /data }
+        - { name: backup, mountPath: /backup }   # yeni kurulumda bu ikisini çıkarın
+  volumes:
+    - name: data
+      persistentVolumeClaim: { claimName: kubeat-data }
+    - name: backup                               # yeni kurulumda bu ikisini çıkarın
+      persistentVolumeClaim: { claimName: kubeat-backup }
+```
+
+Aynı kurulumda, yedek volume'undaki bir kopyaya dönmek:
+
+1. Backend'i durdurun ve pod'un gitmesini bekleyin:
+   `kubectl scale deploy/kubeat-backend --replicas=0`.
+2. `kubectl apply -f kubeat-restore.yaml`, ardından
+   `kubectl wait --for=condition=Ready pod/kubeat-restore`.
+3. Kopyayı yerine koyun:
+   `kubectl exec kubeat-restore -- sh -c 'cp /backup/kubeat-20261012T030000Z.db /data/uptime.db.restore && mv /data/uptime.db.restore /data/uptime.db'`.
+4. `kubectl exec kubeat-restore -- ls /data` ile bakın: backend düzgün
+   kapandıysa yalnızca `uptime.db` vardır. Yanında `uptime.db-wal` ve
+   `uptime.db-shm` kaldıysa (backend çökmüşse) bu ikisini silin; yoksa eski
+   veritabanının yazılmamış sayfaları geri yüklenen kopyanın üzerine
+   uygulanmaya çalışılır.
+5. `kubectl delete pod kubeat-restore`, sonra
+   `kubectl scale deploy/kubeat-backend --replicas=1`.
+
+Cluster ya da namespace kaybolduysa, yeni bir kuruluma:
+
+1. Saklanan anahtarla bir Secret oluşturun ve chart'ı onunla kurun:
+   `kubectl create secret generic kubeat-restored-key --from-file=key=kubeat-secret.key`,
+   `helm install kubeat ... --set secretKey.existingSecret=kubeat-restored-key`.
+   Yedeklemeyi de açın (`backup.enabled=true`).
+2. Backend hazır olunca (boş bir veritabanı oluşturur) yukarıdaki 1. ve 2.
+   adımları uygulayın; yardımcı pod'da `backup` volume'u gerekmez.
+3. Bilgisayardaki kopyayı yazın:
+   `kubectl exec -i kubeat-restore -- sh -c 'cat > /data/uptime.db.restore && mv /data/uptime.db.restore /data/uptime.db' < kubeat-20261012T030000Z.db`.
+4. Yukarıdaki 4. ve 5. adımlar.
+
+Kopyadan sonraki kontrol sonuçları ve değişiklikler kaybolur. Eski bir
+sürümün kopyası yeni sürümde açılır ve şeması yükseltilir; yeni bir sürümün
+kopyası eski sürümde açılmaz. Anahtar yanlışsa backend başlamaz. Prova
+kaydı ve hedef süreler: [docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md).
 
 `kubeat_backup_last_success_timestamp_seconds` metriği son başarılı kopyanın
 zamanını verir; ilerlemiyorsa yedekleme çalışmıyordur.

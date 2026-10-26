@@ -1,0 +1,61 @@
+# Yedekten geri yükleme: hedefler ve prova kaydı
+
+Adımlar README'nin "Yedekleme ve geri yükleme" bölümündedir. Bu belge ne
+kadar veri kaybedilebileceğini, geri dönüşün ne kadar sürdüğünü ve bunun
+nasıl denendiğini kaydeder.
+
+## Hedefler
+
+| | Değer | Neye bağlı |
+|---|---|---|
+| **RPO** (kaybedilebilecek en uzun süre) | `UPTIME_BACKUP_INTERVAL`, varsayılan 24 saat | Kopya bu aralıkla alınır; son kopyadan sonraki monitor, kanal ve ayar değişiklikleri ile kontrol sonuçları kaybolur. Daha kısa RPO için aralığı düşürün (kopya çalışırken alınır, kontroller durmaz). |
+| **RTO** (geri dönüş süresi) | Aynı kurulumda birkaç dakika; yeni kurulumda kurulum süresi + birkaç dakika | Provada yeni bir namespace'e kurulum dahil 76 saniye sürdü (imajlar önbellekteydi). Büyük veritabanında kopyanın taşınma süresi eklenir. |
+| **Cluster kaybı** | Kopyalar ve anahtar dışarıda saklanmışsa geri dönülebilir | Yedek PVC'si aynı cluster'dadır. Kopyaları ve `kubeat-secret-key` içeriğini dışarıya taşımak kurulumu yapanın işidir. |
+
+Geri yüklemenin geri getirmedikleri:
+
+- Kopyadan sonraki kontrol sonuçları ve olaylar. Bu sürede çıkan kesintiler
+  geçmişte görünmez.
+- Gönderilmiş bildirimler. Kopyadan sonra açılıp kapanmış bir olay yeniden
+  bildirilmez; hâlâ süren bir kesinti kontroller başlayınca yeniden bulunur.
+- Anahtarsız bir kopya. Gizli değerler (token'lar, parolalar, webhook
+  adresleri) anahtar olmadan okunamaz. Yanlış anahtarla backend açılışta
+  durur ve nedenini yazar.
+
+## Prova: 2026-10-26, minikube, 0.41.0
+
+Senaryo: namespace'in tamamı kaybolur. Elde yalnızca dışarı alınmış son
+kopya ve anahtar vardır. Geri yükleme sıfırdan yeni bir kuruluma yapılır.
+
+1. `kubeat-rh-a` namespace'ine `backup.enabled=true` ve
+   `backup.interval=2m` ile kuruldu. API üzerinden 3 HTTP monitor ve
+   adresi şifreli saklanan bir webhook kanalı eklendi.
+2. Son kopya `kubectl exec ... cat` ile, anahtar Secret'tan bilgisayara
+   alındı. Kopya `PRAGMA integrity_check` = ok, şema 26, 3 monitor ve 9
+   kontrol sonucu içeriyordu.
+3. Release kaldırıldı ve namespace silindi. Bununla veri ve yedek PVC'leri
+   de gitti.
+4. `kubeat-rh-b` namespace'ine saklanan anahtarla
+   (`secretKey.existingSecret`) yeni kurulum yapıldı. Backend sıfıra
+   ölçeklendi, yardımcı pod ile kopya `kubeat-data`'ya yazıldı, backend
+   yeniden başlatıldı.
+5. Sonuç: 3 monitor ve webhook kanalı geri geldi. Kanalın şifreli adresi
+   anahtarla çözüldü. Dosya izni açılışta `0600`'a çekildi.
+
+Toplam süre, namespace oluşturmadan backend'in hazır olmasına kadar
+**76 saniye**.
+
+Provada görülenler, README'ye işlendi:
+
+- Backend imajında `tar` yok, bu yüzden `kubectl cp` çalışmaz. Dosyalar
+  `kubectl exec ... cat` ile taşınır.
+- Backend düzgün kapandığında `-wal` ve `-shm` dosyası kalmaz. Bunları
+  silmek yalnızca backend çökmüşse gerekir.
+- Yardımcı pod backend imajıyla çalışabilir, ek bir imaj gerekmez. OpenShift
+  `restricted-v2` SCC altında kullanıcıyı namespace aralığından alır ve aynı
+  namespace'teki backend ile aynı UID'yi kullanır.
+
+## Yeniden prova
+
+Sürüm şemayı değiştirdiğinde ya da yedekleme kodu değiştiğinde prova
+tekrarlanır. Bu belgeye tarih, sürüm ve süre eklenir.
