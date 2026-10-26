@@ -45,6 +45,11 @@ turn SSO off (leave oidc.issuer empty).
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-frontend 3000:3000
   then http://localhost:3000
 {{- end }}
+{{- if and (or .Values.oidc.issuer .Values.ldap.url) (not .Values.license.existingSecret) }}
+
+Signing in through LDAP or OIDC needs a Kubeat Enterprise license
+(license.existingSecret); without one only local accounts can sign in.
+{{- end }}
 {{- if .Values.oidc.issuer }}
 {{- with include "kubeat.oidcRedirectURL" . }}
 

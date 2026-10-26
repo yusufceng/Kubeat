@@ -29,6 +29,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/heartbeat"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
+	"github.com/yusufceng/Kubeat/backend/internal/license"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/oidcauth"
@@ -107,6 +108,11 @@ func main() {
 	userAgent := cfg.UserAgentFor(version)
 
 	meter := metrics.New(version)
+	lic := license.NewManager(cfg.LicenseFile, license.PublicKey)
+	reportLicense(lic.Status(), meter, logger)
+	if (cfg.LDAPURL != "" || cfg.OIDCIssuer != "") && !lic.Allows(license.SSO) {
+		logger.Warn("LDAP or OIDC is configured, but signing in through it needs a Kubeat Enterprise license with the sso feature; only local accounts can sign in")
+	}
 	meter.WatchMonitors(db, cfg.MetricsTimeout, logger)
 
 	// Checks and notifications connect only where the target policy allows:
@@ -304,6 +310,11 @@ func main() {
 		defer background.Done()
 		runSessionCleanup(ctx, db, cfg.AuditRetention, logger)
 	}()
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		watchLicense(ctx, lic, cfg.LicenseReloadInterval, meter, logger)
+	}()
 	throttle := &auth.Throttle{MaxFailures: cfg.LoginMaxFailures, Lockout: cfg.LoginLockout, MaxKeys: cfg.LoginThrottleMaxKeys, Logger: logger}
 	background.Add(1)
 	go func() {
@@ -384,6 +395,7 @@ func main() {
 			EventLimit:               cfg.EventLimit,
 			TimelineLimit:            cfg.IncidentTimelineLimit,
 			DiscoveryStatus:          discoveryStatus,
+			License:                  lic,
 			Logger:                   logger,
 
 			DefaultFailureThreshold: cfg.DefaultFailureThreshold,
@@ -675,6 +687,49 @@ func (p podEndpoints) PodEndpoints(ctx context.Context, namespace, source string
 		out = append(out, checker.Endpoint{Pod: e.Pod, Address: e.Address})
 	}
 	return out, nil
+}
+
+// reportLicense logs where the license stands and sets its metric.
+func reportLicense(s license.Status, meter *metrics.Metrics, logger *slog.Logger) {
+	meter.License(time.Time{})
+	switch s.State {
+	case license.Community:
+		logger.Info("community edition: no license configured (UPTIME_LICENSE_FILE)")
+		return
+	case license.Invalid:
+		logger.Error("the license cannot be used; Kubeat Enterprise features are off, monitoring goes on", "problem", s.Problem)
+		return
+	}
+	meter.License(s.ExpiresAt)
+	attrs := []any{"customer", s.Customer, "id", s.ID, "features", s.Features, "expires", s.ExpiresAt.Format(time.DateOnly)}
+	switch s.State {
+	case license.Active:
+		logger.Info("license in effect", attrs...)
+	case license.Expiring:
+		logger.Warn("the license ends soon; renew it to keep its features", attrs...)
+	case license.Expired:
+		logger.Warn("the license has ended; Kubeat Enterprise features are off, monitoring goes on", attrs...)
+	}
+}
+
+// watchLicense reads the license file again when it changes, and reports
+// when the license changes or moves on to ending or ended.
+func watchLicense(ctx context.Context, lic *license.Manager, interval time.Duration, meter *metrics.Metrics, logger *slog.Logger) {
+	last := lic.Status().State
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		changed := lic.Reload()
+		if s := lic.Status(); changed || s.State != last {
+			reportLicense(s, meter, logger)
+			last = s.State
+		}
+	}
 }
 
 // runSessionCleanup drops expired sessions and old audit entries, hourly.

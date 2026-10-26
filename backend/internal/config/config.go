@@ -225,6 +225,12 @@ type Config struct {
 	BackupInterval time.Duration // UPTIME_BACKUP_INTERVAL
 	BackupKeep     int           // UPTIME_BACKUP_KEEP
 
+	// The Kubeat Enterprise license, a mounted Secret for instance; empty
+	// is the community edition. The file is read again every
+	// LicenseReloadInterval when it changed, so a renewal needs no restart.
+	LicenseFile           string        // UPTIME_LICENSE_FILE
+	LicenseReloadInterval time.Duration // UPTIME_LICENSE_RELOAD_INTERVAL
+
 	// Heartbeats go to an external dead man's switch; off while the URL is
 	// empty. MetricsTimeout bounds the database read done for a scrape.
 	HeartbeatURL      string        // UPTIME_HEARTBEAT_URL
@@ -335,6 +341,7 @@ func Load() (Config, error) {
 
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
 		BackupDir:    envString("UPTIME_BACKUP_DIR", ""),
+		LicenseFile:  envString("UPTIME_LICENSE_FILE", ""),
 
 		PrometheusURL:         envString("UPTIME_PROMETHEUS_URL", ""),
 		PrometheusTokenFile:   envString("UPTIME_PROMETHEUS_TOKEN_FILE", ""),
@@ -402,6 +409,7 @@ func Load() (Config, error) {
 		{&cfg.HeartbeatTimeout, "UPTIME_HEARTBEAT_TIMEOUT", 10 * time.Second},
 		{&cfg.MetricsTimeout, "UPTIME_METRICS_TIMEOUT", 5 * time.Second},
 		{&cfg.BackupInterval, "UPTIME_BACKUP_INTERVAL", 24 * time.Hour},
+		{&cfg.LicenseReloadInterval, "UPTIME_LICENSE_RELOAD_INTERVAL", time.Minute},
 		{&cfg.PrometheusTimeout, "UPTIME_PROMETHEUS_TIMEOUT", 10 * time.Second},
 		{&cfg.PrometheusRateWindow, "UPTIME_PROMETHEUS_RATE_WINDOW", 5 * time.Minute},
 	}

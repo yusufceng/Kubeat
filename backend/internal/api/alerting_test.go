@@ -175,7 +175,7 @@ func TestChannelTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(NewHandler(Options{
-		Store: db, Token: testToken, EmailEnabled: true, MaxResults: 100,
+		Store: db, Token: testToken, EmailEnabled: true, MaxResults: 100, License: fullLicense{},
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))
 	t.Cleanup(func() {

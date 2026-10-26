@@ -82,6 +82,8 @@ func TestLoadDefaults(t *testing.T) {
 		BackupInterval: 24 * time.Hour,
 		BackupKeep:     7,
 
+		LicenseReloadInterval: time.Minute,
+
 		HeartbeatInterval: time.Minute,
 		HeartbeatTimeout:  10 * time.Second,
 		MetricsTimeout:    5 * time.Second,

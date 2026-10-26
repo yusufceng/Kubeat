@@ -204,6 +204,23 @@ yavaş yanıt eşiği kapalı olarak sürer.
   oldu; eskisine göre süzen bir WAF kuralı varsa güncelleyin ya da
   `UPTIME_USER_AGENT` verin.
 
+### 0.42'ye yükseltme
+
+0.42 Kubeat Enterprise lisansını getirir (bkz. "Kubeat Enterprise
+lisansı"). Şema değişmez. Aşağıdakilerden birini kullanıyorsanız
+**yükseltmeden önce** lisansı Secret olarak verin
+(`license.existingSecret`); vermezseniz yükseltme yine çalışır ama:
+
+- LDAP ve OIDC ile giriş kapanır; yalnızca yerel hesaplar girebilir.
+- Namespace'le sınırlı kullanıcılar ve dizin grupları **sınırlı kalır**;
+  yeni bir sınır konamaz, mevcut sınır daraltılabilir ya da kaldırılabilir
+  ama genişletilemez.
+- Denetim kaydı görünmez; yazılmaya devam eder.
+- Birden fazla durum sayfası varsa hepsi yayında kalır ve düzenlenebilir,
+  yalnızca yenisi oluşturulamaz.
+
+İzleme, alarmlar ve bildirimler lisanstan etkilenmez.
+
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
 Chart dört Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde
@@ -1402,6 +1419,7 @@ eklenmelidir.
 | Metot | Yol | Açıklama |
 | --- | --- | --- |
 | `GET` | `/api/v1/health` | Backend sağlık durumu |
+| `GET` | `/api/v1/license` | Lisansın durumu (`community`, `active`, `expiring`, `expired`, `invalid`), şu an açık özellikler ve bitiş tarihi. Müşteri adını, lisans numarasını ve sorunu yalnızca yöneticiler görür |
 | `GET` | `/metrics` | Prometheus metrikleri |
 | `GET` | `/api/v1/monitors?window=24h` | Monitor'lar; son durum ve uptime ile. İsteğe bağlı: `namespace=x`, `ids=1,2`, `history=40` (her monitor'un son kontrolleri) |
 | `POST` | `/api/v1/monitors` | Monitor ekler |
@@ -2657,6 +2675,53 @@ liste bağlantı olarak paylaşılabilir); zaman süzgecinin "son …" seçenekl
 indir" o an seçili süzgeçle eşleşen bütün olayları, listenin sırasıyla
 indirir.
 
+## Kubeat Enterprise lisansı
+
+Kubeat lisanssız da tam bir izleme aracıdır: monitor'ler, keşif, alarmlar,
+bildirim kanalları, raporlar ve bir durum sayfası lisans istemez. Kubeat
+Enterprise lisansı şu özellikleri açar:
+
+| Özellik | Lisanssız |
+| --- | --- |
+| `sso`: LDAP ve OIDC ile giriş, dizin gruplarını rollere eşlemek | Ayarlı olsa da kapalıdır; yalnızca yerel hesaplar girer |
+| `scoped_access`: kullanıcıları ve grupları namespace'lerle sınırlamak | Her rol tüm namespace'leri (`*`) görür |
+| `audit`: denetim kaydını görmek | Kayıt yine yazılır; lisans gelince geçmişiyle görünür |
+| `status_pages`: birden fazla durum sayfası | Bir durum sayfası oluşturulabilir |
+
+Lisans, Kubeat'in çevrimdışı anahtarıyla imzalanmış bir dosyadır. İçinde
+müşteri, açtığı özellikler ve bitiş tarihi yazar. Backend imzayı kendi
+içindeki açık anahtarla doğrular; hiçbir yere bağlanmaz, lisans sunucusu
+yoktur. Chart'ta dosya bir Secret olarak verilir:
+
+```sh
+kubectl create secret generic kubeat-license --from-file=license=acme.license
+helm upgrade kubeat ... --set license.existingSecret=kubeat-license
+```
+
+Chart dışında dosyanın yolu `UPTIME_LICENSE_FILE` ile verilir. Backend
+dosyayı `UPTIME_LICENSE_RELOAD_INTERVAL` (1 dakika) aralıkla kontrol eder:
+Secret'ı yenilemek yeterlidir, yeniden başlatma gerekmez. Lisansın durumu
+**Kullanıcılar** sayfasının altında görünür.
+
+Bitişten 30 gün önce yöneticiler her sayfada bir uyarı görür, backend de
+log'a yazar. `kubeat_license_expiry_timestamp_seconds` metriği bitiş
+zamanını verir; buna kendi alarmınızı kurabilirsiniz.
+
+Lisans bittiğinde ya da kullanılamaz olduğunda:
+
+- **İzleme durmaz.** Kontroller, alarmlar, bildirimler ve durum sayfaları
+  çalışmaya devam eder.
+- Lisansın açtığı özellikler kapanır: LDAP ve OIDC ile giriş yapılamaz
+  (açık oturumlar süreleri dolana kadar sürer), denetim kaydı görünmez,
+  yeni bir namespace sınırı ya da ikinci bir durum sayfası oluşturulamaz.
+- **Hiçbir erişim genişlemez.** Namespace'le sınırlı kullanıcılar sınırlı
+  kalır; sınır daraltılabilir ya da kaldırılabilir ama başka
+  namespace'lere taşınamaz ve genişletilemez. Mevcut
+  durum sayfaları yayında kalır ve düzenlenebilir.
+- Yöneticilerin hepsi dizin ya da SSO hesabıysa arayüze yerel bir yönetici
+  hesabıyla girilir: chart'ın oluşturduğu `admin`, gerekirse
+  `UPTIME_ADMIN_PASSWORD_RESET` ile. API anahtarı da çalışmaya devam eder.
+
 ## Yapılandırma
 
 Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
@@ -2783,6 +2848,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_BACKUP_DIR` | – | Veritabanı kopyalarının yazılacağı dizin; boşsa yedekleme kapalıdır |
 | `UPTIME_BACKUP_INTERVAL` | `24h` | Kopyalar arasındaki süre |
 | `UPTIME_BACKUP_KEEP` | `7` | Saklanan kopya sayısı |
+| `UPTIME_LICENSE_FILE` | – | Kubeat Enterprise lisans dosyasının yolu, örneğin bağlanmış bir Secret; boşsa topluluk sürümü (bkz. "Kubeat Enterprise lisansı") |
+| `UPTIME_LICENSE_RELOAD_INTERVAL` | `1m` | Lisans dosyasının değişip değişmediğine bakma aralığı; yenilenen lisans yeniden başlatmadan etkinleşir |
 | `UPTIME_HEARTBEAT_URL` | – | Dead man's switch adresi; boşsa heartbeat gönderilmez |
 | `UPTIME_HEARTBEAT_INTERVAL` | `1m` | Heartbeat aralığı; `UPTIME_SCHEDULER_TICK`'in en az iki katı |
 | `UPTIME_HEARTBEAT_TIMEOUT` | `10s` | Heartbeat isteğinin zaman aşımı |
@@ -2841,4 +2908,6 @@ Branch stratejisi ve commit kuralları: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Lisans
 
-[Apache License 2.0](LICENSE). Katkılar aynı lisansla kabul edilir.
+Kaynak kodu [Apache License 2.0](LICENSE) ile yayınlanır. Katkılar aynı
+lisansla kabul edilir. Kubeat Enterprise özellikleri bir lisans dosyasıyla
+açılır (bkz. "Kubeat Enterprise lisansı").

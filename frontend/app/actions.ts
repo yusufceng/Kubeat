@@ -26,6 +26,7 @@ import {
   type DnsOptions,
   type HttpOptions,
   importCandidates,
+  missingFeature,
   renewPushToken,
   restoreSource,
   type MaintenanceRepeat,
@@ -384,6 +385,8 @@ export async function importCandidatesAction(
 
 async function describe(err: unknown): Promise<string> {
   const t = await getT();
+  const feature = missingFeature(err);
+  if (feature) return t("license.required", { feature: t(`license.feature.${feature}`) });
   if (err instanceof ApiError) {
     if (err.status === 409) return t("monitorForm.actions.error.conflict");
     if (err.status === 400) return t("monitorForm.actions.error.invalid", { message: err.message });

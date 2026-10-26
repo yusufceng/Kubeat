@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
+	"github.com/yusufceng/Kubeat/backend/internal/license"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -388,6 +389,17 @@ func (h *handler) createStatusPage(w http.ResponseWriter, r *http.Request) {
 	var req statusPageRequest
 	if !decodeBody(w, r, &req) {
 		return
+	}
+	if !h.licensed(license.StatusPages) {
+		pages, err := h.opts.Store.ListStatusPages(r.Context())
+		if err != nil {
+			h.internalError(w, r, err)
+			return
+		}
+		if len(pages) >= license.CommunityStatusPages &&
+			!h.requireLicense(w, license.StatusPages, fmt.Sprintf("more than %d status page", license.CommunityStatusPages)) {
+			return
+		}
 	}
 	p := store.StatusPage{Published: true, DetailPages: true}
 	if err := h.applyStatusPage(r, req, &p); err != nil {

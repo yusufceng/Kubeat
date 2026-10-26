@@ -8,7 +8,7 @@ import { sessionToken } from "@/lib/session";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 28;
+export const REQUIRED_API_REVISION = 29;
 
 export type Health = {
   status: string;
@@ -481,6 +481,36 @@ export type MonitorSettings = {
 };
 
 export type NewMonitor = MonitorSettings & { type: MonitorType };
+
+/** What a Kubeat Enterprise license turns on. */
+export const licenseFeatures = ["sso", "scoped_access", "audit", "status_pages"] as const;
+export type LicenseFeature = (typeof licenseFeatures)[number];
+
+/**
+ * Where the license stands. Who it is for, its id and the problem with an
+ * unusable one only administrators are told.
+ */
+export type License = {
+  state: "community" | "active" | "expiring" | "expired" | "invalid";
+  problem?: string;
+  id?: string;
+  customer?: string;
+  /** The features on now: none once the license ended. */
+  features: LicenseFeature[];
+  issued_at?: string;
+  expires_at?: string;
+  /** How many status pages can be made without the status_pages feature. */
+  community_status_pages: number;
+};
+
+export const getLicense = () => request<License>("/license");
+
+/** The feature a 402 answer says the license lacks; null for any other error. */
+export function missingFeature(err: unknown): LicenseFeature | null {
+  if (!(err instanceof ApiError) || err.status !== 402) return null;
+  const feature = (err.body as { feature?: string } | undefined)?.feature;
+  return licenseFeatures.find((f) => f === feature) ?? null;
+}
 
 /** A non-2xx answer from the backend. */
 export class ApiError extends Error {
@@ -1429,7 +1459,13 @@ export const updateUser = (id: number, changes: UserChanges) =>
 
 export const deleteUser = (id: number) => request<void>(`/users/${id}`, { method: "DELETE" });
 
-export type LdapStatus = { enabled: boolean; url?: string; default_role: Role | "" };
+export type LdapStatus = {
+  enabled: boolean;
+  url?: string;
+  default_role: Role | "";
+  /** Why directory sign-in is off although it is configured: the license. */
+  problem?: string;
+};
 
 export type GroupRole = { id: number; group_dn: string; role: Role; namespaces: string[]; created_at: string };
 

@@ -234,14 +234,17 @@ type Options struct {
 	// halves, with the number left out between them. Below 2 (which leaves
 	// no room for both ends) it is 100.
 	TimelineLimit int
-	Logger        *slog.Logger
+	// License turns on the Kubeat Enterprise features; nil is the
+	// community edition.
+	License License
+	Logger  *slog.Logger
 }
 
 // Revision identifies the shape of the API. Increase it whenever a response
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 28
+const Revision = 29
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -361,6 +364,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("PATCH /api/v1/ldap/groups/{id}", h.updateGroupRole)
 	mux.HandleFunc("DELETE /api/v1/ldap/groups/{id}", h.deleteGroupRole)
 	mux.HandleFunc("GET /api/v1/audit", h.listAudit)
+	mux.HandleFunc("GET /api/v1/license", h.getLicense)
 	if h.opts.Throttle == nil {
 		h.opts.Throttle = &auth.Throttle{MaxFailures: 10, Lockout: 15 * time.Minute}
 	}

@@ -6,6 +6,7 @@ import {
   createStatusPage,
   createStatusPageUpdate,
   deleteStatusPageUpdate,
+  missingFeature,
   type StatusPageSettings,
   type StatusPageUpdateSettings,
   updateStatusPage,
@@ -16,6 +17,8 @@ import { getT } from "@/lib/i18n/server";
 /** What the editor is told went wrong, in their language; a 400 carries the backend's own words. */
 async function describe(err: unknown): Promise<string> {
   const t = await getT();
+  const feature = missingFeature(err);
+  if (feature) return t("license.required", { feature: t(`license.feature.${feature}`) });
   if (err instanceof ApiError) {
     if (err.status === 409) return t("monitorForm.actions.slugTaken");
     if (err.status === 400) return t("monitorForm.actions.error.invalid", { message: err.message });

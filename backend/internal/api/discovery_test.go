@@ -46,7 +46,7 @@ func newDiscoveryAPI(t *testing.T, d Discovery) *httptest.Server {
 	opts := Options{
 		Store: db, Token: testToken, MinCheckInterval: 5 * time.Second, StatsWindow: 24 * time.Hour, MaxResults: 100,
 		DefaultFailureThreshold: 3, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		DiscoveryStatus: "no cluster",
+		DiscoveryStatus: "no cluster", License: fullLicense{},
 	}
 	if d != nil {
 		opts.Discovery, opts.DiscoveryStatus = d, "in-cluster"

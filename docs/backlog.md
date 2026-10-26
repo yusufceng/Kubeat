@@ -105,3 +105,22 @@ açılışta çöküyor. ESLint 10.13 ile lint geçiyor, ama eslint-config-next
 `eslint-plugin-react` eklentileri peer olarak `eslint ^9` istiyor. İkisi de
 bu eklentiler destek verdiğinde yeniden denenir. O zamana kadar
 Dependabot'un PR'ları (#12, #13) kapatılabilir.
+
+## Kurumsal kodun lisansı
+
+2026-10-26'da open-core seçildi; 0.42'den itibaren kurumsal özellikler
+imzalı bir lisans dosyasıyla açılıyor (README, "Kubeat Enterprise
+lisansı"). Kodun tamamı hâlâ Apache-2.0: lisans kontrolünü koddan çıkaran
+biri bunu yasal olarak yapabilir. Lisans dosyası teknik bir kilit değil,
+sözleşmenin bir parçasıdır. Satış ciddileşirse şunlar kararlaştırılır:
+
+- Kurumsal özelliklerin kodunu (`ldapauth`, `oidcauth` ve kapıların
+  arkasındaki kısımlar) ayrı bir dizine (`ee/`) ve kaynak açık ama ticari
+  bir lisansa (Elastic License 2.0, BSL ya da özel bir EULA) taşımak.
+  Yayınlanmış sürümler Apache olarak kalır.
+- EULA, üçüncü taraf lisans taraması, marka araştırması, destek süreci.
+- Dış katkı gelmeye başlarsa CLA ya da DCO.
+
+İmzalama aracı Kubeat deposunda değil, `~/kubeat-license-issuer` içinde
+(yalnızca yerel git). Özel bir GitHub deposuna taşınması ve imzalama
+anahtarının çevrimdışı yedeği kullanıcıdadır.

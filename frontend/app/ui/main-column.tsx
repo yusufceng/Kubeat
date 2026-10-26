@@ -1,5 +1,6 @@
 import { BackendWarning } from "@/app/ui/backend-warning";
 import { ContextBar } from "@/app/ui/context-bar";
+import { LicenseWarning } from "@/app/ui/license-warning";
 
 /**
  * The column a page lives in: the context bar over it, and below that the
@@ -15,6 +16,7 @@ export function MainColumn({ children }: { children: React.ReactNode }) {
     <div className="order-1 flex min-w-0 flex-1 flex-col lg:order-2 lg:h-dvh">
       <ContextBar />
       <BackendWarning />
+      <LicenseWarning />
       <div id="content" className="relative flex-1 lg:min-h-0 lg:overflow-y-auto">
         {children}
       </div>

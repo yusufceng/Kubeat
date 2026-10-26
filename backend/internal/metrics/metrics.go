@@ -35,6 +35,7 @@ type Metrics struct {
 	lastHeartbeat     prometheus.Gauge
 	backups           *prometheus.CounterVec
 	lastBackup        prometheus.Gauge
+	licenseExpiry     prometheus.Gauge
 	targetThrottled   *prometheus.CounterVec
 
 	// hosts are the host labels targetThrottled has been given so far; past
@@ -118,6 +119,11 @@ func New(version string) *Metrics {
 		Help: "When a database backup last succeeded; 0 if none has since the process started.",
 	})
 
+	m.licenseExpiry = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "kubeat_license_expiry_timestamp_seconds",
+		Help: "When the Kubeat Enterprise license ends; 0 without a usable license.",
+	})
+
 	build := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "kubeat_build_info",
 		Help:        "Always 1; the version is in the label.",
@@ -135,6 +141,7 @@ func New(version string) *Metrics {
 		m.heartbeats, m.lastHeartbeat,
 		m.backups, m.lastBackup,
 		m.targetThrottled,
+		m.licenseExpiry,
 	)
 	return m
 }
@@ -265,6 +272,18 @@ func (m *Metrics) Heartbeat(result string, at time.Time) {
 	if result == HeartbeatSent {
 		m.lastHeartbeat.Set(float64(at.UnixMilli()) / 1000)
 	}
+}
+
+// License records when the license ends; the zero time without one.
+func (m *Metrics) License(expires time.Time) {
+	if m == nil {
+		return
+	}
+	if expires.IsZero() {
+		m.licenseExpiry.Set(0)
+		return
+	}
+	m.licenseExpiry.Set(float64(expires.Unix()))
 }
 
 // Backup records one backup attempt.

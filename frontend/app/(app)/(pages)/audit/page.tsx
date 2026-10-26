@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { type AuditEntry, listAudit } from "@/lib/api";
+import { type AuditEntry, listAudit, missingFeature } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
 import { config } from "@/lib/config";
 import { getT, titled } from "@/lib/i18n/server";
@@ -46,6 +46,13 @@ async function Audit() {
   try {
     entries = await listAudit(config.auditLimit);
   } catch (err) {
+    if (missingFeature(err)) {
+      return (
+        <EmptyState icon={<LockIcon width={20} height={20} />} title={t("license.required.title")}>
+          {t("license.required.audit")}
+        </EmptyState>
+      );
+    }
     return <BackendError what={t("nav.audit")} err={err} />;
   }
   if (entries.length === 0) {

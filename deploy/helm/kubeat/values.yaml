@@ -206,6 +206,16 @@ backup:
     storageClass: ""     # empty uses the cluster default
     existingClaim: ""    # use this PVC instead of creating one
 
+# The Kubeat Enterprise license. Without one Kubeat is the community
+# edition: monitoring, notifications and status pages work either way; the
+# license turns on signing in through LDAP and OIDC, limiting users to
+# namespaces, reading the audit log and more than one status page. Give it
+# as a Secret with the key "license":
+#   kubectl create secret generic kubeat-license --from-file=license=acme.license
+# A renewed Secret takes effect within a few minutes, without a restart.
+license:
+  existingSecret: ""
+
 # The API token, for scripts and automation: a request presenting it acts as
 # an administrator, which also makes it the way in when the administrators'
 # accounts are locked. By default the chart generates it once and keeps it.

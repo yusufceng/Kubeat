@@ -177,6 +177,10 @@ spec:
             - name: UPTIME_BACKUP_KEEP
               value: {{ .Values.backup.keep | quote }}
             {{- end }}
+            {{- if .Values.license.existingSecret }}
+            - name: UPTIME_LICENSE_FILE
+              value: /etc/kubeat/license/license
+            {{- end }}
             {{- with .Values.prometheus }}
             {{- if .url }}
             - name: UPTIME_PROMETHEUS_URL
@@ -271,6 +275,13 @@ spec:
             - name: backup
               mountPath: /backup
             {{- end }}
+            {{- if .Values.license.existingSecret }}
+            # The whole directory, so that a renewed Secret reaches the
+            # file and the backend reads it again without a restart.
+            - name: license
+              mountPath: /etc/kubeat/license
+              readOnly: true
+            {{- end }}
             # The root filesystem is read-only; SQLite keeps temporary files here.
             - name: tmp
               mountPath: /tmp
@@ -285,6 +296,14 @@ spec:
         - name: backup
           persistentVolumeClaim:
             claimName: {{ .Values.backup.persistence.existingClaim | default (printf "%s-backup" .Release.Name) }}
+        {{- end }}
+        {{- with .Values.license.existingSecret }}
+        - name: license
+          secret:
+            secretName: {{ . }}
+            items:
+              - key: license
+                path: license
         {{- end }}
         - name: tmp
           emptyDir: {}

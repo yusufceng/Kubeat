@@ -14,6 +14,7 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
+	"github.com/yusufceng/Kubeat/backend/internal/license"
 	"github.com/yusufceng/Kubeat/backend/internal/oidcauth"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -223,6 +224,27 @@ func scopeNamespaces(role store.Role, namespaces []string) ([]string, error) {
 	return out, nil
 }
 
+// scoped reports whether namespaces, as scopeNamespaces returns them,
+// limit a user to some namespaces rather than none (an administrator) or
+// all of them.
+func scoped(namespaces []string) bool {
+	return len(namespaces) > 0 && !(len(namespaces) == 1 && namespaces[0] == store.AllNamespaces)
+}
+
+// narrows reports whether the limit after is the scoped limit before, or
+// a part of it: no namespace is added.
+func narrows(before, after []string) bool {
+	if !scoped(before) {
+		return false
+	}
+	for _, ns := range after {
+		if !slices.Contains(before, ns) {
+			return false
+		}
+	}
+	return true
+}
+
 // newSession signs the user in and returns the token for their browser.
 func (h *handler) newSession(ctx context.Context, u store.User) (token string, expires time.Time, err error) {
 	token, hash, err := auth.NewToken()
@@ -268,8 +290,8 @@ func (h *handler) authProviders(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 		return
 	}
-	resp := providersResponse{SetupNeeded: n == 0, LDAP: h.opts.LDAP != nil}
-	if h.opts.OIDC != nil {
+	resp := providersResponse{SetupNeeded: n == 0, LDAP: h.ldap() != nil}
+	if h.oidc() != nil {
 		resp.OIDC = &oidcProvider{Name: h.opts.OIDCName}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -278,11 +300,12 @@ func (h *handler) authProviders(w http.ResponseWriter, r *http.Request) {
 // oidcStart begins a sign-in through the provider: the answer is the URL
 // the browser is to be sent to.
 func (h *handler) oidcStart(w http.ResponseWriter, r *http.Request) {
-	if h.opts.OIDC == nil {
+	provider := h.oidc()
+	if provider == nil {
 		writeError(w, http.StatusNotFound, "OIDC sign-in is not configured")
 		return
 	}
-	url, err := h.opts.OIDC.Start(r.Context(), r.URL.Query().Get("redirect"))
+	url, err := provider.Start(r.Context(), r.URL.Query().Get("redirect"))
 	if err != nil {
 		h.opts.Logger.Error("oidc sign-in could not start", "error", err)
 		writeError(w, http.StatusBadGateway, "the identity provider could not be reached; try again later")
@@ -299,7 +322,8 @@ type oidcCallbackRequest struct {
 // oidcCallback completes a sign-in with what the provider sent back and
 // answers with a session, like a password sign-in.
 func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
-	if h.opts.OIDC == nil {
+	provider := h.oidc()
+	if provider == nil {
 		writeError(w, http.StatusNotFound, "OIDC sign-in is not configured")
 		return
 	}
@@ -311,7 +335,7 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "state and code are required")
 		return
 	}
-	id, err := h.opts.OIDC.Finish(r.Context(), req.State, req.Code)
+	id, err := provider.Finish(r.Context(), req.State, req.Code)
 	switch {
 	case errors.Is(err, oidcauth.ErrInvalidState):
 		unauthorized(w, "the sign-in expired or was not started here; try again")
@@ -479,7 +503,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			h.loginFailed(w, r, req.Username, wrongPassword, attempt, known)
 			return
 		}
-	case h.opts.LDAP != nil && (!known || user.Source == store.UserLDAP):
+	case h.ldap() != nil && (!known || user.Source == store.UserLDAP):
 		// An account that signs in through SSO is not the directory's to
 		// take: the same name there may be someone else.
 		identity, err := h.askDirectory(r.Context(), req.Username, req.Password)
@@ -926,6 +950,9 @@ func (h *handler) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if scoped(namespaces) && !h.requireLicense(w, license.ScopedAccess, "limiting a user to some namespaces") {
+		return
+	}
 	if err := auth.ValidatePassword(req.Username, req.Password, h.opts.PasswordMinLength); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1010,8 +1037,15 @@ func (h *handler) updateUser(w http.ResponseWriter, r *http.Request) {
 		if req.Namespaces != nil {
 			given = *req.Namespaces
 		}
+		before := u.Namespaces
 		if u.Namespaces, err = scopeNamespaces(u.Role, given); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// A limit set under a license stays, and can be narrowed or lifted,
+		// without one; only setting a new one, or moving it, needs it.
+		if scoped(u.Namespaces) && !narrows(before, u.Namespaces) &&
+			!h.requireLicense(w, license.ScopedAccess, "limiting a user to some namespaces") {
 			return
 		}
 	}
@@ -1096,11 +1130,14 @@ func (h *handler) oidcStatus(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {
 		return
 	}
-	resp := oidcStatusResponse{Enabled: h.opts.OIDC != nil, DefaultRole: h.opts.OIDCDefaultRole}
-	if h.opts.OIDC != nil {
-		resp.Issuer, resp.Name = h.opts.OIDC.Issuer(), h.opts.OIDCName
-	} else {
+	resp := oidcStatusResponse{Enabled: h.oidc() != nil, DefaultRole: h.opts.OIDCDefaultRole}
+	switch {
+	case h.opts.OIDC == nil:
 		resp.Problem = h.opts.OIDCProblem
+	case !resp.Enabled:
+		resp.Issuer, resp.Name, resp.Problem = h.opts.OIDC.Issuer(), h.opts.OIDCName, ssoUnlicensed
+	default:
+		resp.Issuer, resp.Name = h.opts.OIDC.Issuer(), h.opts.OIDCName
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1111,15 +1148,23 @@ type ldapStatusResponse struct {
 	// DefaultRole is what a directory user gets without a mapped group;
 	// empty means they cannot sign in.
 	DefaultRole store.Role `json:"default_role"`
+	// Problem says why directory sign-in is off although it is configured.
+	Problem string `json:"problem,omitempty"`
 }
+
+// ssoUnlicensed is why configured SSO is off.
+const ssoUnlicensed = "configured, but signing in through it needs a Kubeat Enterprise license with the sso feature"
 
 func (h *handler) ldapStatus(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {
 		return
 	}
-	resp := ldapStatusResponse{Enabled: h.opts.LDAP != nil, DefaultRole: h.opts.LDAPDefaultRole}
+	resp := ldapStatusResponse{Enabled: h.ldap() != nil, DefaultRole: h.opts.LDAPDefaultRole}
 	if h.opts.LDAP != nil {
 		resp.URL = h.opts.LDAP.URL()
+		if !resp.Enabled {
+			resp.Problem = ssoUnlicensed
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1186,7 +1231,7 @@ func (h *handler) listGroupRoles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) createGroupRole(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
+	if !requireAdmin(w, r) || !h.requireLicense(w, license.SSO, "mapping directory groups to roles") {
 		return
 	}
 	var req groupRoleRequest
@@ -1196,6 +1241,9 @@ func (h *handler) createGroupRole(w http.ResponseWriter, r *http.Request) {
 	var g store.LDAPGroupRole
 	if err := applyGroupRole(req, &g); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if scoped(g.Namespaces) && !h.requireLicense(w, license.ScopedAccess, "limiting a group to some namespaces") {
 		return
 	}
 	created, err := h.opts.Store.CreateLDAPGroupRole(r.Context(), g)
@@ -1212,7 +1260,7 @@ func (h *handler) createGroupRole(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) updateGroupRole(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
+	if !requireAdmin(w, r) || !h.requireLicense(w, license.SSO, "mapping directory groups to roles") {
 		return
 	}
 	id, ok := pathID(r)
@@ -1235,8 +1283,13 @@ func (h *handler) updateGroupRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g := groups[i]
+	before := g.Namespaces
 	if err := applyGroupRole(req, &g); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if scoped(g.Namespaces) && !narrows(before, g.Namespaces) &&
+		!h.requireLicense(w, license.ScopedAccess, "limiting a group to some namespaces") {
 		return
 	}
 	updated, err := h.opts.Store.UpdateLDAPGroupRole(r.Context(), g)
@@ -1287,7 +1340,7 @@ type auditResponse struct {
 }
 
 func (h *handler) listAudit(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
+	if !requireAdmin(w, r) || !h.requireLicense(w, license.Audit, "reading the audit log") {
 		return
 	}
 	limit, err := h.limit(r)

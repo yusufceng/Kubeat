@@ -64,6 +64,9 @@ func newTestAPIWith(t *testing.T, customize func(*Options)) (*httptest.Server, *
 		RawRetention:            48 * time.Hour,
 		HistoryRetention:        365 * 24 * time.Hour,
 		SeriesPoints:            120,
+
+		// Every feature on: these tests are about what the features do.
+		License: fullLicense{},
 	}
 	if customize != nil {
 		customize(&opts)
@@ -452,7 +455,7 @@ func TestAPIToken(t *testing.T) {
 	}
 	metrics := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("kubeat_build_info 1\n")) })
 	srv := httptest.NewServer(NewHandler(Options{
-		Store: db, Token: "s3cret-token", Metrics: metrics, MaxResults: 100, StatsWindow: time.Hour, SessionTTL: time.Hour,
+		Store: db, Token: "s3cret-token", Metrics: metrics, MaxResults: 100, License: fullLicense{}, StatsWindow: time.Hour, SessionTTL: time.Hour,
 		MinCheckInterval: 5 * time.Second, DefaultFailureThreshold: 3,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}))

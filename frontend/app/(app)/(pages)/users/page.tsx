@@ -2,9 +2,12 @@ import Link from "next/link";
 import { Suspense } from "react";
 import {
   getLdapStatus,
+  getLicense,
   getOidcStatus,
   type GroupRole,
   type LdapStatus,
+  type License,
+  licenseFeatures,
   listGroupRoles,
   listUsers,
   type OidcStatus,
@@ -24,9 +27,12 @@ import { GroupRoleForm, GroupRoleRow, UserForm, UserRow } from "@/app/ui/user-fo
 
 type Search = PageProps<"/users">["searchParams"];
 
-/** Whether a way of signing in works: on, off, or set up but refused by its own settings. */
-function ProviderState({ kind, t }: { kind: "on" | "off" | "problem"; t: T }) {
-  const glyph: GlyphKind = kind === "on" ? "up" : kind === "problem" ? "down" : "paused";
+/**
+ * Whether a way of signing in works: on, off, set up but refused by its own
+ * settings, or set up and waiting for a license.
+ */
+function ProviderState({ kind, t }: { kind: "on" | "off" | "problem" | "license"; t: T }) {
+  const glyph: GlyphKind = kind === "on" ? "up" : kind === "problem" ? "down" : kind === "license" ? "warn" : "paused";
   return (
     <span className="pg-state" style={{ color: glyphTone[glyph].ink }}>
       <StatusGlyph kind={glyph} />
@@ -50,17 +56,30 @@ async function Users({ searchParams }: { searchParams: Search }) {
   let oidc: OidcStatus;
   let groups: GroupRole[];
   let known: string[];
+  let license: License | null;
   try {
-    const [u, l, o, g, monitors] = await Promise.all([listUsers(), getLdapStatus(), getOidcStatus(), listGroupRoles(), workspaceMonitors()]);
+    const [u, l, o, g, monitors, lic] = await Promise.all([
+      listUsers(),
+      getLdapStatus(),
+      getOidcStatus(),
+      listGroupRoles(),
+      workspaceMonitors(),
+      getLicense().catch(() => null), // a backend from before licenses
+    ]);
     users = u;
     ldap = l;
     oidc = o;
     groups = g;
+    license = lic;
     known = [...new Set(monitors.map((m) => m.namespace).filter(Boolean))].sort();
   } catch (err) {
     return <BackendError what={t("nav.users")} err={err} />;
   }
   const editing = Number(params.edit) || null;
+  // Set up, but off for want of a license: the backend has the reason in English.
+  const ssoUnlicensed = license !== null && !license.features.includes("sso");
+  const oidcState = oidc.enabled ? "on" : oidc.issuer && ssoUnlicensed ? "license" : oidc.problem ? "problem" : "off";
+  const ldapState = ldap.enabled ? "on" : ldap.url && ssoUnlicensed ? "license" : "off";
   const defaultRole = (role: string) =>
     role ? t("users.groups.defaultRole", { role: t(`auth.role.${role}`) }) : t("users.groups.noDefaultRole");
 
@@ -103,10 +122,14 @@ async function Users({ searchParams }: { searchParams: Search }) {
         <div className="panel">
           <div className="pg-provider-head">
             <h3>{t("users.oidc.title")}</h3>
-            <ProviderState kind={oidc.enabled ? "on" : oidc.problem ? "problem" : "off"} t={t} />
+            <ProviderState kind={oidcState} t={t} />
           </div>
           <div className="pg-provider-body">
-            {oidc.enabled ? (
+            {oidcState === "license" ? (
+              <p>
+                {oidc.name}: <span className="pg-mono">{oidc.issuer}</span>. {t("users.sso.unlicensed")}
+              </p>
+            ) : oidc.enabled ? (
               <p>
                 {oidc.name}: <span className="pg-mono">{oidc.issuer}</span>. {t("users.oidc.enabled")} {defaultRole(oidc.default_role)}
               </p>
@@ -126,10 +149,14 @@ async function Users({ searchParams }: { searchParams: Search }) {
         <div className="panel">
           <div className="pg-provider-head">
             <h3>{t("users.ldap.title")}</h3>
-            <ProviderState kind={ldap.enabled ? "on" : "off"} t={t} />
+            <ProviderState kind={ldapState} t={t} />
           </div>
           <div className="pg-provider-body">
-            {ldap.enabled ? (
+            {ldapState === "license" ? (
+              <p>
+                {t("users.ldap.directory")} <span className="pg-mono">{ldap.url}</span>. {t("users.sso.unlicensed")}
+              </p>
+            ) : ldap.enabled ? (
               <p>
                 {t("users.ldap.directory")} <span className="pg-mono">{ldap.url}</span>. {t("users.ldap.enabled")} {defaultRole(ldap.default_role)}
               </p>
@@ -169,7 +196,76 @@ async function Users({ searchParams }: { searchParams: Search }) {
           )}
         </div>
       </section>
+
+      {license && <LicensePanel license={license} t={t} />}
     </>
+  );
+}
+
+const licenseTone = { community: "paused", active: "up", expiring: "warn", expired: "down", invalid: "down" } as const;
+
+/** Where the Kubeat Enterprise license stands, and what it turns on. */
+function LicensePanel({ license, t }: { license: License; t: T }) {
+  const glyph: GlyphKind = licenseTone[license.state];
+  return (
+    <section id="license" aria-labelledby="license-title" className="flex flex-col gap-4">
+      <div className="pg-section-head mb-0">
+        <h2 id="license-title">{t("license.title")}</h2>
+        <p>{t("license.body")}</p>
+      </div>
+      <div className="panel">
+        <div className="pg-provider-head">
+          <h3>{license.customer || t("license.none")}</h3>
+          <span className="pg-state" style={{ color: glyphTone[glyph].ink }}>
+            <StatusGlyph kind={glyph} />
+            {t(`license.state.${license.state}`)}
+          </span>
+        </div>
+        <div className="pg-provider-body flex flex-col gap-2">
+          {license.state === "community" && (
+            <p>
+              {t("license.noneBefore")} <Setting name="license.existingSecret" />
+              {t("license.noneAnd")}{" "}
+              <Setting name="UPTIME_LICENSE_FILE" />
+              {t("license.noneAfter")}
+            </p>
+          )}
+          {license.state === "invalid" && (
+            <p>
+              {t("license.problem")} <code className="pg-mono break-all text-down-ink">{license.problem}</code>
+            </p>
+          )}
+          {(license.state === "expired" || license.state === "invalid") && <p>{t("license.ended")}</p>}
+          {license.id && (
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+              <dt className="text-ink-3">{t("license.id")}</dt>
+              <dd className="pg-mono">{license.id}</dd>
+              {license.expires_at && (
+                <>
+                  <dt className="text-ink-3">{t("license.expires")}</dt>
+                  <dd className="pg-mono">{license.expires_at.slice(0, 10)}</dd>
+                </>
+              )}
+            </dl>
+          )}
+          <div>
+            <p className="text-ink-3">{t("license.features")}</p>
+            <ul className="mt-1 flex flex-col gap-1">
+              {licenseFeatures.map((f) => {
+                const on = license.features.includes(f);
+                return (
+                  <li key={f} className="flex items-center gap-2">
+                    <StatusGlyph kind={on ? "up" : "paused"} />
+                    <span className={on ? "text-ink" : "text-ink-3"}>{t(`license.feature.${f}`)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+          {license.state !== "community" && <p className="text-ink-3">{t("license.renew")}</p>}
+        </div>
+      </div>
+    </section>
   );
 }
 
