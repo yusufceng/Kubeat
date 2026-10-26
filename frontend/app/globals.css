@@ -38,12 +38,17 @@
   --up: #0c994f;
   --up-ink: #05773b;
   /* Degraded: verifying, recovering, a partial day. */
-  --warn: #e78d02;
+  /* Deep enough for 3:1 against the light surfaces (WCAG 1.4.11): the
+     degraded glyph and bars are read, not decoration. */
+  --warn: #c67600;
   --warn-ink: #a45e00;
   --down: #e4312f;
   --down-ink: #c51e21;
   /* Text on a solid down fill, such as the button that deletes. */
   --on-down: #ffffff;
+  /* A solid danger button: white on --down is 4.4:1, under the 4.5:1 that
+     its 13px label needs (WCAG 1.4.3). */
+  --down-solid: #d42a28;
   --maint: #7487a5;
   --maint-ink: #4c5f7a;
   --idle: #bbbec3;
@@ -85,6 +90,7 @@
   --down: #ff5b58;
   --down-ink: #ff7a73;
   --on-down: #1c0707;
+  --down-solid: var(--down);
   --maint: #7c94b7;
   --maint-ink: #98accb;
   --idle: #44484e;
@@ -403,11 +409,11 @@ body {
   /* The button that carries out something that cannot be undone. */
   .btn-danger-solid {
     border-color: transparent;
-    background: var(--down);
+    background: var(--down-solid);
     color: var(--on-down);
   }
   .btn-danger-solid:hover {
-    background: color-mix(in oklab, var(--down) 88%, var(--ink));
+    background: color-mix(in oklab, var(--down-solid) 88%, var(--ink));
   }
   .btn-sm {
     padding: 5px 10px;
