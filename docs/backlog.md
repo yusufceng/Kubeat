@@ -94,3 +94,14 @@ Bilerek sonraya bırakılanlar:
   monitor alanı mı) ve raporlardaki yeri ayrı bir karar.
 - **Durum sayfası markalaması** (logo, yazı tipi, renkler) yapılmayacaklar
   listesinde kalıyor; yalnızca sıkışık yerleşim ve bölümler yapılıyor.
+
+## TypeScript 7 ve ESLint 10
+
+Dependabot'un iki major güncellemesi 2026-10-26'da denendi ve bekletildi.
+TypeScript 7.0.2 ile `next build` tip kontrolü geçiyor, ama
+typescript-eslint 8.72 TypeScript 7'yi desteklemediği için `npm run lint`
+açılışta çöküyor. ESLint 10.13 ile lint geçiyor, ama eslint-config-next
+16.4.3'ün içindeki `eslint-plugin-import`, `eslint-plugin-jsx-a11y` ve
+`eslint-plugin-react` eklentileri peer olarak `eslint ^9` istiyor. İkisi de
+bu eklentiler destek verdiğinde yeniden denenir. O zamana kadar
+Dependabot'un PR'ları (#12, #13) kapatılabilir.
