@@ -34,8 +34,13 @@ MVP için SQLite kullanılır.
 - **Soyutlama:** kodun geri kalanı `store.Store` interface'ine bağımlıdır;
   ileride PostgreSQL'e geçiş bu interface'in ikinci bir implementasyonudur.
 - **Şema:** zamanlar Unix milisaniye (INTEGER, UTC) olarak saklanır.
-  Migration'lar binary'ye gömülüdür, sırayla uygulanır ve uygulanan sayı
-  `PRAGMA user_version` içinde tutulur.
+  Migration'lar binary'ye gömülüdür ve dosya adı sırasıyla uygulanır.
+  Uygulananlar dosya adıyla `schema_migrations` tablosuna yazılır; böylece
+  iki dalda eklenip ters sırayla birleşen bir migration da çalışır.
+  Uygulanan sayı ayrıca `PRAGMA user_version` içinde tutulur: eski
+  binary'ler yeni bir veritabanını yine reddeder, yedek doğrulaması da bu
+  sayıya bakar. Tablodan önceki veritabanlarında ilk `user_version` kadar
+  dosya bir kez adıyla kaydedilir (0.42).
 
 ## Sonuçlar
 

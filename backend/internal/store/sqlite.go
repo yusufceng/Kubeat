@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -229,10 +230,18 @@ func openPool(path string, busyTimeout time.Duration, writer bool) (*sql.DB, err
 // dropping the old table would otherwise delete every row referring to it.
 const withoutForeignKeys = "-- migrate: foreign_keys=off"
 
-// migrate applies the embedded migrations in file name order. The number of
-// applied migrations is tracked in PRAGMA user_version.
+// migrate applies the embedded migrations that the database has not had yet,
+// in file name order. Each applied migration is recorded by file name in
+// schema_migrations, so a migration added below the newest one (two branches
+// merged in either order) still runs. PRAGMA user_version keeps the number of
+// applied migrations: older binaries, which tracked only that number, still
+// refuse a database newer than they are, and backups are checked against it.
 func migrate(ctx context.Context, db *sql.DB) error {
-	names, err := fs.Glob(migrationFiles, "migrations/*.sql")
+	return migrateFrom(ctx, db, migrationFiles)
+}
+
+func migrateFrom(ctx context.Context, db *sql.DB, files fs.FS) error {
+	names, err := fs.Glob(files, "migrations/*.sql")
 	if err != nil {
 		return err
 	}
@@ -245,27 +254,90 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 	defer conn.Close()
 
-	var version int
-	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+	applied, err := appliedMigrations(ctx, conn, names)
+	if err != nil {
 		return err
 	}
-	if version > len(names) {
-		return fmt.Errorf("database is at version %d, newer than this binary (%d)", version, len(names))
+	known := make(map[string]bool, len(names))
+	for _, name := range names {
+		known[path.Base(name)] = true
+	}
+	for name := range applied {
+		if !known[name] {
+			return fmt.Errorf("database has migration %s, which this binary does not know: it was written by a newer version", name)
+		}
 	}
 
-	for i := version; i < len(names); i++ {
-		body, err := migrationFiles.ReadFile(names[i])
+	for _, name := range names {
+		if applied[path.Base(name)] {
+			continue
+		}
+		body, err := fs.ReadFile(files, name)
 		if err != nil {
 			return err
 		}
-		if err := applyMigration(ctx, conn, string(body), i+1); err != nil {
-			return fmt.Errorf("%s: %w", names[i], err)
+		if err := applyMigration(ctx, conn, path.Base(name), string(body), len(applied)+1); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
 		}
+		applied[path.Base(name)] = true
 	}
 	return nil
 }
 
-func applyMigration(ctx context.Context, conn *sql.Conn, body string, version int) (err error) {
+// appliedMigrations returns the file names of the migrations the database
+// has had. A database from before schema_migrations existed has only the
+// count in user_version; its first that many files, in name order, are the
+// ones it has, and they are recorded by name here once.
+func appliedMigrations(ctx context.Context, conn *sql.Conn, names []string) (map[string]bool, error) {
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		name       TEXT PRIMARY KEY,
+		applied_at INTEGER NOT NULL
+	)`); err != nil {
+		return nil, err
+	}
+	var version, recorded int
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return nil, err
+	}
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&recorded); err != nil {
+		return nil, err
+	}
+	if recorded == 0 && version > 0 {
+		if version > len(names) {
+			return nil, fmt.Errorf("database is at version %d, newer than this binary (%d)", version, len(names))
+		}
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		for _, name := range names[:version] {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (name, applied_at) VALUES (?, 0)", path.Base(name)); err != nil {
+				return nil, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+	}
+
+	rows, err := conn.QueryContext(ctx, "SELECT name FROM schema_migrations")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	applied := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		applied[name] = true
+	}
+	return applied, rows.Err()
+}
+
+func applyMigration(ctx context.Context, conn *sql.Conn, name, body string, version int) (err error) {
 	rebuild := strings.HasPrefix(body, withoutForeignKeys)
 	if rebuild {
 		// The setting cannot be changed inside a transaction.
@@ -301,6 +373,9 @@ func applyMigration(ctx context.Context, conn *sql.Conn, body string, version in
 		if broken {
 			return errors.New("the migration left rows that refer to missing rows")
 		}
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)", name, time.Now().UnixMilli()); err != nil {
+		return err
 	}
 	// PRAGMA does not accept bound parameters.
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
