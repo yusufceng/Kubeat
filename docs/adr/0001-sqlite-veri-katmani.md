@@ -40,7 +40,7 @@ MVP için SQLite kullanılır.
   Uygulanan sayı ayrıca `PRAGMA user_version` içinde tutulur: eski
   binary'ler yeni bir veritabanını yine reddeder, yedek doğrulaması da bu
   sayıya bakar. Tablodan önceki veritabanlarında ilk `user_version` kadar
-  dosya bir kez adıyla kaydedilir (0.42).
+  dosya bir kez adıyla kaydedilir (0.41.1).
 
 ## Sonuçlar
 
