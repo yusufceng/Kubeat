@@ -20,6 +20,15 @@ OIDC girişi, namespace sınırlı keşif, yedek ve bir pilot durum sayfası ora
 çalışıyor. Daha ayrıntılı teknik kontrol listesi:
 [openshift-dogrulama.md](openshift-dogrulama.md).
 
+Güncelleme (2026-10-27): şirket cluster'ı ve pilot ekibi yok; pilot aynı
+takvimle (karar 2026-11-27) Developer Sandbox'ta sürer ve geri bildirim
+sprint ekibinin müşteri ve SRE ajanlarından gelir
+([agents/sprint-takimi.md](agents/sprint-takimi.md), [sprints/](sprints/)).
+Aşağıdaki ekip adımları ve ön koşullar gerçek bir ekip ve cluster
+bulunduğunda olduğu gibi geçerlidir. Sandbox boşta kalan pod'ları
+uyuttuğundan kesinti yakalama ve yanlış alarm ölçümleri orada güvenilir
+değildir; sandbox ürünü göstermek ve alıştırmak içindir.
+
 ## Kapsam
 
 | | Öneri |

@@ -36,7 +36,10 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 25 | İki dil: arayüz (tarayıcıya göre, değiştirilebilir) ve bildirimler İngilizce/Türkçe | Tamamlandı |
 | 26 | Namespace'le sınırlı keşif: cluster-admin olmadan kurulum (Role), Thanos'un namespace ucu | Tamamlandı |
 | 27 | Open-core: Kubeat Enterprise lisansı, çevrimdışı imzalı lisans dosyası ([ADR-0002](adr/0002-open-core-lisans.md)) | Tamamlandı |
-| 28 | Pilot: bir ekiple şirket cluster'ında üç hafta gerçek kullanım ([pilot.md](pilot.md)) | Sandbox'ta kurulu (2026-10-27, 0.42.2, pilot değerleri); şirket cluster'ı: kurulum 2026-11-02, ölçüm 2026-11-20'ye kadar, karar 2026-11-27 |
+| 28 | Pilot: gerçek bir cluster'da üç hafta kullanım ([pilot.md](pilot.md)) | Developer Sandbox'ta (2026-10-27'den itibaren, 0.42.2, pilot değerleri; karar 2026-11-27); şirket cluster'ı ve ekip olmadığından geri bildirim sprint ekibinin müşteri ve SRE ajanlarından |
+| 29 | Sprint ekibi: müşteri, SRE, BA, PO, PMO ve developer ajanlarıyla düzenli sprintler ([agents/sprint-takimi.md](agents/sprint-takimi.md), [sprints/](sprints/)) | Sprint 1 (2026-10-27): bildirim teslimatı (S18, S17), yedek dayanıklılığı (S19), öz-sağlık alarmları (S9); [sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md) |
+| 30 | Tedarik zinciri: cosign ile imzalı imaj ve chart, SBOM/provenance, SECURITY.md | Planlandı (sprint 2 adayı, S1); yayım hattı değişikliği bir sonraki sürüm etiketinde doğrulanır |
+| 31 | Hızlı başlangıç ve kurulum belgeleri: güncel kurulum komutu, OpenShift dışı fsGroup notu, yükseltme notları docs/yukseltme.md, lisansın nasıl istendiği | Planlandı (sprint 2 adayı, S10, S11, S12, S15) |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
@@ -126,7 +129,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   API'den ayıramaz: üçü aynı porttadır.
 - Yayımlanmış bir durum sayfasının her görüntülenmesi tüm monitor'ların
   durumunu okur; önbellek yoktur. Çok ziyaret edilen bir sayfa için önüne
-  bir önbellek konmalıdır.
+  bir önbellek konmalıdır. Okuma havuzunda bağlantı sınırı da yoktur: çok
+  sayıda eşzamanlı istek backend'i bellek limitine itebilir (S21,
+  [backlog](backlog.md) "Okuma havuzuna bağlantı sınırı ve durum sayfasına
+  eşzamanlılık sınırı").
 - Gizli değerler `UPTIME_SECRET_KEY` ile şifrelenir; anahtar değiştirme
   (rotation) yoktur ve push token'ları şifrelenmez.
 - Hedef politikası yalnızca loopback, link-local (bulut metadata servisi) ve
@@ -140,6 +146,11 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 - Annotation eşitlemesi her turda tüm cluster'ın Service, Pod, Ingress, Route
   ve workload listesini çeker; binlerce pod'lu cluster'da aralık uzatılmalıdır.
 - Bakım sırasındaki başarısız kontroller uptime'a dahildir.
+- Cluster API'ye monitor'ün başarısızlık eşiği kadar kontrol boyunca
+  ulaşılamazsa `workload` ve `each_pod` monitor'leri kesinti açar ve
+  bildirim gönderir; API kesintisi hedefin kendi hatasından ayrılmaz (S20,
+  [backlog](backlog.md) "Cluster API'ye ulaşılamayan kontrolü hedef hatası
+  saymamak").
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.
