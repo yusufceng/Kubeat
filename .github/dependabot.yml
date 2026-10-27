@@ -25,6 +25,17 @@ updates:
       npm-packages:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # The types follow the runtime's Node major (ubi9/nodejs-24-minimal);
+      # the two change together, by hand.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # typescript-eslint does not run on TypeScript 7 and eslint-config-next's
+      # plugins peer on eslint ^9; see docs/backlog.md. Retried by hand.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /backend
