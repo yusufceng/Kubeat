@@ -3,7 +3,7 @@
 # pinned to exact tags so that a release says what it was built from;
 # Dependabot proposes the updates. The Go version is the toolchain line of
 # go.mod, which CI tests with: raise both together.
-FROM --platform=$BUILDPLATFORM golang:1.26.9 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
