@@ -35,6 +35,8 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 24 | Yayım: sürüm etiketiyle GHCR'ye çok mimarili imajlar ve OCI chart; gerçek cluster kurulumunun ön koşulu | Tamamlandı |
 | 25 | İki dil: arayüz (tarayıcıya göre, değiştirilebilir) ve bildirimler İngilizce/Türkçe | Tamamlandı |
 | 26 | Namespace'le sınırlı keşif: cluster-admin olmadan kurulum (Role), Thanos'un namespace ucu | Tamamlandı |
+| 27 | Open-core: Kubeat Enterprise lisansı, çevrimdışı imzalı lisans dosyası ([ADR-0002](adr/0002-open-core-lisans.md)) | Tamamlandı |
+| 28 | Pilot: bir ekiple şirket cluster'ında üç hafta gerçek kullanım ([pilot.md](pilot.md)) | Planlandı |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 

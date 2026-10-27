@@ -1,9 +1,15 @@
 # Gerçek OpenShift'te doğrulama
 
-Kubeat bugüne kadar yalnızca minikube üzerindeki OpenShift benzetiminde
-çalıştı ([deploy/demo/openshift-sim](../deploy/demo/openshift-sim)). Bu
-belge, gerçek bir cluster'da neyin nasıl doğrulanacağını ve sonucun nasıl
-geri bildirileceğini anlatır. Hepsi bir öğleden sonraya sığar.
+Kubeat minikube üzerindeki OpenShift benzetiminde
+([deploy/demo/openshift-sim](../deploy/demo/openshift-sim)) ve Red Hat
+Developer Sandbox'taki (ROSA) gerçek bir OpenShift'te çalışıyor. Sandbox
+tek namespace verir ve cluster-admin yetkisi yoktur: Route, `restricted-v2`
+SCC, LDAP ve OIDC ile giriş, yedekleme ve yükseltmeler orada doğrulandı;
+cluster-admin isteyen maddeler (ClusterRole ile keşif, ServiceMonitor,
+Thanos yetkisi, NetworkPolicy) ilk tam yetkili kurulumda denenir. Bu belge,
+böyle bir cluster'da neyin nasıl doğrulanacağını ve sonucun nasıl geri
+bildirileceğini anlatır; pilot planı [pilot.md](pilot.md) dosyasındadır.
+Hepsi bir öğleden sonraya sığar.
 
 ## Ön koşullar
 
