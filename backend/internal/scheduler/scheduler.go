@@ -378,8 +378,10 @@ func (s *Scheduler) work(ctx context.Context, jobs <-chan store.Monitor, results
 		// reached are owed now.
 		s.settle(m, result.Hops, now)
 
-		// A check interrupted by shutdown says nothing about the target.
-		if ctx.Err() != nil {
+		// A check interrupted by shutdown says nothing about the target. One
+		// that still succeeded was not interrupted: it finished just before
+		// the cancel and its result is as good as any.
+		if ctx.Err() != nil && !result.Up {
 			continue
 		}
 		results <- result
