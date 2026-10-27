@@ -78,6 +78,11 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
   [values.yaml](deploy/helm/kubeat/values.yaml). Eski values dosyalarındaki
   `backend.env` ve `frontend.env` okunmaz: boş değillerse chart kurulmaz ve
   oradaki ayarların `extraEnv`'e taşınmasını ister.
+- Yükseltirken ayarları bir values dosyasında tutup `-f` ile verin ya da
+  `--reset-then-reuse-values` (Helm 3.14+) kullanın. `--reuse-values` eski
+  chart'ın varsayılanlarını da taşır: imaj etiketi bir kez `--set` ile
+  sabitlendiyse `null` ile silmek bile yetmez, pod'lar eski sürümde kalır.
+  Eldeki ayarlar `helm get values kubeat -o yaml` ile alınır.
 
 ### 0.38'e yükseltme
 
