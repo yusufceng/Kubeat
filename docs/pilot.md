@@ -14,8 +14,11 @@ sorunlar giderilip ikinci tur) ya da **durdur**.
 
 Kurulum adımları 0.42.0 chart'ıyla sıfırdan bir minikube'da baştan sona
 denendi (2026-10-27); OpenShift'e özgü maddeler (Route, SCC, LDAP, OIDC,
-yedekleme) Developer Sandbox'ta doğrulandı. Daha ayrıntılı teknik kontrol
-listesi: [openshift-dogrulama.md](openshift-dogrulama.md).
+yedekleme) Developer Sandbox'ta doğrulandı. Aynı gün pilot değerleri 0.42.2
+ile Developer Sandbox'a da kuruldu: pilot lisansı, HSTS'li Route, LDAP ve
+OIDC girişi, namespace sınırlı keşif, yedek ve bir pilot durum sayfası orada
+çalışıyor. Daha ayrıntılı teknik kontrol listesi:
+[openshift-dogrulama.md](openshift-dogrulama.md).
 
 ## Kapsam
 
