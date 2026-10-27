@@ -36,7 +36,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 25 | İki dil: arayüz (tarayıcıya göre, değiştirilebilir) ve bildirimler İngilizce/Türkçe | Tamamlandı |
 | 26 | Namespace'le sınırlı keşif: cluster-admin olmadan kurulum (Role), Thanos'un namespace ucu | Tamamlandı |
 | 27 | Open-core: Kubeat Enterprise lisansı, çevrimdışı imzalı lisans dosyası ([ADR-0002](adr/0002-open-core-lisans.md)) | Tamamlandı |
-| 28 | Pilot: bir ekiple şirket cluster'ında üç hafta gerçek kullanım ([pilot.md](pilot.md)) | Planlandı: kurulum 2026-11-02, ölçüm 2026-11-20'ye kadar, karar 2026-11-27 |
+| 28 | Pilot: bir ekiple şirket cluster'ında üç hafta gerçek kullanım ([pilot.md](pilot.md)) | Sandbox'ta kurulu (2026-10-27, 0.42.2, pilot değerleri); şirket cluster'ı: kurulum 2026-11-02, ölçüm 2026-11-20'ye kadar, karar 2026-11-27 |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
