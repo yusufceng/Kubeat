@@ -45,7 +45,7 @@ ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
 cluster'a kurulum:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.28.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.42.2 \
   -n kubeat --create-namespace
 ```
 
@@ -257,7 +257,7 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.28.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.42.2 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \

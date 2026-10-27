@@ -158,3 +158,151 @@ Güncelleme (2026-10-27): kararlar şöyle verildi.
   anahtar üretilir, açık anahtar yeni sürümle gömülür ve verilmiş lisanslar
   yeniden verilir; üç lisansla bu ucuz, dış müşteriyle pahalılaşır. Birden
   fazla açık anahtar tanıma (rotasyon) ilk dış müşteriyle eklenir.
+
+## Denetim kaydı: stdout log satırı, süzgeçler, CSV ve kaynak adresi
+
+Sprint 1'in PO turunda (2026-10-27) ertelendi (hikâye S4,
+[sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md)). Tek
+kaynak: kurumsal müşterinin SIEM ihtiyacı ("kim, nereden, ne zaman", 30
+cluster); L boyut, migration ister. Tetikleyici: ilk dış kurumsal görüşme.
+Kararlar: başarılı denetim yazımından sonra stdout'a yazılan tek log satırı
+lisans kapısının dışındadır (ADR-0002'nin "görmek" kapısı arayüz, API ve
+CSV'dir; README "Kubeat Enterprise lisansı" zaten "Kayıt yine yazılır" der),
+hikâye alındığında ADR'ye güncelleme notu yazılır; `remote_addr` için
+X-Forwarded-For yalnızca frontend üzerinden gelen istekte, doğrudan API
+isteğinde `r.RemoteAddr`; `user_agent` ve hash zinciri yok; "90 gün
+değiştirilemez saklama" SIEM'in işidir. Stdout satırı tek başına S boyutlu
+bir parça olarak sprint 2 ya da 3 dolgusu olabilir.
+
+## Oturuma boşta kalma süresi `UPTIME_SESSION_IDLE`
+
+2026-10-27'de ertelendi (S5). Kurumsal güvenlik kontrol listesi maddesi
+("etkileşimsiz 15 dakikadan sonra oturum düşer"); bugün yalnızca 12 saatlik
+mutlak süre var (`UPTIME_SESSION_TTL`). Varsayılan kapalı olacağından küçük
+ekip için değer üretmez; L boyut (backend, frontend, chart). Tetikleyici:
+kurumsal güvenlik incelemesi ya da pilot ekibinin isteği. Kararlar: pilot
+values'ta 15 dk; 401 `reason=idle` ile giriş sayfasına; çerez max-age
+TTL'de kalır; "oturumunuz kapanmak üzere" uyarısı yok.
+
+## Şema yükselten açılışta migration'dan önce otomatik yedek
+
+2026-10-27'de ertelendi (S6). Sprint 1 migration eklemiyor (şema 26 kalır),
+bu yüzden sırası şemaya bağlandı. Kural: migration ekleyen ilk hikâye
+(bugün S4) sprint'e girdiğinde S6 aynı sprintte ondan önce yapılır.
+Kararlar: `UPTIME_BACKUP_DIR` doluysa ve dosyanın şeması ikilininkinden
+eskiyse `OpenSQLite`'tan önce `kubeat-pre-schema<N>-<zaman>.db` kopyası
+alınır; dizin açıkken kopya alınamazsa açılış durur, dizin kapalıysa WARN;
+pre-schema kopyaları `UPTIME_BACKUP_KEEP`'ten bağımsız, son 2 tutulur; down
+migration yok.
+
+## Yedekleri cluster dışına taşıma belgesi ve backend imajına `tar`
+
+2026-10-27'de ertelendi (S7). S boyut, kod yok: README "Yedekleme ve geri
+yükleme"ye "Cluster dışına" bölümü (yedek PVC'sinin OADP/Velero
+snapshot'ının tutarlı olduğu, `kubeat-secret-key` Secret'ının aynı sete
+girdiği, 0600 dosyalar için aynı UID'de çalışan CronJob örneği) ve
+`kubectl cp`/`oc rsync` için ubi-minimal imaja `tar`. İhtiyaç pilot sonu
+"devam" kararıyla doğar (pilot.md "Pilot sonunda"); sprint 3 adayı. Karar:
+imaja `tar` kabul (UBI paketi, taban imaj güncellemesiyle Dependabot
+kapsar).
+
+## Yedek kopyalarını S3 uyumlu depoya yüklemek
+
+2026-10-27'de ertelendi (S8). `UPTIME_BACKUP_S3_*` ile her başarılı kopyanın
+yüklenmesi ve `kubeat_backup_upload_last_success_timestamp_seconds`. Şişirme
+ve "başka araç yapıyor": Velero/OADP PVC snapshot'ı ve S7'nin CronJob'u aynı
+işi platformla görür; AWS SDK v2 ~10 modül ekler; tek kaynak, 30 cluster'lı
+kurumsal senaryo. Tetikleyici: çok cluster'lı ilk dış müşterinin açık
+isteği. Kayıt: air-gapped iç S3 (ODF/MinIO) için CA ayarı şart; tercih
+aws-sdk-go-v2; endpoint yöneticinin ayarı olduğundan hedef politikasından
+muaf.
+
+## CVE tarama raporu yayımlamak
+
+2026-10-27'de karar: hayır. Tedarik zinciri hikâyesinin (S1, sprint 2 adayı)
+açık sorusuydu; SBOM varken müşteri raporu kendi tarayıcısıyla (Trivy,
+grype) kendisi üretir. Kyverno/ClusterImagePolicy örnek manifest'i de
+müşterinin politikasıdır, ürünün işi değildir.
+
+## Yöneticinin kendi alan adları: `UPTIME_OWN_HOSTS`
+
+2026-10-27'de ertelendi (S13). Küçük ekibin kendi genel alan adı "dış host"
+sayılıyor: aynı host'a en çok 5 monitor ve 30 sn alt sınır. Tek kaynak;
+sandbox pilotunda kota aşılmıyor (her Route ayrı host). Tetikleyici: kendi
+alan adında kota reddi yaşayan ilk kullanıcı. Karar şimdiden verildi:
+yalnızca yöneticinin listesi (`UPTIME_OWN_HOSTS`, `backend.extraEnv` ile),
+keşfin gördüğü Ingress/Route host'larını kendiliğinden "benim" saymak asla
+(netguard/incluster.go ve README "Hedef yükü" gerekçesi korunur: namespace
+editörü Ingress'e yabancı bir host yazıp kotayı aşamamalı).
+
+## API'de ada göre arama ve `upsert=true`; `kubeat.io/path` Ingress ve Route'ta; openapi.yaml
+
+2026-10-27'de ertelendi (S14). Betik/Terraform ile idempotent uygulama
+isteği: aynı adla POST bugün 409, ada göre arama yok, OpenAPI yok;
+`kubeat.io/path` yalnızca Service'te tanınıyor. Annotation yolu zaten
+idempotent ve cluster-native. Tetikleyici: betik/Terraform ile uygulama
+isteyen ilk kullanıcı. `kubeat.io/path`'in Ingress ve Route'ta tanınması
+küçük ve cluster-native bir parça; BA isterse ayrı hikâye olarak öne
+çekilebilir. OpenAPI dosyası (BA'nın "tek başına hikâye değil" kararı) aynı
+maddede. Karar: upsert PATCH değil tam değiştirme; PUT ve ada göre DELETE
+yok.
+
+## Ücretsiz katmanda tek OIDC sağlayıcısıyla giriş; alternatifi TOTP 2FA
+
+2026-10-27'de ertelendi (S16). Küçük ekibin "Google Workspace ile giriş,
+ayrılan kişinin erişimi orada kapanınca kapansın" isteği. ADR-0002'ye aykırı
+(`sso` = LDAP ve OIDC) ve ADR bir günlük; pilotun 4. sorusu tam olarak hangi
+ücretli özelliklerin olmazsa olmaz olduğunu ölçer. ADR yeniden açılmadı.
+Tetikleyici: pilot kararı (2026-11-27) ve pilot sorusu 4'ün cevabı. Alınırsa
+BA önerisi: OIDC girişi kapının dışına, grup→rol eşlemesi, LDAP ve namespace
+sınırı kapıda kalır. Alternatifi TOTP 2FA da burada; yol haritasında
+bilerek dışarıda.
+
+## Cluster API'ye ulaşılamayan kontrolü hedef hatası saymamak
+
+2026-10-27'de ertelendi (S20). ≥ 90 s süren bir cluster API kesintisi her
+`workload` ve `each_pod` monitor'ünde olay açıp bildirim gönderir (SRE orta;
+L boyut, 11 dosya). Yanlış alarm pilotun karar sorusu, ama sandbox'ta bu tip
+monitor az ve böyle bir kesinti görülmedi (varsayım). Tetikleyici: pilotta
+API kesintisi kaynaklı yanlış alarm görülürse öne alınır; aksi halde sprint 3
+adayı. Karar: unreachable/timeout/unauthorized/forbidden/sertifika sınıfları
+varsayılan olarak atlanır (sonuç yazılmaz, sayaç ilerlemez),
+`kubeat_cluster_api_failures_total{reason}` sayacı ve
+`KubeatClusterAPIUnreachable` kuralı eklenir; "not found" ve "no ready pod"
+başarısızlık kalır; `UPTIME_CLUSTER_API_FAILURE_AS_DOWN=true` eski davranışı
+seçer. Bugünkü davranış yol haritası "Bilinen sınırlar"a yazıldı.
+
+## Okuma havuzuna bağlantı sınırı ve durum sayfasına eşzamanlılık sınırı
+
+2026-10-27'de ertelendi (S21). Okuma havuzu sınırsız (`sqlite.go`
+`openPool`); kesinti anında herkese açık durum sayfasını yenileyen 200 kişi
+200 bağlantı demek, backend 256 Mi limitine itilip OOMKill ile izlemeyi
+durdurabilir (SRE orta/risk; doğrulama BA'nın). Sandbox'ın durum sayfasının
+dış ziyaretçisi yok. Tetikleyici: durum sayfası dışarıya açıldığında ya da
+kullanıcının yük testinde 200 eşzamanlı istek ölçüldüğünde (ajanlar backend
+çalıştırmaz, ölçüm kullanıcının); sprint 3 adayı. Karar: `UPTIME_DB_READ_CONNS`
+(varsayılan 16) ve `UPTIME_PUBLIC_CONCURRENCY` (varsayılan 32); semafor
+dolunca 2 sn bekleme, sonra 503 + `Retry-After: 5`. Durum sayfası önbelleği
+ayrı karar olarak bilinen sınır kalır.
+
+## Kontrol zaman aşımına üst sınır `UPTIME_MAX_CHECK_TIMEOUT`
+
+2026-10-27'de ertelendi (S22). Zaman aşımının mutlak üst sınırı yok; SYN'e
+cevap vermeyen 20 hedef 60 s/60 s ile tüm worker'ları tutup kalan
+monitor'lerin kontrolünü fiilen durdurabilir (SRE orta/risk). Sprint 1'deki
+`KubeatWorkersSaturated` alarmı (S9) tespiti sağladığından önleme sonraya
+kaldı. Tetikleyici: alarm yanınca ya da sprint 3. Karar: varsayılan `60s`,
+`0` kapalı; API ve annotation doğrulaması aşan değeri reddeder; mevcut aşan
+monitor'lere dokunulmaz, açılışta WARN ile listelenir, sonraki düzenlemede
+reddedilir; `UPTIME_WORKERS` açıklamasına boyutlandırma kuralı.
+
+## .env.example'ı tamamlamak ve config ile karşılaştıran CI denetimi
+
+2026-10-27'de ertelendi (S24). `.env.example` 11 ayarı eksik (OIDC claim/CA/
+zaman aşımı, Prometheus sorguları, olay önbelleği); chart dışı kurulum yapan
+biri tüm ayarları oradan görebilmeli (SRE düşük/docs). Sprint ekibinin
+"Tamamlanma tanımı" zaten her hikâyede `.env.example` ister, reviewer
+denetler. Sprint 3 dolgusu (S); tetikleyici: chart dışı kurulum isteyen ilk
+kullanıcı ya da sprint 1-2'de bir sapma görülürse. Karar: betik Makefile'da
+(`make lint`), CI onu çağırır; chart values ile karşılaştırma yok (chart her
+ayarı `extraEnv` ile alır).
