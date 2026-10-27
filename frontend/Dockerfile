@@ -3,7 +3,7 @@
 # pinned to exact tags so that a release says what it was built from;
 # Dependabot proposes the updates. Node's major version is the runtime
 # image's (nodejs-24-minimal): change both together.
-FROM --platform=$BUILDPLATFORM node:24.22.0-slim AS build
+FROM --platform=$BUILDPLATFORM node:24.22.1-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
