@@ -106,6 +106,10 @@ açılışta çöküyor. ESLint 10.13 ile lint geçiyor, ama eslint-config-next
 bu eklentiler destek verdiğinde yeniden denenir. O zamana kadar
 Dependabot'un PR'ları (#12, #13) kapatılabilir.
 
+Güncelleme (2026-10-27): PR'lar kapatıldı; `.github/dependabot.yml`
+TypeScript, ESLint ve `@types/node` major sürümlerini yok sayıyor (sonuncusu
+çalışma zamanının Node major'ına bağlı). Üçü de elle denenir.
+
 ## Kurumsal kodun lisansı
 
 2026-10-26'da open-core seçildi; 0.42'den itibaren kurumsal özellikler
@@ -121,6 +125,36 @@ sözleşmenin bir parçasıdır. Satış ciddileşirse şunlar kararlaştırıl�
 - EULA, üçüncü taraf lisans taraması, marka araştırması, destek süreci.
 - Dış katkı gelmeye başlarsa CLA ya da DCO.
 
-İmzalama aracı Kubeat deposunda değil, `~/kubeat-license-issuer` içinde
-(yalnızca yerel git). Özel bir GitHub deposuna taşınması ve imzalama
-anahtarının çevrimdışı yedeği kullanıcıdadır.
+İmzalama aracı Kubeat deposunda değil, özel bir depodadır; verilen
+lisansların kaydı da orada tutulur.
+
+Güncelleme (2026-10-27): kararlar şöyle verildi.
+
+- **Kodun lisansı.** Pilot boyunca ve ilk dış müşteri görüşmesine kadar her
+  şey Apache-2.0 kalır: pilot şirket içidir, dışarıda kullanan yoktur,
+  bugün ayırmak yalnızca iş çıkarır. Tetikleyici: ilk dış müşteri görüşmesi
+  ya da ilk kamuya duyuru, hangisi önce gelirse. O zaman `ldapauth`,
+  `oidcauth`, `license` ve kapıların arkasındaki handler'lar `backend/ee/`
+  altına taşınır ve GitLab EE / Elastic License 2.0 örneğindeki gibi
+  "geçerli lisansla kullanılır" diyen kaynağı açık ticari bir lisans alır;
+  kalanı Apache-2.0 kalır. Tek telif sahibi olduğundan yeniden lisanslama
+  için kimsenin onayı gerekmez.
+- **Üçüncü taraf lisansları** tarandı. Backend'e bağlanan 73 Go modülü:
+  Apache-2.0 (37), BSD (19), MIT (15), ISC (1), MPL-2.0 (1,
+  `go-sql-driver/mysql`; dosya bazlı copyleft, değiştirilmeden kullanılıyor,
+  ticari dağıtıma engel değil). Frontend'in üretim paketleri MIT, Apache-2.0,
+  ISC, BSD, 0BSD; `caniuse-lite` verisi CC-BY-4.0, Next.js'in görsel
+  kütüphanesi `sharp`'ın libvips ikilileri LGPL-3.0 (dinamik bağlanır, her
+  Next.js kurulumunda aynı; Kubeat `next/image` kullanmaz). GPL/AGPL yok.
+  Satıştan önce araçla (go-licenses, license-checker) bir kez daha
+  tekrarlanır.
+- **Ad.** "Kubeat" için web'de bir ürün ya da marka çakışması bulunmadı; en
+  yakını farklı bir ad olan KUBECOST (IBM) markası. TÜRKPATENT ve EUIPO'da
+  resmî sorgu satıştan önce yapılır; pilot için gerekmez.
+- **EULA ve destek.** Şirket içi pilotta sözleşme yok; destek kullanıcının
+  kendisi, aynı iş günü. İlk dış müşteride kısa bir Kubeat Enterprise lisans
+  sözleşmesi taslağı hazırlanır ve imzadan önce avukata gösterilir.
+- **Anahtar.** Backend tek açık anahtar tanır. Anahtar kaybolursa yeni
+  anahtar üretilir, açık anahtar yeni sürümle gömülür ve verilmiş lisanslar
+  yeniden verilir; üç lisansla bu ucuz, dış müşteriyle pahalılaşır. Birden
+  fazla açık anahtar tanıma (rotasyon) ilk dış müşteriyle eklenir.
