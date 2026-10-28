@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -17,12 +18,18 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
-// recorder is a Sender that remembers what it was asked to send.
+// recorder is a Sender that remembers what it was asked to send. The
+// channels are sent to in parallel (Engine.deliver), so the order in which
+// their messages arrive within one pass is nothing to count on: settle puts
+// what arrived in channel order, and flush does so after every run of the
+// loop. A channel's own messages keep their order, as the engine keeps it.
 type recorder struct {
 	mu       sync.Mutex
 	sent     []Notification
 	channels []string
-	failures int // number of upcoming sends that fail
+	ids      []int64 // the channels' IDs, what settle orders by
+	settled  int     // how much of sent is in channel order
+	failures int     // number of upcoming sends that fail
 }
 
 func (r *recorder) Send(_ context.Context, ch store.Channel, n Notification) error {
@@ -34,7 +41,36 @@ func (r *recorder) Send(_ context.Context, ch store.Channel, n Notification) err
 	}
 	r.sent = append(r.sent, n)
 	r.channels = append(r.channels, ch.Name)
+	r.ids = append(r.ids, ch.ID)
 	return nil
+}
+
+// settle puts what arrived since the last settle in the order the channels
+// are listed in (by ID), which is the order the loop sent to them in before
+// it sent in parallel; a channel's own messages keep their order.
+func (r *recorder) settle() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	order := make([]int, len(r.sent)-r.settled)
+	for i := range order {
+		order[i] = r.settled + i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return r.ids[order[a]] < r.ids[order[b]] })
+	sent, channels, ids := make([]Notification, len(order)), make([]string, len(order)), make([]int64, len(order))
+	for i, j := range order {
+		sent[i], channels[i], ids[i] = r.sent[j], r.channels[j], r.ids[j]
+	}
+	copy(r.sent[r.settled:], sent)
+	copy(r.channels[r.settled:], channels)
+	copy(r.ids[r.settled:], ids)
+	r.settled = len(r.sent)
+}
+
+// reset forgets what was sent so far.
+func (r *recorder) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sent, r.channels, r.ids, r.settled = nil, nil, nil, 0
 }
 
 func (r *recorder) events() []Event {
@@ -115,11 +151,13 @@ func (f *fixture) incidents() []store.Incident {
 	return list
 }
 
-// flush runs the delivery loop until the queue is empty.
+// flush runs the delivery loop until the queue is empty, and settles what
+// it sent into channel order.
 func (f *fixture) flush() {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	f.engine.Run(ctx)
+	f.sender.settle()
 }
 
 func TestIncidentOpensOnlyAfterThresholdConsecutiveFailures(t *testing.T) {
@@ -242,7 +280,7 @@ func TestDeliveryRetriesAndSkipsDisabledChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f.sender.failures = 2 // first two tries to "ops" fail, the third succeeds
+	f.sender.failures = 2 // the first two tries, to either channel, fail; the retries succeed
 	f.check(false)
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -257,6 +295,7 @@ func TestDeliveryRetriesAndSkipsDisabledChannels(t *testing.T) {
 	}
 	cancel()
 	<-done
+	f.sender.settle()
 
 	f.sender.mu.Lock()
 	defer f.sender.mu.Unlock()
@@ -678,10 +717,9 @@ func TestDeliveryFollowsTheChannelScope(t *testing.T) {
 	}
 
 	deliver := func(namespace string) string {
-		f.sender.mu.Lock()
-		f.sender.channels = nil
-		f.sender.mu.Unlock()
+		f.sender.reset()
 		f.engine.deliverTo(ctx, Notification{Event: EventDown, Monitor: store.Monitor{Name: "m", Namespace: namespace}}, nil)
+		f.sender.settle()
 		f.sender.mu.Lock()
 		defer f.sender.mu.Unlock()
 		return strings.Join(f.sender.channels, ",")
