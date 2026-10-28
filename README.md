@@ -2140,9 +2140,20 @@ en çok `keep` kopya bulunur ve veritabanı büyüdükçe her yeni kopya bir
 öncekinden büyüktür; fazladan bir kopyalık yer bu payı verir. Chart'ın
 varsayılanları (`backup.keep=7`, `backup.persistence.size=5Gi`) yaklaşık
 640 MiB'a kadar bir veritabanı için yeter (5 Gi / 8); kopya veritabanının
-boşluğu alınmış hâlidir, ondan biraz küçüktür. Volume tek bir kopyayı bile
-almıyorsa her deneme bir eski kopya daha siler ve sonunda kopya kalmaz; log
-her seferinde uyarır, volume büyütülmelidir.
+boşluğu alınmış hâlidir, ondan biraz küçüktür.
+
+Bir kopya silmek de yer açmıyorsa (veritabanı volume'dan büyük; paylaşılan
+bir PVC'yi ya da thin-provisioned havuzu başka bir kiracı doldurmuş) son
+kopya korunur: `keep ≥ 2` iken her deneme en fazla bir eski kopya siler,
+son kopyaya dokunmaz (`backup volume full; keeping the only copy, no
+retry`, WARN); yedekleme durur, her deneme ERROR loglar ve
+`kubeat_backups_total{result="failed"}` sayacını artırır. `keep=1`'de tek
+kopya da gidebilir. Dolu kalan volume bir dakika sonra değil, bir aralık
+(`UPTIME_BACKUP_INTERVAL`) sonra yeniden denenir: volume bir dakikada
+boşalmaz ve her deneme bir kopyaya mal olabilir; yeniden başlatma hemen
+dener. Çözüm volume'u büyütmektir. Yarım kalan bir kopyanın `.partial`
+dosyası (örneğin kopya sırasında pod yeniden başladıysa) bir sonraki
+denemede silinir, yer tutmaz.
 
 Yedek dizini veritabanından **ayrı bir volume** olmalıdır; aynı volume'daki
 kopya veritabanıyla birlikte kaybolur. Chart'ta `backup.enabled=true` bunun

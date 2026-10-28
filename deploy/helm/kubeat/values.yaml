@@ -202,8 +202,11 @@ oidc:
 # most keep copies ever share the volume; the extra copy's worth of room is
 # for growth, as each new copy is larger than the one it replaces. A volume
 # that fills up anyway does not stop the backups: the oldest copy is removed
-# and the write retried, with a warning in the backend's log; with keep 1
-# that leaves a moment without a backup.
+# and the write retried once, with a warning in the backend's log. The last
+# copy is never given up with keep >= 2: when even that does not make room,
+# the backups stop with an error per attempt (kubeat_backups_total with
+# result="failed") until the volume is grown; with keep 1 the only copy
+# goes, which leaves a moment without a backup.
 backup:
   enabled: false
   interval: 24h

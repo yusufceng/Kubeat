@@ -24,7 +24,14 @@ const (
 	suffix = ".db"
 	// stamp orders lexically by time, so file names sort chronologically.
 	stamp = "20060102T150405Z"
+	// partialSuffix marks a copy that is still being written.
+	partialSuffix = ".partial"
 )
+
+// failurePause is how long Run waits after a failed attempt before the next
+// one, so that it does not spin on a persistent failure. A full volume is
+// waited out for a whole interval instead, see Run.
+var failurePause = time.Minute
 
 // Store is the part of the persistence layer backups need.
 type Store interface {
@@ -80,11 +87,19 @@ func Run(ctx context.Context, st Store, opts Options) {
 		opts.Metrics.Backup(err == nil, now)
 		if err != nil {
 			opts.Logger.Error("backup failed", "error", err)
-			// Do not spin on a persistent failure.
+			// Do not spin on a persistent failure. A full volume is not
+			// tried again before a whole interval has passed: it does not
+			// empty within a minute, and every attempt on it may cost a
+			// copy. A restart tries at once, as the newest copy is older
+			// than the interval by then.
+			pause := min(opts.Interval, failurePause)
+			if errors.Is(err, syscall.ENOSPC) {
+				pause = opts.Interval
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(min(opts.Interval, time.Minute)):
+			case <-time.After(pause):
 			}
 			continue
 		}
@@ -97,17 +112,23 @@ func Run(ctx context.Context, st Store, opts Options) {
 // after it: the copies beyond keep-1 go first, so the new one fits where
 // the oldest stood and a full volume does not stop the backups for good.
 // Should the write still run out of space, the oldest copy is removed and
-// the write tried once more. With keep=1 the only copy is not given up in
-// advance: the write is tried first, and only a full volume costs the copy
-// before the retry, which leaves a moment without a backup. Both are
-// warned about in the log, as the volume is too small for the database.
-// It returns the backup's path.
+// the write tried once more, but never the last copy when keep is two or
+// more: a volume that does not take a copy even then will not within the
+// retry, and the last copy is the only way back. With keep=1 the only copy
+// is not given up in advance: the write is tried first, and only a full
+// volume costs the copy before the retry, which leaves a moment without a
+// backup. Each is warned about in the log, as the volume is too small for
+// the database. It returns the backup's path.
 func Take(ctx context.Context, st Store, opts Options, now time.Time) (string, error) {
 	final := filepath.Join(opts.Dir, prefix+now.UTC().Format(stamp)+suffix)
 	// Written under a temporary name so that a half-written file is never
-	// mistaken for a backup.
-	partial := final + ".partial"
-	_ = os.Remove(partial)
+	// mistaken for a backup. A partial left behind by a copy that was cut
+	// short, say by a restart, is no backup and takes up the room the write
+	// needs, so it goes first.
+	partial := final + partialSuffix
+	if err := removePartials(opts.Dir); err != nil {
+		opts.Logger.Warn("removing a left-over partial backup failed", "error", err)
+	}
 
 	if opts.Keep >= 2 {
 		if err := prune(opts.Dir, opts.Keep-1); err != nil {
@@ -116,7 +137,7 @@ func Take(ctx context.Context, st Store, opts Options, now time.Time) (string, e
 	}
 
 	err := write(ctx, st, partial)
-	if errors.Is(err, syscall.ENOSPC) && makeRoom(opts.Dir, opts.Logger) {
+	if errors.Is(err, syscall.ENOSPC) && makeRoom(opts.Dir, opts.Keep, opts.Logger) {
 		err = write(ctx, st, partial)
 	}
 	if err != nil {
@@ -151,15 +172,23 @@ func write(ctx context.Context, st Store, partial string) error {
 }
 
 // makeRoom deletes the oldest backup in dir so that a copy that ran out of
-// space can be tried once more. It reports whether a copy was removed; the
-// warning names it and says when it was the only one, as there is no
-// backup then until a write succeeds.
-func makeRoom(dir string, logger *slog.Logger) bool {
+// space can be tried once more, and reports whether it did. The last copy
+// is kept when keep is two or more: the volume is full for a reason that
+// removing copies did not cure, and the last copy is the only way back; the
+// backups then stop, with an error per attempt, until the volume is grown.
+// With keep=1 the only copy goes, as a moment without a backup was accepted
+// over a stale one. The warning names the copy and says when it was the
+// only one.
+func makeRoom(dir string, keep int, logger *slog.Logger) bool {
 	names, err := list(dir)
 	if err != nil || len(names) == 0 {
 		return false
 	}
 	oldest := names[0]
+	if len(names) == 1 && keep >= 2 {
+		logger.Warn("backup volume full; keeping the only copy, no retry", "kept", oldest)
+		return false
+	}
 	if err := os.Remove(filepath.Join(dir, oldest)); err != nil {
 		logger.Warn("backup volume full and the oldest copy could not be removed", "error", err)
 		return false
@@ -180,15 +209,40 @@ func list(dir string) ([]string, error) {
 	}
 	var names []string
 	for _, e := range entries {
-		name := e.Name()
-		if e.Type().IsRegular() && strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
-			if _, err := time.Parse(stamp, strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)); err == nil {
-				names = append(names, name)
-			}
+		if e.Type().IsRegular() && isBackupName(e.Name()) {
+			names = append(names, e.Name())
 		}
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// isBackupName reports whether name is one this package gives a backup:
+// the prefix, a time stamp and the suffix. Only such files are ever removed.
+func isBackupName(name string) bool {
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		return false
+	}
+	_, err := time.Parse(stamp, strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix))
+	return err == nil
+}
+
+// removePartials deletes the partial files this package named in dir, as
+// left behind by a copy that was cut short.
+func removePartials(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.Type().IsRegular() && strings.HasSuffix(name, partialSuffix) && isBackupName(strings.TrimSuffix(name, partialSuffix)) {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // newest returns when the latest backup in dir was taken.
