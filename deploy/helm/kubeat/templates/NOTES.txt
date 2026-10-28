@@ -96,8 +96,8 @@ Jobs in other namespaces send push reports through the frontend:
 {{- if include "kubeat.keepBackup" . }}{{ $kept = append $kept (printf "%s-backup" .Release.Name) }}{{ end }}
 {{- with $kept }}
 
-helm uninstall leaves the data in place, and installing again with the same
-release name and namespace picks it up. These PersistentVolumeClaims stay:
+helm uninstall leaves these PersistentVolumeClaims in place, and installing
+again with the same release name and namespace picks them up:
 {{- if include "kubeat.keepData" $ }}
   - {{ $.Release.Name }}-data, the database (backend.persistence.keepOnUninstall)
 {{- end }}
