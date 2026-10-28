@@ -22,6 +22,13 @@ rules dosyası), Grafana Cloud'da `mimir.rules.kubernetes` ve GMP'de `Rules`
 CRD'ye taşıma cümleleri, `metrics.prometheusRule.enabled=true`'nun CRD'siz
 cluster'da kurulumu bozduğu uyarısı. Sprint 2 doküman paketi adayı (S12 ile).
 
+Güncelleme (2026-10-28, sprint 2 planı): belge S30 olarak sprint 3 doküman
+paketinde (S12 ve S15 ile). Önce kurallar düzelir: sprint 2'de S29 (#36),
+böylece kopyalanan kurallar düzeltilmiş olanlardır. Kararlar: chart CRD
+yokken fail etmez (`helm template` ile çalışan GitOps hatlarını kırar),
+`docs/` altında statik kural dosyası yok; Grafana Cloud ve GMP adları
+resmî belgeden doğrulanır.
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
@@ -203,6 +210,10 @@ alınır; dizin açıkken kopya alınamazsa açılış durur, dizin kapalıysa W
 pre-schema kopyaları `UPTIME_BACKUP_KEEP`'ten bağımsız, son 2 tutulur; down
 migration yok.
 
+Güncelleme (2026-10-28, sprint 2 planı): sprint 2 migration eklemiyor, 0.44
+şema 26 ile çıkar ve 0.43.0'a `helm rollback` mümkün. Tetikleyici adayı
+artık S33 ("Sustur"u bildirim susturmasına çevirmek, aşağıda) ya da S4.
+
 ## Yedekleri cluster dışına taşıma belgesi ve backend imajına `tar`
 
 2026-10-27'de ertelendi (S7). S boyut, kod yok: README "Yedekleme ve geri
@@ -255,6 +266,12 @@ küçük ve cluster-native bir parça; BA isterse ayrı hikâye olarak öne
 maddede. Karar: upsert PATCH değil tam değiştirme; PUT ve ada göre DELETE
 yok.
 
+Güncelleme (2026-10-28, sprint 2 planı): Müşteri B'nin GitHub Actions'tan
+kanal ve durum sayfası yönetme isteği yeni bir kullanıcıdan gelmiyor (S14'ün
+kaynağı da Müşteri B), tetikleyici yanmadı. API'ye cluster dışından erişim
+yolunun belgesi ve arayüzün `/api/v1` isteğine JSON 404 dönmesi S34'te
+(sonraki sprint havuzu).
+
 ## Ücretsiz katmanda tek OIDC sağlayıcısıyla giriş; alternatifi TOTP 2FA
 
 2026-10-27'de ertelendi (S16). Küçük ekibin "Google Workspace ile giriş,
@@ -280,6 +297,13 @@ varsayılan olarak atlanır (sonuç yazılmaz, sayaç ilerlemez),
 başarısızlık kalır; `UPTIME_CLUSTER_API_FAILURE_AS_DOWN=true` eski davranışı
 seçer. Bugünkü davranış yol haritası "Bilinen sınırlar"a yazıldı.
 
+Güncelleme (2026-10-28, sprint 2 planı): Müşteri B'nin GKE zonal notu
+(control plane yükseltmesi sırasında yanlış kesinti) ortam bilgisi,
+gözlem değil; tetikleyici (pilotta API kaynaklı yanlış alarm) yanmadı.
+BA'nın "sprint 3'ün ilk adayı" önerisi kabul edilmedi, çünkü sprint 3'ün
+ilk yerleri müşteri engelleyicilerinin (S10+S11, S1); sprint 3–4 adayı.
+README'deki GKE zonal notu sprint 3'te S12 ile gelir.
+
 ## Okuma havuzuna bağlantı sınırı ve durum sayfasına eşzamanlılık sınırı
 
 2026-10-27'de ertelendi (S21). Okuma havuzu sınırsız (`sqlite.go`
@@ -292,6 +316,12 @@ kullanıcının yük testinde 200 eşzamanlı istek ölçüldüğünde (ajanlar 
 (varsayılan 16) ve `UPTIME_PUBLIC_CONCURRENCY` (varsayılan 32); semafor
 dolunca 2 sn bekleme, sonra 503 + `Retry-After: 5`. Durum sayfası önbelleği
 ayrı karar olarak bilinen sınır kalır.
+
+Güncelleme (2026-10-28, sprint 2 planı): tetikleyici yanmadı; Müşteri B'nin
+durum sayfasını kendi alan adında açma isteği bir persona isteği, gerçek
+kullanıcı ya da ölçüm değil. S35 ile birlikte alınır (aşağıda "Durum
+sayfasını yönetim arayüzünü açmadan kendi alan adında yayımlamak"): dışarı
+açmayı anlatan belge S21'den önce yayımlanmaz, ikisi aynı sürümde çıkar.
 
 ## Kontrol zaman aşımına üst sınır `UPTIME_MAX_CHECK_TIMEOUT`
 
@@ -352,6 +382,12 @@ adayı). Kurallar promtool'dan geçmedi; `promtool check rules` yerelde ve
 cluster'sız çalıştığından `test-chart.sh`'a eklenmesi önerildi. Pano için
 istek yok.
 
+Güncelleme (2026-10-28, sprint 2 planı): yalnızca `inhibit_rules` örneği
+(lisansın warning/critical'i ve `KubeatDown` yanarken aynı namespace'teki
+`KubeatMonitorDown`) ve promtool denetimi sprint 2'de S29 (#36) ile
+geliyor. Kalan yönlendirme örnekleri ve pano backlog'da kalıyor,
+tetikleyici aynı.
+
 ## Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı yeniden deneme kuyruğu
 
 2026-10-28'de ertelendi (S17, #27). Kanalın almadığı kesinti bildirimi
@@ -384,6 +420,13 @@ alarm 15 dakika yanar; önerisi kanal türü başına "son deneme başarısız"
 gauge'ı ya da README ve description'ın "son 15 dakikada başarısız deneme
 oldu" demesi ve `for` önerisi. Patlamada ölü makine kanalı ayrı madde.
 
+Güncelleme (2026-10-28, sprint 2 planı): kapanmış olayın teslim edilmemiş
+`up`'ı S28'e (PagerDuty ve webhook'a kurulum kimliği, sonraki sprint)
+eklenmedi; SRE backlog'da kalsın dedi, tetikleyici değişmedi. S25 (#37) hiç
+denenmemiş kesinti bildirimini yeniden başlatmada bildirim kaydından kurar;
+kalıcı kuyruk yine yok. `KubeatNotificationsFailing`'in kanal başına
+gauge'ı ve `for: 5m` S26'da (sonraki sprint havuzu).
+
 ## Patlamada ölü makine kanalının teslimat kuyruğuna maliyeti
 
 2026-10-28'de ertelendi (S18'in kapsam dışı parçası, #26; PO kararı "kanal
@@ -405,3 +448,57 @@ türetilmesi; patlama testine ölü makine kanalı senaryosu. Tetikleyici yandı
 sayılır: sprint 2 adayı (PMO önerisi,
 [sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md) "Sonraki
 sprint önerisi"); PO karar verir.
+
+Güncelleme (2026-10-28, sprint 2 planı): sprint 2'ye alındı (S25, #37):
+kirli çıkışta kesinti bildirimi kaybıyla aynı kök, tek maddede. Karar:
+"almıyor" sayılan makine kanalına yeni bildirim denenmez, yeniden deneme
+listesine yazılır; `UPTIME_NOTIFY_QUEUE_SIZE` için "en az monitor sayısı
+kadar" kuralı README'ye girer, otomatik türetme yok. Merge ile "kapandı"
+notu düşülür (S25'in kabul ölçütü).
+
+## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
+
+2026-10-28'de ertelendi (S33,
+[sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)). Müşteri
+B (önemli): monitor menüsündeki "Sustur" sıradan bir bakım penceresi açar
+(`frontend/app/ui/monitor-settings.tsx:173`), bu yüzden müşterilere açık
+durum sayfasında "Bakım: Susturma" görünür; susturma sürerken servis
+gerçekten düşerse olay açılmadığı için sayfa yine "bakım" der
+(`backend/internal/api/statuspage_view.go:31-44`). Susturma nöbetçinin
+aracıdır, müşteriye duyuru değildir. L boyut ve migration (pencereye tür
+alanı): backlog kuralıyla önce S6 gerekir, yani iki slot. Tetikleyici:
+durum sayfasının dışarı açılması (S35/S21 paketi) ya da gerçek bir şikâyet.
+Karar şimdiden: yalnızca sayfadan gizlemek yok, çünkü susturmada olay
+açılmadığından sayfa gerçek bir kesintide "çalışıyor" der. Susturmada olay
+açılır; bildirim, hatırlatma ve yeniden deneme tutulur; pencere sonunda
+hâlâ açık olay duyurulur; susturma içinde açılıp kapanan olayın düzelme
+bildirimi gitmez. Ara adım S27 (sonraki sprint havuzu): "Sustur" ipucu iki
+dilde durum sayfasında "bakım" görüneceğini söyler.
+
+## Durum sayfasını yönetim arayüzünü açmadan kendi alan adında yayımlamak
+
+2026-10-28'de ertelendi (S35). Müşteri B (önemli): müşterilerine kendi
+alan adında durum sayfası göstermek, giriş ekranı ve API iç ağda kalsın;
+bugün sayfayı açmak giriş ekranını da açmak demek (giriş kilidi kullanıcı
+adına göre, yol haritası "Bilinen sınırlar"). Belge dışarı açmayı
+kolaylaştırır ve S21'in tetikleyicisini kendisi yakar; müşteriye dönük
+sayfa izlenen cluster'la birlikte düşer, o iş için dışarıdan bakan
+tamamlayıcı araç daha doğru yer ("UptimeRobot karşılaştırmasından
+ertelenenler"; yol haritası Kuma tablosu "özel alan adı yok"). Tetikleyici:
+gerçek bir kullanıcının isteği ya da pilotta "devam" kararı. Kural: S21 ile
+aynı sürümde yayımlanır, ondan önce değil. Karar: chart'a
+`statusPage.ingress` yok, OpenShift Route örneği yok.
+
+## Kararlı minor ve güvenlik düzeltmeleri için destek penceresi
+
+2026-10-28'de ertelendi (S1'in açık sorusu). Müşteri A (önemli): 15 günde
+12 minor çıktı (v0.32.0 → v0.43.0); güvenlik yaması almak için davranış
+değiştiren son minor'a geçmek zorunda. Karar (kullanıcı adına): ilk dış
+müşteri ya da satın alma görüşmesine kadar taahhüt yok. S1 (sonraki sprint)
+ile gelecek SECURITY.md "yalnızca son minor, kritik/yüksek CVE 7 gün" der;
+S1 Makefile'ın `release/v*` dalından etiketlemesini teknik olarak açar, bu
+bir yetenektir, söz değil. Tetikleyici: ilk satın alma görüşmesi. Başlangıç
+önerisi BA'nın varsayılanı: çeyrekte bir kararlı minor, ardılı çıktıktan
+sonra 90 gün kritik/yüksek CVE ve taban imaj düzeltmesi, aynı anda en çok
+iki hat. Gerekçe: söz sonradan verilebilir; verilip geri alınırsa güven
+kaybolur.
