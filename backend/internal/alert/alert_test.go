@@ -30,11 +30,18 @@ type recorder struct {
 	ids      []int64 // the channels' IDs, what settle orders by
 	settled  int     // how much of sent is in channel order
 	failures int     // number of upcoming sends that fail
+	// failuresOf is the number of upcoming sends to a channel, by name,
+	// that fail while the other channels take theirs (fail).
+	failuresOf map[string]int
 }
 
 func (r *recorder) Send(_ context.Context, ch store.Channel, n Notification) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.failuresOf[ch.Name] > 0 {
+		r.failuresOf[ch.Name]--
+		return errors.New("boom")
+	}
 	if r.failures > 0 {
 		r.failures--
 		return errors.New("boom")
@@ -64,6 +71,17 @@ func (r *recorder) settle() {
 	copy(r.channels[r.settled:], channels)
 	copy(r.ids[r.settled:], ids)
 	r.settled = len(r.sent)
+}
+
+// fail makes the next n sends to the named channel fail, as a target that
+// answers with an error does; the other channels take theirs.
+func (r *recorder) fail(channel string, n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failuresOf == nil {
+		r.failuresOf = make(map[string]int)
+	}
+	r.failuresOf[channel] = n
 }
 
 // reset forgets what was sent so far.

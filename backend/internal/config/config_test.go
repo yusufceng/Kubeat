@@ -75,6 +75,8 @@ func TestLoadDefaults(t *testing.T) {
 		NotifyAttempts:          3,
 		NotifyRetryDelay:        5 * time.Second,
 		NotifyTimeout:           5 * time.Second,
+		NotifyRetryMax:          15 * time.Minute,
+		NotifyRetryFor:          time.Hour,
 
 		PrometheusTimeout:    10 * time.Second,
 		PrometheusRateWindow: 5 * time.Minute,
@@ -473,6 +475,31 @@ func TestReminderInterval(t *testing.T) {
 		if _, err := Load(); err == nil {
 			t.Errorf("UPTIME_REMINDER_INTERVAL=%q was accepted", bad)
 		}
+	}
+}
+
+// The two settings of sending an outage notification again take a
+// duration; zero turns each off.
+func TestNotifyRetry(t *testing.T) {
+	for _, key := range []string{"UPTIME_NOTIFY_RETRY_MAX", "UPTIME_NOTIFY_RETRY_FOR"} {
+		for value, want := range map[string]time.Duration{"0": 0, "0s": 0, "30m": 30 * time.Minute} {
+			t.Setenv(key, value)
+			cfg, err := Load()
+			got := cfg.NotifyRetryMax
+			if key == "UPTIME_NOTIFY_RETRY_FOR" {
+				got = cfg.NotifyRetryFor
+			}
+			if err != nil || got != want {
+				t.Errorf("%s=%q: %s, %v; want %s", key, value, got, err, want)
+			}
+		}
+		for _, bad := range []string{"-1m", "later"} {
+			t.Setenv(key, bad)
+			if _, err := Load(); err == nil {
+				t.Errorf("%s=%q was accepted", key, bad)
+			}
+		}
+		t.Setenv(key, "")
 	}
 }
 

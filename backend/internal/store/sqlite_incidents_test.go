@@ -207,6 +207,17 @@ func TestDeliveryLog(t *testing.T) {
 			t.Errorf("DeliveryAt(%+v) = %v, %v, %v; want %v", key, at, found, err, want)
 		}
 	}
+	// Whether the channel took it: only a delivered attempt counts.
+	for key, want := range map[struct {
+		incident, channel int64
+		event             string
+	}]bool{
+		{incident.ID, 5, "down"}: true, {other.ID, 1, "down"}: false, {incident.ID, 1, "down"}: false, {12345, 5, "down"}: false,
+	} {
+		if got, err := s.Delivered(ctx, key.incident, key.channel, key.event); err != nil || got != want {
+			t.Errorf("Delivered(%+v) = %v, %v; want %v", key, got, err, want)
+		}
+	}
 
 	// Retention deletes by age; deleting the monitor deletes the rest.
 	if n, err := s.DeleteDeliveriesBefore(ctx, base.Add(3*time.Minute)); err != nil || n != 3 {

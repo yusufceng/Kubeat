@@ -952,6 +952,9 @@ type Store interface {
 	// not, to tell the channel the event about the incident, and when the
 	// first of them ended.
 	DeliveryAt(ctx context.Context, incidentID, channelID int64, event string) (at time.Time, found bool, err error)
+	// Delivered reports whether an attempt to tell the channel the event
+	// about the incident succeeded.
+	Delivered(ctx context.Context, incidentID, channelID int64, event string) (bool, error)
 	// DeleteDeliveriesBefore removes log entries older than cutoff and
 	// reports how many rows were deleted.
 	DeleteDeliveriesBefore(ctx context.Context, cutoff time.Time) (int64, error)

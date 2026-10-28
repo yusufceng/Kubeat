@@ -148,6 +148,8 @@ func main() {
 		Attempts:          cfg.NotifyAttempts,
 		RetryDelay:        cfg.NotifyRetryDelay,
 		SendTimeout:       cfg.NotifyTimeout,
+		RetryMax:          cfg.NotifyRetryMax,
+		RetryFor:          cfg.NotifyRetryFor,
 		GroupWait:         cfg.NotifyGroupWait,
 		Language:          cfg.Language,
 		PublicURL:         cfg.PublicURL,

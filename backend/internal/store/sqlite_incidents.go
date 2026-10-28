@@ -237,6 +237,21 @@ func (s *SQLite) DeliveryAt(ctx context.Context, incidentID, channelID int64, ev
 	return time.UnixMilli(at.Int64).UTC(), true, nil
 }
 
+// Delivered says whether any attempt to tell the channel the event about
+// the incident succeeded: the alert engine sends an outage notification a
+// channel did not take again, and after a restart reads from here whether
+// it still has to.
+func (s *SQLite) Delivered(ctx context.Context, incidentID, channelID int64, event string) (bool, error) {
+	var n int
+	err := s.read.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM incident_deliveries WHERE incident_id = ? AND channel_id = ? AND event = ? AND delivered",
+		incidentID, channelID, event).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("delivered: %w", err)
+	}
+	return n > 0, nil
+}
+
 func (s *SQLite) DeleteDeliveriesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	n, err := s.deleteBefore(ctx, "incident_deliveries", "at", cutoff)
 	if err != nil {
