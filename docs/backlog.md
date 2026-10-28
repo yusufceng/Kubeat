@@ -323,3 +323,14 @@ yapılmadı: sandbox'taki veritabanı küçük, `docs/yuk-testi.md`'deki 600 MB
 veritabanı bile varsayılan 5 Gi'ye sığıyor. Tetikleyici: boyut kuralını
 aşan bir pilot veritabanı ya da loglarda tekrarlanan `backup volume full`
 uyarısı.
+
+## Alertmanager yönlendirme ve susturma örnekleri; Grafana panosu
+
+2026-10-27'de kapsam dışı bırakıldı (S9). Chart'ın PrometheusRule'u
+alarmı üretir; Alertmanager'da namespace'e göre yönlendirme, `critical`
+yanarken aynı addaki `warning`'i susturma (`KubeatLicenseExpiring`) ve
+alıcı örnekleri platformun yapılandırmasıdır. OpenShift'in ve
+kube-prometheus-stack'in varsayılan yapılandırması susturmayı zaten yapar;
+README yalnızca bunu söyler. Grafana panosu da burada: öz-metrikler için
+hazır bir pano istenirse `docs/` altına JSON olarak eklenir. Tetikleyici:
+kendi Alertmanager'ını elle yapılandıran ya da pano isteyen ilk kullanıcı.
