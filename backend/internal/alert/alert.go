@@ -112,6 +112,10 @@ type Store interface {
 	// incident before a restart, and when: whether the log has an attempt,
 	// delivered or not, and when the first ended.
 	DeliveryAt(ctx context.Context, incidentID, channelID int64, event string) (at time.Time, found bool, err error)
+	// Delivered says whether an attempt to tell the channel the event
+	// about the incident succeeded: whether, after a restart, an outage
+	// still has to be sent again to the channel.
+	Delivered(ctx context.Context, incidentID, channelID int64, event string) (bool, error)
 	SetMonitorSlowSince(ctx context.Context, id int64, since time.Time) error
 }
 
@@ -136,10 +140,20 @@ type Options struct {
 	// new ones are dropped and logged rather than stalling result writes.
 	QueueSize int
 	// Attempts is the total number of tries per channel, RetryDelay the
-	// pause between them and SendTimeout the limit of a single try.
+	// pause between them and SendTimeout the limit of a single try. The
+	// three make one attempt to deliver a notification.
 	Attempts    int
 	RetryDelay  time.Duration
 	SendTimeout time.Duration
+	// A notification of an outage or of its end that a channel did not
+	// take is attempted again while the outage lasts: after a minute, then
+	// after twice the wait each time, RetryMax at most; zero attempts
+	// nothing again. The end of an outage is attempted for RetryFor at
+	// most, from the attempt that failed; zero does not attempt it again.
+	// Nothing else is attempted again: a test, a reminder, a certificate
+	// or a slowness notification goes once.
+	RetryMax time.Duration
+	RetryFor time.Duration
 	// Language the notifications are written in; English when empty.
 	Language string
 	// PublicURL is Kubeat's address as its users reach it, for the links
@@ -461,7 +475,9 @@ func takeDue(groups map[groupKey]*pendingGroup, now time.Time, everything bool) 
 // outages at the next start. Each pass through the channels sends to them
 // in parallel and waits for the slowest (deliver): the loop is held up by
 // a channel that does not answer for as long as one send to it takes, not
-// once per channel, and the other channels are not held up at all.
+// once per channel, and the other channels are not held up at all. An
+// outage notification a channel did not take is sent again when its wait
+// is up (retryLater, deliverOwed), with what else is owed.
 func (e *Engine) Run(ctx context.Context) {
 	groups := make(map[groupKey]*pendingGroup)
 	started := 0
@@ -568,10 +584,10 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 			}
 		}
 		if n, ok := grouped(event, mine); ok {
-			shares = append(shares, outbound{ch, []Notification{n}})
+			shares = append(shares, outbound{channel: ch, notes: []Notification{n}})
 		}
 	}
-	e.deliver(ctx, shares)
+	e.retryLater(e.deliver(ctx, shares))
 	e.outagesOver(notes)
 }
 
@@ -579,11 +595,17 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 // the notifications end, once every channel has had its chance to hear
 // of the end: those that route did not reach (disabled, narrowed or
 // deleted meanwhile) must not stay owed anything about an outage that is
-// over.
+// over. An outage notification still to be sent again is not sent: the
+// outage is over, and a channel that never took it has failed for good.
+// Nor is the end of an earlier outage of the monitor: a later end was
+// told.
 func (e *Engine) outagesOver(notes []Notification) {
 	for _, n := range notes {
-		if n.Event == EventUp {
-			e.owed.forgetOutage(n.Monitor.ID, n.Incident.ID)
+		if n.Event != EventUp {
+			continue
+		}
+		for _, r := range e.owed.forgetOutage(n.Monitor.ID, n.Incident.ID) {
+			e.gaveUp(r.channel, r.note, "the outage ended before the channel took it")
 		}
 	}
 }
@@ -624,48 +646,95 @@ func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(sto
 		// route notes what the channel is owed even about an event it
 		// does not want, so that its own reminders can follow.
 		if e.route(ch, n, now) && ch.Wants(n.Event.Kind()) {
-			shares = append(shares, outbound{ch, []Notification{n}})
+			shares = append(shares, outbound{channel: ch, notes: []Notification{n}})
 		}
 	}
-	e.deliver(ctx, shares)
+	e.retryLater(e.deliver(ctx, shares))
 	if include == nil {
 		e.outagesOver([]Notification{n})
 	}
 }
 
 // outbound is a channel's share of one pass through the channels: what it
-// is sent, in the order it is sent.
+// is sent, in the order it is sent. A note sent again has its retry under
+// its index in retries.
 type outbound struct {
 	channel store.Channel
 	notes   []Notification
+	retries map[int]*retry
 }
 
-// deliver sends each channel its share and returns once the last send is
-// recorded. The channels are sent to in parallel, one goroutine each, and
-// each channel serially, in order: a channel that is slow or down holds up
-// only itself, and a pass costs the loop its slowest channel rather than
-// the sum of them. Only the sends leave the loop's goroutine; what a
-// channel is owed (route, outagesOver) is settled in the loop, before and
-// after, and the store and the metrics take calls from several goroutines.
-func (e *Engine) deliver(ctx context.Context, shares []outbound) {
-	var wg sync.WaitGroup
+// failed is a send that a channel did not take: what was sent, and the
+// retry it was sent again for, if it was. A note sent again is held back
+// once the channel failed to take another in the pass (deliver): not
+// sent, so not an attempt, and failed all the same.
+type failed struct {
+	channel store.Channel
+	note    Notification
+	retry   *retry
+	held    bool
+}
+
+// deliver sends each channel its share, and returns what failed once the
+// last send is recorded. The channels are sent to in parallel, one
+// goroutine each, and each channel serially, in order: a channel that is
+// slow or down holds up only itself, and a pass costs the loop its slowest
+// channel rather than the sum of them. Once a channel fails to take a
+// note, the notes sent to it again are held back for the pass: a channel
+// that is down costs the pass one attempt, not one per note waiting on
+// it, and they wait again (retryLater). A note sent for the first time
+// still goes: it is news, which the channel may yet take. Only the sends
+// leave the loop's goroutine; what a channel is owed (route, retryLater,
+// outagesOver) is settled in the loop, before and after, and the store and
+// the metrics take calls from several goroutines.
+func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		failures []failed
+	)
 	for _, s := range shares {
 		wg.Go(func() {
-			for _, n := range s.notes {
-				e.send(ctx, s.channel, n)
+			tripped := false
+			for i, n := range s.notes {
+				r := s.retries[i]
+				var err error
+				if tripped && r != nil {
+					err = errNotTaken
+				} else {
+					err = e.send(ctx, s.channel, n)
+				}
+				if err == nil {
+					continue
+				}
+				tripped = true
+				mu.Lock()
+				failures = append(failures, failed{channel: s.channel, note: n, retry: r, held: err == errNotTaken})
+				mu.Unlock()
 			}
 		})
 	}
 	wg.Wait()
+	return failures
 }
+
+// errNotTaken stands, within deliver, for a note held back because the
+// channel did not take another in the pass.
+var errNotTaken = errors.New("the channel did not take another notification in this pass")
 
 // send delivers one notification (single or grouped) to one channel, with
 // retries, and records the outcome: on the channel, and in the delivery
 // log of every incident the message was about. It runs in a goroutine of
-// deliver's, beside the sends to the other channels.
-func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
+// deliver's, beside the sends to the other channels. A failure is the
+// attempt's, not yet the notification's: whether it is attempted again is
+// settled in the loop (retryLater), which counts the notification failed
+// when it is not.
+func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) error {
 	err := e.sendWithRetry(ctx, ch, n)
-	e.opts.Metrics.Notification(string(ch.Type), string(n.Event), err == nil)
+	e.opts.Metrics.NotificationAttempt(string(ch.Type), err == nil)
+	if err == nil {
+		e.opts.Metrics.Notification(string(ch.Type), string(n.Event), true)
+	}
 	deliveryError := ""
 	if err != nil {
 		deliveryError = err.Error()
@@ -678,15 +747,30 @@ func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
 	if logErr := e.store.RecordDeliveries(context.WithoutCancel(ctx), deliveryLog(ch, n, now, deliveryError)); logErr != nil {
 		e.opts.Logger.Error("delivery log not written", "channel", ch.Name, "event", n.Event, "error", logErr)
 	}
-	what := n.Monitor.Name
-	if len(n.Group) > 1 {
-		what = fmt.Sprintf("%d monitors", len(n.Group))
-	}
 	if err != nil {
-		e.opts.Logger.Error("notification failed", "channel", ch.Name, "event", n.Event, "monitor", what, "error", err)
-		return
+		e.opts.Logger.Error("notification failed", "channel", ch.Name, "event", n.Event, "monitor", about(n), "error", err)
+		return err
 	}
-	e.opts.Logger.Info("notification sent", "channel", ch.Name, "event", n.Event, "monitor", what)
+	e.opts.Logger.Info("notification sent", "channel", ch.Name, "event", n.Event, "monitor", about(n))
+	return nil
+}
+
+// about names what a notification is about, for the log lines.
+func about(n Notification) string {
+	if len(n.Group) > 1 {
+		return fmt.Sprintf("%d monitors", len(n.Group))
+	}
+	return n.Monitor.Name
+}
+
+// gaveUp counts a notification a channel never took: the final outcome of
+// its attempts. The reason is logged when the attempts spread over the
+// outage (retryLater); a notification attempted once was logged by send.
+func (e *Engine) gaveUp(ch store.Channel, n Notification, reason string) {
+	e.opts.Metrics.Notification(string(ch.Type), string(n.Event), false)
+	if reason != "" {
+		e.opts.Logger.Error("notification given up", "channel", ch.Name, "event", n.Event, "monitor", about(n), "reason", reason)
+	}
 }
 
 // deliveryLog is the delivery log's record of one attempt: an entry for

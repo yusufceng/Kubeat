@@ -151,6 +151,18 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   bildirim gönderir; API kesintisi hedefin kendi hatasından ayrılmaz (S20,
   [backlog](backlog.md) "Cluster API'ye ulaşılamayan kontrolü hedef hatası
   saymamak").
+- Bildirim kanalları birbirinden bağımsız teslim edilir; başarısız kesinti
+  bildirimi olay kapanana kadar artan aralıkla yeniden denenir (üst sınır
+  `UPTIME_NOTIFY_RETRY_MAX`), düzelme (`up`) bildirimi için en çok
+  `UPTIME_NOTIFY_RETRY_FOR`. Deneme listesi bellektedir: yeniden
+  başlatmada açık kesintininki bildirim kaydından kurulur, bekleyen düzelme
+  bildirimi düşer; kanal almadan yeni bir kesinti açılırsa da düşer. Teslim
+  edilemeyen bildirimlerin ayrı bir görünümü (dead-letter) yoktur; bildirim
+  kaydı, `kubeat_notification_attempts_total{result="failed"}` (chart'ın
+  `KubeatNotificationsFailing` alarmı bunu sayar) ve
+  `kubeat_notifications_total{result="failed"}` gösterir ([backlog](backlog.md)
+  "Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı
+  yeniden deneme kuyruğu").
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.

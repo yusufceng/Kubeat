@@ -75,6 +75,8 @@ func TestLoadDefaults(t *testing.T) {
 		NotifyAttempts:          3,
 		NotifyRetryDelay:        5 * time.Second,
 		NotifyTimeout:           5 * time.Second,
+		NotifyRetryMax:          15 * time.Minute,
+		NotifyRetryFor:          time.Hour,
 
 		PrometheusTimeout:    10 * time.Second,
 		PrometheusRateWindow: 5 * time.Minute,
@@ -473,6 +475,63 @@ func TestReminderInterval(t *testing.T) {
 		if _, err := Load(); err == nil {
 			t.Errorf("UPTIME_REMINDER_INTERVAL=%q was accepted", bad)
 		}
+	}
+}
+
+// The two settings of sending an outage notification again take a
+// duration; zero turns each off.
+func TestNotifyRetry(t *testing.T) {
+	for _, key := range []string{"UPTIME_NOTIFY_RETRY_MAX", "UPTIME_NOTIFY_RETRY_FOR"} {
+		for value, want := range map[string]time.Duration{"0": 0, "0s": 0, "30m": 30 * time.Minute} {
+			t.Setenv(key, value)
+			cfg, err := Load()
+			got := cfg.NotifyRetryMax
+			if key == "UPTIME_NOTIFY_RETRY_FOR" {
+				got = cfg.NotifyRetryFor
+			}
+			if err != nil || got != want {
+				t.Errorf("%s=%q: %s, %v; want %s", key, value, got, err, want)
+			}
+		}
+		for _, bad := range []string{"-1m", "later"} {
+			t.Setenv(key, bad)
+			if _, err := Load(); err == nil {
+				t.Errorf("%s=%q was accepted", key, bad)
+			}
+		}
+		t.Setenv(key, "")
+	}
+}
+
+// The cap on the wait between the attempts is at least a minute, and at
+// least one attempt: shorter, a channel that is down would be sent to
+// without a pause. The end of an outage has no such floor.
+func TestNotifyRetryMaxHasAFloor(t *testing.T) {
+	for _, bad := range []string{"10s", "59s"} {
+		t.Setenv("UPTIME_NOTIFY_RETRY_MAX", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "UPTIME_NOTIFY_RETRY_MAX") {
+			t.Errorf("UPTIME_NOTIFY_RETRY_MAX=%q: %v, want it refused", bad, err)
+		}
+	}
+	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "1m")
+	if cfg, err := Load(); err != nil || cfg.NotifyRetryMax != time.Minute {
+		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=1m: %s, %v", cfg.NotifyRetryMax, err)
+	}
+	// An attempt of 5 tries of 30s with 10s between them is 200s long.
+	t.Setenv("UPTIME_NOTIFY_ATTEMPTS", "5")
+	t.Setenv("UPTIME_NOTIFY_TIMEOUT", "30s")
+	t.Setenv("UPTIME_NOTIFY_RETRY_DELAY", "10s")
+	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "3m")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "= 3m20s") {
+		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=3m with attempts of 3m20s: %v, want it refused", err)
+	}
+	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "4m")
+	if _, err := Load(); err != nil {
+		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=4m with attempts of 3m20s: %v", err)
+	}
+	t.Setenv("UPTIME_NOTIFY_RETRY_FOR", "30s")
+	if cfg, err := Load(); err != nil || cfg.NotifyRetryFor != 30*time.Second {
+		t.Errorf("UPTIME_NOTIFY_RETRY_FOR=30s: %s, %v", cfg.NotifyRetryFor, err)
 	}
 }
 

@@ -208,6 +208,12 @@ type Config struct {
 	NotifyAttempts          int           // UPTIME_NOTIFY_ATTEMPTS
 	NotifyRetryDelay        time.Duration // UPTIME_NOTIFY_RETRY_DELAY
 	NotifyTimeout           time.Duration // UPTIME_NOTIFY_TIMEOUT
+	// An outage notification a channel did not take is sent again while
+	// the outage lasts, at a doubling interval capped by NotifyRetryMax (0
+	// sends nothing again); the end of an outage for NotifyRetryFor at most
+	// (0 does not send it again).
+	NotifyRetryMax time.Duration // UPTIME_NOTIFY_RETRY_MAX; 0 = off
+	NotifyRetryFor time.Duration // UPTIME_NOTIFY_RETRY_FOR; 0 = the end is not sent again
 
 	// A Prometheus-compatible server (on OpenShift, Thanos Querier) from
 	// which pod CPU and memory usage is read; off while the URL is empty.
@@ -514,6 +520,20 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.NotifyGroupWait, err = envDurationOrZero("UPTIME_NOTIFY_GROUP_WAIT", 30*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.NotifyRetryMax, err = envDurationOrZero("UPTIME_NOTIFY_RETRY_MAX", 15*time.Minute); err != nil {
+		return Config{}, err
+	}
+	// The wait between the attempts starts at a minute and is capped by
+	// RETRY_MAX; a cap under a minute, or under the length of one attempt
+	// (its tries and the pauses between them), would send to a channel that
+	// is down without a pause.
+	if attempt := time.Duration(cfg.NotifyAttempts) * (cfg.NotifyTimeout + cfg.NotifyRetryDelay); cfg.NotifyRetryMax > 0 && cfg.NotifyRetryMax < max(time.Minute, attempt) {
+		return Config{}, fmt.Errorf("UPTIME_NOTIFY_RETRY_MAX: must be 0 or at least 1m and one attempt, UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY) = %s; got %s",
+			attempt, cfg.NotifyRetryMax)
+	}
+	if cfg.NotifyRetryFor, err = envDurationOrZero("UPTIME_NOTIFY_RETRY_FOR", time.Hour); err != nil {
 		return Config{}, err
 	}
 	if cfg.DiscoveryDefaultTimeout >= cfg.DiscoveryDefaultInterval {

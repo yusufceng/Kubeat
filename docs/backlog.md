@@ -334,3 +334,19 @@ kube-prometheus-stack'in varsayılan yapılandırması susturmayı zaten yapar;
 README yalnızca bunu söyler. Grafana panosu da burada: öz-metrikler için
 hazır bir pano istenirse `docs/` altına JSON olarak eklenir. Tetikleyici:
 kendi Alertmanager'ını elle yapılandıran ya da pano isteyen ilk kullanıcı.
+
+## Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı yeniden deneme kuyruğu
+
+2026-10-28'de ertelendi (S17, #27). Kanalın almadığı kesinti bildirimi
+artık olay kapanana kadar artan aralıkla yeniden denenir (README "Alarm");
+deneme listesi bellektedir, yeniden başlatmada açık kesintininki bildirim
+kaydından kurulur, bekleyen düzelme bildirimi düşer. Kapsam dışı bırakılan
+iki parça: teslim edilemeyen bildirimleri tek yerde gösteren bir görünüm
+(dead-letter) ve veritabanında kalıcı bir yeniden deneme kuyruğu. Bugün
+ikisinin yerini bildirim kaydı (olay sayfası), kanal satırındaki "Son
+gönderim" ve `kubeat_notifications_total{result="failed"}` ile
+`kubeat_notification_attempts_total` sayaçları tutar; S9'un
+`KubeatNotificationsFailing` alarmı başarısız denemeyi ve düşürülen
+bildirimi sayar, motorun vazgeçmesini beklemez. Tetikleyici: pilotta
+yeniden deneme penceresini aşan bir kanal kesintisi (düzelme için 1 saatten
+uzun) ya da yeniden başlatmayla düşen bir düzelme bildirimi görülürse.

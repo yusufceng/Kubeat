@@ -30,6 +30,7 @@ type Metrics struct {
 	resultsWritten    prometheus.Counter
 	resultsDropped    prometheus.Counter
 	notifications     *prometheus.CounterVec
+	notificationAtt   *prometheus.CounterVec
 	notificationsDrop prometheus.Counter
 	heartbeats        *prometheus.CounterVec
 	lastHeartbeat     prometheus.Gauge
@@ -89,8 +90,12 @@ func New(version string) *Metrics {
 		}),
 		notifications: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kubeat_notifications_total",
-			Help: "Notification deliveries, by channel type, event and outcome (after retries).",
+			Help: "Notifications by channel type, event and final outcome: sent once a channel took it, failed once the engine stopped trying (after the tries of one attempt, and for an outage notification after the attempts spread over the outage).",
 		}, []string{"channel_type", "event", "result"}),
+		notificationAtt: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubeat_notification_attempts_total",
+			Help: "Attempts to deliver a notification to a channel, by channel type and outcome: one per entry of the delivery log, the attempts of an outage notification sent again included.",
+		}, []string{"channel_type", "result"}),
 		notificationsDrop: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "kubeat_notifications_dropped_total",
 			Help: "Notifications dropped because the delivery queue was full.",
@@ -137,7 +142,7 @@ func New(version string) *Metrics {
 		build,
 		m.checks, m.checkDuration, m.checksInFlight, m.dispatchSkipped, m.lastTick,
 		m.resultsWritten, m.resultsDropped,
-		m.notifications, m.notificationsDrop,
+		m.notifications, m.notificationAtt, m.notificationsDrop,
 		m.heartbeats, m.lastHeartbeat,
 		m.backups, m.lastBackup,
 		m.targetThrottled,
@@ -242,10 +247,20 @@ func (m *Metrics) Results(written, dropped int) {
 	m.resultsDropped.Add(float64(dropped))
 }
 
-// Notification records the final outcome of delivering to one channel.
+// Notification records the final outcome of delivering to one channel:
+// taken, or given up on after every attempt.
 func (m *Metrics) Notification(channelType, event string, delivered bool) {
 	if m != nil {
 		m.notifications.WithLabelValues(channelType, event, resultLabel(delivered, "sent", "failed")).Inc()
+	}
+}
+
+// NotificationAttempt records one attempt to deliver to one channel, as
+// the delivery log does; an outage notification sent again is counted
+// once more.
+func (m *Metrics) NotificationAttempt(channelType string, delivered bool) {
+	if m != nil {
+		m.notificationAtt.WithLabelValues(channelType, resultLabel(delivered, "sent", "failed")).Inc()
 	}
 }
 
