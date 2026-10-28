@@ -163,8 +163,15 @@ type Options struct {
 	// event in the same namespace, so that an outage of many monitors is
 	// one message to people rather than one per monitor; zero sends each
 	// at once. Channels read by software (webhook, PagerDuty) are never
-	// grouped and never wait: they get every notification at once.
+	// grouped and do not wait for a group: they get every notification at
+	// once, unless they did not take the last one (paused).
 	GroupWait time.Duration
+	// DrainTimeout bounds what Run still sends once its ctx is done: the
+	// groups waiting, the queue and what is owed by then. When it is up,
+	// the sends under way are cut short and the rest is not sent; the
+	// outages among it are sent at the next start (restore). Zero sends
+	// all of it, however long that takes.
+	DrainTimeout time.Duration
 	// Metrics may be nil.
 	Metrics *metrics.Metrics
 	Logger  *slog.Logger
@@ -181,11 +188,20 @@ type Engine struct {
 	owed *schedule
 	// now is the clock of the delivery loop; tests set their own.
 	now func() time.Time
+	// started is when the engine was made, to the millisecond as the
+	// store keeps times: the outages open before then are the ones a
+	// restart may have kept from a channel (restore).
+	started time.Time
+	// halt bounds the attempts to deliver (sendWithRetry): it ends
+	// DrainTimeout after Run's ctx is done. Only Run sets it, before it
+	// sends anything.
+	halt context.Context
 }
 
 // New returns an Engine. Run must be started for notifications to be sent.
 func New(st Store, sender Sender, opts Options) *Engine {
-	return &Engine{store: st, sender: sender, opts: opts, queue: make(chan Notification, opts.QueueSize), owed: newSchedule(), now: time.Now}
+	return &Engine{store: st, sender: sender, opts: opts, queue: make(chan Notification, opts.QueueSize), owed: newSchedule(),
+		now: time.Now, started: time.Now().Truncate(time.Millisecond), halt: context.Background()}
 }
 
 // Evaluate updates incidents for the monitors in results, which must already
@@ -467,18 +483,36 @@ func takeDue(groups map[groupKey]*pendingGroup, now time.Time, everything bool) 
 }
 
 // Run delivers queued notifications until ctx is cancelled, then delivers
-// what is still queued (without retries) and returns. With GroupWait set,
-// notifications are held for that long and delivered together with the
-// others of their group. What channels with a delay or a repeat interval
-// are owed (see schedule) is delivered when it falls due; at shutdown what
-// is due by then goes, and the rest is worked out again from the open
-// outages at the next start. Each pass through the channels sends to them
-// in parallel and waits for the slowest (deliver): the loop is held up by
-// a channel that does not answer for as long as one send to it takes, not
-// once per channel, and the other channels are not held up at all. An
-// outage notification a channel did not take is sent again when its wait
-// is up (retryLater, deliverOwed), with what else is owed.
+// what is still waiting (without retries) and returns: the groups people
+// wait for first, then the queue, then what is owed by then, all of it
+// within DrainTimeout. With GroupWait set, notifications are held for
+// that long and delivered together with the others of their group. What
+// channels with a delay or a repeat interval are owed (see schedule) is
+// delivered when it falls due; at shutdown what is due by then goes, and
+// the rest is worked out again from the open outages at the next start.
+// Each pass through the channels sends to them in parallel and waits for
+// the slowest (deliver): the loop is held up by a channel that does not
+// answer for as long as one send to it takes, not once per channel, and
+// the other channels are not held up at all. An outage notification a
+// channel did not take is sent again when its wait is up (retryLater,
+// deliverOwed), with what else is owed; a channel software reads is sent
+// nothing until then (paused), so that one that is down holds up the
+// loop once per wait rather than once per notification.
 func (e *Engine) Run(ctx context.Context) {
+	if e.opts.DrainTimeout > 0 {
+		halt, stop := context.WithCancel(context.Background())
+		defer stop()
+		go func() {
+			<-ctx.Done()
+			select {
+			case <-time.After(e.opts.DrainTimeout):
+				stop()
+			case <-halt.Done():
+			}
+		}()
+		e.halt = halt
+		defer func() { e.halt = context.Background() }()
+	}
 	groups := make(map[groupKey]*pendingGroup)
 	started := 0
 	timer := time.NewTimer(time.Hour)
@@ -516,10 +550,13 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 		g.notes = append(g.notes, n)
 	}
-	flush := func(everything bool) {
+	flushGroups := func(everything bool) {
 		for _, g := range takeDue(groups, e.now(), everything) {
 			e.deliverGroup(ctx, g.event, g.notes, func(ch store.Channel) bool { return !machine(ch.Type) })
 		}
+	}
+	flush := func(everything bool) {
+		flushGroups(everything)
 		e.deliverOwed(ctx)
 	}
 
@@ -542,15 +579,29 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 	}
 	timer.Stop()
-	for {
+	// Shutting down: the groups people wait for go first, ahead of the
+	// queue, whose channels software reads may be slow to answer; then
+	// what is queued, the groups it makes and what is owed by then, as
+	// long as halt allows.
+	if e.halt.Err() == nil {
+		flushGroups(true)
+	}
+	for e.halt.Err() == nil {
 		select {
 		case n := <-e.queue:
 			add(n)
 		default:
-			// Shutting down: what is waiting goes now.
 			flush(true)
 			return
 		}
+	}
+	left := len(e.queue)
+	for _, g := range groups {
+		left += len(g.notes)
+	}
+	if left > 0 {
+		e.opts.Logger.Warn("shutting down: notifications not sent within UPTIME_SHUTDOWN_TIMEOUT; the outages among them are sent at the next start",
+			"count", left)
 	}
 }
 
@@ -626,7 +677,8 @@ func grouped(event Event, mine []Notification) (Notification, bool) {
 
 // deliverTo sends one notification to every enabled channel whose scope
 // covers it and that include accepts; nil includes them all. A channel
-// whose delay or repeat interval says otherwise hears of it later (route).
+// whose delay or repeat interval says otherwise hears of it later (route),
+// and a paused one in its next pass (paused).
 // With no filter it is the notification's only pass through the channels,
 // and the end of an outage is forgotten after it (outagesOver); with one,
 // the pass through the channels people read (deliverGroup) is the last.
@@ -638,18 +690,27 @@ func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(sto
 		return
 	}
 	now := e.now()
-	var shares []outbound
+	var (
+		shares []outbound
+		held   []failed
+	)
 	for _, ch := range channels {
 		if !ch.Enabled || !ch.Covers(n.Monitor) || (include != nil && !include(ch)) {
 			continue
 		}
 		// route notes what the channel is owed even about an event it
 		// does not want, so that its own reminders can follow.
-		if e.route(ch, n, now) && ch.Wants(n.Event.Kind()) {
-			shares = append(shares, outbound{channel: ch, notes: []Notification{n}})
+		if !e.route(ch, n, now) || !ch.Wants(n.Event.Kind()) {
+			continue
 		}
+		if e.paused(ch, now) != nil {
+			// Not attempted: it waits for the channel's next pass.
+			held = append(held, failed{channel: ch, note: n, held: true})
+			continue
+		}
+		shares = append(shares, outbound{channel: ch, notes: []Notification{n}})
 	}
-	e.retryLater(e.deliver(ctx, shares))
+	e.retryLater(append(e.deliver(ctx, shares), held...))
 	if include == nil {
 		e.outagesOver([]Notification{n})
 	}
@@ -665,9 +726,9 @@ type outbound struct {
 }
 
 // failed is a send that a channel did not take: what was sent, and the
-// retry it was sent again for, if it was. A note sent again is held back
-// once the channel failed to take another in the pass (deliver): not
-// sent, so not an attempt, and failed all the same.
+// retry it was sent again for, if it was. A note is held back once the
+// channel failed to take another in the pass (deliver), or when the
+// channel is paused: not sent, so not an attempt, and failed all the same.
 type failed struct {
 	channel store.Channel
 	note    Notification
@@ -683,10 +744,12 @@ type failed struct {
 // note, the notes sent to it again are held back for the pass: a channel
 // that is down costs the pass one attempt, not one per note waiting on
 // it, and they wait again (retryLater). A note sent for the first time
-// still goes: it is news, which the channel may yet take. Only the sends
-// leave the loop's goroutine; what a channel is owed (route, retryLater,
-// outagesOver) is settled in the loop, before and after, and the store and
-// the metrics take calls from several goroutines.
+// still goes to a channel people read: it is news, which the channel may
+// yet take. A channel software reads (with the attempts again on) is held
+// back all the rest, and paused until it takes one (paused). Only the
+// sends leave the loop's goroutine; what a channel is owed (route,
+// retryLater, outagesOver, paused) is settled in the loop, before and
+// after, and the store and the metrics take calls from several goroutines.
 func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 	var (
 		wg       sync.WaitGroup
@@ -694,12 +757,13 @@ func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 		failures []failed
 	)
 	for _, s := range shares {
+		pauses := e.pauses(s.channel)
 		wg.Go(func() {
 			tripped := false
 			for i, n := range s.notes {
 				r := s.retries[i]
 				var err error
-				if tripped && r != nil {
+				if tripped && (r != nil || pauses) {
 					err = errNotTaken
 				} else {
 					err = e.send(ctx, s.channel, n)
@@ -715,6 +779,19 @@ func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 		})
 	}
 	wg.Wait()
+	missed := make(map[int64]bool, len(failures))
+	for _, f := range failures {
+		missed[f.channel.ID] = true
+	}
+	for _, s := range shares {
+		switch {
+		case !e.pauses(s.channel):
+		case missed[s.channel.ID]:
+			e.owed.failing[s.channel.ID] = true
+		default:
+			delete(e.owed.failing, s.channel.ID)
+		}
+	}
 	return failures
 }
 
@@ -802,10 +879,12 @@ func deliveryLog(ch store.Channel, n Notification, at time.Time, deliveryError s
 	return out
 }
 
+// sendWithRetry makes one attempt: Attempts tries, RetryDelay apart, each
+// within SendTimeout and halt.
 func (e *Engine) sendWithRetry(ctx context.Context, ch store.Channel, n Notification) error {
 	var err error
 	for attempt := 1; attempt <= e.opts.Attempts; attempt++ {
-		if err = e.SendOnce(ctx, ch, n); err == nil {
+		if err = e.sendWithin(e.halt, ch, n); err == nil {
 			return nil
 		}
 		if attempt == e.opts.Attempts {
@@ -823,13 +902,18 @@ func (e *Engine) sendWithRetry(ctx context.Context, ch store.Channel, n Notifica
 // SendOnce makes a single delivery attempt, bounded by SendTimeout. An
 // attempt already under way is not cut short by shutdown.
 func (e *Engine) SendOnce(ctx context.Context, ch store.Channel, n Notification) error {
+	return e.sendWithin(context.WithoutCancel(ctx), ch, n)
+}
+
+// sendWithin makes a single delivery attempt within ctx and SendTimeout.
+func (e *Engine) sendWithin(ctx context.Context, ch store.Channel, n Notification) error {
 	if n.Language == "" {
 		n.Language = e.opts.Language
 	}
 	if n.PublicURL == "" {
 		n.PublicURL = e.opts.PublicURL
 	}
-	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.opts.SendTimeout)
+	sendCtx, cancel := context.WithTimeout(ctx, e.opts.SendTimeout)
 	defer cancel()
 	return e.sender.Send(sendCtx, ch, n)
 }

@@ -113,7 +113,9 @@ func TestAnOutageNotificationNotTakenIsSentAgain(t *testing.T) {
 }
 
 // The outage ending ends the attempts: the channel hears of the end, and
-// the notification of the outage counts as failed.
+// the notification of the outage counts as failed. The webhook, which did
+// not take the outage, is sent nothing until its retry is due: the end
+// goes then.
 func TestSendingAgainStopsWhenTheOutageEnds(t *testing.T) {
 	f := newFixture(t, 1, 1)
 	f.retrying(15*time.Minute, time.Hour)
@@ -122,11 +124,22 @@ func TestSendingAgainStopsWhenTheOutageEnds(t *testing.T) {
 	f.flush()
 	f.check(true) // 30 seconds later, before the attempt again
 	f.flush()
+	if got := f.sender.log(); got != "" {
+		t.Fatalf("after the recovery: %q, want nothing before the webhook's retry", got)
+	}
+	if n := len(f.engine.owed.retries); n != 1 {
+		t.Fatalf("%d retries after the recovery, want the end alone", n)
+	}
+	if r := f.engine.owed.retries[0]; r.note.Event != EventUp || !r.due.Equal(f.clock.Add(30*time.Second)) {
+		t.Fatalf("the retry after the recovery = %s due in %s, want up due with the outage's retry", r.note.Event, r.due.Sub(f.clock))
+	}
+	f.check(true) // a minute after the failure
+	f.flush()
 	if got := f.sender.log(); got != "ops:up" {
-		t.Fatalf("after the recovery: %q, want ops:up alone", got)
+		t.Fatalf("a minute after the failure: %q, want ops:up alone", got)
 	}
 	if n := len(f.engine.owed.retries); n != 0 {
-		t.Errorf("%d retries after the recovery, want none", n)
+		t.Errorf("%d retries after the end was taken, want none", n)
 	}
 	f.clock = f.clock.Add(5 * time.Minute)
 	f.flush()
@@ -218,7 +231,9 @@ func TestTheEndOfAnOutageIsSentAgainForAWhileOnly(t *testing.T) {
 // The end of an outage a channel did not take is not sent again once a
 // newer outage of the monitor opened: told the end then, the channel
 // would read the monitor as up again while it is down. Nor once the end
-// of a later outage was told: the earlier end is moot by then.
+// of a later outage was told: the earlier end is moot by then. The
+// webhook, which did not take the end, hears of the newer outage when its
+// retry is due.
 func TestTheEndOfAnOutageIsNotSentAgainAfterANewerOutage(t *testing.T) {
 	f := newFixture(t, 1, 1)
 	f.retrying(15*time.Minute, time.Hour)
@@ -233,17 +248,18 @@ func TestTheEndOfAnOutageIsNotSentAgainAfterANewerOutage(t *testing.T) {
 	if n := len(f.engine.owed.retries); n != 1 {
 		t.Fatalf("%d retries, want the end to be sent again", n)
 	}
-	f.check(false) // 30 seconds on: down again, and the channel takes it
+	f.check(false) // 30 seconds on: down again, held back for the webhook's retry
 	f.flush()
-	if got := f.sender.log(); got != "ops:down,ops:down" {
-		t.Fatalf("at the second outage: %q, want ops:down,ops:down", got)
+	if got := f.sender.log(); got != "ops:down" {
+		t.Fatalf("at the second outage: %q, want it held back", got)
 	}
-	// A minute after the failure the end of the first outage falls due,
-	// and is not sent: the second outage is open.
+	// A minute after the failure the webhook's retry is due: the end of
+	// the first outage is not sent, since the second is open, and the
+	// second outage is, and taken.
 	f.check(false)
 	f.flush()
 	if got := f.sender.log(); got != "ops:down,ops:down" {
-		t.Fatalf("a minute after the failure: %q, want the end of the first outage not sent", got)
+		t.Fatalf("a minute after the failure: %q, want the second outage and not the end of the first", got)
 	}
 	if n := len(f.engine.owed.retries); n != 0 {
 		t.Errorf("%d retries, want the end of the first outage given up", n)
@@ -260,8 +276,9 @@ func TestTheEndOfAnOutageIsNotSentAgainAfterANewerOutage(t *testing.T) {
 	}
 
 	// The end of a third outage is not taken, and a fourth comes and goes
-	// before it is due again: once the end of the fourth is told, the end
-	// of the third is not sent.
+	// before it is due again: the fourth outage, held back for the
+	// webhook's retry, is over before it; once the end of the fourth is
+	// told, the end of the third is not sent.
 	f.check(false)
 	f.flush()
 	f.sender.fail("ops", 1)
@@ -271,7 +288,7 @@ func TestTheEndOfAnOutageIsNotSentAgainAfterANewerOutage(t *testing.T) {
 	f.flush()
 	f.check(true) // a minute after the failure: the fourth's end goes as the third's falls due
 	f.flush()
-	const told = "ops:down,ops:down,ops:up,ops:down,ops:down,ops:up"
+	const told = "ops:down,ops:down,ops:up,ops:down,ops:up"
 	if got := f.sender.log(); got != told {
 		t.Fatalf("after the fourth outage: %q, want the end of the third not sent", got)
 	}
@@ -284,29 +301,33 @@ func TestTheEndOfAnOutageIsNotSentAgainAfterANewerOutage(t *testing.T) {
 		t.Errorf("a quarter of an hour on: %q, want nothing more", got)
 	}
 	f.counts(map[string]float64{
-		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=failed}": 2,
-		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=sent}":   2,
+		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=failed}":   2,
+		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=sent}":     2,
+		"kubeat_notifications_total{channel_type=webhook}{event=down}{result=failed}": 1,
 	})
 }
 
-// A channel that does not take a message is not sent, in the same pass,
-// the other messages waiting to be sent to it again: a channel that is
-// down costs a pass one attempt rather than one per message waiting on
-// it. The messages held back wait again, their wait doubled, with no
-// attempt on the record.
+// A channel people read that does not take a message is not sent, in the
+// same pass, the other messages waiting to be sent to it again: a channel
+// that is down costs a pass one attempt rather than one per message
+// waiting on it. The messages held back wait again, their wait doubled,
+// with no attempt on the record. (A channel software reads is sent
+// nothing at all until its retry: TestAWebhookThatTookNoneIsSentNothingUntilItsRetry.)
 func TestAChannelNotTakingOneIsSentNoOtherAgainInThatPass(t *testing.T) {
-	f := newFixture(t, 1, 1) // "ops", a webhook: every notification on its own
+	f := newFixture(t, 1, 1) // "ops", a webhook, takes everything
 	f.retrying(15*time.Minute, time.Hour)
+	// With GroupWait off, chat gets every notification on its own.
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
 	ctx := context.Background()
 	cart, err := f.db.CreateMonitor(ctx, store.Monitor{Name: "cart", Type: store.MonitorTCP, Target: "cart:80",
 		Interval: 30 * time.Second, Timeout: 5 * time.Second, FailureThreshold: 1, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Both monitors go down at once and the webhook takes neither; a
-	// minute on it does not take the first message sent again, and the
-	// second is not sent.
-	f.sender.fail("ops", 3)
+	// Both monitors go down at once and chat takes neither; a minute on it
+	// does not take the first message sent again, and the second is not
+	// sent.
+	f.sender.fail("chat", 3)
 	f.clock = f.clock.Add(30 * time.Second)
 	batch := []store.CheckResult{
 		{MonitorID: f.monitor.ID, CheckedAt: f.clock, Error: "refused"},
@@ -322,8 +343,8 @@ func TestAChannelNotTakingOneIsSentNoOtherAgainInThatPass(t *testing.T) {
 	}
 	f.clock = f.clock.Add(time.Minute)
 	f.flush()
-	if got := f.sender.log(); got != "" {
-		t.Fatalf("a minute on: %q, want nothing taken", got)
+	if got := f.sender.log(); got != "ops:down,ops:down" {
+		t.Fatalf("a minute on: %q, want nothing taken by chat", got)
 	}
 	var attempts []int
 	for _, r := range f.engine.owed.retries {
@@ -340,26 +361,32 @@ func TestAChannelNotTakingOneIsSentNoOtherAgainInThatPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(f.deliveries(cartOutage.ID)); n != 1 {
-		t.Errorf("cart's delivery log has %d entries, want the first attempt alone", n)
+	var chatEntries int
+	for _, d := range f.deliveries(cartOutage.ID) {
+		if d.ChannelName == "chat" {
+			chatEntries++
+		}
+	}
+	if chatEntries != 1 {
+		t.Errorf("cart's delivery log has %d entries for chat, want the first attempt alone", chatEntries)
 	}
 	f.counts(map[string]float64{
-		"kubeat_notification_attempts_total{channel_type=webhook}{result=failed}": 3,
-		"kubeat_notification_attempts_total{channel_type=webhook}{result=sent}":   0,
+		"kubeat_notification_attempts_total{channel_type=slack}{result=failed}": 3,
+		"kubeat_notification_attempts_total{channel_type=slack}{result=sent}":   0,
 	})
 
-	// Once the webhook answers, both go.
+	// Once chat answers, both go.
 	f.clock = f.clock.Add(2 * time.Minute)
 	f.flush()
-	if got := f.sender.log(); got != "ops:down,ops:down" {
+	if got := f.sender.log(); got != "ops:down,ops:down,chat:down,chat:down" {
 		t.Errorf("three minutes on: %q, want both taken", got)
 	}
 	if n := len(f.engine.owed.retries); n != 0 {
-		t.Errorf("%d retries after the webhook took both, want none", n)
+		t.Errorf("%d retries after chat took both, want none", n)
 	}
 	f.counts(map[string]float64{
-		"kubeat_notification_attempts_total{channel_type=webhook}{result=sent}":     2,
-		"kubeat_notifications_total{channel_type=webhook}{event=down}{result=sent}": 2,
+		"kubeat_notification_attempts_total{channel_type=slack}{result=sent}":     2,
+		"kubeat_notifications_total{channel_type=slack}{event=down}{result=sent}": 2,
 	})
 }
 
@@ -544,4 +571,163 @@ func TestOnlyOutageNotificationsAreSentAgain(t *testing.T) {
 		"kubeat_notifications_total{channel_type=webhook}{event=reminder}{result=failed}": 1,
 		"kubeat_notifications_total{channel_type=webhook}{event=down}{result=failed}":     1,
 	})
+}
+
+// monitorIn creates a monitor of the namespace that one failed check
+// takes down.
+func (f *fixture) monitorIn(name, namespace string) store.Monitor {
+	f.t.Helper()
+	m, err := f.db.CreateMonitor(context.Background(), store.Monitor{Name: name, Type: store.MonitorTCP, Target: name + ":80", Namespace: namespace,
+		Interval: 30 * time.Second, Timeout: 5 * time.Second, FailureThreshold: 1, Enabled: true})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return m
+}
+
+// result stores a result of the monitor at the fixture's clock and
+// evaluates it, as the scheduler does.
+func (f *fixture) result(m store.Monitor, up bool) {
+	f.t.Helper()
+	r := store.CheckResult{MonitorID: m.ID, CheckedAt: f.clock, Up: up, Latency: time.Millisecond}
+	if !up {
+		r.Error = "refused"
+	}
+	if err := f.db.InsertCheckResults(context.Background(), []store.CheckResult{r}); err != nil {
+		f.t.Fatal(err)
+	}
+	f.engine.Evaluate(context.Background(), []store.CheckResult{r})
+}
+
+// A channel software reads that does not take a notification is sent
+// nothing until its retry is due: what comes up meanwhile is held back,
+// neither attempted nor on the record nor counted, and goes in that
+// retry's pass with the rest, a certificate warning, which is not sent
+// again otherwise, too. Once the channel takes one, it is sent everything
+// at once again.
+func TestAWebhookThatTookNoneIsSentNothingUntilItsRetry(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook; the fixture's "api" has a certificate
+	f.retrying(15*time.Minute, time.Hour)
+	cart, orders := f.monitorIn("cart", ""), f.monitorIn("orders", "")
+	f.sender.fail("ops", 1)
+	f.clock = f.clock.Add(30 * time.Second)
+	f.result(cart, false) // 0:30: not taken; the webhook's retry is at 1:30
+	f.flush()
+
+	f.checkCert(10 * 24 * time.Hour) // 1:00
+	f.result(orders, false)
+	f.flush()
+	if got := f.sender.log(); got != "" {
+		t.Fatalf("while the webhook waits for its retry: %q, want nothing sent", got)
+	}
+	var waiting []string
+	for _, r := range f.engine.owed.retries {
+		waiting = append(waiting, fmt.Sprintf("%s:%s:%d:%v", r.note.Monitor.Name, r.note.Event, r.attempts, r.once))
+		if !r.due.Equal(f.clock.Add(30 * time.Second)) {
+			t.Errorf("%s %s: due in %s, want with the webhook's retry", r.note.Monitor.Name, r.note.Event, r.due.Sub(f.clock))
+		}
+	}
+	if got := strings.Join(waiting, ","); got != "cart:down:1:false,api:cert_expiring:0:true,orders:down:0:false" {
+		t.Errorf("waiting for the webhook (monitor:event:failed attempts:once) = %s", got)
+	}
+	ordersOutage, err := f.db.GetOpenIncident(context.Background(), orders.ID, store.IncidentDown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.deliveries(ordersOutage.ID)); n != 0 {
+		t.Errorf("orders' delivery log has %d entries, want none: nothing was attempted", n)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=failed}": 1,
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=sent}":   0,
+	})
+
+	f.clock = f.clock.Add(30 * time.Second) // 1:30: the retry is due
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:cert_expiring,ops:down" {
+		t.Fatalf("at the webhook's retry: %q, want all three in the order they came up", got)
+	}
+	f.clock = f.clock.Add(30 * time.Second) // 2:00: it took them, and hears at once again
+	f.result(cart, true)
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:cert_expiring,ops:down,ops:up" {
+		t.Errorf("after the webhook took them: %q, want the end at once", got)
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries left, want none", n)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=failed}":            1,
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=sent}":              4,
+		"kubeat_notifications_total{channel_type=webhook}{event=down}{result=sent}":          2,
+		"kubeat_notifications_total{channel_type=webhook}{event=cert_expiring}{result=sent}": 1,
+	})
+}
+
+// A pass the webhook takes nothing in holds back the rest of it: what
+// waits for the webhook to be sent again waits for its next retry, the
+// wait doubled, and a certificate warning, which is not sent again
+// otherwise, is given up.
+func TestWhatAWebhookTakesNoneOfInItsPassWaitsAgain(t *testing.T) {
+	f := newFixture(t, 1, 1)
+	f.retrying(15*time.Minute, time.Hour)
+	cart, orders := f.monitorIn("cart", ""), f.monitorIn("orders", "")
+	f.sender.fail("ops", 2)
+	f.clock = f.clock.Add(30 * time.Second)
+	f.result(cart, false) // 0:30: not taken
+	f.flush()
+	f.checkCert(10 * 24 * time.Hour) // 1:00: held back, with orders' outage
+	f.result(orders, false)
+	f.flush()
+	f.clock = f.clock.Add(30 * time.Second) // 1:30: cart's outage is not taken again
+	f.flush()
+	if got := f.sender.log(); got != "" {
+		t.Fatalf("at the webhook's retry: %q, want nothing taken", got)
+	}
+	var waiting []string
+	for _, r := range f.engine.owed.retries {
+		waiting = append(waiting, fmt.Sprintf("%s:%d", r.note.Monitor.Name, r.attempts))
+		if !r.due.Equal(f.clock.Add(2 * time.Minute)) {
+			t.Errorf("%s: due in %s, want in 2 minutes", r.note.Monitor.Name, r.due.Sub(f.clock))
+		}
+	}
+	if got := strings.Join(waiting, ","); got != "cart:2,orders:0" {
+		t.Errorf("waiting for the webhook (monitor:failed attempts) = %s, want the two outages and the warning given up", got)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=failed}":              2,
+		"kubeat_notifications_total{channel_type=webhook}{event=cert_expiring}{result=failed}": 1,
+	})
+	f.clock = f.clock.Add(2 * time.Minute) // 3:30
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:down" {
+		t.Errorf("at the next retry: %q, want both outages", got)
+	}
+}
+
+// A reminder held back for a webhook that took none gives way to a newer
+// one: the webhook's retry brings the outage and its latest reminder.
+func TestAHeldBackReminderGivesWayToANewerOne(t *testing.T) {
+	f := newFixture(t, 1, 1)
+	f.retrying(15*time.Minute, time.Hour)
+	f.engine.opts.ReminderInterval = 20 * time.Second
+	f.sender.fail("ops", 1)
+	opened := f.check(false).CheckedAt // not taken; the webhook's retry is a minute on
+	f.flush()
+	for _, after := range []time.Duration{20 * time.Second, 40 * time.Second} { // a reminder each
+		f.clock = opened.Add(after)
+		f.result(f.monitor, false)
+		f.flush()
+	}
+	f.clock = opened.Add(time.Minute)
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:reminder" {
+		t.Fatalf("at the webhook's retry: %q, want the outage and one reminder", got)
+	}
+	f.sender.mu.Lock()
+	reminder := f.sender.sent[1]
+	f.sender.mu.Unlock()
+	if !reminder.At.Equal(opened.Add(40 * time.Second)) {
+		t.Errorf("the reminder sent is of %s, want the newer one", reminder.At.Sub(opened))
+	}
 }

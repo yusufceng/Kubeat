@@ -31,10 +31,16 @@ import (
 // outage of the monitor has opened: told the end after the start of the
 // next, the channel would read the monitor as up while it is down. A
 // grouped message is attempted again as one, less the monitors whose
-// outages ended meanwhile. These too are in memory: at a start the
-// delivery log says which open outages a channel was sent and did not
-// take, and they are sent again; an end of an outage still to be sent
-// again is lost with the restart.
+// outages ended meanwhile. A channel software reads that did not take what
+// it was sent is paused until its next retry (Engine.paused): what comes
+// up for it meanwhile is not attempted but held back for that retry's
+// pass, where it goes with what else waits for the channel, once only if
+// it is not attempted again otherwise (retry.once). These too are in
+// memory: at a start the delivery log says which open outages a channel
+// was sent and did not take, and they are sent again, and which a channel
+// without a delay was never sent, having been queued or waiting for its
+// group at the restart, and they are told then (restore); an end of an
+// outage still to be sent again is lost with the restart.
 
 // owedKind is what a channel is still owed about an outage.
 type owedKind int
@@ -76,6 +82,11 @@ type retry struct {
 	// wait, Options.RetryMax at most.
 	wait     time.Duration
 	attempts int // attempts that failed so far, for the log
+	// once marks a notification held back for a paused channel that is
+	// not attempted again otherwise (Engine.retries): a reminder, a
+	// certificate or slowness notification. It goes in the pass it was
+	// held back for, and is given up if the channel takes nothing then.
+	once bool
 }
 
 // retryBase is the wait before the first attempt again.
@@ -114,11 +125,14 @@ func (r *retry) narrow(keep func(Notification) (Notification, bool)) bool {
 type schedule struct {
 	entries map[owedKey]*owed
 	retries []*retry
+	// failing are the channels software reads whose last attempt failed:
+	// until they take one, they are paused (Engine.paused).
+	failing map[int64]bool
 	seq     int
 }
 
 func newSchedule() *schedule {
-	return &schedule{entries: make(map[owedKey]*owed)}
+	return &schedule{entries: make(map[owedKey]*owed), failing: make(map[int64]bool)}
 }
 
 // addRetry notes a notification to send to the channel again at due, and
@@ -137,6 +151,19 @@ func (s *schedule) dropRetry(r *retry) {
 			return
 		}
 	}
+}
+
+// supersede drops the reminder about the notification's monitor still
+// held back for the channel: n, newer, takes its place, as a newer
+// reminder does in a group (dropStaleReminders).
+func (s *schedule) supersede(channelID int64, n Notification) {
+	kept := s.retries[:0]
+	for _, r := range s.retries {
+		if !r.once || r.channel.ID != channelID || r.note.Event != EventReminder || r.note.Monitor.ID != n.Monitor.ID {
+			kept = append(kept, r)
+		}
+	}
+	s.retries = kept
 }
 
 // hasRetry says whether the channel is to be sent the event about the
@@ -184,12 +211,14 @@ func (s *schedule) forget(key owedKey) { delete(s.entries, key) }
 // disabled, narrowed or deleted meanwhile is not reached, and its entry
 // must not outlive the outage, or the end of a later one it was never
 // told of would find it told (route). An entry about a newer outage of
-// the monitor, noted while the end waited to go out, is kept. The outage
-// also leaves the messages still to be sent again: a grouped one goes on
-// for its other monitors, and the retries left with nothing to tell are
-// returned, dropped. The end of this outage still to be sent again stays;
-// the end of an earlier outage of the monitor is moot now that a later
-// end was told, and leaves too.
+// the monitor, noted while the end waited to go out, is kept. The outage,
+// and a reminder of it held back for a paused channel, also leave the
+// messages still to be sent again: a grouped one goes on for its other
+// monitors, and the retries left with nothing to tell are returned,
+// dropped. The end of this outage still to be sent again stays; the end
+// of an earlier outage of the monitor is moot now that a later end was
+// told, and leaves too. A certificate or slowness notification held back
+// is about no outage and stays.
 func (s *schedule) forgetOutage(monitorID, incidentID int64) (dropped []*retry) {
 	for key, o := range s.entries {
 		if key.monitor == monitorID && o.note.Incident.ID <= incidentID {
@@ -202,10 +231,13 @@ func (s *schedule) forgetOutage(monitorID, incidentID int64) (dropped []*retry) 
 			if m.Monitor.ID != monitorID {
 				return m, true
 			}
-			if r.note.Event == EventDown {
+			switch r.note.Event {
+			case EventDown, EventReminder:
 				return m, m.Incident.ID > incidentID
+			case EventUp:
+				return m, m.Incident.ID >= incidentID
 			}
-			return m, m.Incident.ID >= incidentID
+			return m, true
 		}) {
 			dropped = append(dropped, r)
 			continue
@@ -269,22 +301,69 @@ func (e *Engine) retries(n Notification) bool {
 	return n.Event == EventDown || n.Event == EventUp && e.opts.RetryFor > 0
 }
 
+// pauses says whether the channel is paused once it does not take a
+// notification: a channel software reads, with the attempts again on.
+func (e *Engine) pauses(ch store.Channel) bool {
+	return machine(ch.Type) && e.opts.RetryMax > 0
+}
+
+// paused returns the retry that a channel software reads waits for when
+// its last attempt failed: the first of its retries still to come. Until
+// it is due the channel is sent nothing, and what comes up for it is held
+// back for that retry's pass (retryLater), where it goes with what else
+// waits for the channel: a channel that is down costs the loop one
+// attempt per wait rather than one per notification, and the queue keeps
+// moving. Nil when the channel took the last it was sent, or has nothing
+// to be sent again.
+func (e *Engine) paused(ch store.Channel, now time.Time) *retry {
+	if !e.pauses(ch) || !e.owed.failing[ch.ID] {
+		return nil
+	}
+	var first *retry
+	for _, r := range e.owed.retries {
+		if r.channel.ID == ch.ID && r.due.After(now) && (first == nil || r.due.Before(first.due)) {
+			first = r
+		}
+	}
+	return first
+}
+
 // retryLater notes, after a pass through the channels, what to send
 // again: a notification of an outage or of its end that a channel did
 // not take waits retryBase, then twice the last wait each time, RetryMax
 // at most; the end of an outage is not waited for past RetryFor from the
 // first failure. A note held back because the channel took none of the
 // others (deliver) waits the same way, with no attempt counted against
-// it. Everything else, and everything with the attempts off, has failed
-// for good.
+// it. A first note held back for a channel software reads (deliver,
+// paused) waits for the channel's next pass and goes in it, once only if
+// it is not attempted again otherwise; the channel taking nothing in it
+// gives that one up. Everything else, and everything with the attempts
+// off, has failed for good.
 func (e *Engine) retryLater(failures []failed) {
 	now := e.now()
 	held := make(map[string]int)
 	for _, f := range failures {
 		r := f.retry
 		switch {
+		case r != nil && r.once:
+			e.owed.dropRetry(r)
+			e.gaveUp(f.channel, f.note, "the channel took nothing in the pass it was held back for")
+			continue
 		case r != nil:
 			r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
+		case f.held:
+			// Not attempted: it goes with what the channel waits for, or,
+			// when nothing else waits, it starts the wait.
+			wait := min(retryBase, e.opts.RetryMax)
+			due, next := now.Add(wait), min(wait*2, e.opts.RetryMax)
+			if p := e.paused(f.channel, now); p != nil {
+				due, next = p.due, p.wait
+			}
+			if f.note.Event == EventReminder {
+				e.owed.supersede(f.channel.ID, f.note)
+			}
+			r = e.owed.addRetry(f.channel, f.note, now, due, next)
+			r.once = !e.retries(f.note)
 		case e.retries(f.note):
 			wait := min(retryBase, e.opts.RetryMax)
 			r = e.owed.addRetry(f.channel, f.note, now, now.Add(wait), min(wait*2, e.opts.RetryMax))
@@ -295,7 +374,7 @@ func (e *Engine) retryLater(failures []failed) {
 		if !f.held {
 			r.attempts++
 		}
-		if f.note.Event == EventUp && r.due.After(r.since.Add(e.opts.RetryFor)) {
+		if f.note.Event == EventUp && !r.once && r.due.After(r.since.Add(e.opts.RetryFor)) {
 			e.owed.dropRetry(r)
 			e.gaveUp(f.channel, f.note, "the end of the outage was not taken within UPTIME_NOTIFY_RETRY_FOR")
 			continue
@@ -308,7 +387,7 @@ func (e *Engine) retryLater(failures []failed) {
 			"in", r.due.Sub(now).String(), "failed_attempts", r.attempts)
 	}
 	for channel, count := range held {
-		e.opts.Logger.Warn("notifications held back, the channel did not take another; to be sent again later", "channel", channel, "count", count)
+		e.opts.Logger.Warn("notifications held back, the channel took none; to be sent later", "channel", channel, "count", count)
 	}
 }
 
@@ -364,7 +443,9 @@ func (e *Engine) route(ch store.Channel, n Notification, now time.Time) bool {
 // with it, when its wait is up (retryLater): less the monitors whose
 // outage is over or that are gone, for the end of an outage less those
 // with a newer outage open, and not at all to a channel gone or no
-// longer listening, or past RetryFor for the end of an outage.
+// longer listening, or past RetryFor for the end of an outage. A paused
+// channel is sent none of it: what falls due for it waits for its next
+// pass (paused).
 func (e *Engine) deliverOwed(ctx context.Context) {
 	now := e.now()
 	due := e.owed.due(now)
@@ -480,8 +561,12 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 
 	// One share per channel, its batches in the order they fell due: the
 	// channels software reads get each notification on its own, the rest
-	// one message per batch. The channels are sent to in parallel.
-	var shares []outbound
+	// one message per batch. The channels are sent to in parallel; a
+	// paused one is sent nothing, its notes are held back.
+	var (
+		shares []outbound
+		held   []failed
+	)
 	at := make(map[int64]int)
 	share := func(ch store.Channel) *outbound {
 		i, ok := at[ch.ID]
@@ -497,6 +582,11 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 		if !machine(ch.Type) {
 			n, _ := grouped(key.event, notes) // a batch is never empty
 			notes = []Notification{n}
+		} else if e.paused(ch, now) != nil {
+			for _, n := range notes {
+				held = append(held, failed{channel: ch, note: n, held: true})
+			}
+			continue
 		}
 		s := share(ch)
 		s.notes = append(s.notes, notes...)
@@ -514,7 +604,7 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 			e.owed.dropRetry(r)
 			e.gaveUp(r.channel, r.note, "the channel is gone, disabled or no longer listens for the event")
 			continue
-		case r.note.Event == EventUp && now.After(r.since.Add(e.opts.RetryFor)):
+		case r.note.Event == EventUp && !r.once && now.After(r.since.Add(e.opts.RetryFor)):
 			e.owed.dropRetry(r)
 			e.gaveUp(r.channel, r.note, "the end of the outage was not taken within UPTIME_NOTIFY_RETRY_FOR")
 			continue
@@ -541,15 +631,18 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 			case err != nil && !errors.Is(err, store.ErrNotFound):
 				storeErr = err
 				return n, true
-			case n.Event == EventDown:
-				// The outage is told while it is the one open.
+			case n.Event == EventDown || n.Event == EventReminder:
+				// The outage, or a reminder of it, is told while it is
+				// the one open.
 				return n, err == nil && incident.ID == n.Incident.ID
-			default:
+			case n.Event == EventUp:
 				// The end of an outage is told while no outage is open:
 				// after the next one opened, the channel would read the
 				// monitor as up again while it is down.
 				return n, err != nil
 			}
+			// A certificate or slowness notification is about no outage.
+			return n, true
 		})
 		if storeErr != nil {
 			// The store could not say; nothing may pass for over.
@@ -560,13 +653,21 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 		if !left {
 			e.owed.dropRetry(r)
 			reason := "the outage ended, or its monitor is gone, before the channel took it"
-			if r.note.Event == EventUp {
+			switch {
+			case r.note.Event == EventUp:
 				reason = "a newer outage opened, or the monitor is gone, before the channel took the end"
+			case !r.note.Event.Outage():
+				reason = "the monitor is gone, or the channel no longer hears of it"
 			}
 			e.gaveUp(r.channel, r.note, reason)
 			continue
 		}
 		r.channel = ch
+		if p := e.paused(ch, now); p != nil {
+			// The channel took none of late: this goes in its next pass.
+			r.due = p.due
+			continue
+		}
 		s := share(ch)
 		if s.retries == nil {
 			s.retries = make(map[int]*retry)
@@ -585,7 +686,7 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 			e.owed.dropRetry(r)
 		}
 	}
-	e.retryLater(failures)
+	e.retryLater(append(failures, held...))
 }
 
 // restore works out, from the outages open now, what the channels with a
@@ -596,9 +697,15 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 // that attempt falls. Without the attempt, either the delay passed in
 // maintenance and the loop silenced the outage, which stays silenced, or
 // the restart came between the delay and the delivery, and the outage,
-// still going on, is told now. Whichever channel was sent the outage, at
-// once or after its delay, and did not take it is sent it again now
-// (retryUndelivered): the retry the loop had in hand before the restart.
+// still going on, is told now. A channel without a delay was sent the
+// outage when it opened, unless the restart came while it waited in the
+// queue or for its group: the log has no attempt then, and the outage is
+// told now the same way, but not to a channel created after it opened,
+// which was not there to hear of it, nor about an outage that opened after
+// the engine started, which the engine sends itself. Whichever channel was
+// sent the outage, at once or after its delay, and did not take it is
+// sent it again now (retryUndelivered): the retry the loop had in hand
+// before the restart.
 func (e *Engine) restore(ctx context.Context) {
 	ctx = context.WithoutCancel(ctx)
 	open := true
@@ -631,14 +738,22 @@ func (e *Engine) restore(ctx context.Context) {
 			}
 			note := Notification{Event: EventDown, Monitor: m, Incident: incident, At: opened,
 				Language: e.opts.Language, PublicURL: e.opts.PublicURL}
+			key := owedKey{ch.ID, m.ID}
 			if ch.Delay <= 0 && ch.Repeat <= 0 {
-				// Sent the outage when it opened; owed nothing else.
-				if told, _ := e.wasTold(ctx, ch, incident); told {
+				// Sent the outage when it opened, or about to be; owed
+				// nothing else.
+				told, _ := e.wasTold(ctx, ch, incident)
+				switch {
+				case told:
 					e.retryUndelivered(ctx, ch, note, now)
+				case ch.CreatedAt.Before(opened) && opened.Before(e.started) &&
+					e.owed.get(key) == nil && !e.owed.hasRetry(ch.ID, EventDown, incident.ID):
+					// Never attempted: it is told now (deliverOwed), and if
+					// the channel does not take it, sent again.
+					e.owed.put(key, &owed{channel: ch, note: note, kind: owedOutage, due: now})
 				}
 				continue
 			}
-			key := owedKey{ch.ID, m.ID}
 			if e.owed.get(key) != nil {
 				continue
 			}
