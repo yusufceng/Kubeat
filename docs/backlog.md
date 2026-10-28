@@ -388,6 +388,17 @@ Güncelleme (2026-10-28, sprint 2 planı): yalnızca `inhibit_rules` örneği
 geliyor. Kalan yönlendirme örnekleri ve pano backlog'da kalıyor,
 tetikleyici aynı.
 
+Güncelleme (2026-10-29, S29 #36): `inhibit_rules` örneği README "Aracın
+kendi sağlığı"nda ("Kendi Alertmanager'ınız için susturma kuralları"):
+lisansın critical'i aynı kurulumun warning'ini, `KubeatDown` aynı
+namespace'teki `KubeatMonitorDown`, `KubeatCertificateExpiring` ve
+`KubeatBackupFailing`'i susturur; üçü de scrape boşluğunda son değerini 10
+dakika tutar. Bedeli README'de: Kubeat 25 dakikadan uzun düşükken biten bir
+kesintinin düzelmesi Alertmanager'dan gitmeyebilir. Kurallar artık promtool
+ile sınanıyor (`deploy/helm/test-chart.sh`, CI chart işi). `AlertmanagerConfig`
+nesnesiyle yazılmış örnek, kalan yönlendirme örnekleri ve pano backlog'da,
+tetikleyici aynı.
+
 ## Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı yeniden deneme kuyruğu
 
 2026-10-28'de ertelendi (S17, #27). Kanalın almadığı kesinti bildirimi

@@ -36,6 +36,12 @@ silinirse `backend/uptime.db` de silinmelidir. Arayüz yalnızca bu makineden
 erişilsin diye `127.0.0.1`'de dinler; ağdaki başka bir cihazdan denemek için
 `make dev FRONTEND_HOST=0.0.0.0`.
 
+`make test` chart'ı da sınar (`deploy/helm/test-chart.sh`). `promtool`
+PATH'teyse ya da `PROMTOOL=/yol/promtool` verilirse alarm kurallarını
+`promtool check rules` ile denetler ve senaryolarını
+(`deploy/helm/prometheusrule-test.yaml`) çalıştırır; promtool yoksa bu adımı
+uyarıyla atlar, CI'da ise atlamaz.
+
 ## Cluster'a kurulum
 
 Her sürüm etiketi (`v0.28.0` gibi) imajları `ghcr.io/yusufceng/kubeat-backend`
@@ -2104,10 +2110,11 @@ yayınlar. Başlıcaları:
 | `kubeat_target_throttled_total{host}` | Hedef host, son kontrolün yönlendirildiği bir host ya da ulaştığı bir adres dakikalık kontrol tavanına (`UPTIME_TARGET_MAX_RATE`, `UPTIME_CLUSTER_TARGET_MAX_RATE`, `UPTIME_TARGET_ADDRESS_MAX_RATE`) takıldığı için beklemeye başlayan kontroller, monitor'un kendi host'u etiketiyle; her bekleme kaç tick sürerse sürsün bir kez sayılır; ilk 100 host kendi etiketiyle, sonrakiler `other` olarak sayılır (bkz. "Hedef yükü") |
 | `kubeat_results_dropped_total` | Veritabanına yazılamayan sonuçlar |
 | `kubeat_notifications_total{channel_type,event,result}` | Bildirimler, son sonucuyla: kanal alınca `sent`, denemeler bitince `failed` (bkz. "Alarm") |
-| `kubeat_notification_attempts_total{channel_type,result}` | Kanala yapılan her teslimat denemesi, kesinti bildiriminin yeniden denemeleri dahil; bildirim kaydındaki her satır için bir artış |
+| `kubeat_notification_attempts_total{channel_type,result}` | Kanala yapılan her teslimat denemesi, kesinti bildiriminin yeniden denemeleri dahil; bildirim kaydındaki her satır için bir artış. Her kanal türünün `sent` ve `failed` serisi açılışta 0 ile yayınlanır, böylece `increase()` ilk başarısız denemeyi de görür |
 | `kubeat_notifications_dropped_total` | Teslimat kuyruğu dolu olduğu için düşürülen bildirimler |
-| `kubeat_backups_total{result}` | Yedek denemeleri, `ok` ya da `failed` |
+| `kubeat_backups_total{result}` | Yedek denemeleri, `ok` ya da `failed`; iki seri de açılışta 0'dan başlar |
 | `kubeat_backup_last_success_timestamp_seconds` | En yeni yedek kopyanın zamanı; yeniden başlatmada yedek dizinindeki en yeni dosyadan okunur (bkz. "Yedekleme ve geri yükleme") |
+| `kubeat_backup_last_failure_timestamp_seconds` | Son başarısız yedek denemesinin zamanı, süreç açıldığından beri; yoksa 0. Son başarılı kopyadan yeniyse yedekleme başarısızdır (`KubeatBackupFailing`) |
 | `kubeat_license_expiry_timestamp_seconds` | Kubeat Enterprise lisansının bitiş zamanı; lisans yoksa 0 |
 
 Chart'ta `metrics.serviceMonitor.enabled=true` bir ServiceMonitor oluşturur;
@@ -2129,15 +2136,15 @@ yapılır. Kurallar:
 
 | Alarm | Koşul |
 | --- | --- |
-| `KubeatMonitorDown` | `kubeat_monitor_incident_open == 1`; etiketlerinde `monitor`, `monitor_namespace`, `type` ve `severity` (`metrics.prometheusRule.severity`, varsayılan `warning`) |
-| `KubeatCertificateExpiring` | Sertifikanın bitişine `metrics.prometheusRule.certWarningDays` (14) günden az kaldı |
-| `KubeatDown` | Backend 5 dakikadır scrape edilemiyor (`critical`); bu sırada `KubeatMonitorDown` alarmları susar, çözülmez |
+| `KubeatMonitorDown` | Monitor'un açık kesintisi var (`kubeat_monitor_incident_open`); etiketlerinde `monitor`, `monitor_namespace`, `type`, `namespace`, `job` ve `severity` (`metrics.prometheusRule.severity`, varsayılan `warning`). Kesinti kapanınca bir sonraki scrape'te çözülür, scrape boşluğunda açık kalır (bkz. aşağıda "Scrape boşluğu") |
+| `KubeatCertificateExpiring` | Sertifikanın bitişine `metrics.prometheusRule.certWarningDays` (14) günden az kaldı; scrape boşluğunda açık kalır |
+| `KubeatDown` | Backend 5 dakikadır scrape edilemiyor ya da hiç backend pod'u yok: pod bekliyor, silindi ya da uyutuldu (`critical`). `up{job="<release>-backend", namespace="<namespace>"}` serisine bakar; ServiceMonitor kapalıyken bu etiketlerle toplayan başka bir scrape yoksa sürekli yanar. Bu sırada kesinti, sertifika ve yedek alarmları 10 dakika açık kalır, sonra çözülür (bkz. aşağıda susturma kuralları) |
 | `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |
 | `KubeatMetricsIncomplete` | Monitor metrikleri veritabanından okunamıyor |
 | `KubeatResultsDropped` | Son 10 dakikada veritabanına yazılamayan kontrol sonucu var; uptime geçmişinde boşluk oluşur |
 | `KubeatNotificationsFailing` | Son 15 dakikada bir kanala teslimat denemesi başarısız oldu (`kubeat_notification_attempts_total{result="failed"}`) ya da kuyruk dolu olduğu için bildirim düşürüldü; bir kesinti duyurulmamış olabilir. Kesinti bildirimi olay sürdükçe yeniden denenir (bkz. "Alarm"); alarm kanal almadığı sürece yanar, motorun vazgeçmesini beklemez |
 | `KubeatWorkersSaturated` | 15 dakikadır sırası gelen kontroller boş worker olmadığı için sonraki tick'e kalıyor; `UPTIME_WORKERS` düşük ya da hedefler kontrolleri zaman aşımına kadar oyalıyor |
-| `KubeatBackupFailing` | Son bir saatte başarısız yedek denemesi var (bkz. "Yedekleme ve geri yükleme") |
+| `KubeatBackupFailing` | Son yedek denemesi başarısız oldu ve o zamandan beri başarılı kopya yok (`kubeat_backup_last_failure_timestamp_seconds` son başarılı kopyadan yeni). İlk başarısız denemede yanar ve bir kopya başarılı olana kadar açık kalır: dolu volume'un bir aralık süren beklemesi, hiç kopya olmaması ve yeniden başlatma dahil (bkz. "Yedekleme ve geri yükleme") |
 | `KubeatBackupStale` | `backup.interval` değerinin iki katı süredir başarılı yedek yok; yalnızca `backup.enabled=true` iken üretilir |
 | `KubeatLicenseExpiring` | Kubeat Enterprise lisansının bitişine 30 günden az kaldı ya da lisans bitti; 7 günden az kalınca aynı adla ikinci bir kural `critical` ile yanar (bkz. "Kubeat Enterprise lisansı") |
 
@@ -2149,8 +2156,56 @@ olunca `warning` olanı da açık kalır; OpenShift'in ve kube-prometheus-stack'
 varsayılan Alertmanager yapılandırması aynı addaki `warning` alarmı
 `critical` yanarken susturur.
 
-Her iki nesne de prometheus-operator CRD'lerini ister; OpenShift'te user
-workload monitoring açık olmalıdır (`enableUserWorkload: true`).
+**Scrape boşluğu.** Backend tek replica çalışır ve `Recreate` ile
+güncellenir; her yükseltmede, node drain'de ve başarısız bir scrape'te
+Prometheus backend'in serilerini bir süre göremez. `KubeatMonitorDown`,
+`KubeatCertificateExpiring` ve `KubeatBackupFailing` bu boşlukta çözülmez:
+son 10 dakikadaki değerlerini tutarlar (`last_over_time`). Metrikler
+okunabildiği sürece güncel değerleri esastır; kapanan bir kesinti, Recreate'in
+hemen ardından da, bir sonraki scrape'te çözülür, Kubeat açıkken silinen ya
+da durdurulan bir monitor'un alarmı da öyle. Bu alarmlar pod'a göre değil
+monitor'e ve kuruluma göre tektir: `pod`, `instance`, `endpoint`, `container`
+ve `service` etiketlerini taşımazlar, Recreate'in getirdiği yeni pod ikinci
+bir alarm açmaz. Backend 10 dakikadan uzun scrape edilemezse çözülürler; o
+sırada `KubeatDown` en az 5 dakikadır yanmaktadır.
+
+**Kendi Alertmanager'ınız için susturma kuralları.** Ayrı kurulan bir
+Alertmanager'da (örneğin user workload monitoring'in kendi Alertmanager'ı)
+varsayılan susturma kuralı yoksa `KubeatLicenseExpiring`'in iki alarmı birden
+gider. Kubeat'in 10 dakikayı aşan bir kesintisinde yukarıdaki üç alarmın
+"resolved" gitmesini de bir susturma kuralı önler. İkisi için
+`alertmanager.yaml` örneği:
+
+```yaml
+inhibit_rules:
+  # Lisansın critical alarmı yanarken aynı kurulumun warning alarmı susar.
+  - source_matchers:
+      - 'alertname = "KubeatLicenseExpiring"'
+      - 'severity = "critical"'
+    target_matchers:
+      - 'alertname = "KubeatLicenseExpiring"'
+      - 'severity = "warning"'
+    equal: [namespace]
+  # KubeatDown yanarken aynı kurulumun son değerini tutan alarmları susar.
+  - source_matchers:
+      - 'alertname = "KubeatDown"'
+    target_matchers:
+      - 'alertname =~ "KubeatMonitorDown|KubeatCertificateExpiring|KubeatBackupFailing"'
+    equal: [namespace]
+```
+
+`KubeatDown` 5 dakikada yanar, diğer üçü 10 dakika açık kalır: susturma onlar
+çözülmeden yerindedir. Alertmanager susturulan bir alarmın "resolved"
+bildirimini de göndermez (Alertmanager belgesi, "Inhibition"). Bunun bir
+bedeli var: Kubeat düşükken gerçekten biten bir kesintinin düzelmesi de
+susturulur. Prometheus çözülen alarmı 15 dakika daha Alertmanager'a
+gönderdiğinden `KubeatDown` o süre içinde çözülürse düzelme yine iletilir;
+daha uzun bir Kubeat kesintisinde alarm alıcıda (PagerDuty, Slack) açık
+kalabilir. Kubeat'in kendi bildirim kanalları düzelmeyi, backend geri gelince
+yine bildirir.
+
+ServiceMonitor ile PrometheusRule prometheus-operator CRD'lerini ister;
+OpenShift'te user workload monitoring açık olmalıdır (`enableUserWorkload: true`).
 
 **Heartbeat (dead man's switch).** `UPTIME_HEARTBEAT_URL` ayarlanırsa backend
 bu adrese her `UPTIME_HEARTBEAT_INTERVAL` sürede bir `GET` atar. Karşı taraf
@@ -2289,11 +2344,16 @@ kaydı ve hedef süreler: [docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.m
 `kubeat_backup_last_success_timestamp_seconds` metriği en yeni kopyanın
 zamanını verir: son başarılı kopyanın, yeniden başlatmadan sonra da yedek
 dizinindeki en yeni dosyanın; ilerlemiyorsa yedekleme çalışmıyordur.
-`metrics.prometheusRule.enabled=true` ile cluster'ın Prometheus'u bunu
-kendisi izler (bkz. "Aracın kendi sağlığı"): `KubeatBackupFailing` son bir
-saatte başarısız bir deneme olduğunda, `KubeatBackupStale` `backup.interval`
-değerinin iki katı süredir başarılı kopya olmadığında yanar. Hiç başarılı
-kopya alınamamışsa yalnızca ilki yanar.
+`kubeat_backup_last_failure_timestamp_seconds` son başarısız denemenin
+zamanıdır. `metrics.prometheusRule.enabled=true` ile cluster'ın Prometheus'u
+bunları kendisi izler (bkz. "Aracın kendi sağlığı"): `KubeatBackupFailing`
+ilk başarısız denemede yanar ve bir kopya başarılı olana kadar açık kalır;
+dolu volume'un bir aralık süren beklemesi de, yedek dizininin hiç
+kullanılamaması da buna dahildir. `KubeatBackupStale` `backup.interval`
+değerinin iki katı süredir başarılı kopya olmadığında yanar. Hiç kopya
+yokken `KubeatBackupStale` yanmaz, karşılaştıracağı bir kopya yoktur; o
+durumda başarısız denemeyi `KubeatBackupFailing` kopya alınana kadar açık
+tutar.
 
 ## Keşif
 
