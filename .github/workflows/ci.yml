@@ -60,6 +60,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
+      # test-chart.sh checks the alert rules with promtool and runs their
+      # scenarios, and fails under CI without it. A pinned Prometheus
+      # release (an LTS line), the archive checked against its checksum.
+      - name: Install promtool
+        env:
+          PROMETHEUS_VERSION: 3.13.5
+          PROMETHEUS_SHA256: 0388822ace519c5a3a8ef556a541ce1b536e21d872f82deded465bd27a5a0699
+        run: |
+          archive="prometheus-${PROMETHEUS_VERSION}.linux-amd64"
+          curl -fsSLo "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/$archive.tar.gz"
+          echo "$PROMETHEUS_SHA256  $RUNNER_TEMP/$archive.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/promtool"
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -C "$RUNNER_TEMP/promtool" --strip-components=1 "$archive/promtool"
+          "$RUNNER_TEMP/promtool/promtool" --version
+          echo "$RUNNER_TEMP/promtool" >> "$GITHUB_PATH"
       - run: helm lint deploy/helm/kubeat
       - run: helm template kubeat deploy/helm/kubeat > /dev/null
       - run: deploy/helm/test-chart.sh
