@@ -331,12 +331,20 @@ Ekiple son görüşme, üç karar sorusu:
 helm -n kubeat uninstall kubeat
 ```
 
-Kaldırma, Deployment'larla birlikte **veri ve yedek PVC'lerini de siler**
-(minikube'da doğrulandı); geride şifreleme anahtarı (`kubeat-secret-key`
-Secret'ı) ve elle oluşturduğunuz lisans, LDAP parolası ve CA kalır. Veriyi
-saklamak istiyorsanız kaldırmadan önce son yedeği ve anahtarı dışarı alın
-(README "Yedekleme ve geri yükleme"); hepsini silmek için
-`oc delete project kubeat`.
+Kaldırma Deployment'ları siler ama chart 0.44.0'dan beri **veri ve yedek
+PVC'lerini bırakır** (0.43.0 ve öncesi onları da siliyordu, minikube'da
+doğrulandı); `helm uninstall` bıraktıklarını "These resources were kept due
+to the resource policy" diye sayar. Geride şifreleme anahtarı
+(`kubeat-secret-key` Secret'ı) ve elle oluşturduğunuz lisans, LDAP parolası
+ve CA da kalır; aynı adla `kubeat` namespace'ine yeniden kurulum kaldığı
+yerden sürer. Veriyi saklamak istiyorsanız son yedeği ve anahtarı dışarı alın
+(README "Yedekleme ve geri yükleme"); sonra PVC'leri bilerek silin:
+
+```sh
+oc -n kubeat delete pvc kubeat-data kubeat-backup
+```
+
+Hepsini silmek için `oc delete project kubeat`.
 
 ## Bilinen sınırlar
 
