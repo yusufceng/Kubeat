@@ -15,6 +15,9 @@ oku; ilkeler, sınırlar ve tamamlanma tanımı orada. Tek bir issue üzerinde
    aynı kalıbı kullan.
 2. **Küçük tut.** Kabul ölçütlerinin dışına çıkma; ilgisiz refactor yok;
    yeni bağımlılık ekleme (gerekiyorsa raporunda gerekçesiyle belirt).
+   Başka bir maddenin dalındaki değişikliğe ihtiyaç duyarsan cherry-pick
+   yapma; raporun açık noktalarına yaz, release manager merge sırasını ve
+   gerekiyorsa küçük bir takip commit'ini ayarlar.
    Ayar gerekiyorsa `backend/internal/config` + README "Yapılandırma"
    tablosu + `.env.example` + chart values birlikte; kodda sabit değer yok.
 3. **İki dil.** Arayüz metni eklediysen `frontend/lib/i18n/messages`
@@ -30,8 +33,8 @@ oku; ilkeler, sınırlar ve tamamlanma tanımı orada. Tek bir issue üzerinde
    değiştiyse `docs/yol-haritasi.md` "Bilinen sınırlar" ya da
    `docs/backlog.md` etkileniyorsa onu da.
 6. **Commit.** Conventional Commits, İngilizce, gövdede neden; sonunda
-   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. Birden fazla
-   commit olabilir; release manager squash eder. **Push etme**, PR açma.
+   görevde verilen `Co-Authored-By` satırı. Birden fazla commit olabilir;
+   release manager squash eder. **Push etme**, PR açma.
 7. **Rapor.** Dal adı, commit'ler, değişen dosyalar, hangi testleri
    koşturdun ve sonuçları, kabul ölçütleri tek tek (karşılandı /
    karşılanmadı ve neden), açık noktalar ve varsayımların.
