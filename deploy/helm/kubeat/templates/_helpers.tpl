@@ -60,9 +60,10 @@ and reading it as .Values.a.b would turn the protection off without a word.
 The annotations of a PVC that outlives the release. helm uninstall skips a
 resource with helm.sh/resource-policy: keep, as it does the encryption key's
 Secret. Argo CD (and OpenShift GitOps, built on it) renders the chart with
-helm template and runs the release itself: deleting the application leaves
-a resource with Delete=false, and Argo CD reads Helm's annotation the same
-way only since 2.7.
+helm template and runs the release itself. It honours both annotations
+since 2.7, when deleting the application leaves a resource with either, and
+neither before, when a cascade delete takes these PVCs too. Delete=false is
+Argo CD's own name for Helm's annotation and adds no protection of its own.
 */}}
 {{- define "kubeat.keepAnnotations" -}}
 helm.sh/resource-policy: keep

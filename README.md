@@ -279,17 +279,21 @@ Bu yüzden GitOps ile kurarken dört Secret'ı kendiniz oluşturun (Sealed
 Secrets, External Secrets Operator, ...) ve adlarını yukarıdaki
 `existingSecret` değerleriyle verin; chart o zaman bunları üretmez.
 
-Uygulamayı silmek, Argo CD'nin cascade silmesi de, veri ve yedek PVC'lerini
-bırakır: chart onlara Helm'in `helm.sh/resource-policy: keep`
+Uygulamayı silmek, Argo CD 2.7 ve sonrasında cascade silme de, veri ve
+yedek PVC'lerini bırakır: chart onlara Helm'in `helm.sh/resource-policy: keep`
 annotation'ının yanında `argocd.argoproj.io/sync-options: Delete=false` da
 basar (`backend.persistence.keepOnUninstall`,
 `backup.persistence.keepOnUninstall`). Argo CD Helm'i yalnızca manifest
-üretmek için kullanır (`helm template`), kurulumu kendisi yönetir; Helm'in
-annotation'ını 2.7'den beri aynı anlamda okur, `Delete=false` daha eski
-sürümleri de kapsar. Aynı adla aynı namespace'e yeniden oluşturulan uygulama
-aynı adlı PVC'leri bağlar; Secret'lar yukarıdaki gibi sizin olduğundan
-anahtar ve parolalar da aynı kalır. PVC'leri bilerek silmek için uygulamayı
-sildikten sonra `kubectl -n <namespace> delete pvc <release>-data <release>-backup`
+üretmek için kullanır (`helm template`), kurulumu kendisi yönetir; iki
+annotation'ı da 2.7'den beri okur. Daha eski sürümlerde (ve onları taşıyan
+OpenShift GitOps'ta) ikisi de yok sayılır ve cascade silme PVC'leri de
+siler; orada uygulamayı cascade'siz silin
+(`argocd app delete <uygulama> --cascade=false`) ya da önce kopyaları
+dışarı alın ("Yedekleme ve geri yükleme"). Aynı adla aynı namespace'e
+yeniden oluşturulan uygulama aynı adlı PVC'leri bağlar; Secret'lar
+yukarıdaki gibi sizin olduğundan anahtar ve parolalar da aynı kalır.
+PVC'leri bilerek silmek için uygulamayı sildikten sonra
+`kubectl -n <namespace> delete pvc <release>-data <release>-backup`
 (release adı, `helm.releaseName` verilmediyse uygulamanın adıdır) ya da önce
 iki `keepOnUninstall`'ı `false` yapıp eşitleyin, sonra uygulamayı silin.
 `Delete=false` yalnızca uygulamanın silinmesine karşıdır: değerlerden çıkan
@@ -2250,12 +2254,18 @@ kubectl -n kubeat delete pvc kubeat-data kubeat-backup
 
 Ya da önce `backend.persistence.keepOnUninstall=false` ve
 `backup.persistence.keepOnUninstall=false` ile yükseltin; `helm uninstall`
-ikisini de 0.43'e kadar olduğu gibi siler. Koruma yükseltmede de geçerlidir:
-`backup.enabled=false` ya da `backup.persistence.existingClaim` ile
-yükseltmek chart'ın oluşturduğu yedek PVC'sini kopyalarıyla bırakır,
-gerekmiyorsa onu da elle silin; `existingClaim` ile verilen PVC'yi chart hiç
-silmez. Namespace'i silmek ise PVC'leri de siler: kopyaların cluster dışına
-taşınması bunun için de gerekir.
+ikisini de 0.43'e kadar olduğu gibi siler. `keep` annotation'ını zaten
+taşıyan yedek PVC'si (0.44 ile oluşturulmuş ya da 0.44'e yükseltilmiş)
+yükseltmede de korunur: `backup.enabled=false` ya da
+`backup.persistence.existingClaim` ile yükseltmek chart'ın oluşturduğu yedek
+PVC'sini kopyalarıyla bırakır, gerekmiyorsa onu da elle silin;
+`existingClaim` ile verilen PVC'yi chart hiç silmez. 0.43'ten gelirken yedeği kapatmayı ya da `existingClaim`'e geçişi
+yükseltmeyle aynı adımda yapmayın: Helm yükseltmede artık üretmediği bir
+kaynağı ancak cluster'daki nesne `keep` taşıyorsa bırakır, 0.43'ün
+oluşturduğu yedek PVC'si taşımaz ve kopyalarıyla silinir. Önce aynı values
+ile 0.44'e yükseltin, değişikliği sonraki yükseltmede yapın. Namespace'i
+silmek ise PVC'leri de siler: kopyaların cluster dışına taşınması bunun için
+de gerekir.
 
 Kopyaları cluster dışına almak için (backend imajında `tar` olmadığından
 `kubectl cp` çalışmaz):

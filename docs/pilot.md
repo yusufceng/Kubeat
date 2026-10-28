@@ -325,7 +325,10 @@ Ekiple son görüşme, üç karar sorusu:
 - `admin` hesabının parolası değiştirilir ve Secret kasaya kaldırılır.
 - Lisans süresi ve kapsamı sözleşmeye göre yenilenir.
 
-**Durdur** kararı verildiyse:
+**Durdur** kararı verildiyse, veriyi saklamak istiyorsanız kaldırmadan önce
+son yedeği ve anahtarı dışarı alın (README "Yedekleme ve geri yükleme");
+oradaki kopyalama komutları backend Deployment'ı üzerinden çalışır ve
+kaldırmayla o da gider. Sonra:
 
 ```sh
 helm -n kubeat uninstall kubeat
@@ -337,8 +340,7 @@ doğrulandı); `helm uninstall` bıraktıklarını "These resources were kept du
 to the resource policy" diye sayar. Geride şifreleme anahtarı
 (`kubeat-secret-key` Secret'ı) ve elle oluşturduğunuz lisans, LDAP parolası
 ve CA da kalır; aynı adla `kubeat` namespace'ine yeniden kurulum kaldığı
-yerden sürer. Veriyi saklamak istiyorsanız son yedeği ve anahtarı dışarı alın
-(README "Yedekleme ve geri yükleme"); sonra PVC'leri bilerek silin:
+yerden sürer. Kurulum gerçekten bitiyorsa PVC'leri bilerek silin:
 
 ```sh
 oc -n kubeat delete pvc kubeat-data kubeat-backup

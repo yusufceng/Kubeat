@@ -75,9 +75,10 @@ refuses "frontend.env" "move its variables to frontend.extraEnv" --set frontend.
 
 # Removing the release leaves the database's and the backups' PVCs: helm
 # uninstall skips what carries helm.sh/resource-policy, deleting an Argo CD
-# application what carries Delete=false. Each claim has a switch of its
-# own, read with a default of true: a value set to null, as a release
-# upgraded with --reuse-values from 0.43 renders without it, keeps them too.
+# application (2.7 or later) what carries either that or Delete=false. Each
+# claim has a switch of its own, read with a default of true: a value set
+# to null, as a release upgraded with --reuse-values from 0.43 renders
+# without it, keeps them too.
 # The backups' claim exists only when the chart creates it.
 # claim NAME CLAIM has|lacks|absent TEXT VALUES...: the PersistentVolumeClaim
 # CLAIM rendered with these values has TEXT, lacks it, or is not rendered.
