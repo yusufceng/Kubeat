@@ -498,6 +498,17 @@ listesine yazılır; `UPTIME_NOTIFY_QUEUE_SIZE` için "en az monitor sayısı
 kadar" kuralı README'ye girer, otomatik türetme yok. Merge ile "kapandı"
 notu düşülür (S25'in kabul ölçütü).
 
+Kapandı (2026-10-29, S25, #37): almayan makine kanalı (webhook, PagerDuty)
+yeniden deneme zamanına kadar "almıyor" sayılır; bu sürede gelen
+bildirimler ona denenmeden yeniden deneme listesine yazılır ve kanalın
+sıradaki geçişinde gider (yeniden denenmeyen hatırlatma, sertifika ve
+yavaşlık bildirimi o geçişte bir kez). Ölü makine kanalıyla 100
+bildirimlik patlamada kuyruk dolmaz, `kubeat_notifications_dropped_total`
+artmaz, insan kanallarının grubu `UPTIME_NOTIFY_GROUP_WAIT` içinde gider
+(`go test -race`). Kuyruk kuralı README "Alarm" ve "Yapılandırma"da.
+Kalan: `UPTIME_NOTIFY_GROUP_WAIT=0` iken yanıt vermeyen bir insan kanalı
+her bildirimde yine denenir (README'de sınır olarak).
+
 ## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
 
 2026-10-28'de ertelendi (S33,
