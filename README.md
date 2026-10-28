@@ -2166,12 +2166,13 @@ hemen ardından da, bir sonraki scrape'te çözülür, Kubeat açıkken silinen 
 da durdurulan bir monitor'un alarmı da öyle. Yedek alarmı iki zamanın son 10
 dakikadaki en büyüğüne bakar (`max_over_time`): zamanlar bir süreçte yalnızca
 büyür, yeniden başlayan backend ise yeni pod'da da aynı pod'da da (OOMKill,
-liveness) ilk denemesi bitene kadar başarısızlık göstermez. Alarm bu sırada
-çözülmez; başarılı bir yedekten sonraki ilk scrape'te çözülür. Bu alarmlar
-pod'a göre değil monitor'e ve kuruluma göre tektir: `pod`, `instance`,
-`endpoint`, `container` ve `service` etiketlerini taşımazlar, Recreate'in
-getirdiği yeni pod ikinci bir alarm açmaz. Backend 10 dakikadan uzun scrape
-edilemezse çözülürler; o sırada `KubeatDown` en az 5 dakikadır yanmaktadır.
+liveness) ilk denemesi bitene kadar başarısızlık göstermez. Yeniden başlama
+ve ilk deneme birlikte 10 dakikayı aşmadıkça alarm bu sırada çözülmez;
+başarılı bir yedekten sonraki ilk scrape'te çözülür. Bu alarmlar pod'a göre
+değil monitor'e ve kuruluma göre tektir: `pod`, `instance`, `endpoint`,
+`container` ve `service` etiketlerini taşımazlar, Recreate'in getirdiği yeni
+pod ikinci bir alarm açmaz. Backend 10 dakikadan uzun scrape edilemezse
+çözülürler; o sırada `KubeatDown` en az 5 dakikadır yanmaktadır.
 
 **Alertmanager'da susturma kuralları.** Ayrı kurulan bir Alertmanager'da
 (örneğin user workload monitoring'in kendi Alertmanager'ı) varsayılan
