@@ -346,6 +346,7 @@ iki parça: teslim edilemeyen bildirimleri tek yerde gösteren bir görünüm
 ikisinin yerini bildirim kaydı (olay sayfası), kanal satırındaki "Son
 gönderim" ve `kubeat_notifications_total{result="failed"}` ile
 `kubeat_notification_attempts_total` sayaçları tutar; S9'un
-`KubeatNotificationsFailing` alarmı da bunları sayar. Tetikleyici: pilotta
+`KubeatNotificationsFailing` alarmı başarısız denemeyi ve düşürülen
+bildirimi sayar, motorun vazgeçmesini beklemez. Tetikleyici: pilotta
 yeniden deneme penceresini aşan bir kanal kesintisi (düzelme için 1 saatten
 uzun) ya da yeniden başlatmayla düşen bir düzelme bildirimi görülürse.

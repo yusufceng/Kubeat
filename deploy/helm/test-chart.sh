@@ -141,6 +141,12 @@ for alert in KubeatDown KubeatSchedulerStalled KubeatMetricsIncomplete KubeatRes
 done
 rules "KubeatBackupStale without backups" lacks "alert: KubeatBackupStale"
 rules "KubeatBackupFailing without backups" has "alert: KubeatBackupFailing"
+# A failed attempt fires the notifications alert, not only a notification
+# given up on: the latter stays silent while an outage notification is
+# attempted again.
+rules "KubeatNotificationsFailing counts every attempt" has 'increase(kubeat_notification_attempts_total{result="failed"}[15m]) > 0'
+rules "KubeatNotificationsFailing counts the dropped" has 'increase(kubeat_notifications_dropped_total[15m]) > 0'
+rules "KubeatNotificationsFailing does not wait for the engine to give up" lacks 'kubeat_notifications_total{result="failed"}'
 rules "license warning at 30 days" has "< 30 * 86400"
 rules "license critical at 7 days" has "< 7 * 86400"
 for interval in 24h:86400 12h:43200 90m:5400 1h30m:5400 1.5h:5400 2h30m15s:9015 1h0m0s:3600 30s:30; do

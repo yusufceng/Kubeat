@@ -2107,7 +2107,7 @@ yapılır. Kurallar:
 | `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |
 | `KubeatMetricsIncomplete` | Monitor metrikleri veritabanından okunamıyor |
 | `KubeatResultsDropped` | Son 10 dakikada veritabanına yazılamayan kontrol sonucu var; uptime geçmişinde boşluk oluşur |
-| `KubeatNotificationsFailing` | Son 15 dakikada yeniden denemelere rağmen teslim edilemeyen ya da kuyruk dolu olduğu için düşürülen bildirim var; bir kesinti duyurulmamış olabilir |
+| `KubeatNotificationsFailing` | Son 15 dakikada bir kanala teslimat denemesi başarısız oldu (`kubeat_notification_attempts_total{result="failed"}`) ya da kuyruk dolu olduğu için bildirim düşürüldü; bir kesinti duyurulmamış olabilir. Kesinti bildirimi olay sürdükçe yeniden denenir (bkz. "Alarm"); alarm kanal almadığı sürece yanar, motorun vazgeçmesini beklemez |
 | `KubeatWorkersSaturated` | 15 dakikadır sırası gelen kontroller boş worker olmadığı için sonraki tick'e kalıyor; `UPTIME_WORKERS` düşük ya da hedefler kontrolleri zaman aşımına kadar oyalıyor |
 | `KubeatBackupFailing` | Son bir saatte başarısız yedek denemesi var (bkz. "Yedekleme ve geri yükleme") |
 | `KubeatBackupStale` | `backup.interval` değerinin iki katı süredir başarılı yedek yok; yalnızca `backup.enabled=true` iken üretilir |
