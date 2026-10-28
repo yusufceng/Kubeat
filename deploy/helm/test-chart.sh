@@ -189,6 +189,23 @@ notes "SSO with a license" omits "$NEEDS_LICENSE" "${SSO[@]}" "${ROUTE[@]}" --se
 notes "LDAP without a license" says "$NEEDS_LICENSE" --set ldap.url=ldap://ldap.example.com --set ldap.baseDN=dc=example,dc=com
 notes "no SSO" omits "$NEEDS_LICENSE"
 
+# The backend's grace period, which must outlast UPTIME_SHUTDOWN_TIMEOUT:
+# 30 seconds by default, as given, and the default for values without the
+# key, as an upgrade with --reuse-values from before it renders.
+# grace NAME SECONDS VALUES...: the backend renders with this grace period.
+grace() {
+  local name="$1" want="$2"
+  shift 2
+  if ! helm template kubeat "$CHART" --show-only templates/backend.yaml "$@" >"$WORK/backend.yaml" 2>"$WORK/err"; then
+    failed "$name: refused: $(cat "$WORK/err")"
+  elif ! grep -qx "      terminationGracePeriodSeconds: $want" "$WORK/backend.yaml"; then
+    failed "$name: want terminationGracePeriodSeconds: $want, got: $(grep -F terminationGracePeriodSeconds: "$WORK/backend.yaml")"
+  fi
+}
+grace "grace period by default" 30
+grace "grace period given" 45 --set backend.terminationGracePeriodSeconds=45
+grace "grace period missing from older values" 30 --set backend.terminationGracePeriodSeconds=null
+
 # The alert rules: Kubeat's self-health rules render, the backup staleness
 # rule only with backups on, with a threshold read from backup.interval.
 RULES=(--set metrics.prometheusRule.enabled=true)
