@@ -525,6 +525,14 @@ func Load() (Config, error) {
 	if cfg.NotifyRetryMax, err = envDurationOrZero("UPTIME_NOTIFY_RETRY_MAX", 15*time.Minute); err != nil {
 		return Config{}, err
 	}
+	// The wait between the attempts starts at a minute and is capped by
+	// RETRY_MAX; a cap under a minute, or under the length of one attempt
+	// (its tries and the pauses between them), would send to a channel that
+	// is down without a pause.
+	if attempt := time.Duration(cfg.NotifyAttempts) * (cfg.NotifyTimeout + cfg.NotifyRetryDelay); cfg.NotifyRetryMax > 0 && cfg.NotifyRetryMax < max(time.Minute, attempt) {
+		return Config{}, fmt.Errorf("UPTIME_NOTIFY_RETRY_MAX: must be 0 or at least 1m and one attempt, UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY) = %s; got %s",
+			attempt, cfg.NotifyRetryMax)
+	}
 	if cfg.NotifyRetryFor, err = envDurationOrZero("UPTIME_NOTIFY_RETRY_FOR", time.Hour); err != nil {
 		return Config{}, err
 	}

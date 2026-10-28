@@ -53,7 +53,7 @@ backend:
     # UPTIME_RETENTION: 168h
     # UPTIME_REMINDER_INTERVAL: 15m    # announce an ongoing outage again
     # UPTIME_NOTIFY_GROUP_WAIT: 30s    # "0" turns grouping off
-    # UPTIME_NOTIFY_RETRY_MAX: 15m     # an outage notification a channel did not take is sent again at 1, 2, 4... minutes, up to this; "0" turns it off
+    # UPTIME_NOTIFY_RETRY_MAX: 15m     # an outage notification a channel did not take is sent again at 1, 2, 4... minutes, up to this (at least 1m); "0" turns it off
     # UPTIME_NOTIFY_RETRY_FOR: 1h      # the end of an outage is sent again for this long at most; "0" does not send it again
     # UPTIME_RECOVERY_THRESHOLD: "1"
     # UPTIME_DEFAULT_FAILURE_THRESHOLD: "3"

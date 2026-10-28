@@ -503,6 +503,38 @@ func TestNotifyRetry(t *testing.T) {
 	}
 }
 
+// The cap on the wait between the attempts is at least a minute, and at
+// least one attempt: shorter, a channel that is down would be sent to
+// without a pause. The end of an outage has no such floor.
+func TestNotifyRetryMaxHasAFloor(t *testing.T) {
+	for _, bad := range []string{"10s", "59s"} {
+		t.Setenv("UPTIME_NOTIFY_RETRY_MAX", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "UPTIME_NOTIFY_RETRY_MAX") {
+			t.Errorf("UPTIME_NOTIFY_RETRY_MAX=%q: %v, want it refused", bad, err)
+		}
+	}
+	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "1m")
+	if cfg, err := Load(); err != nil || cfg.NotifyRetryMax != time.Minute {
+		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=1m: %s, %v", cfg.NotifyRetryMax, err)
+	}
+	// An attempt of 5 tries of 30s with 10s between them is 200s long.
+	t.Setenv("UPTIME_NOTIFY_ATTEMPTS", "5")
+	t.Setenv("UPTIME_NOTIFY_TIMEOUT", "30s")
+	t.Setenv("UPTIME_NOTIFY_RETRY_DELAY", "10s")
+	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "3m")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "= 3m20s") {
+		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=3m with attempts of 3m20s: %v, want it refused", err)
+	}
+	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "4m")
+	if _, err := Load(); err != nil {
+		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=4m with attempts of 3m20s: %v", err)
+	}
+	t.Setenv("UPTIME_NOTIFY_RETRY_FOR", "30s")
+	if cfg, err := Load(); err != nil || cfg.NotifyRetryFor != 30*time.Second {
+		t.Errorf("UPTIME_NOTIFY_RETRY_FOR=30s: %s, %v", cfg.NotifyRetryFor, err)
+	}
+}
+
 func TestHeartbeatIntervalMustAllowATick(t *testing.T) {
 	t.Setenv("UPTIME_HEARTBEAT_URL", "https://hc.example.com/ping/x")
 	t.Setenv("UPTIME_SCHEDULER_TICK", "10s")
