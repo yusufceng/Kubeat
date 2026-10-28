@@ -311,7 +311,7 @@ func TestTakeRemovesAPartialLeftBehind(t *testing.T) {
 func TestRunWaitsForTheIntervalSinceTheNewestBackup(t *testing.T) {
 	dir := t.TempDir()
 	m := metrics.New("test")
-	run := func(st *fakeStore, interval time.Duration) (stop func()) {
+	run := func(st *fakeStore, m *metrics.Metrics, interval time.Duration) (stop func()) {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func() {
@@ -326,7 +326,7 @@ func TestRunWaitsForTheIntervalSinceTheNewestBackup(t *testing.T) {
 
 	// Nothing there yet: a backup is taken at once.
 	first := &fakeStore{}
-	stop := run(first, time.Hour)
+	stop := run(first, m, time.Hour)
 	waitFor(t, "the first backup", func() bool { return first.calls.Load() == 1 })
 	time.Sleep(30 * time.Millisecond)
 	stop()
@@ -334,13 +334,26 @@ func TestRunWaitsForTheIntervalSinceTheNewestBackup(t *testing.T) {
 		t.Errorf("%d backups within one interval, want 1", n)
 	}
 
-	// A restart inside the interval takes none.
+	// A restart inside the interval takes none, but reports the copy it
+	// found: the gauge would otherwise read 0, as if there were no backup,
+	// until the next one. Finding a copy is not an attempt, so it is not
+	// counted as one.
 	restarted := &fakeStore{}
-	stop = run(restarted, time.Hour)
+	afterRestart := metrics.New("test")
+	stop = run(restarted, afterRestart, time.Hour)
 	time.Sleep(50 * time.Millisecond)
 	stop()
 	if n := restarted.calls.Load(); n != 0 {
 		t.Errorf("restart took %d extra backups", n)
+	}
+	last, ok := newest(dir)
+	if !ok {
+		t.Fatal("the first backup is gone")
+	}
+	if got, _ := afterRestart.Gather(); got["kubeat_backup_last_success_timestamp_seconds"] != float64(last.Unix()) ||
+		got["kubeat_backups_total{result=ok}"] != 0 {
+		t.Errorf("after a restart: last = %v, want %v; ok attempts = %v, want 0",
+			got["kubeat_backup_last_success_timestamp_seconds"], last.Unix(), got["kubeat_backups_total{result=ok}"])
 	}
 
 	got, err := m.Gather()
@@ -354,7 +367,7 @@ func TestRunWaitsForTheIntervalSinceTheNewestBackup(t *testing.T) {
 	// A failing store is retried without spinning, and counted.
 	failing := &fakeStore{err: errors.New("disk read error")}
 	os.RemoveAll(dir)
-	stop = run(failing, 20*time.Millisecond)
+	stop = run(failing, m, 20*time.Millisecond)
 	// Wait for the count itself: an attempt is counted when it ends, and
 	// one that is cut short by stopping is not counted at all.
 	waitFor(t, "two counted failures", func() bool {

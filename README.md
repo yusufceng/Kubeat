@@ -2075,7 +2075,11 @@ yayınlar. Başlıcaları:
 | `kubeat_scheduler_dispatch_skipped_total` | Boş worker olmadığı için bekleyen kontroller; artıyorsa `UPTIME_WORKERS` düşüktür |
 | `kubeat_target_throttled_total{host}` | Hedef host, son kontrolün yönlendirildiği bir host ya da ulaştığı bir adres dakikalık kontrol tavanına (`UPTIME_TARGET_MAX_RATE`, `UPTIME_CLUSTER_TARGET_MAX_RATE`, `UPTIME_TARGET_ADDRESS_MAX_RATE`) takıldığı için beklemeye başlayan kontroller, monitor'un kendi host'u etiketiyle; her bekleme kaç tick sürerse sürsün bir kez sayılır; ilk 100 host kendi etiketiyle, sonrakiler `other` olarak sayılır (bkz. "Hedef yükü") |
 | `kubeat_results_dropped_total` | Veritabanına yazılamayan sonuçlar |
-| `kubeat_notifications_total{channel_type,event,result}` | Bildirim gönderimleri |
+| `kubeat_notifications_total{channel_type,event,result}` | Bildirim gönderimleri; `result` yeniden denemelerden sonra `sent` ya da `failed` |
+| `kubeat_notifications_dropped_total` | Teslimat kuyruğu dolu olduğu için düşürülen bildirimler |
+| `kubeat_backups_total{result}` | Yedek denemeleri, `ok` ya da `failed` |
+| `kubeat_backup_last_success_timestamp_seconds` | En yeni yedek kopyanın zamanı; yeniden başlatmada yedek dizinindeki en yeni dosyadan okunur (bkz. "Yedekleme ve geri yükleme") |
+| `kubeat_license_expiry_timestamp_seconds` | Kubeat Enterprise lisansının bitiş zamanı; lisans yoksa 0 |
 
 Chart'ta `metrics.serviceMonitor.enabled=true` bir ServiceMonitor oluşturur;
 böylece monitor durumları cluster'ın kendi Prometheus'unda sorgulanabilir
@@ -2101,6 +2105,20 @@ yapılır. Kurallar:
 | `KubeatDown` | Backend 5 dakikadır scrape edilemiyor (`critical`); bu sırada `KubeatMonitorDown` alarmları susar, çözülmez |
 | `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |
 | `KubeatMetricsIncomplete` | Monitor metrikleri veritabanından okunamıyor |
+| `KubeatResultsDropped` | Son 10 dakikada veritabanına yazılamayan kontrol sonucu var; uptime geçmişinde boşluk oluşur |
+| `KubeatNotificationsFailing` | Son 15 dakikada yeniden denemelere rağmen teslim edilemeyen ya da kuyruk dolu olduğu için düşürülen bildirim var; bir kesinti duyurulmamış olabilir |
+| `KubeatWorkersSaturated` | 15 dakikadır sırası gelen kontroller boş worker olmadığı için sonraki tick'e kalıyor; `UPTIME_WORKERS` düşük ya da hedefler kontrolleri zaman aşımına kadar oyalıyor |
+| `KubeatBackupFailing` | Son bir saatte başarısız yedek denemesi var (bkz. "Yedekleme ve geri yükleme") |
+| `KubeatBackupStale` | `backup.interval` değerinin iki katı süredir başarılı yedek yok; yalnızca `backup.enabled=true` iken üretilir |
+| `KubeatLicenseExpiring` | Kubeat Enterprise lisansının bitişine 30 günden az kaldı ya da lisans bitti; 7 günden az kalınca aynı adla ikinci bir kural `critical` ile yanar (bkz. "Kubeat Enterprise lisansı") |
+
+`kubeat.monitors` grubundaki ilk iki kural `severity` etiketini
+`metrics.prometheusRule.severity` değerinden alır; `kubeat.self`
+grubundakiler kendileri koyar (`warning`, belirtilenlerde `critical`). Alarm
+belirtiyi söyler, nedeni backend'in log'undadır. Lisans alarmı `critical`
+olunca `warning` olanı da açık kalır; OpenShift'in ve kube-prometheus-stack'in
+varsayılan Alertmanager yapılandırması aynı addaki `warning` alarmı
+`critical` yanarken susturur.
 
 Her iki nesne de prometheus-operator CRD'lerini ister; OpenShift'te user
 workload monitoring açık olmalıdır (`enableUserWorkload: true`).
@@ -2239,8 +2257,14 @@ sürümün kopyası yeni sürümde açılır ve şeması yükseltilir; yeni bir 
 kopyası eski sürümde açılmaz. Anahtar yanlışsa backend başlamaz. Prova
 kaydı ve hedef süreler: [docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md).
 
-`kubeat_backup_last_success_timestamp_seconds` metriği son başarılı kopyanın
-zamanını verir; ilerlemiyorsa yedekleme çalışmıyordur.
+`kubeat_backup_last_success_timestamp_seconds` metriği en yeni kopyanın
+zamanını verir: son başarılı kopyanın, yeniden başlatmadan sonra da yedek
+dizinindeki en yeni dosyanın; ilerlemiyorsa yedekleme çalışmıyordur.
+`metrics.prometheusRule.enabled=true` ile cluster'ın Prometheus'u bunu
+kendisi izler (bkz. "Aracın kendi sağlığı"): `KubeatBackupFailing` son bir
+saatte başarısız bir deneme olduğunda, `KubeatBackupStale` `backup.interval`
+değerinin iki katı süredir başarılı kopya olmadığında yanar. Hiç başarılı
+kopya alınamamışsa yalnızca ilki yanar.
 
 ## Keşif
 
@@ -2746,7 +2770,10 @@ Secret'ı yenilemek yeterlidir, yeniden başlatma gerekmez. Lisansın durumu
 
 Bitişten 30 gün önce yöneticiler her sayfada bir uyarı görür, backend de
 log'a yazar. `kubeat_license_expiry_timestamp_seconds` metriği bitiş
-zamanını verir; buna kendi alarmınızı kurabilirsiniz.
+zamanını verir; `metrics.prometheusRule.enabled=true` ile cluster'ın
+Alertmanager'ı da haber verir: `KubeatLicenseExpiring` bitişe 30 günden az
+kalınca `warning`, 7 günden az kalınca `critical` ile yanar ve lisans
+bitince de yanmaya devam eder (bkz. "Aracın kendi sağlığı").
 
 Lisans bittiğinde ya da kullanılamaz olduğunda:
 

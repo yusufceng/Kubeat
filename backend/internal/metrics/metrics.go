@@ -116,7 +116,7 @@ func New(version string) *Metrics {
 	m.hosts = make(map[string]bool)
 	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_backup_last_success_timestamp_seconds",
-		Help: "When a database backup last succeeded; 0 if none has since the process started.",
+		Help: "When the newest database backup was taken: the last to succeed, or after a start the newest copy found in the backup directory; 0 while there is none.",
 	})
 
 	m.licenseExpiry = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -293,6 +293,15 @@ func (m *Metrics) Backup(ok bool, at time.Time) {
 	}
 	m.backups.WithLabelValues(resultLabel(ok, "ok", "failed")).Inc()
 	if ok {
+		m.lastBackup.Set(float64(at.UnixMilli()) / 1000)
+	}
+}
+
+// LastBackup records when the newest backup already in the backup directory
+// was taken, so that the gauge does not read 0 from a restart until the next
+// backup. Unlike Backup it counts no attempt: none was made.
+func (m *Metrics) LastBackup(at time.Time) {
+	if m != nil {
 		m.lastBackup.Set(float64(at.UnixMilli()) / 1000)
 	}
 }

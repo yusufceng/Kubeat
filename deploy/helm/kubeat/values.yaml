@@ -209,6 +209,11 @@ oidc:
 # goes, which leaves a moment without a backup.
 backup:
   enabled: false
+  # How often a copy is taken, as a Go duration (24h, 12h, 90m, 1h30m). The
+  # PrometheusRule's KubeatBackupStale alert fires when no copy has succeeded
+  # for twice this: the chart reads the threshold from this value, rather
+  # than from a seconds value of its own that would drift from it, so it
+  # must be a duration the chart can read (h, m and s units).
   interval: 24h
   keep: 7                # copies kept; see the size rule above
   persistence:
@@ -313,8 +318,13 @@ metrics:
     labels: {}
   # Creates a PrometheusRule so the cluster's Prometheus raises alerts from
   # the metrics: KubeatMonitorDown per open outage, KubeatCertificateExpiring,
-  # and KubeatDown / KubeatSchedulerStalled for Kubeat itself. They reach the
-  # Alertmanager and receivers the platform already has.
+  # and for Kubeat itself KubeatDown, KubeatSchedulerStalled,
+  # KubeatMetricsIncomplete, KubeatResultsDropped, KubeatNotificationsFailing,
+  # KubeatWorkersSaturated, KubeatBackupFailing, KubeatBackupStale (with
+  # backup.enabled: no good copy for twice backup.interval) and
+  # KubeatLicenseExpiring (30 days before the license ends, critical at 7
+  # days and after it ends). They reach the Alertmanager and receivers the
+  # platform already has; the README's "Aracın kendi sağlığı" lists them.
   prometheusRule:
     enabled: false
     labels: {}

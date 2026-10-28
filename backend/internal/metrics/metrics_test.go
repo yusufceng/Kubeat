@@ -29,6 +29,9 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.NotificationDropped()
 	m.Heartbeat(HeartbeatSent, time.Now())
 	m.TargetThrottled("example.com")
+	m.Backup(true, time.Now())
+	m.LastBackup(time.Now())
+	m.License(time.Now())
 }
 
 // The host label is bounded: past MaxThrottledHosts hosts, new ones are
@@ -76,12 +79,14 @@ func TestEventCounters(t *testing.T) {
 	m.NotificationDropped()
 	m.Heartbeat(HeartbeatWithheld, now)
 	m.Heartbeat(HeartbeatSent, now)
+	m.LastBackup(now)
 
 	got, err := m.Gather()
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]float64{
+		"kubeat_backup_last_success_timestamp_seconds":                              1_800_000_000.5,
 		"kubeat_build_info{version=1.2.3}":                                          1,
 		"kubeat_checks_total{result=up}{type=http}":                                 1,
 		"kubeat_checks_total{result=down}{type=tcp}":                                1,
@@ -101,6 +106,12 @@ func TestEventCounters(t *testing.T) {
 	for key, value := range want {
 		if got[key] != value {
 			t.Errorf("%s = %v, want %v", key, got[key], value)
+		}
+	}
+	// A backup found at start is not a backup attempt.
+	for key := range got {
+		if strings.HasPrefix(key, "kubeat_backups_total") {
+			t.Errorf("LastBackup counted an attempt: %s = %v", key, got[key])
 		}
 	}
 	if _, ok := got["go_goroutines"]; !ok {

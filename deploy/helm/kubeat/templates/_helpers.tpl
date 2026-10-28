@@ -111,6 +111,28 @@ https://{{ .Values.ingress.host }}/auth/callback
 {{- end -}}
 {{- end -}}
 
+{{/*
+The seconds in a Go duration such as 24h, 90m, 1h30m or 1.5h, rounded up
+to a whole number: the number and unit pairs time.ParseDuration takes (h, m,
+s, ms, us, µs, ns). Anything else fails the render, naming the value it
+came from, as the backend would refuse it at start all the same. Takes a
+list: the duration and the value's name.
+*/}}
+{{- define "kubeat.durationSeconds" -}}
+{{- $text := index . 0 | toString -}}
+{{- $parts := regexFindAll "([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|ms|s|m|h)" $text -1 -}}
+{{- if or (not $parts) (ne (join "" $parts) (trimPrefix "+" $text)) -}}
+{{- fail (printf "%s is %q, not a duration such as 24h, 90m or 1h30m" (index . 1) $text) -}}
+{{- end -}}
+{{- $perUnit := dict "h" 3600.0 "m" 60.0 "s" 1.0 "ms" 0.001 "us" 0.000001 "µs" 0.000001 "ns" 0.000000001 -}}
+{{- $seconds := 0.0 -}}
+{{- range $parts -}}
+{{- $unit := regexFind "[a-zµ]+$" . -}}
+{{- $seconds = addf $seconds (mulf (trimSuffix $unit . | float64) (get $perUnit $unit)) -}}
+{{- end -}}
+{{- ceil $seconds | int -}}
+{{- end -}}
+
 {{/* A dotted IPv4 address as Go's netip reads it: no leading zeros. */}}
 {{- define "kubeat.ipv4Pattern" -}}
 (25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}

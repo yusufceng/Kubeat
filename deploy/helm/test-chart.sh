@@ -119,6 +119,38 @@ notes "SSO with a license" omits "$NEEDS_LICENSE" "${SSO[@]}" "${ROUTE[@]}" --se
 notes "LDAP without a license" says "$NEEDS_LICENSE" --set ldap.url=ldap://ldap.example.com --set ldap.baseDN=dc=example,dc=com
 notes "no SSO" omits "$NEEDS_LICENSE"
 
+# The alert rules: Kubeat's self-health rules render, the backup staleness
+# rule only with backups on, with a threshold read from backup.interval.
+RULES=(--set metrics.prometheusRule.enabled=true)
+# rules NAME has|lacks TEXT VALUES...: the PrometheusRule rendered with these
+# values (and the rules on) has TEXT, or lacks it.
+rules() {
+  local name="$1" want="$2" text="$3"
+  shift 3
+  if ! helm template kubeat "$CHART" --show-only templates/prometheusrule.yaml "${RULES[@]}" "$@" >"$WORK/rules" 2>"$WORK/err"; then
+    failed "$name: refused: $(cat "$WORK/err")"
+  elif grep -qF -- "$text" "$WORK/rules"; then
+    [ "$want" = has ] || failed "$name: the rules have \"$text\""
+  else
+    [ "$want" = lacks ] || failed "$name: the rules lack \"$text\""
+  fi
+}
+for alert in KubeatDown KubeatSchedulerStalled KubeatMetricsIncomplete KubeatResultsDropped \
+  KubeatNotificationsFailing KubeatWorkersSaturated KubeatBackupFailing KubeatBackupStale KubeatLicenseExpiring; do
+  rules "$alert with backups" has "alert: $alert" --set backup.enabled=true
+done
+rules "KubeatBackupStale without backups" lacks "alert: KubeatBackupStale"
+rules "KubeatBackupFailing without backups" has "alert: KubeatBackupFailing"
+rules "license warning at 30 days" has "< 30 * 86400"
+rules "license critical at 7 days" has "< 7 * 86400"
+for interval in 24h:86400 12h:43200 90m:5400 1h30m:5400 1.5h:5400 2h30m15s:9015 1h0m0s:3600 30s:30; do
+  rules "stale threshold at ${interval%:*}" has "> 2 * ${interval#*:} and" --set backup.enabled=true --set backup.interval="${interval%:*}"
+done
+for interval in 1d 24 1.5 h 24H 24h30 ""; do
+  refuses "backup.interval $interval" "backup.interval is \"$interval\", not a duration" \
+    "${RULES[@]}" --set backup.enabled=true --set backup.interval="$interval"
+done
+
 if [ "$FAILED" -gt 0 ]; then
   echo "$FAILED chart check(s) failed"
   exit 1
