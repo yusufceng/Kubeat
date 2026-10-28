@@ -27,11 +27,14 @@ import (
 // notification, or the end of one, that every try of an attempt failed
 // to deliver is attempted again while the outage lasts, after a minute
 // and then after twice the wait each time, up to Options.RetryMax; the
-// end of an outage for Options.RetryFor at most. A grouped message is
-// attempted again as one, less the monitors whose outages ended meanwhile.
-// These too are in memory: at a start the delivery log says which open
-// outages a channel was sent and did not take, and they are sent again;
-// an end of an outage still to be sent again is lost with the restart.
+// end of an outage for Options.RetryFor at most, and only while no newer
+// outage of the monitor has opened: told the end after the start of the
+// next, the channel would read the monitor as up while it is down. A
+// grouped message is attempted again as one, less the monitors whose
+// outages ended meanwhile. These too are in memory: at a start the
+// delivery log says which open outages a channel was sent and did not
+// take, and they are sent again; an end of an outage still to be sent
+// again is lost with the restart.
 
 // owedKind is what a channel is still owed about an outage.
 type owedKind int
@@ -184,7 +187,9 @@ func (s *schedule) forget(key owedKey) { delete(s.entries, key) }
 // the monitor, noted while the end waited to go out, is kept. The outage
 // also leaves the messages still to be sent again: a grouped one goes on
 // for its other monitors, and the retries left with nothing to tell are
-// returned, dropped. The end of an outage still to be sent again stays.
+// returned, dropped. The end of this outage still to be sent again stays;
+// the end of an earlier outage of the monitor is moot now that a later
+// end was told, and leaves too.
 func (s *schedule) forgetOutage(monitorID, incidentID int64) (dropped []*retry) {
 	for key, o := range s.entries {
 		if key.monitor == monitorID && o.note.Incident.ID <= incidentID {
@@ -193,8 +198,14 @@ func (s *schedule) forgetOutage(monitorID, incidentID int64) (dropped []*retry) 
 	}
 	kept := s.retries[:0]
 	for _, r := range s.retries {
-		if r.note.Event == EventDown && !r.narrow(func(m Notification) (Notification, bool) {
-			return m, m.Monitor.ID != monitorID || m.Incident.ID > incidentID
+		if !r.narrow(func(m Notification) (Notification, bool) {
+			if m.Monitor.ID != monitorID {
+				return m, true
+			}
+			if r.note.Event == EventDown {
+				return m, m.Incident.ID > incidentID
+			}
+			return m, m.Incident.ID >= incidentID
 		}) {
 			dropped = append(dropped, r)
 			continue
@@ -262,10 +273,13 @@ func (e *Engine) retries(n Notification) bool {
 // again: a notification of an outage or of its end that a channel did
 // not take waits retryBase, then twice the last wait each time, RetryMax
 // at most; the end of an outage is not waited for past RetryFor from the
-// first failure. Everything else, and everything with the attempts off,
-// has failed for good.
+// first failure. A note held back because the channel took none of the
+// others (deliver) waits the same way, with no attempt counted against
+// it. Everything else, and everything with the attempts off, has failed
+// for good.
 func (e *Engine) retryLater(failures []failed) {
 	now := e.now()
+	held := make(map[string]int)
 	for _, f := range failures {
 		r := f.retry
 		switch {
@@ -278,14 +292,23 @@ func (e *Engine) retryLater(failures []failed) {
 			e.gaveUp(f.channel, f.note, "")
 			continue
 		}
-		r.attempts++
+		if !f.held {
+			r.attempts++
+		}
 		if f.note.Event == EventUp && r.due.After(r.since.Add(e.opts.RetryFor)) {
 			e.owed.dropRetry(r)
 			e.gaveUp(f.channel, f.note, "the end of the outage was not taken within UPTIME_NOTIFY_RETRY_FOR")
 			continue
 		}
+		if f.held {
+			held[f.channel.Name]++
+			continue
+		}
 		e.opts.Logger.Warn("notification to be sent again", "channel", f.channel.Name, "event", f.note.Event, "monitor", about(f.note),
 			"in", r.due.Sub(now).String(), "failed_attempts", r.attempts)
+	}
+	for channel, count := range held {
+		e.opts.Logger.Warn("notifications held back, the channel did not take another; to be sent again later", "channel", channel, "count", count)
 	}
 }
 
@@ -339,8 +362,9 @@ func (e *Engine) route(ch store.Channel, n Notification, now time.Time) bool {
 // and before the end is delivered, or a channel that wants no reminders,
 // must not cost it the end. What the channels did not take goes again
 // with it, when its wait is up (retryLater): less the monitors whose
-// outage is over or that are gone, and not at all to a channel gone or
-// no longer listening, or past RetryFor for the end of an outage.
+// outage is over or that are gone, for the end of an outage less those
+// with a newer outage open, and not at all to a channel gone or no
+// longer listening, or past RetryFor for the end of an outage.
 func (e *Engine) deliverOwed(ctx context.Context) {
 	now := e.now()
 	due := e.owed.due(now)
@@ -512,18 +536,20 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 				return n, false
 			}
 			n.Monitor = m
-			if n.Event != EventDown {
-				return n, true
-			}
 			incident, err := e.store.GetOpenIncident(ctx, m.ID, store.IncidentDown)
-			if errors.Is(err, store.ErrNotFound) {
-				return n, false
-			}
-			if err != nil {
+			switch {
+			case err != nil && !errors.Is(err, store.ErrNotFound):
 				storeErr = err
 				return n, true
+			case n.Event == EventDown:
+				// The outage is told while it is the one open.
+				return n, err == nil && incident.ID == n.Incident.ID
+			default:
+				// The end of an outage is told while no outage is open:
+				// after the next one opened, the channel would read the
+				// monitor as up again while it is down.
+				return n, err != nil
 			}
-			return n, incident.ID == n.Incident.ID
 		})
 		if storeErr != nil {
 			// The store could not say; nothing may pass for over.
@@ -533,7 +559,11 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 		}
 		if !left {
 			e.owed.dropRetry(r)
-			e.gaveUp(r.channel, r.note, "the outage ended, or its monitor is gone, before the channel took it")
+			reason := "the outage ended, or its monitor is gone, before the channel took it"
+			if r.note.Event == EventUp {
+				reason = "a newer outage opened, or the monitor is gone, before the channel took the end"
+			}
+			e.gaveUp(r.channel, r.note, reason)
 			continue
 		}
 		r.channel = ch

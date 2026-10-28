@@ -2408,11 +2408,21 @@ dk…), aralık en çok `UPTIME_NOTIFY_RETRY_MAX` (varsayılan 15 dk) olana
 kadar. Kanal alınca ya da olay kapanınca denemeler biter; kapanınca kanal
 yalnızca düzelmeyi duyar. Düzelme (`up`) bildirimi de aynı aralıklarla, ilk
 başarısız denemeden itibaren en çok `UPTIME_NOTIFY_RETRY_FOR` (varsayılan 1
-saat) boyunca denenir. Gruplanmış bir mesaj tek mesaj olarak yeniden denenir;
-bu arada düzelen monitor'lar mesajdan düşer. Her deneme bildirim kaydına
-yazılır ve `kubeat_notification_attempts_total` sayacını artırır;
+saat) boyunca denenir; kanal almadan aynı monitor'da yeni bir kesinti
+açılırsa bekleyen düzelme bildirimi düşer (kanal yeni kesintiyi duyar; eski
+düzelme gönderilse süren kesinti kapanmış sanılırdı), sonraki bir
+kesintinin düzelmesi teslim edilince de öncekininki artık gönderilmez.
+Gruplanmış bir mesaj tek mesaj olarak yeniden denenir; bu arada düzelen
+monitor'lar mesajdan düşer. Bir kanal bir geçişte bir bildirimi almazsa, o
+geçişte ona yeniden gönderilecek diğer bildirimler denenmez ve bekleme
+süreleri yine ikiye katlanır: kapalı bir kanal her geçişte en çok bir
+denemenin süresi kadar tutar, bildirim başına değil. Her deneme bildirim
+kaydına yazılır ve `kubeat_notification_attempts_total` sayacını artırır
+(denenmeden bekletilen bildirim yazılmaz ve sayılmaz);
 `kubeat_notifications_total` bildirimi bir kez, son sonucuyla sayar (kanal
-alınca `sent`, denemeler bitince `failed`). Kanal satırındaki **Son
+alınca `sent`, denemeler bitince `failed`). Chart'ın `KubeatNotificationsFailing`
+alarmı başarısız denemeyi sayar: kanal almadığı sürece yanar, motorun
+vazgeçmesini beklemez (bkz. "Aracın kendi sağlığı"). Kanal satırındaki **Son
 gönderim** son denemeyi gösterir: başarısız deneme orada hatasıyla görünür,
 kanal alınca yerini başarılı gönderim alır. Test, hatırlatma, sertifika ve
 yavaşlık bildirimleri yeniden denenmez: testin sonucu kanal satırında
@@ -2421,7 +2431,10 @@ bellektedir: backend yeniden başlayınca açık kesintilerin hangi kanallara
 teslim edilemediğine bildirim kaydından bakılır ve o kanallara hemen
 yeniden gönderilir; bekleyen bir düzelme bildirimi ise yeniden başlatmayla
 düşer. `UPTIME_NOTIFY_RETRY_MAX=0` yeniden denemeyi tümüyle,
-`UPTIME_NOTIFY_RETRY_FOR=0` yalnızca düzelme için kapatır.
+`UPTIME_NOTIFY_RETRY_FOR=0` yalnızca düzelme için kapatır;
+`UPTIME_NOTIFY_RETRY_MAX` en az 1 dakika ve bir denemenin süresi
+(`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`,
+varsayılanlarla 30 sn) olmalıdır; daha kısası reddedilir, backend başlamaz.
 
 HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
 `UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir "sertifika" olayı

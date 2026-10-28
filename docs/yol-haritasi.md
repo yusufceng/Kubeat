@@ -156,8 +156,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   `UPTIME_NOTIFY_RETRY_MAX`), düzelme (`up`) bildirimi için en çok
   `UPTIME_NOTIFY_RETRY_FOR`. Deneme listesi bellektedir: yeniden
   başlatmada açık kesintininki bildirim kaydından kurulur, bekleyen düzelme
-  bildirimi düşer. Teslim edilemeyen bildirimlerin ayrı bir görünümü
-  (dead-letter) yoktur; bildirim kaydı ve
+  bildirimi düşer; kanal almadan yeni bir kesinti açılırsa da düşer. Teslim
+  edilemeyen bildirimlerin ayrı bir görünümü (dead-letter) yoktur; bildirim
+  kaydı, `kubeat_notification_attempts_total{result="failed"}` (chart'ın
+  `KubeatNotificationsFailing` alarmı bunu sayar) ve
   `kubeat_notifications_total{result="failed"}` gösterir ([backlog](backlog.md)
   "Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı
   yeniden deneme kuyruğu").

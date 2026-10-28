@@ -597,6 +597,8 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 // deleted meanwhile) must not stay owed anything about an outage that is
 // over. An outage notification still to be sent again is not sent: the
 // outage is over, and a channel that never took it has failed for good.
+// Nor is the end of an earlier outage of the monitor: a later end was
+// told.
 func (e *Engine) outagesOver(notes []Notification) {
 	for _, n := range notes {
 		if n.Event != EventUp {
@@ -663,21 +665,28 @@ type outbound struct {
 }
 
 // failed is a send that a channel did not take: what was sent, and the
-// retry it was sent again for, if it was.
+// retry it was sent again for, if it was. A note sent again is held back
+// once the channel failed to take another in the pass (deliver): not
+// sent, so not an attempt, and failed all the same.
 type failed struct {
 	channel store.Channel
 	note    Notification
 	retry   *retry
+	held    bool
 }
 
 // deliver sends each channel its share, and returns what failed once the
 // last send is recorded. The channels are sent to in parallel, one
 // goroutine each, and each channel serially, in order: a channel that is
 // slow or down holds up only itself, and a pass costs the loop its slowest
-// channel rather than the sum of them. Only the sends leave the loop's
-// goroutine; what a channel is owed (route, retryLater, outagesOver) is
-// settled in the loop, before and after, and the store and the metrics
-// take calls from several goroutines.
+// channel rather than the sum of them. Once a channel fails to take a
+// note, the notes sent to it again are held back for the pass: a channel
+// that is down costs the pass one attempt, not one per note waiting on
+// it, and they wait again (retryLater). A note sent for the first time
+// still goes: it is news, which the channel may yet take. Only the sends
+// leave the loop's goroutine; what a channel is owed (route, retryLater,
+// outagesOver) is settled in the loop, before and after, and the store and
+// the metrics take calls from several goroutines.
 func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 	var (
 		wg       sync.WaitGroup
@@ -686,18 +695,32 @@ func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 	)
 	for _, s := range shares {
 		wg.Go(func() {
+			tripped := false
 			for i, n := range s.notes {
-				if err := e.send(ctx, s.channel, n); err != nil {
-					mu.Lock()
-					failures = append(failures, failed{channel: s.channel, note: n, retry: s.retries[i]})
-					mu.Unlock()
+				r := s.retries[i]
+				var err error
+				if tripped && r != nil {
+					err = errNotTaken
+				} else {
+					err = e.send(ctx, s.channel, n)
 				}
+				if err == nil {
+					continue
+				}
+				tripped = true
+				mu.Lock()
+				failures = append(failures, failed{channel: s.channel, note: n, retry: r, held: err == errNotTaken})
+				mu.Unlock()
 			}
 		})
 	}
 	wg.Wait()
 	return failures
 }
+
+// errNotTaken stands, within deliver, for a note held back because the
+// channel did not take another in the pass.
+var errNotTaken = errors.New("the channel did not take another notification in this pass")
 
 // send delivers one notification (single or grouped) to one channel, with
 // retries, and records the outcome: on the channel, and in the delivery

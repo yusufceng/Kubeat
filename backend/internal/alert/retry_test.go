@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -211,6 +212,154 @@ func TestTheEndOfAnOutageIsSentAgainForAWhileOnly(t *testing.T) {
 		"kubeat_notification_attempts_total{channel_type=webhook}{result=failed}":   4,
 		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=failed}": 1,
 		"kubeat_notifications_total{channel_type=webhook}{event=down}{result=sent}": 1,
+	})
+}
+
+// The end of an outage a channel did not take is not sent again once a
+// newer outage of the monitor opened: told the end then, the channel
+// would read the monitor as up again while it is down. Nor once the end
+// of a later outage was told: the earlier end is moot by then.
+func TestTheEndOfAnOutageIsNotSentAgainAfterANewerOutage(t *testing.T) {
+	f := newFixture(t, 1, 1)
+	f.retrying(15*time.Minute, time.Hour)
+	f.check(false)
+	f.flush()
+	f.sender.fail("ops", 1)
+	f.check(true) // the end is not taken
+	f.flush()
+	if got := f.sender.log(); got != "ops:down" {
+		t.Fatalf("while the webhook does not answer: %q, want ops:down alone", got)
+	}
+	if n := len(f.engine.owed.retries); n != 1 {
+		t.Fatalf("%d retries, want the end to be sent again", n)
+	}
+	f.check(false) // 30 seconds on: down again, and the channel takes it
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:down" {
+		t.Fatalf("at the second outage: %q, want ops:down,ops:down", got)
+	}
+	// A minute after the failure the end of the first outage falls due,
+	// and is not sent: the second outage is open.
+	f.check(false)
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:down" {
+		t.Fatalf("a minute after the failure: %q, want the end of the first outage not sent", got)
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries, want the end of the first outage given up", n)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=failed}":   1,
+		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=failed}": 1,
+		"kubeat_notifications_total{channel_type=webhook}{event=down}{result=sent}": 2,
+	})
+	f.check(true)
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:down,ops:up" {
+		t.Fatalf("after the second outage: %q, want its end alone", got)
+	}
+
+	// The end of a third outage is not taken, and a fourth comes and goes
+	// before it is due again: once the end of the fourth is told, the end
+	// of the third is not sent.
+	f.check(false)
+	f.flush()
+	f.sender.fail("ops", 1)
+	f.check(true)
+	f.flush()
+	f.check(false)
+	f.flush()
+	f.check(true) // a minute after the failure: the fourth's end goes as the third's falls due
+	f.flush()
+	const told = "ops:down,ops:down,ops:up,ops:down,ops:down,ops:up"
+	if got := f.sender.log(); got != told {
+		t.Fatalf("after the fourth outage: %q, want the end of the third not sent", got)
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries, want the end of the third outage given up", n)
+	}
+	f.clock = f.clock.Add(15 * time.Minute)
+	f.flush()
+	if got := f.sender.log(); got != told {
+		t.Errorf("a quarter of an hour on: %q, want nothing more", got)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=failed}": 2,
+		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=sent}":   2,
+	})
+}
+
+// A channel that does not take a message is not sent, in the same pass,
+// the other messages waiting to be sent to it again: a channel that is
+// down costs a pass one attempt rather than one per message waiting on
+// it. The messages held back wait again, their wait doubled, with no
+// attempt on the record.
+func TestAChannelNotTakingOneIsSentNoOtherAgainInThatPass(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook: every notification on its own
+	f.retrying(15*time.Minute, time.Hour)
+	ctx := context.Background()
+	cart, err := f.db.CreateMonitor(ctx, store.Monitor{Name: "cart", Type: store.MonitorTCP, Target: "cart:80",
+		Interval: 30 * time.Second, Timeout: 5 * time.Second, FailureThreshold: 1, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both monitors go down at once and the webhook takes neither; a
+	// minute on it does not take the first message sent again, and the
+	// second is not sent.
+	f.sender.fail("ops", 3)
+	f.clock = f.clock.Add(30 * time.Second)
+	batch := []store.CheckResult{
+		{MonitorID: f.monitor.ID, CheckedAt: f.clock, Error: "refused"},
+		{MonitorID: cart.ID, CheckedAt: f.clock, Error: "refused"},
+	}
+	if err := f.db.InsertCheckResults(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	f.engine.Evaluate(ctx, batch)
+	f.flush()
+	if n := len(f.engine.owed.retries); n != 2 {
+		t.Fatalf("%d retries, want both outages to be sent again", n)
+	}
+	f.clock = f.clock.Add(time.Minute)
+	f.flush()
+	if got := f.sender.log(); got != "" {
+		t.Fatalf("a minute on: %q, want nothing taken", got)
+	}
+	var attempts []int
+	for _, r := range f.engine.owed.retries {
+		if !r.due.Equal(f.clock.Add(2 * time.Minute)) {
+			t.Errorf("%s: due in %s, want both to wait 2 minutes", r.note.Monitor.Name, r.due.Sub(f.clock))
+		}
+		attempts = append(attempts, r.attempts)
+	}
+	if got := fmt.Sprint(attempts); got != "[2 1]" {
+		t.Errorf("failed attempts counted = %s, want [2 1]: one message sent again, the other held back", got)
+	}
+	// The record has the attempt that was made, not the message held back.
+	cartOutage, err := f.db.GetOpenIncident(ctx, cart.ID, store.IncidentDown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.deliveries(cartOutage.ID)); n != 1 {
+		t.Errorf("cart's delivery log has %d entries, want the first attempt alone", n)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=failed}": 3,
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=sent}":   0,
+	})
+
+	// Once the webhook answers, both go.
+	f.clock = f.clock.Add(2 * time.Minute)
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:down" {
+		t.Errorf("three minutes on: %q, want both taken", got)
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries after the webhook took both, want none", n)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=sent}":     2,
+		"kubeat_notifications_total{channel_type=webhook}{event=down}{result=sent}": 2,
 	})
 }
 
