@@ -14,7 +14,7 @@ sorunlar giderilip ikinci tur) ya da **durdur**.
 
 Kurulum adımları 0.42.0 chart'ıyla sıfırdan bir minikube'da baştan sona
 denendi (2026-10-27); OpenShift'e özgü maddeler (Route, SCC, LDAP, OIDC,
-yedekleme) Developer Sandbox'ta doğrulandı. Aynı gün pilot değerleri 0.42.2
+yedekleme) Developer Sandbox'ta doğrulandı. Aynı gün pilot değerleri 0.43.0
 ile Developer Sandbox'a da kuruldu: pilot lisansı, HSTS'li Route, LDAP ve
 OIDC girişi, namespace sınırlı keşif, yedek ve bir pilot durum sayfası orada
 çalışıyor. Daha ayrıntılı teknik kontrol listesi:
@@ -77,10 +77,10 @@ mimariyi birden taşır:
 
 ```sh
 R=registry.sirket.local/kubeat
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.42.2  docker://$R/kubeat-backend:0.42.2
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.42.2 docker://$R/kubeat-frontend:0.42.2
-helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.42.2        # kubeat-0.42.2.tgz
-helm push kubeat-0.42.2.tgz oci://registry.sirket.local/charts
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.43.0  docker://$R/kubeat-backend:0.43.0
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.43.0 docker://$R/kubeat-frontend:0.43.0
+helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.43.0        # kubeat-0.43.0.tgz
+helm push kubeat-0.43.0.tgz oci://registry.sirket.local/charts
 ```
 
 Values'ta `backend.image.repository`, `frontend.image.repository` ve
@@ -167,7 +167,7 @@ aralıklar olmalıdır, yoksa kontroller de vekile gider.
 ### 3. Kurulum
 
 ```sh
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.42.2 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.43.0 \
   -n kubeat -f values-pilot.yaml
 oc -n kubeat rollout status deploy/kubeat-backend
 oc -n kubeat rollout status deploy/kubeat-frontend
