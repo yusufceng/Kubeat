@@ -5,6 +5,10 @@ metadata:
   name: {{ .Release.Name }}-data
   labels:
     {{- include "kubeat.labels" . | nindent 4 }}
+  {{- if include "kubeat.keepData" . }}
+  annotations:
+    {{- include "kubeat.keepAnnotations" . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes: ["ReadWriteOnce"]
   {{- with .Values.backend.persistence.storageClass }}
@@ -21,6 +25,10 @@ metadata:
   name: {{ .Release.Name }}-backup
   labels:
     {{- include "kubeat.labels" . | nindent 4 }}
+  {{- if include "kubeat.keepBackup" . }}
+  annotations:
+    {{- include "kubeat.keepAnnotations" . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes: ["ReadWriteOnce"]
   {{- with .Values.backup.persistence.storageClass }}

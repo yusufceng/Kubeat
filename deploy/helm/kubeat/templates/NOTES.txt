@@ -91,6 +91,22 @@ The NetworkPolicy lets only these connect to the backend:
 Jobs in other namespaces send push reports through the frontend:
   http://{{ .Release.Name }}-frontend.{{ .Release.Namespace }}.svc:3000/api/push/<token>
 {{- end }}
+{{- $kept := list }}
+{{- if include "kubeat.keepData" . }}{{ $kept = append $kept (printf "%s-data" .Release.Name) }}{{ end }}
+{{- if include "kubeat.keepBackup" . }}{{ $kept = append $kept (printf "%s-backup" .Release.Name) }}{{ end }}
+{{- with $kept }}
+
+helm uninstall leaves the data in place, and installing again with the same
+release name and namespace picks it up. These PersistentVolumeClaims stay:
+{{- if include "kubeat.keepData" $ }}
+  - {{ $.Release.Name }}-data, the database (backend.persistence.keepOnUninstall)
+{{- end }}
+{{- if include "kubeat.keepBackup" $ }}
+  - {{ $.Release.Name }}-backup, the backups (backup.persistence.keepOnUninstall)
+{{- end }}
+To delete them once the release is uninstalled:
+  kubectl -n {{ $.Release.Namespace }} delete pvc {{ join " " . }}
+{{- end }}
 {{- if and (contains ":9091" .Values.prometheus.url) .Values.discovery.enabled (not .Values.discovery.namespaces) (not .Values.prometheus.openshiftMonitoringView) }}
 
 WARNING: prometheus.url is on port 9091, where OpenShift's Thanos Querier
