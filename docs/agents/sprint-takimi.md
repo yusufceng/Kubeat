@@ -39,7 +39,11 @@ sonunda bakar ve yön verir.
 6. **İnceleme**: SRE ya da BA diff'i kabul ölçütlerine göre doğrular;
    release manager CI'yı bekler, squash-merge eder, issue kapanır.
 7. **Sprint sonu**: müşteriler teslimatı puanlar, PMO retro yazar; bunlar
-   sonraki sprintin girdisidir.
+   sonraki sprintin girdisidir. Sprint takvimle değil teslimatla kapanır:
+   issue'lar merge edilir, sürüm çıkar, müşteriler puanlar. Ajan sınırı
+   içinde doğrulanamayan maddeler (gerçek cluster, sandbox, gerçek
+   Prometheus) sprint dosyasında "Kullanıcıda kalanlar" listesine yazılır;
+   sonraki sprintin keşfi bu listenin sonucuyla başlar.
 
 ## Ürün ilkeleri: karar ölçütleri
 
@@ -109,9 +113,13 @@ Etiketler: `ready-for-agent` ve `bug` / `enhancement` / `documentation`.
 - README, docs ve iki dil güncel; yeni ayar varsa README tablosu,
   `.env.example` ve chart values de.
 - Ertelenen parçalar backlog'da, yol haritası satırı güncel.
+- Davranış değiştiren madde, developer raporunda sprint dosyasının
+  "Yükseltme notu" başlığına bir cümle verir; sürüm PR'ı README'deki
+  "### <sürüm>'e yükseltme" bölümünü taşır.
 - CI yeşil, squash-merge edildi, issue kapandı.
 
 ## Sprint dosyası
 
 `docs/sprints/<yyyy-mm-dd>-sprint-<n>.md`: hedef, maddeler (issue, durum,
-dal), yapılmayacaklar ve gerekçeleri, riskler, sprint sonu puanları, retro.
+dal), yapılmayacaklar ve gerekçeleri, riskler, yükseltme notu, kullanıcıda
+kalanlar, sprint sonu puanları, retro.

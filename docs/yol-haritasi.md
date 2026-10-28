@@ -36,10 +36,10 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 25 | İki dil: arayüz (tarayıcıya göre, değiştirilebilir) ve bildirimler İngilizce/Türkçe | Tamamlandı |
 | 26 | Namespace'le sınırlı keşif: cluster-admin olmadan kurulum (Role), Thanos'un namespace ucu | Tamamlandı |
 | 27 | Open-core: Kubeat Enterprise lisansı, çevrimdışı imzalı lisans dosyası ([ADR-0002](adr/0002-open-core-lisans.md)) | Tamamlandı |
-| 28 | Pilot: gerçek bir cluster'da üç hafta kullanım ([pilot.md](pilot.md)) | Developer Sandbox'ta (2026-10-27'den itibaren, 0.42.2, pilot değerleri; karar 2026-11-27); şirket cluster'ı ve ekip olmadığından geri bildirim sprint ekibinin müşteri ve SRE ajanlarından |
-| 29 | Sprint ekibi: müşteri, SRE, BA, PO, PMO ve developer ajanlarıyla düzenli sprintler ([agents/sprint-takimi.md](agents/sprint-takimi.md), [sprints/](sprints/)) | Sprint 1 (2026-10-27–28) tamamlandı, 0.43.0: bildirim teslimatı (S18, S17), yedek dayanıklılığı (S19), öz-sağlık alarmları (S9); puanlar 4,0/5 ve retro [sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md); sprint 2 PO turunu bekliyor |
-| 30 | Tedarik zinciri: cosign ile imzalı imaj ve chart, SBOM/provenance, SECURITY.md | Planlandı (sprint 2 adayı, S1); yayım hattı değişikliği bir sonraki sürüm etiketinde doğrulanır |
-| 31 | Hızlı başlangıç ve kurulum belgeleri: güncel kurulum komutu, OpenShift dışı fsGroup notu, yükseltme notları docs/yukseltme.md, lisansın nasıl istendiği | Planlandı (sprint 2 adayı, S10, S11, S12, S15) |
+| 28 | Pilot: gerçek bir cluster'da üç hafta kullanım ([pilot.md](pilot.md)) | Developer Sandbox'ta (2026-10-27'den itibaren; 2026-10-28'den beri 0.43.0, sprint 2 sonunda 0.44.0; pilot değerleri; karar 2026-11-27); şirket cluster'ı ve ekip olmadığından geri bildirim sprint ekibinin müşteri ve SRE ajanlarından |
+| 29 | Sprint ekibi: müşteri, SRE, BA, PO, PMO ve developer ajanlarıyla düzenli sprintler ([agents/sprint-takimi.md](agents/sprint-takimi.md), [sprints/](sprints/)) | Sprint 1 (2026-10-27–28) tamamlandı, 0.43.0: bildirim teslimatı (S18, S17), yedek dayanıklılığı (S19), öz-sağlık alarmları (S9); puanlar 4,0/5 ve retro [sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md); sprint 2 (2026-10-28) planlandı: Kubeat'in kendi arızası sessiz kalmaz ve kayıp yaratmaz (S29 öz-sağlık kuralları + promtool, S25 kesinti bildirimi kaybı ve ölü makine kanalı, S31 kaldırmada PVC koruması, S32 sonuç yazılamazken heartbeat); hedef 0.44.0, [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md) |
+| 30 | Tedarik zinciri: cosign ile imzalı imaj ve chart, SBOM/provenance, SECURITY.md | Planlandı (sprint 3 adayı, S1; sprint 2'de kritik/yüksek SRE riskleri önce alındı); release.yml değişikliği S11'in denetiminden sonra gelir, sprint 3'ün sürüm etiketinde doğrulanır; destek penceresi taahhüdü yok ([backlog](backlog.md)) |
+| 31 | Hızlı başlangıç ve kurulum belgeleri: güncel kurulum komutu, OpenShift dışı fsGroup notu, yükseltme notları docs/yukseltme.md, lisansın nasıl istendiği, operator'süz cluster için öz-sağlık kuralları (S30) | Planlandı (sprint 3: S10+S11 ilk madde, S12+S15+S30 doküman paketi) |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
@@ -166,6 +166,11 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.
+- Aynı PagerDuty servisine bağlanan birden çok kurulumda olay numaraları
+  çakışır: `dedup_key` kurulum kimliği taşımaz (`kubeat-incident-<n>`), bir
+  cluster'ın kesintisi diğerinin açık alarmına eklenir ve ilk düzelme
+  ikisini de kapatır. Her kuruluma ayrı bir PagerDuty servisi verin (S28,
+  sprint 3 adayı; [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)).
 - Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır; minikube'da
   ve gerçek RHCOS'ta ek ayar gerektirmeden çalıştı. Bir Service adına ping
   atılamaz: ClusterIP sanal bir adrestir ve ICMP'ye yanıt vermez; pod IP'si
