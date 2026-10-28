@@ -57,7 +57,7 @@ pilotun ilk işi budur:
 | Ne | Kimden | Not |
 | --- | --- | --- |
 | `ghcr.io`'ya erişim ya da iç registry | Platform ekibi | Erişim yoksa imajlar ve chart aynalanır (aşağıda) |
-| Cluster'da RWO StorageClass | Platform ekibi | Veri 2 Gi, yedek 5 Gi |
+| Cluster'da RWO StorageClass | Platform ekibi | Veri 2 Gi, yedek 5 Gi; yedek en az (keep + 1) × veritabanı boyutu, varsayılan 7 kopya ile ~640 MiB'a kadar veritabanı için yeter (README "Yedekleme ve geri yükleme") |
 | Route host | Platform / DNS | `kubeat.apps.<cluster-domain>`; router'ın verdiği host da olur |
 | AD/LDAP bilgileri | Kimlik ekibi | Sunucu (`ldaps://`), base DN, arama hesabı ve parolası, CA sertifikası; yönetici grubunun ve ekip grubunun DN'leri |
 | Bildirim adresi | Ekip | Slack, Teams, Mattermost ya da Google Chat webhook URL'i; ya da SMTP |

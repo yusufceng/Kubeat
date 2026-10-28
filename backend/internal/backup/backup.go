@@ -6,12 +6,14 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
@@ -26,6 +28,8 @@ const (
 
 // Store is the part of the persistence layer backups need.
 type Store interface {
+	// Backup copies the database to dest. A copy that ran out of space
+	// reports an error that wraps syscall.ENOSPC.
 	Backup(ctx context.Context, dest string) error
 }
 
@@ -88,7 +92,15 @@ func Run(ctx context.Context, st Store, opts Options) {
 	}
 }
 
-// Take writes one backup named after now, verifies it and prunes old ones.
+// Take writes one backup named after now, verifies it and leaves the newest
+// opts.Keep copies in the directory. Room is made before the write, not
+// after it: the copies beyond keep-1 go first, so the new one fits where
+// the oldest stood and a full volume does not stop the backups for good.
+// Should the write still run out of space, the oldest copy is removed and
+// the write tried once more. With keep=1 the only copy is not given up in
+// advance: the write is tried first, and only a full volume costs the copy
+// before the retry, which leaves a moment without a backup. Both are
+// warned about in the log, as the volume is too small for the database.
 // It returns the backup's path.
 func Take(ctx context.Context, st Store, opts Options, now time.Time) (string, error) {
 	final := filepath.Join(opts.Dir, prefix+now.UTC().Format(stamp)+suffix)
@@ -97,10 +109,20 @@ func Take(ctx context.Context, st Store, opts Options, now time.Time) (string, e
 	partial := final + ".partial"
 	_ = os.Remove(partial)
 
-	if err := st.Backup(ctx, partial); err != nil {
-		_ = os.Remove(partial)
+	if opts.Keep >= 2 {
+		if err := prune(opts.Dir, opts.Keep-1); err != nil {
+			opts.Logger.Warn("removing old backups failed", "error", err)
+		}
+	}
+
+	err := write(ctx, st, partial)
+	if errors.Is(err, syscall.ENOSPC) && makeRoom(opts.Dir, opts.Logger) {
+		err = write(ctx, st, partial)
+	}
+	if err != nil {
 		return "", err
 	}
+
 	if opts.Verify != nil {
 		if err := opts.Verify(ctx, partial); err != nil {
 			_ = os.Remove(partial)
@@ -115,6 +137,39 @@ func Take(ctx context.Context, st Store, opts Options, now time.Time) (string, e
 		opts.Logger.Warn("removing old backups failed", "error", err)
 	}
 	return final, nil
+}
+
+// write has the store copy the database to partial. A failed copy leaves no
+// file behind, so that what it wrote does not take up the room a retry
+// needs.
+func write(ctx context.Context, st Store, partial string) error {
+	err := st.Backup(ctx, partial)
+	if err != nil {
+		_ = os.Remove(partial)
+	}
+	return err
+}
+
+// makeRoom deletes the oldest backup in dir so that a copy that ran out of
+// space can be tried once more. It reports whether a copy was removed; the
+// warning names it and says when it was the only one, as there is no
+// backup then until a write succeeds.
+func makeRoom(dir string, logger *slog.Logger) bool {
+	names, err := list(dir)
+	if err != nil || len(names) == 0 {
+		return false
+	}
+	oldest := names[0]
+	if err := os.Remove(filepath.Join(dir, oldest)); err != nil {
+		logger.Warn("backup volume full and the oldest copy could not be removed", "error", err)
+		return false
+	}
+	if len(names) == 1 {
+		logger.Warn("backup volume full; removed the only copy and retried, there is no backup until a write succeeds", "removed", oldest)
+	} else {
+		logger.Warn("backup volume full; removed the oldest copy and retried", "removed", oldest, "left", len(names)-1)
+	}
+	return true
 }
 
 // list returns the backup file names in dir, oldest first.

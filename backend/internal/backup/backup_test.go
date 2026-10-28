@@ -1,14 +1,18 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -18,20 +22,46 @@ import (
 
 var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
 
-// fakeStore writes a small file as its "backup".
+// errFull is a copy that ran out of space, wrapped the way the store wraps
+// the driver's "database or disk is full".
+var errFull = fmt.Errorf("backup: %w: database or disk is full", syscall.ENOSPC)
+
+// fakeStore writes a small file as its "backup". With room set, the volume
+// is pretended to hold that many copies: a write that finds room copies
+// there already runs out of space. A failed write leaves a partial file
+// behind, as an interrupted copy would.
 type fakeStore struct {
 	calls atomic.Int32
-	err   error
+	err   error // every write fails with it
+	room  int   // copies the volume holds; 0 means no limit
+
+	mu   sync.Mutex
+	seen []int // copies in the directory at each write
 }
 
 func (f *fakeStore) Backup(_ context.Context, dest string) error {
 	f.calls.Add(1)
-	if f.err != nil {
-		// Leave a partial file behind, as an interrupted copy would.
+	copies, _ := list(filepath.Dir(dest))
+	f.mu.Lock()
+	f.seen = append(f.seen, len(copies))
+	f.mu.Unlock()
+
+	err := f.err
+	if err == nil && f.room > 0 && len(copies) >= f.room {
+		err = errFull
+	}
+	if err != nil {
 		os.WriteFile(dest, []byte("half"), 0o600)
-		return f.err
+		return err
 	}
 	return os.WriteFile(dest, []byte("database copy"), 0o600)
+}
+
+// copiesSeen is how many copies were in the directory at each write.
+func (f *fakeStore) copiesSeen() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return fmt.Sprint(f.seen)
 }
 
 func names(t *testing.T, dir string) []string {
@@ -71,19 +101,157 @@ func TestTakeNamesVerifiesAndPrunes(t *testing.T) {
 		t.Errorf("directory = %s\nwant        %s", got, want)
 	}
 
-	// A backup that does not verify is discarded and reported.
+	// A backup that does not verify is discarded and reported. Room was
+	// made for it first, so the directory is down to keep-1 copies; the
+	// attempt leaves no partial file.
 	opts.Verify = func(context.Context, string) error { return errors.New("not a database") }
 	if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, 9)); err == nil {
 		t.Error("an unverifiable backup was kept")
 	}
-	// So is one the store failed to write; neither leaves a partial file.
+	want = "kubeat-20261015T030000Z.db kubeat-manual-copy.db notes.txt"
+	if after := strings.Join(names(t, dir), " "); after != want {
+		t.Errorf("after a failed verification: %s\nwant %s", after, want)
+	}
+	// So is one the store failed to write; the directory holds no more
+	// copies than before.
 	opts.Verify = nil
-	st.err = errors.New("disk full")
+	st.err = errors.New("disk read error")
 	if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, 10)); err == nil {
 		t.Error("a failed backup reported success")
 	}
 	if after := strings.Join(names(t, dir), " "); after != want {
-		t.Errorf("failed backups changed the directory: %s", after)
+		t.Errorf("a failed write changed the directory: %s\nwant %s", after, want)
+	}
+}
+
+// The oldest copies go before the new one is written, so a volume sized
+// for keep copies never fills up: with keep=3 the store finds two copies
+// when it writes the fourth.
+func TestTakeMakesRoomBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	st := &fakeStore{}
+	opts := Options{Dir: dir, Keep: 3, Logger: discard}
+	base := time.Date(2026, 10, 12, 3, 0, 0, 0, time.UTC)
+	for day := 0; day < 4; day++ {
+		if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, day)); err != nil {
+			t.Fatalf("take %d: %v", day, err)
+		}
+	}
+	if saw := st.copiesSeen(); saw != "[0 1 2 2]" {
+		t.Errorf("copies present at each write = %s, want [0 1 2 2]", saw)
+	}
+	got := strings.Join(names(t, dir), " ")
+	want := "kubeat-20261013T030000Z.db kubeat-20261014T030000Z.db kubeat-20261015T030000Z.db"
+	if got != want {
+		t.Errorf("directory = %s\nwant        %s", got, want)
+	}
+
+	// A failed write leaves no more copies than there were, and no partial.
+	st.err = errors.New("disk read error")
+	if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, 4)); err == nil {
+		t.Error("a failed backup reported success")
+	}
+	want = "kubeat-20261014T030000Z.db kubeat-20261015T030000Z.db"
+	if got := strings.Join(names(t, dir), " "); got != want {
+		t.Errorf("after a failed write: %s\nwant %s", got, want)
+	}
+}
+
+// When the write still runs out of space, the oldest copy goes and the
+// write is tried once more; the log says so. The retry is one: a store that
+// keeps running out of space costs one copy per attempt, not all of them.
+func TestTakeRetriesOnceWhenTheVolumeIsFull(t *testing.T) {
+	dir := t.TempDir()
+	var log bytes.Buffer
+	st := &fakeStore{room: 2}
+	opts := Options{Dir: dir, Keep: 3, Logger: slog.New(slog.NewTextHandler(&log, nil))}
+	base := time.Date(2026, 10, 12, 3, 0, 0, 0, time.UTC)
+	for day := 0; day < 2; day++ {
+		if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, day)); err != nil {
+			t.Fatalf("take %d: %v", day, err)
+		}
+	}
+	if log.Len() != 0 {
+		t.Errorf("writes that fit were logged: %s", log.String())
+	}
+
+	// The third copy does not fit beside the two the volume holds.
+	if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, 2)); err != nil {
+		t.Fatalf("take on a full volume: %v", err)
+	}
+	if saw := st.copiesSeen(); saw != "[0 1 2 1]" {
+		t.Errorf("copies present at each write = %s, want [0 1 2 1]", saw)
+	}
+	want := "kubeat-20261013T030000Z.db kubeat-20261014T030000Z.db"
+	if got := strings.Join(names(t, dir), " "); got != want {
+		t.Errorf("directory = %s\nwant        %s", got, want)
+	}
+	if !strings.Contains(log.String(), "level=WARN") ||
+		!strings.Contains(log.String(), "backup volume full; removed the oldest copy and retried") ||
+		!strings.Contains(log.String(), "removed=kubeat-20261012T030000Z.db") {
+		t.Errorf("the log does not say why a copy went: %s", log.String())
+	}
+
+	// From now on nothing fits: each attempt costs one copy and fails, the
+	// last one without a copy left to remove and so without a retry. No
+	// partial file stays behind.
+	st.err = errFull
+	log.Reset()
+	for day := 3; day < 6; day++ {
+		if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, day)); !errors.Is(err, syscall.ENOSPC) {
+			t.Errorf("take %d: error = %v, want ENOSPC", day, err)
+		}
+	}
+	if saw := st.copiesSeen(); saw != "[0 1 2 1 2 1 1 0 0]" {
+		t.Errorf("copies present at each write = %s, want [0 1 2 1 2 1 1 0 0]", saw)
+	}
+	if got := names(t, dir); len(got) != 0 {
+		t.Errorf("directory = %v, want empty", got)
+	}
+	if !strings.Contains(log.String(), "removed the only copy") {
+		t.Errorf("the log does not say that no backup is left: %s", log.String())
+	}
+}
+
+// With keep=1 the only copy is not given up before the new one is written:
+// it goes only when the write ran out of space, and the warning says that
+// there is no backup until the retry succeeds.
+func TestTakeWithKeepOneRemovesTheCopyOnlyWhenFull(t *testing.T) {
+	dir := t.TempDir()
+	var log bytes.Buffer
+	st := &fakeStore{room: 2}
+	opts := Options{Dir: dir, Keep: 1, Logger: slog.New(slog.NewTextHandler(&log, nil))}
+	base := time.Date(2026, 10, 12, 3, 0, 0, 0, time.UTC)
+	for day := 0; day < 2; day++ {
+		if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, day)); err != nil {
+			t.Fatalf("take %d: %v", day, err)
+		}
+	}
+	// Room for two: the second copy was written beside the first, which
+	// went only afterwards.
+	if saw := st.copiesSeen(); saw != "[0 1]" {
+		t.Errorf("copies present at each write = %s, want [0 1]", saw)
+	}
+	if got := strings.Join(names(t, dir), " "); got != "kubeat-20261013T030000Z.db" {
+		t.Errorf("directory = %s", got)
+	}
+	if log.Len() != 0 {
+		t.Errorf("writes that fit were logged: %s", log.String())
+	}
+
+	// Room for one: the write is still tried first, then the copy goes.
+	st.room = 1
+	if _, err := Take(context.Background(), st, opts, base.AddDate(0, 0, 2)); err != nil {
+		t.Fatalf("take on a full volume: %v", err)
+	}
+	if saw := st.copiesSeen(); saw != "[0 1 1 0]" {
+		t.Errorf("copies present at each write = %s, want [0 1 1 0]", saw)
+	}
+	if got := strings.Join(names(t, dir), " "); got != "kubeat-20261014T030000Z.db" {
+		t.Errorf("directory = %s", got)
+	}
+	if !strings.Contains(log.String(), "level=WARN") || !strings.Contains(log.String(), "removed the only copy") {
+		t.Errorf("the moment without a backup was not warned about: %s", log.String())
 	}
 }
 
@@ -141,7 +309,7 @@ func TestRunWaitsForTheIntervalSinceTheNewestBackup(t *testing.T) {
 	}
 
 	// A failing store is retried without spinning, and counted.
-	failing := &fakeStore{err: errors.New("disk full")}
+	failing := &fakeStore{err: errors.New("disk read error")}
 	os.RemoveAll(dir)
 	stop = run(failing, 20*time.Millisecond)
 	// Wait for the count itself: an attempt is counted when it ends, and
