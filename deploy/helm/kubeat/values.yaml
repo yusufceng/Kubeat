@@ -196,13 +196,23 @@ oidc:
     # UPTIME_OIDC_DEFAULT_NAMESPACES: "*"
 
 # Periodic copies of the database on a volume of their own. A copy on the
-# database's own volume would be lost together with it.
+# database's own volume would be lost together with it. Size the volume for
+# one copy more than keep: size >= (keep + 1) x the database's size. Before
+# a new copy is written the oldest ones are removed down to keep-1, so at
+# most keep copies ever share the volume; the extra copy's worth of room is
+# for growth, as each new copy is larger than the one it replaces. A volume
+# that fills up anyway does not stop the backups: the oldest copy is removed
+# and the write retried once, with a warning in the backend's log. The last
+# copy is never given up with keep >= 2: when even that does not make room,
+# the backups stop with an error per attempt (kubeat_backups_total with
+# result="failed") until the volume is grown; with keep 1 the only copy
+# goes, which leaves a moment without a backup.
 backup:
   enabled: false
   interval: 24h
-  keep: 7
+  keep: 7                # copies kept; see the size rule above
   persistence:
-    size: 5Gi
+    size: 5Gi            # >= (keep + 1) x database size: 7 copies of up to ~640 MiB
     storageClass: ""     # empty uses the cluster default
     existingClaim: ""    # use this PVC instead of creating one
 

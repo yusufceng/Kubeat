@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"modernc.org/sqlite"
@@ -67,7 +68,9 @@ func OpenSQLite(ctx context.Context, path string, busyTimeout time.Duration) (*S
 
 // Backup writes a consistent, compacted copy of the database to dest, which
 // must not exist. It runs while the database is in use: the copy reflects
-// the moment it started, and writers are not held up.
+// the moment it started, and writers are not held up. A copy that ran out
+// of space reports an error that wraps syscall.ENOSPC, so that the caller
+// can make room and try again.
 func (s *SQLite) Backup(ctx context.Context, dest string) error {
 	// A connection of its own, so the single write connection stays free for
 	// check results while a large database is being copied.
@@ -81,9 +84,21 @@ func (s *SQLite) Backup(ctx context.Context, dest string) error {
 	// VACUUM INTO takes no bound parameters; the path is quoted as a literal.
 	quoted := "'" + strings.ReplaceAll(dest, "'", "''") + "'"
 	if _, err := db.ExecContext(ctx, "VACUUM INTO "+quoted); err != nil {
-		return fmt.Errorf("backup: %w", err)
+		return backupError(err)
 	}
 	return nil
+}
+
+// backupError wraps a failed copy for the backup package. SQLite reports a
+// write that the file system refused with ENOSPC as "database or disk is
+// full" (SQLITE_FULL); that error wraps syscall.ENOSPC, so that the caller
+// can make room and try again.
+func backupError(err error) error {
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_FULL {
+		return fmt.Errorf("backup: %w: %w", syscall.ENOSPC, err)
+	}
+	return fmt.Errorf("backup: %w", err)
 }
 
 // Vacuum rewrites the database file without its free space, where deleted

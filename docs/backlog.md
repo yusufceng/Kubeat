@@ -306,3 +306,20 @@ denetler. Sprint 3 dolgusu (S); tetikleyici: chart dışı kurulum isteyen ilk
 kullanıcı ya da sprint 1-2'de bir sapma görülürse. Karar: betik Makefile'da
 (`make lint`), CI onu çağırır; chart values ile karşılaştırma yok (chart her
 ayarı `extraEnv` ile alır).
+
+## Yedek sıkıştırma ve dolan yedek PVC'sini büyütme
+
+2026-10-28'de ertelendi (S19'un kapsam dışı parçaları, #28). S19 ile yedek
+volume'u dolunca yedekleme durmuyor: eski kopyalar yeni kopyadan önce
+siliniyor, yine de yer yoksa bir kopya daha silinip yazım bir kez
+yineleniyor. `keep ≥ 2`'de son kopya korunur: o da yetmezse yedekleme durur,
+her deneme hata loglar ve dolu kalan volume bir aralık sonra yeniden denenir
+(`keep=1`'de tek kopya da gidebilir). Boyut kuralı (keep + 1) × veritabanı
+boyutu README "Yedekleme ve geri yükleme"de. Daha az yer için kopyaların
+sıkıştırılması (geri yüklemede açma adımı gerekir) ve dolan PVC'nin
+büyütülmesi (StorageClass `allowVolumeExpansion` isterse
+`backup.persistence.size` artırılır; chart'ta ek iş yok, belge yok)
+yapılmadı: sandbox'taki veritabanı küçük, `docs/yuk-testi.md`'deki 600 MB
+veritabanı bile varsayılan 5 Gi'ye sığıyor. Tetikleyici: boyut kuralını
+aşan bir pilot veritabanı ya da loglarda tekrarlanan `backup volume full`
+uyarısı.

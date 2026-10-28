@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -849,6 +850,32 @@ func TestBackup(t *testing.T) {
 	os.WriteFile(junk, []byte("this is not a database, just some text that is long enough"), 0o600)
 	if _, err := SchemaVersion(ctx, junk); err == nil {
 		t.Error("SchemaVersion of a non-database file succeeded")
+	}
+}
+
+// A copy that ran out of space reports an error that wraps syscall.ENOSPC,
+// which the backup package looks for before it makes room and tries again.
+// SQLite reports a write refused for lack of space as "database or disk is
+// full"; a page limit raises the same result code without filling a disk.
+func TestBackupErrorNamesAFullVolume(t *testing.T) {
+	ctx := context.Background()
+	db := openBare(t)
+	// The limit is per connection, so the write must use the same one.
+	db.SetMaxOpenConns(1)
+	if _, err := db.ExecContext(ctx, "PRAGMA max_page_count = 1"); err != nil {
+		t.Fatal(err)
+	}
+	_, full := db.ExecContext(ctx, "CREATE TABLE t (id INTEGER)")
+	if full == nil {
+		t.Fatal("a database limited to one page grew")
+	}
+	if err := backupError(full); !errors.Is(err, syscall.ENOSPC) {
+		t.Errorf("backupError(%v) = %v, want it to wrap ENOSPC", full, err)
+	}
+	// Any other failure is passed on as it is, without the errno.
+	other := backupError(errors.New("file exists"))
+	if errors.Is(other, syscall.ENOSPC) || other.Error() != "backup: file exists" {
+		t.Errorf("backupError(file exists) = %v", other)
 	}
 }
 

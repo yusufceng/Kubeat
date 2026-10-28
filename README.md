@@ -2124,6 +2124,37 @@ açılıp şema sürümü doğrulandıktan sonra saklanır. Dosyalar
 Yeniden başlatma ek kopya üretmez: yeni kopya, en son kopyanın üzerinden
 aralık kadar zaman geçince alınır.
 
+Eski kopyalar yeni kopya yazıldıktan sonra değil, **önce** silinir: her
+kopyadan önce dizin `UPTIME_BACKUP_KEEP - 1` kopyaya indirilir, böylece
+yeni kopya en eskisinin yerine sığar ve volume dolunca yedekleme kalıcı
+olarak durmaz. Yazım buna rağmen yer kalmadığı için (`ENOSPC`) başarısız
+olursa en eski kopya silinip yazım bir kez daha denenir; log nedenini
+söyler (`backup volume full; removed the oldest copy and retried`, WARN).
+`UPTIME_BACKUP_KEEP=1` ile tek kopya önceden silinmez: önce yazmayı dener,
+yalnızca volume doluysa tek kopyayı silip yeniden dener; yazım başarılı
+olana kadar kısa bir süre yedeksiz kalınır ve bu WARN ile loglanır.
+Başarısız bir deneme dizini `keep - 1` kopyada bırakabilir.
+
+Yedek volume'u en az **(keep + 1) × veritabanı boyutu** olmalıdır: dizinde
+en çok `keep` kopya bulunur ve veritabanı büyüdükçe her yeni kopya bir
+öncekinden büyüktür; fazladan bir kopyalık yer bu payı verir. Chart'ın
+varsayılanları (`backup.keep=7`, `backup.persistence.size=5Gi`) yaklaşık
+640 MiB'a kadar bir veritabanı için yeter (5 Gi / 8); kopya veritabanının
+boşluğu alınmış hâlidir, ondan biraz küçüktür.
+
+Bir kopya silmek de yer açmıyorsa (veritabanı volume'dan büyük; paylaşılan
+bir PVC'yi ya da thin-provisioned havuzu başka bir kiracı doldurmuş) son
+kopya korunur: `keep ≥ 2` iken her deneme en fazla bir eski kopya siler,
+son kopyaya dokunmaz (`backup volume full; keeping the only copy, no
+retry`, WARN); yedekleme durur, her deneme ERROR loglar ve
+`kubeat_backups_total{result="failed"}` sayacını artırır. `keep=1`'de tek
+kopya da gidebilir. Dolu kalan volume bir dakika sonra değil, bir aralık
+(`UPTIME_BACKUP_INTERVAL`) sonra yeniden denenir: volume bir dakikada
+boşalmaz ve her deneme bir kopyaya mal olabilir; yeniden başlatma hemen
+dener. Çözüm volume'u büyütmektir. Yarım kalan bir kopyanın `.partial`
+dosyası (örneğin kopya sırasında pod yeniden başladıysa) bir sonraki
+denemede silinir, yer tutmaz.
+
 Yedek dizini veritabanından **ayrı bir volume** olmalıdır; aynı volume'daki
 kopya veritabanıyla birlikte kaybolur. Chart'ta `backup.enabled=true` bunun
 için ayrı bir PVC oluşturur. Bu yine aynı cluster'dadır: cluster'ın
@@ -2857,7 +2888,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_PROMETHEUS_MEMORY_QUERY` | – | Varsayılan bellek sorgusunun yerine kullanılır |
 | `UPTIME_BACKUP_DIR` | – | Veritabanı kopyalarının yazılacağı dizin; boşsa yedekleme kapalıdır |
 | `UPTIME_BACKUP_INTERVAL` | `24h` | Kopyalar arasındaki süre |
-| `UPTIME_BACKUP_KEEP` | `7` | Saklanan kopya sayısı |
+| `UPTIME_BACKUP_KEEP` | `7` | Saklanan kopya sayısı; yedek volume'u en az (keep + 1) × veritabanı boyutu olmalıdır |
 | `UPTIME_LICENSE_FILE` | – | Kubeat Enterprise lisans dosyasının yolu, örneğin bağlanmış bir Secret; boşsa topluluk sürümü (bkz. "Kubeat Enterprise lisansı") |
 | `UPTIME_LICENSE_RELOAD_INTERVAL` | `1m` | Lisans dosyasının değişip değişmediğine bakma aralığı; yenilenen lisans yeniden başlatmadan etkinleşir |
 | `UPTIME_HEARTBEAT_URL` | – | Dead man's switch adresi; boşsa heartbeat gönderilmez |
