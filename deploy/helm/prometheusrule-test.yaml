@@ -7,7 +7,8 @@
 # The series are what the ServiceMonitor scrapes. A failed scrape is a
 # "stale" sample: Prometheus marks every series of the target stale then, as
 # it does for a target that goes away. The pod a Recreate brings is scraped
-# under a new pod and instance label.
+# under a new pod and instance label; a backend container restarted in its
+# pod keeps them.
 rule_files:
   - rules.yaml
 
@@ -332,3 +333,35 @@ tests:
       - eval_time: 14m
         alertname: KubeatBackupFailing
         exp_alerts: []
+
+  - name: KubeatBackupFailing stays open while a backend restarted in its pod makes its first attempt
+    interval: 1m
+    input_series:
+      # The backend container restarts in its pod (OOMKill, a failed
+      # liveness probe), so the series keep their labels. Before: the newest
+      # copy is from 30s, the attempt at 2m failed. The scrape at 10m fails.
+      # After: the new process reports the copy on disk at once, but no
+      # failure until its first attempt, begun at 10m50s, ends; the scrape
+      # at 13m reads that failure.
+      - series: 'kubeat_backup_last_success_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '30x9 stale 30x5'
+      - series: 'kubeat_backup_last_failure_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 120x7 stale 0 0 650x2'
+    alert_rule_test:
+      # The restarted backend reports 0 as its last failure: the largest
+      # value of the past 10 minutes is still the failure from 2m.
+      - eval_time: 11m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 12m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 13m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations

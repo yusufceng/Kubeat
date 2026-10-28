@@ -164,7 +164,7 @@ done
 # state over a scrape gap. promtool below shows how they behave.
 rules "KubeatDown without a backend target" has 'absent(up{job="kubeat-backend", namespace="default"})'
 rules "KubeatMonitorDown over a scrape gap" has 'last_over_time(kubeat_monitor_incident_open[10m])'
-rules "KubeatBackupFailing until a backup succeeds" has 'last_over_time(kubeat_backup_last_failure_timestamp_seconds[10m])'
+rules "KubeatBackupFailing until a backup succeeds" has 'max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m])'
 
 # The rules as Prometheus reads them: promtool checks the rule groups and
 # runs the scenarios of prometheusrule-test.yaml (no backend target, a failed

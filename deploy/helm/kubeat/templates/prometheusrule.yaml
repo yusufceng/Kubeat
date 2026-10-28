@@ -122,13 +122,15 @@ spec:
         # The newest attempt failed: the last failure is newer than the last
         # good copy. Unlike a count of failures over a window, it stays until
         # a backup succeeds: over the whole interval a full volume waits, and
-        # with no copy at all. Both times are read over 10 minutes and across
-        # pods, so that a restart, after which the backend has no failure of
-        # its own yet, does not resolve it before its first attempt.
+        # with no copy at all. Both are times, which only grow within a
+        # process, so each is read as its largest value of the past 10
+        # minutes across pods: a restarted backend, in the same pod or in a
+        # new one, reports no failure until its first attempt ends, and its
+        # last value would resolve the alert meanwhile.
         - alert: KubeatBackupFailing
           expr: |-
-            max without ({{ $scrape }}) (last_over_time(kubeat_backup_last_failure_timestamp_seconds[10m]))
-            > max without ({{ $scrape }}) (last_over_time(kubeat_backup_last_success_timestamp_seconds[10m]))
+            max without ({{ $scrape }}) (max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m]))
+            > max without ({{ $scrape }}) (max_over_time(kubeat_backup_last_success_timestamp_seconds[10m]))
           labels:
             severity: warning
           annotations:
