@@ -61,6 +61,11 @@ func Run(ctx context.Context, st Store, opts Options) {
 		opts.Metrics.Backup(false, time.Now())
 		return
 	}
+	// The newest copy already there is reported, so that a restart does not
+	// read as "no backup" (and raise a staleness alert) until the next one.
+	if last, ok := newest(opts.Dir); ok {
+		opts.Metrics.LastBackup(last)
+	}
 
 	for {
 		wait := opts.Interval
