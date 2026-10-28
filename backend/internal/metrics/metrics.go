@@ -36,6 +36,7 @@ type Metrics struct {
 	lastHeartbeat     prometheus.Gauge
 	backups           *prometheus.CounterVec
 	lastBackup        prometheus.Gauge
+	lastBackupFailure prometheus.Gauge
 	licenseExpiry     prometheus.Gauge
 	targetThrottled   *prometheus.CounterVec
 
@@ -123,6 +124,22 @@ func New(version string) *Metrics {
 		Name: "kubeat_backup_last_success_timestamp_seconds",
 		Help: "When the newest database backup was taken: the last to succeed, or after a start the newest copy found in the backup directory; 0 while there is none.",
 	})
+	m.lastBackupFailure = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "kubeat_backup_last_failure_timestamp_seconds",
+		Help: "When a database backup attempt last failed since the process started; 0 while none has. Newer than kubeat_backup_last_success_timestamp_seconds while the backups are failing.",
+	})
+
+	// A labelled counter has no series until its first increase, and
+	// increase() cannot tell a first increase from a series that appears:
+	// the series the alert rules watch are there from the start, at 0.
+	for _, channelType := range store.ChannelTypes {
+		for _, delivered := range []bool{true, false} {
+			m.notificationAtt.WithLabelValues(string(channelType), resultLabel(delivered, "sent", "failed"))
+		}
+	}
+	for _, ok := range []bool{true, false} {
+		m.backups.WithLabelValues(resultLabel(ok, "ok", "failed"))
+	}
 
 	m.licenseExpiry = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_license_expiry_timestamp_seconds",
@@ -144,7 +161,7 @@ func New(version string) *Metrics {
 		m.resultsWritten, m.resultsDropped,
 		m.notifications, m.notificationAtt, m.notificationsDrop,
 		m.heartbeats, m.lastHeartbeat,
-		m.backups, m.lastBackup,
+		m.backups, m.lastBackup, m.lastBackupFailure,
 		m.targetThrottled,
 		m.licenseExpiry,
 	)
@@ -301,7 +318,9 @@ func (m *Metrics) License(expires time.Time) {
 	m.licenseExpiry.Set(float64(expires.Unix()))
 }
 
-// Backup records one backup attempt.
+// Backup records one backup attempt. A failure is kept with its time, so
+// that the backups read as failing until a newer one succeeds, however long
+// the next attempt waits.
 func (m *Metrics) Backup(ok bool, at time.Time) {
 	if m == nil {
 		return
@@ -309,6 +328,8 @@ func (m *Metrics) Backup(ok bool, at time.Time) {
 	m.backups.WithLabelValues(resultLabel(ok, "ok", "failed")).Inc()
 	if ok {
 		m.lastBackup.Set(float64(at.UnixMilli()) / 1000)
+	} else {
+		m.lastBackupFailure.Set(float64(at.UnixMilli()) / 1000)
 	}
 }
 

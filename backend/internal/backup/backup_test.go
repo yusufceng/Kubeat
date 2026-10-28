@@ -378,6 +378,39 @@ func TestRunWaitsForTheIntervalSinceTheNewestBackup(t *testing.T) {
 	if n := failing.calls.Load(); n > 20 {
 		t.Errorf("%d attempts in a moment: the loop is spinning", n)
 	}
+	// The failures are newer than the last good copy: the backups read as
+	// failing, which KubeatBackupFailing alerts on.
+	if got, _ := m.Gather(); got["kubeat_backup_last_failure_timestamp_seconds"] <= got["kubeat_backup_last_success_timestamp_seconds"] {
+		t.Errorf("failure at %v is not newer than the last success at %v",
+			got["kubeat_backup_last_failure_timestamp_seconds"], got["kubeat_backup_last_success_timestamp_seconds"])
+	}
+}
+
+// A backup directory that cannot be made is one failed attempt, after which
+// Run gives up until a restart. The failure stays the newest backup event,
+// so KubeatBackupFailing stays open, also without any copy to compare with.
+func TestRunReportsAnUnusableDirectory(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := metrics.New("test")
+	st := &fakeStore{}
+	Run(context.Background(), st, Options{Dir: filepath.Join(file, "backup"), Interval: time.Hour, Keep: 3, Metrics: m, Logger: discard})
+
+	if n := st.calls.Load(); n != 0 {
+		t.Errorf("%d copies attempted without a directory", n)
+	}
+	got, err := m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_backups_total{result=failed}"] != 1 || got["kubeat_backup_last_failure_timestamp_seconds"] == 0 ||
+		got["kubeat_backup_last_success_timestamp_seconds"] != 0 {
+		t.Errorf("failed = %v, last failure = %v, last success = %v; want 1, a time, 0",
+			got["kubeat_backups_total{result=failed}"], got["kubeat_backup_last_failure_timestamp_seconds"],
+			got["kubeat_backup_last_success_timestamp_seconds"])
+	}
 }
 
 // A volume that stays full is tried again after a whole interval, not after
