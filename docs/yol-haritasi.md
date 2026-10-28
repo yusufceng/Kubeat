@@ -173,11 +173,13 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   sprint 3 adayı; [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)).
 - Chart'ın alarmları backend'i cluster'ın Prometheus'u scrape edebildiği
   sürece görür: Kubeat 10 dakikadan uzun düşerse kesinti, sertifika ve yedek
-  alarmları çözülür. README'deki susturma kuralı bunları `KubeatDown`
-  yanarken susturur; bedeli, Kubeat 25 dakikadan uzun düşükken biten bir
-  kesintinin düzelmesinin Alertmanager'dan gitmeyebilmesidir (Kubeat'in kendi
-  kanalları bildirir). Cluster'ın tamamı düşerse yalnızca dışarıdaki
-  heartbeat haber verir (README, "Aracın kendi sağlığı").
+  alarmları çözülür. README'deki susturma kuralı, alarmları alan
+  Alertmanager'a eklenirse (OpenShift'in ve kube-prometheus-stack'in
+  varsayılanında yoktur), bunları `KubeatDown` yanarken susturur; bedeli,
+  Kubeat 25 dakikadan uzun düşükken biten bir kesintinin düzelmesinin
+  Alertmanager'dan gitmeyebilmesidir (Kubeat'in kendi kanalları bildirir).
+  Cluster'ın tamamı düşerse yalnızca dışarıdaki heartbeat haber verir
+  (README, "Aracın kendi sağlığı").
 - Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır; minikube'da
   ve gerçek RHCOS'ta ek ayar gerektirmeden çalıştı. Bir Service adına ping
   atılamaz: ClusterIP sanal bir adrestir ve ICMP'ye yanıt vermez; pod IP'si

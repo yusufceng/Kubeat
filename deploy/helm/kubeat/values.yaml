@@ -332,7 +332,8 @@ metrics:
   # namespace, as the ServiceMonitor above scrapes it: another scrape needs
   # the same labels, or KubeatDown keeps firing. They reach the Alertmanager
   # and receivers the platform already has; the README's "Aracın kendi
-  # sağlığı" lists them, with inhibit rules for an Alertmanager of your own.
+  # sağlığı" lists them, with inhibit rules for whichever Alertmanager
+  # receives them.
   prometheusRule:
     enabled: false
     labels: {}

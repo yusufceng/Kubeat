@@ -2173,12 +2173,16 @@ pod'a göre değil monitor'e ve kuruluma göre tektir: `pod`, `instance`,
 getirdiği yeni pod ikinci bir alarm açmaz. Backend 10 dakikadan uzun scrape
 edilemezse çözülürler; o sırada `KubeatDown` en az 5 dakikadır yanmaktadır.
 
-**Kendi Alertmanager'ınız için susturma kuralları.** Ayrı kurulan bir
-Alertmanager'da (örneğin user workload monitoring'in kendi Alertmanager'ı)
-varsayılan susturma kuralı yoksa `KubeatLicenseExpiring`'in iki alarmı birden
-gider. Kubeat'in 10 dakikayı aşan bir kesintisinde yukarıdaki üç alarmın
-"resolved" gitmesini de bir susturma kuralı önler. İkisi için
-`alertmanager.yaml` örneği:
+**Alertmanager'da susturma kuralları.** Ayrı kurulan bir Alertmanager'da
+(örneğin user workload monitoring'in kendi Alertmanager'ı) varsayılan
+susturma kuralı yoksa `KubeatLicenseExpiring`'in iki alarmı birden gider.
+Kubeat'in 10 dakikayı aşan bir kesintisinde yukarıdaki üç alarmın
+"resolved" gitmesini de bir susturma kuralı önler. Bu ikinci kural
+OpenShift'in ve kube-prometheus-stack'in varsayılan yapılandırmasında yoktur:
+alarmları hangi Alertmanager alıyorsa, OpenShift'te platformun
+`alertmanager-main`'i de olsa, ona eklenir; eklenmezse Kubeat 10 dakikadan
+uzun düşükken bu üç alarm "resolved" gider. İkisi için `alertmanager.yaml`
+örneği:
 
 ```yaml
 inhibit_rules:
@@ -2190,7 +2194,7 @@ inhibit_rules:
       - 'alertname = "KubeatLicenseExpiring"'
       - 'severity = "warning"'
     equal: [namespace]
-  # KubeatDown yanarken aynı kurulumun son değerini tutan alarmları susar.
+  # KubeatDown yanarken aynı kurulumun boşlukta açık kalan alarmları susar.
   - source_matchers:
       - 'alertname = "KubeatDown"'
     target_matchers:
