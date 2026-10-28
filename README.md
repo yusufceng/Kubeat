@@ -226,6 +226,34 @@ lisansı"). Şema değişmez. Aşağıdakilerden birini kullanıyorsanız
 
 İzleme, alarmlar ve bildirimler lisanstan etkilenmez.
 
+### 0.43'e yükseltme
+
+0.43 bildirim teslimatını, yedeklemeyi ve aracın kendi alarmlarını
+değiştirir; şema değişmez ve yükseltme sırasında yapılacak bir şey yoktur.
+Varsayılan davranış üç yerde değişir:
+
+- **Bildirim yeniden denenir.** Kanalın almadığı kesinti bildirimi olay
+  kapanana kadar artan aralıkla (1, 2, 4… dk; en çok
+  `UPTIME_NOTIFY_RETRY_MAX`, varsayılan 15 dk) yeniden gönderilir; düzelme
+  bildirimi ilk başarısız denemeden itibaren `UPTIME_NOTIFY_RETRY_FOR`
+  (varsayılan 1 sa) boyunca. Yeniden başlatmada bekleyen kesinti bildirimleri
+  bildirim kaydından toparlanır. Eski davranış (tek deneme) için
+  `UPTIME_NOTIFY_RETRY_MAX=0`. Kanallar artık birbirini bekletmez: yanıt
+  vermeyen bir webhook Slack'i ya da e-postayı geciktirmez (bkz. "Alarm").
+- **Yedek silme sırası.** Eski kopyalar yeni kopya yazılmadan önce `keep-1`'e
+  indirilir; volume yine de doluysa en eski kopya silinip yazım bir kez
+  yinelenir. `keep ≥ 2` ile son kopya hiç silinmez, `keep=1` ile tek kopya
+  gidebilir; dolu kalan volume bir aralık sonra yeniden denenir (bkz.
+  "Yedekleme ve geri yükleme").
+- **Yeni alarmlar ve metrik.** `metrics.prometheusRule.enabled` ile
+  `kubeat.self` grubuna `KubeatResultsDropped`, `KubeatNotificationsFailing`,
+  `KubeatWorkersSaturated`, `KubeatBackupFailing`, `KubeatBackupStale` ve
+  `KubeatLicenseExpiring` (warning ve critical) gelir; Alertmanager
+  yönlendirme ve susturma kurallarınıza ekleyin. `kubeat_notifications_total`
+  artık bildirimin son sonucunu sayar; denemeler yeni
+  `kubeat_notification_attempts_total` metriğindedir (bkz. "Aracın kendi
+  sağlığı").
+
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
 Chart dört Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde

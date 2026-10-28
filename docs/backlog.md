@@ -14,6 +14,14 @@ monitoring kapalı cluster'larda anlam kazanır; böyle bir ortam görülürse
 Kubeat'in kanal türü olarak eklenir (OpenShift'te `monitoring-alertmanager-
 edit` rolü ve kube-rbac-proxy üzerinden 9095 portu).
 
+Güncelleme (2026-10-28, sprint 1 kapanışı): Müşteri B'nin ortamı (GKE,
+operator yok, Grafana Cloud ya da Managed Prometheus) tam bu ortam; karara
+itirazı yok, kod değil belge istiyor: kuralların PromQL'i (`helm template …
+--show-only templates/prometheusrule.yaml` ya da `docs/` altında düz bir
+rules dosyası), Grafana Cloud'da `mimir.rules.kubernetes` ve GMP'de `Rules`
+CRD'ye taşıma cümleleri, `metrics.prometheusRule.enabled=true`'nun CRD'siz
+cluster'da kurulumu bozduğu uyarısı. Sprint 2 doküman paketi adayı (S12 ile).
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
@@ -335,6 +343,15 @@ README yalnızca bunu söyler. Grafana panosu da burada: öz-metrikler için
 hazır bir pano istenirse `docs/` altına JSON olarak eklenir. Tetikleyici:
 kendi Alertmanager'ını elle yapılandıran ya da pano isteyen ilk kullanıcı.
 
+Güncelleme (2026-10-28, sprint 1 kapanışı): tetikleyici kısmen yandı. Müşteri
+A, user workload monitoring Alertmanager'ını ayrı kuran kurumda varsayılan
+inhibit kuralının olmadığını, `KubeatLicenseExpiring`'in warning ve
+critical'inin ikisinin birden gideceğini yazdı; README "Aracın kendi
+sağlığı"na kısa bir `inhibit_rules` örneği yeter (sprint 2 doküman paketi
+adayı). Kurallar promtool'dan geçmedi; `promtool check rules` yerelde ve
+cluster'sız çalıştığından `test-chart.sh`'a eklenmesi önerildi. Pano için
+istek yok.
+
 ## Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı yeniden deneme kuyruğu
 
 2026-10-28'de ertelendi (S17, #27). Kanalın almadığı kesinti bildirimi
@@ -350,3 +367,41 @@ gönderim" ve `kubeat_notifications_total{result="failed"}` ile
 bildirimi sayar, motorun vazgeçmesini beklemez. Tetikleyici: pilotta
 yeniden deneme penceresini aşan bir kanal kesintisi (düzelme için 1 saatten
 uzun) ya da yeniden başlatmayla düşen bir düzelme bildirimi görülürse.
+
+Güncelleme (2026-10-28, sprint 1 kapanışı): Müşteri A (hoş olur) makine
+kanalında düşen düzelme bildiriminin kapanmayan kayıt demek olduğunu yazdı:
+PagerDuty `dedup_key` ile resolve, ITSM webhook'u `up` ile ticket kapatır;
+bakım penceresi 2–4 saat olan kurumda `up` pencere içinde düşerse incident ve
+ticket açık kalır. Önerisi: makine kanalı için `up` da olay kapanana kadar (ya
+da en az 24 saat) denensin ve yeniden başlatmada "kapanmış olay + teslim
+edilmiş `down` + teslim edilmemiş `up`" kayıttan kurulsun (`DeliveryAt` ve
+`Delivered` var). En azı: README PagerDuty ve webhook satırlarına "kanal uzun
+süre ulaşılmaz kalabiliyorsa `UPTIME_NOTIFY_RETRY_FOR`'u bakım pencerenizden
+uzun tutun" notu (sprint 2 doküman paketi adayı). Müşteri B (hoş olur):
+`KubeatNotificationsFailing` `increase(...[15m]) > 0` ve `for` yok; 30
+saniyelik Slack hıçkırığında bildirim bir dakika sonra teslim edilmişken
+alarm 15 dakika yanar; önerisi kanal türü başına "son deneme başarısız"
+gauge'ı ya da README ve description'ın "son 15 dakikada başarısız deneme
+oldu" demesi ve `for` önerisi. Patlamada ölü makine kanalı ayrı madde.
+
+## Patlamada ölü makine kanalının teslimat kuyruğuna maliyeti
+
+2026-10-28'de ertelendi (S18'in kapsam dışı parçası, #26; PO kararı "kanal
+başına kalıcı kuyruk yok"). Kanallar artık birbirinden bağımsız teslim
+edilir, ama döngü her bildirim için makine kanallarını eşzamanlı çağırır ve
+#27'nin devre kesicisi yalnızca yeniden denemeleri tutar: takılı tek makine
+kanalı patlamada geçiş başına, bildirim başına bir gönderim bekletir
+(`UPTIME_NOTIFY_ATTEMPTS × (TIMEOUT + RETRY_DELAY)`, varsayılanlarla 25–30
+sn). Sprint 1 kapanışında Müşteri A bunu "önemli" bulgu olarak yazdı: ölü
+PagerDuty ya da ITSM kanalıyla çakışan bir Ingress/DNS kesintisinde
+varsayılan 100'lük kuyruk ~42 dakikada boşalır, bu arada enqueue'da düşen
+bildirim (`kubeat_notifications_dropped_total` sayar) ne yeniden denenir ne
+yeniden başlatmada kayıttan kurulur (kayıtta satırı yok), Slack ve e-posta da
+duymaz. Önerilen parça: bir geçişte almayan makine kanalı yeniden deneme
+süresine kadar "tripped" sayılsın ve yeni `down` ona gönderilmeden yeniden
+deneme listesine yazılsın; `UPTIME_NOTIFY_QUEUE_SIZE` için README'de "en az
+monitor sayısı kadar" kuralı ya da varsayılanın monitor sayısından
+türetilmesi; patlama testine ölü makine kanalı senaryosu. Tetikleyici yandı
+sayılır: sprint 2 adayı (PMO önerisi,
+[sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md) "Sonraki
+sprint önerisi"); PO karar verir.
