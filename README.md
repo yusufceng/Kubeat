@@ -2336,7 +2336,12 @@ Bir monitor art arda `failure_threshold` kez başarısız olursa olay açılır;
 art arda `UPTIME_RECOVERY_THRESHOLD` kez başarılı olunca kapanır. Her iki
 durumda etkin tüm kanallara bir bildirim gider (gecikmeli bir kanal
 kesintiyi ancak gecikmesini aşarsa duyar; bkz. "Gecikme ve tekrar"); olay
-açıkken tekrar bildirim gönderilmez.
+açıkken tekrar bildirim gönderilmez. Kanallar birbirini bekletmez: bir
+bildirim etkin kanallara aynı anda gider (her kanala kendi sırasıyla), yani
+yanıt vermeyen bir webhook ya da PagerDuty, Slack'in ya da e-postanın
+teslimatını geciktirmez; teslimat döngüsü yalnızca en yavaş kanal kadar
+bekler ve bu sırada gelen bildirimler kuyrukta (`UPTIME_NOTIFY_QUEUE_SIZE`)
+birikir.
 
 HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
 `UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir "sertifika" olayı
@@ -2826,7 +2831,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_ATTEMPTS` | `3` | Kanal başına bildirim deneme sayısı |
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bildirim denemeleri arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir bildirim denemesinin zaman aşımı |
-| `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Gönderilmeyi bekleyebilecek en fazla bildirim sayısı |
+| `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Teslimat döngüsünün önünde bekleyebilecek en fazla bildirim sayısı. Döngü bir bildirimi tüm kanallara aynı anda gönderir ve yalnızca en yavaş kanalın denemeleri kadar bekler; bu sırada gelenler burada birikir, kuyruk doluysa düşer ve `kubeat_notifications_dropped_total` artar |
 | `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz. `UPTIME_OIDC_REDIRECT_URL` boşsa SSO dönüş adresi de bundan türetilir |
 | `UPTIME_LANGUAGE` | `en` | Bildirim metinlerinin ve ilk yönetici hesabının görünen adının dili: `en` ya da `tr` |
 | `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |

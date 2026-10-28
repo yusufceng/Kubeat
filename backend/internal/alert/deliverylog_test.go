@@ -78,12 +78,14 @@ func TestDeliveryLogIsRedacted(t *testing.T) {
 	if len(log) != 2 {
 		t.Fatalf("log = %+v, want an entry per channel", log)
 	}
+	errors := map[string]string{}
 	for _, d := range log {
 		if d.Delivered || d.Error == "" {
 			t.Errorf("%s: entry = %+v", d.ChannelName, d)
 		}
+		errors[d.ChannelName] = d.Error
 	}
-	if got := log[1].Error; got != "posting to https://push.example.com/… with key ********: 403 Forbidden" {
+	if got := errors["gotify"]; got != "posting to https://push.example.com/… with key ********: 403 Forbidden" {
 		t.Errorf("redacted error = %q", got)
 	}
 }

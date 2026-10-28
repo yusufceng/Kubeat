@@ -284,16 +284,26 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 		}
 	}
 
+	// One share per channel, its batches in the order they fell due: the
+	// channels software reads get each notification on its own, the rest
+	// one message per batch. The channels are sent to in parallel.
+	var shares []outbound
+	at := make(map[int64]int)
 	for _, key := range order {
 		ch, notes := byID[key.channel], batches[key]
-		if machine(ch.Type) {
-			for _, n := range notes {
-				e.send(ctx, ch, n)
-			}
-			continue
+		if !machine(ch.Type) {
+			n, _ := grouped(key.event, notes) // a batch is never empty
+			notes = []Notification{n}
 		}
-		e.sendGrouped(ctx, ch, key.event, notes)
+		i, ok := at[ch.ID]
+		if !ok {
+			i = len(shares)
+			at[ch.ID] = i
+			shares = append(shares, outbound{channel: ch})
+		}
+		shares[i].notes = append(shares[i].notes, notes...)
 	}
+	e.deliver(ctx, shares)
 }
 
 // restore works out, from the outages open now, what the channels with a

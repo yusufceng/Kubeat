@@ -72,7 +72,7 @@ func TestChannelDelayTellsOnlyOutagesThatLast(t *testing.T) {
 	}
 
 	// A long one: the pager is told after ten minutes, and of the end.
-	f.sender.sent, f.sender.channels = nil, nil
+	f.sender.reset()
 	opened := f.check(false)
 	f.flush()
 	for i := 0; i < 19; i++ { // 9.5 minutes: not yet

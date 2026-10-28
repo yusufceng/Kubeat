@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
@@ -457,7 +458,10 @@ func takeDue(groups map[groupKey]*pendingGroup, now time.Time, everything bool) 
 // others of their group. What channels with a delay or a repeat interval
 // are owed (see schedule) is delivered when it falls due; at shutdown what
 // is due by then goes, and the rest is worked out again from the open
-// outages at the next start.
+// outages at the next start. Each pass through the channels sends to them
+// in parallel and waits for the slowest (deliver): the loop is held up by
+// a channel that does not answer for as long as one send to it takes, not
+// once per channel, and the other channels are not held up at all.
 func (e *Engine) Run(ctx context.Context) {
 	groups := make(map[groupKey]*pendingGroup)
 	started := 0
@@ -550,6 +554,7 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 		return
 	}
 	now := e.now()
+	var shares []outbound
 	for _, ch := range channels {
 		if !ch.Enabled || (include != nil && !include(ch)) {
 			continue
@@ -562,8 +567,11 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 				mine = append(mine, n)
 			}
 		}
-		e.sendGrouped(ctx, ch, event, mine)
+		if n, ok := grouped(event, mine); ok {
+			shares = append(shares, outbound{ch, []Notification{n}})
+		}
 	}
+	e.deliver(ctx, shares)
 	e.outagesOver(notes)
 }
 
@@ -580,18 +588,18 @@ func (e *Engine) outagesOver(notes []Notification) {
 	}
 }
 
-// sendGrouped sends what a channel gets of a group: nothing, the one
+// grouped is what a channel gets of a group: nothing, the one
 // notification, or the lot as one message.
-func (e *Engine) sendGrouped(ctx context.Context, ch store.Channel, event Event, mine []Notification) {
-	switch {
-	case len(mine) == 0:
-	case len(mine) == 1:
-		e.send(ctx, ch, mine[0])
-	default:
-		first := mine[0]
-		e.send(ctx, ch, Notification{Event: event, Monitor: first.Monitor, Incident: first.Incident, CertExpiresAt: first.CertExpiresAt,
-			At: first.At, Language: first.Language, PublicURL: first.PublicURL, Group: mine})
+func grouped(event Event, mine []Notification) (Notification, bool) {
+	switch len(mine) {
+	case 0:
+		return Notification{}, false
+	case 1:
+		return mine[0], true
 	}
+	first := mine[0]
+	return Notification{Event: event, Monitor: first.Monitor, Incident: first.Incident, CertExpiresAt: first.CertExpiresAt,
+		At: first.At, Language: first.Language, PublicURL: first.PublicURL, Group: mine}, true
 }
 
 // deliverTo sends one notification to every enabled channel whose scope
@@ -608,6 +616,7 @@ func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(sto
 		return
 	}
 	now := e.now()
+	var shares []outbound
 	for _, ch := range channels {
 		if !ch.Enabled || !ch.Covers(n.Monitor) || (include != nil && !include(ch)) {
 			continue
@@ -615,17 +624,45 @@ func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(sto
 		// route notes what the channel is owed even about an event it
 		// does not want, so that its own reminders can follow.
 		if e.route(ch, n, now) && ch.Wants(n.Event.Kind()) {
-			e.send(ctx, ch, n)
+			shares = append(shares, outbound{ch, []Notification{n}})
 		}
 	}
+	e.deliver(ctx, shares)
 	if include == nil {
 		e.outagesOver([]Notification{n})
 	}
 }
 
+// outbound is a channel's share of one pass through the channels: what it
+// is sent, in the order it is sent.
+type outbound struct {
+	channel store.Channel
+	notes   []Notification
+}
+
+// deliver sends each channel its share and returns once the last send is
+// recorded. The channels are sent to in parallel, one goroutine each, and
+// each channel serially, in order: a channel that is slow or down holds up
+// only itself, and a pass costs the loop its slowest channel rather than
+// the sum of them. Only the sends leave the loop's goroutine; what a
+// channel is owed (route, outagesOver) is settled in the loop, before and
+// after, and the store and the metrics take calls from several goroutines.
+func (e *Engine) deliver(ctx context.Context, shares []outbound) {
+	var wg sync.WaitGroup
+	for _, s := range shares {
+		wg.Go(func() {
+			for _, n := range s.notes {
+				e.send(ctx, s.channel, n)
+			}
+		})
+	}
+	wg.Wait()
+}
+
 // send delivers one notification (single or grouped) to one channel, with
 // retries, and records the outcome: on the channel, and in the delivery
-// log of every incident the message was about.
+// log of every incident the message was about. It runs in a goroutine of
+// deliver's, beside the sends to the other channels.
 func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) {
 	err := e.sendWithRetry(ctx, ch, n)
 	e.opts.Metrics.Notification(string(ch.Type), string(n.Event), err == nil)
