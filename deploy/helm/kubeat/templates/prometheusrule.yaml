@@ -142,7 +142,7 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Kubeat could not read its monitors from the database for the metrics"
+            summary: "Kubeat could not read its monitors or channels from the database for the metrics"
         - alert: KubeatResultsDropped
           expr: increase(kubeat_results_dropped_total[10m]) > 0
           labels:
