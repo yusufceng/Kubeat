@@ -44,7 +44,7 @@ uyarıyla atlar, CI'da ise atlamaz.
 
 ## Cluster'a kurulum
 
-Her sürüm etiketi (`v0.28.0` gibi) imajları `ghcr.io/yusufceng/kubeat-backend`
+Her sürüm etiketi (`vX.Y.Z`) imajları `ghcr.io/yusufceng/kubeat-backend`
 ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
 `oci://ghcr.io/yusufceng/charts/kubeat` olarak yayımlar
 ([.github/workflows/release.yml](.github/workflows/release.yml)). Herhangi bir
