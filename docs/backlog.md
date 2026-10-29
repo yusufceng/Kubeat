@@ -565,3 +565,17 @@ bilerek kaldırmada silinecek nesne artar, kurulum notlarındaki silme komutu
 onları da saymalı). Tetikleyici: kullanıcının minikube provası (sprint 2
 "Kullanıcıda kalanlar" 3) yeni Secret'taki parolanın geçmediğini doğrularsa
 ya da gerçek bir yeniden kurulumda yönetici bu yüzden takılırsa.
+
+## Dolan veri volume'u: büyütme, kotaya göre saklama, yazılamayan sonuçlar
+
+2026-10-29'da ertelendi (S32'nin kapsam dışı parçaları, #39). 0.44'ten
+beri veri volume'u dolup sonuçlar yazılamaz olunca heartbeat kesilir ve
+backend yazım başına tek satır loglar (`batch insert failed`, düşen sonuç
+sayısıyla); boyut kuralı README "Geçmiş verisi"nde. Yapılmayanlar: PVC'nin
+kendiliğinden büyütülmesi (StorageClass `allowVolumeExpansion` isterse
+`backend.persistence.size` artırılır, chart'ta ek iş yok), `UPTIME_RETENTION`'ın
+monitor sayısına ve aralığa göre kendiliğinden ayarlanması, yazılamayan
+sonuçların bellekte tutulması (volume doluyken de olay açılır ve bildirim
+gider, ama bellek sınırı ister ve yeniden başlatmada kaybolur). Tetikleyici:
+boyut kuralını aşan bir kurulum ya da loglarda `dropped` değeri `rows`'a eşit
+`batch insert failed` satırları ve `heartbeat withheld`.

@@ -63,6 +63,23 @@ kabaca `worker sayısı / ortalama kontrol süresi` kontrol/sn.
 (580 MB). Bu sırada sonuç yazımı kesilmedi. Kopyadan başlatılan sunucu 500
 monitor'u ve 10 milyon sonucu sorunsuz okudu.
 
+## Satır boyutları
+
+2026-10-29, şema 26 (S32): boş bir veritabanına 100 monitor, her birine
+7 gün boyunca 60 sn aralıkla sonuç, scheduler gibi zamana göre karışık ve
+100'lük toplu yazımla; boyut, WAL boşaltıldıktan sonra
+`page_count × page_size` farkı. İndeksler dahildir.
+
+| Satır | Boyut |
+| --- | --- |
+| HTTP sonucu (%99 başarılı, %1 hata metniyle) | 65 B |
+| Aynısı, HTTPS sertifika bitişiyle | 71 B |
+| Başarısız HTTPS sonucu, ayrıntılarıyla (zaman aşımı, süre dağılımı, TLS) | 550 B |
+| Saatlik özet (monitor × saat; bir yıl, saat saat yazılmış) | 41 B |
+| Bildirim kaydı (bir teslimat denemesi) | 93 B |
+
+Veri volume'unun boyut kuralı bunlardan çıkar: README "Geçmiş verisi".
+
 ## Ölçülmeyenler
 
 - Uzun süreli çalışma (günler): veritabanı büyümesi, retention'ın
