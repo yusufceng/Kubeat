@@ -425,8 +425,11 @@ discovery:
   syncInterval: 1m
 
 # Pod-level security context for both workloads. Leave empty on OpenShift,
-# which assigns the UID and fsGroup itself. On other clusters set fsGroup so
-# the backend can write to its volume, e.g. {fsGroup: 1001}.
+# which assigns the UID and fsGroup itself. On other clusters set
+# {fsGroup: 1001}, the images' UID, so the backend can write to its volumes,
+# as the install command in the README ("Cluster'a kurulum") does; while it
+# is empty there the install notes warn. The restore pod in the README
+# ("Yedekleme ve geri yükleme") takes the same.
 podSecurityContext: {}
 
 # Exposes the frontend outside the cluster. Enable at most one.

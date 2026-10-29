@@ -68,11 +68,15 @@ test:
 	cd backend && go test ./...
 	cd frontend && npm test
 	deploy/helm/test-chart.sh
+	scripts/test-check-versions.sh
 
+# check-versions.sh: Chart.yaml, VERSION, README ve docs/pilot.md'deki
+# sürümler aynı mı (CONTRIBUTING.md, "Sürümler").
 lint:
 	cd backend && go vet ./...
 	cd frontend && npm run lint
 	helm lint $(CHART)
+	scripts/check-versions.sh
 
 build:
 	cd backend && go build -o bin/server ./cmd/server

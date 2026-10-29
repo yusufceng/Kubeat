@@ -76,6 +76,17 @@ renders "empty env" --set-json 'backend.env={}' --set-json 'frontend.env={}'
 refuses "backend.env" "move its variables to backend.extraEnv" --set backend.env.UPTIME_RETENTION=48h
 refuses "frontend.env" "move its variables to frontend.extraEnv" --set frontend.env.REFRESH_INTERVAL_MS=10000
 
+# Outside OpenShift, whose SCC assigns an fsGroup, the backend can write to
+# volumes owned by root only with podSecurityContext.fsGroup: the install
+# notes warn while it is empty. The cluster's APIs pick the text alone; the
+# chart sets no fsGroup of its own.
+UNWRITABLE="the backend may be unable to write to its volumes"
+notes "no podSecurityContext" says "$UNWRITABLE"
+notes "fsGroup given" omits "$UNWRITABLE" --set podSecurityContext.fsGroup=1001
+notes "OpenShift" omits "$UNWRITABLE" --api-versions security.openshift.io/v1
+notes "OpenShift with an Ingress" omits "$UNWRITABLE" --api-versions security.openshift.io/v1 --set ingress.enabled=true
+helm template kubeat "$CHART" | grep -q "fsGroup" && failed "fsGroup: the chart sets one of its own"
+
 # Removing the release leaves the database's and the backups' PVCs: helm
 # uninstall skips what carries helm.sh/resource-policy, deleting an Argo CD
 # application (2.7 or later) what carries either that or Delete=false. Each

@@ -55,11 +55,34 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # Twice, with pinned Helm releases (CONTRIBUTING.md, "Sürümler"): the one
+  # release.yml packages the chart with, and the last patch of Helm 3, which
+  # GitOps tools such as Argo CD may still embed to render the chart and for
+  # which README names --reset-then-reuse-values (3.14+). The first run
+  # keeps the check name "chart".
   chart:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: chart
+            helm: v4.3.1
+          - name: chart (Helm 3)
+            helm: v3.22.1
     steps:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
+        with:
+          version: ${{ matrix.helm }}
+      # The install and mirroring commands in README.md and docs/pilot.md,
+      # the Makefile's VERSION and appVersion name Chart.yaml's version, so a
+      # release PR that misses one fails here; and the check's own tests.
+      - name: The docs name the chart's version
+        run: |
+          scripts/check-versions.sh
+          scripts/test-check-versions.sh
       # test-chart.sh checks the alert rules with promtool and runs their
       # scenarios, and fails under CI without it. A pinned Prometheus
       # release (an LTS line), the archive checked against its checksum.
