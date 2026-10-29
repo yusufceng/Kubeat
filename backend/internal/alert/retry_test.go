@@ -952,3 +952,144 @@ func TestAReminderFollowsItsOutageToAWebhook(t *testing.T) {
 		t.Errorf("at 1:30: %q, want the outage, then its reminder", got)
 	}
 }
+
+// What is held back for a webhook to go once, as it is not sent again
+// otherwise (a certificate warning; the end of an outage with
+// UPTIME_NOTIFY_RETRY_FOR=0), is not given up untried when a notification
+// ahead of it is refused for the first time and ends the webhook's pass:
+// it goes in the next pass, ahead of what the webhook refused.
+func TestWhatGoesOnceIsNotGivenUpUntried(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook; the fixture's "api" has a certificate
+	f.retrying(15*time.Minute, 0)
+	f.engine.sender = &refusing{recorder: f.sender, channel: "ops", monitor: "bad"}
+	x, bad, good := f.monitorIn("x", ""), f.monitorIn("bad", ""), f.monitorIn("good", "")
+	start := f.clock
+	f.clock = start.Add(10 * time.Second)
+	f.result(good, false) // 0:10: taken
+	f.flush()
+	f.sender.fail("ops", 1) // a failure the webhook gets over
+	f.clock = start.Add(30 * time.Second)
+	f.result(x, false) // 0:30: not taken; the webhook's retry is at 1:30
+	f.flush()
+	f.clock = start.Add(45 * time.Second)
+	f.result(bad, false) // 0:45: held back for that retry
+	f.flush()
+	f.clock = start.Add(time.Minute)
+	f.result(good, true) // 1:00: held back, to go once
+	f.flush()
+	f.clock = start.Add(45 * time.Second) // checkCert checks 30 seconds on
+	f.checkCert(10 * 24 * time.Hour)      // 1:15: held back, to go once
+	f.flush()
+
+	// 1:30: bad's outage, which the webhook never refused before, goes
+	// first and is refused; the rest of the pass is held back.
+	f.passes(start, 90*time.Second)
+	if got := f.sentTo("ops"); got != "down:good" {
+		t.Fatalf("at 1:30: %q, want nothing more taken", got)
+	}
+	var waiting []string
+	for _, r := range f.engine.owed.retries {
+		waiting = append(waiting, fmt.Sprintf("%s:%s:%d:%v", r.note.Monitor.Name, r.note.Event, r.attempts, r.once))
+		if !r.due.Equal(start.Add(3*time.Minute + 30*time.Second)) {
+			t.Errorf("%s %s: due at %s, want with the webhook's next pass at 3m30s", r.note.Monitor.Name, r.note.Event, r.due.Sub(start))
+		}
+	}
+	if got := strings.Join(waiting, ","); got != "x:down:1:false,bad:down:1:false,good:up:0:true,api:cert_expiring:0:true" {
+		t.Errorf("waiting for the webhook (monitor:event:failed attempts:once) = %s, want the two that go once still there", got)
+	}
+
+	// 3:30: they go first, and are taken; bad's outage is refused again.
+	f.passes(start, 3*time.Minute+30*time.Second)
+	if got := f.sentTo("ops"); got != "down:good,up:good,cert_expiring:api,down:x" {
+		t.Errorf("at 3:30: %q, want good's end and the warning, then x's outage", got)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=sent}":              1,
+		"kubeat_notifications_total{channel_type=webhook}{event=up}{result=failed}":            0,
+		"kubeat_notifications_total{channel_type=webhook}{event=cert_expiring}{result=sent}":   1,
+		"kubeat_notifications_total{channel_type=webhook}{event=cert_expiring}{result=failed}": 0,
+	})
+}
+
+// UPTIME_NOTIFY_RETRY_FOR, shorter here than UPTIME_NOTIFY_RETRY_MAX, counts
+// from the first attempt of the end of an outage held back for a webhook,
+// however long the end waits for that attempt: when its pass is put off to
+// a later retry of the webhook's, and when a refusal ahead of it in its
+// pass holds it back again.
+func TestAHeldBackEndCountsRetryForFromItsFirstAttempt(t *testing.T) {
+	t.Run("its pass put off", func(t *testing.T) {
+		f := newFixture(t, 1, 1) // "ops", a webhook
+		f.retrying(15*time.Minute, 5*time.Minute)
+		a, b, d := f.monitorIn("a", ""), f.monitorIn("b", ""), f.monitorIn("d", "")
+		start := f.clock
+		f.clock = start.Add(10 * time.Second)
+		f.result(d, false) // 0:10: taken
+		f.flush()
+		f.sender.fail("ops", 1000) // the webhook goes away
+		f.clock = start.Add(30 * time.Second)
+		f.result(a, false) // 0:30: not taken; due again at 1:30, 3:30, 7:30, 15:30, 30:30 and 45:30
+		f.flush()
+		f.passes(start, 45*time.Minute)
+		f.clock = start.Add(45*time.Minute + 30*time.Second)
+		f.result(b, false) // 45:30: tried as a's retry falls due, which then waits for b's
+		f.flush()
+		// 46:30: b's goes first and is not taken; the webhook's retries
+		// drift apart, b's at 48:30, a's at 1:01:30.
+		f.passes(start, 46*time.Minute+30*time.Second)
+		f.clock = start.Add(47 * time.Minute)
+		f.result(d, true) // 47:00: held back for 48:30, which is put off to 1:01:30
+		f.flush()
+		f.passes(start, time.Hour)
+		for _, r := range f.engine.owed.retries {
+			if r.note.Event == EventUp && (!r.due.Equal(start.Add(time.Hour+90*time.Second)) || r.attempts != 0) {
+				t.Errorf("d's end due at %s with %d attempts, want it untried and due at 1h1m30s", r.due.Sub(start), r.attempts)
+			}
+		}
+		f.sender.fail("ops", 0) // back
+		f.passes(start, time.Hour+90*time.Second)
+		if got := f.sentTo("ops"); got != "down:d,up:d,down:b,down:a" {
+			t.Errorf("at 1:01:30: %q, want d's end, then the two outages", got)
+		}
+		f.counts(map[string]float64{
+			"kubeat_notifications_total{channel_type=webhook}{event=up}{result=sent}":   1,
+			"kubeat_notifications_total{channel_type=webhook}{event=up}{result=failed}": 0,
+		})
+	})
+	t.Run("held back again in its pass", func(t *testing.T) {
+		f := newFixture(t, 1, 1) // "ops", a webhook
+		f.retrying(15*time.Minute, 5*time.Minute)
+		f.engine.sender = &refusing{recorder: f.sender, channel: "ops", monitor: "bad"}
+		bad, d := f.monitorIn("bad", ""), f.monitorIn("d", "")
+		start := f.clock
+		f.clock = start.Add(10 * time.Second)
+		f.result(d, false) // 0:10: taken
+		f.flush()
+		f.clock = start.Add(30 * time.Second)
+		f.result(bad, false) // 0:30: refused, and at 1:30, 3:30, 7:30, 15:30 and 30:30; the next pass is at 45:30
+		f.flush()
+		f.passes(start, 31*time.Minute)
+		f.clock = start.Add(32 * time.Minute)
+		f.result(bad, true) // 32:00: held back for 45:30
+		f.flush()
+		f.clock = start.Add(34 * time.Minute)
+		f.result(d, true) // 34:00: held back for 45:30, behind bad's end
+		f.flush()
+		// 45:30: bad's end goes first and is refused; d's is held back
+		// again, to 1:00:30, and is not given up untried.
+		f.passes(start, 45*time.Minute+30*time.Second)
+		if n := len(f.engine.owed.retries); n != 1 {
+			t.Fatalf("%d retries at 45:30, want d's end alone, bad's given up after its attempt", n)
+		}
+		if r := f.engine.owed.retries[0]; r.note.Monitor.Name != "d" || r.attempts != 0 || !r.due.Equal(start.Add(time.Hour+30*time.Second)) {
+			t.Errorf("the retry at 45:30 = %s with %d attempts, due at %s; want d's end untried, due at 1h0m30s", r.note.Monitor.Name, r.attempts, r.due.Sub(start))
+		}
+		f.passes(start, time.Hour+30*time.Second)
+		if got := f.sentTo("ops"); got != "down:d,up:d" {
+			t.Errorf("at 1:00:30: %q, want d's end taken", got)
+		}
+		f.counts(map[string]float64{
+			"kubeat_notifications_total{channel_type=webhook}{event=up}{result=sent}":   1,
+			"kubeat_notifications_total{channel_type=webhook}{event=up}{result=failed}": 1,
+		})
+	})
+}

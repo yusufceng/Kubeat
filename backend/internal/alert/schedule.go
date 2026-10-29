@@ -75,9 +75,10 @@ type owedKey struct{ channel, monitor int64 }
 type retry struct {
 	channel store.Channel
 	note    Notification
-	// since is when the first attempt failed, or was to be made for a note
-	// held back (retryLater); the end of an outage is attempted again for
-	// Options.RetryFor from then.
+	// since is when the first attempt failed, or, for a note held back and
+	// not attempted yet, when that attempt is due: it moves with the note
+	// until then (retryLater, deliverOwed). The end of an outage is
+	// attempted again for Options.RetryFor from then.
 	since time.Time
 	due   time.Time
 	// wait is how long the attempt after the next waits: twice the last
@@ -88,8 +89,10 @@ type retry struct {
 	attempts int
 	// once marks a notification held back for a paused channel that is
 	// not attempted again otherwise (Engine.retries): a reminder, a
-	// certificate or slowness notification. It goes in the pass it was
-	// held back for, and is given up if the channel does not take it then.
+	// certificate or slowness notification, the end of an outage with
+	// RetryFor zero. It goes in the pass it was held back for, or, held
+	// back again there behind a note the channel refused, in a later one;
+	// it is given up if the channel does not take it when it is attempted.
 	once bool
 }
 
@@ -342,21 +345,26 @@ func (e *Engine) paused(ch store.Channel, now time.Time) *retry {
 // paused) waits for the channel's next pass and goes in it, once only if
 // it is not attempted again otherwise, and its RetryFor counts from that
 // pass, its first attempt: not from when it was held back, which a wait
-// longer than RetryFor would end before any attempt. The channel not
-// taking a note that goes once gives it up. Everything else, and
-// everything with the attempts off, has failed for good.
+// longer than RetryFor would end before any attempt. Held back again
+// before any attempt, a note's RetryFor moves with it to its next pass,
+// and a note that goes once still goes then: only the channel refusing
+// it gives it up. Everything else, and everything with the attempts off,
+// has failed for good.
 func (e *Engine) retryLater(failures []failed) {
 	now := e.now()
 	held := make(map[string]int)
 	for _, f := range failures {
 		r := f.retry
 		switch {
-		case r != nil && r.once:
+		case r != nil && r.once && !f.held:
 			e.owed.dropRetry(r)
 			e.gaveUp(f.channel, f.note, "not taken in the pass it was held back for")
 			continue
 		case r != nil:
 			r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
+			if f.held && r.attempts == 0 {
+				r.since = r.due
+			}
 		case f.held:
 			// Not attempted: it goes with what the channel waits for, or,
 			// when nothing else waits, it starts the wait.
@@ -670,7 +678,11 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 		}
 		r.channel = ch
 		if p := e.paused(ch, now); p != nil {
-			// The channel took none of late: this goes in its next pass.
+			// The channel took none of late: this goes in its next pass,
+			// and a note not attempted yet counts its RetryFor from there.
+			if r.attempts == 0 {
+				r.since = p.due
+			}
 			r.due = p.due
 			continue
 		}
