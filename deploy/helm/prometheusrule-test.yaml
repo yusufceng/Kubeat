@@ -593,6 +593,40 @@ tests:
           - exp_labels: *itsm-failing-labels
             exp_annotations: *itsm-failing-annotations
 
+  - name: KubeatNotificationsFailing stays on after a successful test while an outage the channel did not take waits, and resolves once it is sent
+    interval: 1m
+    input_series:
+      # The webhook answers 404 from 1m to an outage sent to it again, as
+      # after an upgrade. Fixed, it passes a test at 8m, so its last attempt
+      # is good; the outage waits for its next attempt, at 16m
+      # (UPTIME_NOTIFY_RETRY_MAX after the refusal), which takes it. An
+      # outage that closes first drops it the same way.
+      - series: 'kubeat_channel_last_delivery_ok{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", channel="itsm", channel_type="webhook"}'
+        values: '1 0x6 1x13'
+      - series: 'kubeat_channel_undelivered_outages{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", channel="itsm", channel_type="webhook"}'
+        values: '0 1x14 0x5'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1x21'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: KubeatNotificationsFailing
+        exp_alerts:
+          - exp_labels: *itsm-failing-labels
+            exp_annotations: *itsm-failing-annotations
+      - eval_time: 10m
+        alertname: KubeatNotificationsFailing
+        exp_alerts:
+          - exp_labels: *itsm-failing-labels
+            exp_annotations: *itsm-failing-annotations
+      - eval_time: 15m
+        alertname: KubeatNotificationsFailing
+        exp_alerts:
+          - exp_labels: *itsm-failing-labels
+            exp_annotations: *itsm-failing-annotations
+      - eval_time: 16m
+        alertname: KubeatNotificationsFailing
+        exp_alerts: []
+
   - name: KubeatNotificationsFailing holds over a failed scrape
     interval: 1m
     input_series:
