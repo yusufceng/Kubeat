@@ -253,11 +253,16 @@ for alert in KubeatDown KubeatSchedulerStalled KubeatUnhealthy KubeatMetricsInco
 done
 rules "KubeatBackupStale without backups" lacks "alert: KubeatBackupStale"
 rules "KubeatBackupFailing without backups" has "alert: KubeatBackupFailing"
-# A failed attempt fires the notifications alert, not only a notification
-# given up on: the latter stays silent while an outage notification is
-# attempted again.
-rules "KubeatNotificationsFailing counts every attempt" has 'increase(kubeat_notification_attempts_total{result="failed"}[15m]) > 0'
+# The notifications alert is one per channel: the channel's last attempt
+# failed, or an outage it did not take waits to be sent to it again, held
+# over a scrape gap; notifications dropped from a full queue stay a separate
+# expression. It no longer counts failed attempts by channel type, nor waits
+# for the engine to give up. promtool below shows how it behaves.
+rules "KubeatNotificationsFailing on a channel's last attempt" has 'max without (instance, pod, endpoint, container, service) (kubeat_channel_last_delivery_ok) == 0'
+rules "KubeatNotificationsFailing while an outage waits for a channel" has 'max without (instance, pod, endpoint, container, service) (kubeat_channel_undelivered_outages) > 0'
+rules "KubeatNotificationsFailing over a scrape gap" has 'last_over_time(kubeat_channel_undelivered_outages[10m])'
 rules "KubeatNotificationsFailing counts the dropped" has 'increase(kubeat_notifications_dropped_total[15m]) > 0'
+rules "KubeatNotificationsFailing per channel, not per channel type" lacks 'kubeat_notification_attempts_total'
 rules "KubeatNotificationsFailing does not wait for the engine to give up" lacks 'kubeat_notifications_total{result="failed"}'
 rules "license warning at 30 days" has "< 30 * 86400"
 rules "license critical at 7 days" has "< 7 * 86400"
@@ -348,11 +353,11 @@ done
 # The rules as Prometheus reads them: promtool checks the rule groups and
 # runs the scenarios of prometheusrule-test.yaml (no backend target, a failed
 # scrape, a Recreate, an outage that closes, a failing backup, a backend that
-# stores no result) against the rules rendered for release "kubeat" in
-# namespace "kubeat", and those of prometheusrule-cluster-test.yaml (two
-# clusters, one of them failing, gone, in a scrape gap or recreated, and an
-# HA pair the store does not deduplicate) against the rules rendered with
-# clusterLabel=cluster.
+# stores no result, a channel that does not take notifications) against the
+# rules rendered for release "kubeat" in namespace "kubeat", and those of
+# prometheusrule-cluster-test.yaml (two clusters, one of them failing, gone,
+# in a scrape gap or recreated, and an HA pair the store does not
+# deduplicate) against the rules rendered with clusterLabel=cluster.
 PROMTOOL="${PROMTOOL:-promtool}"
 # rulefile FILE VALUES...: writes the rule groups of the PrometheusRule
 # rendered with these values (and the rules on) to FILE.

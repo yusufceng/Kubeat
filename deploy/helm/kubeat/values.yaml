@@ -360,12 +360,14 @@ metrics:
   # all), KubeatSchedulerStalled, KubeatUnhealthy (critical: for 5 minutes
   # no tick, or no check result stored, as the heartbeat judges it; also
   # without a heartbeat), KubeatMetricsIncomplete,
-  # KubeatResultsDropped, KubeatNotificationsFailing, KubeatWorkersSaturated,
+  # KubeatResultsDropped, KubeatNotificationsFailing (per channel, with its
+  # name in the channel label), KubeatWorkersSaturated,
   # KubeatBackupFailing (until a backup succeeds), KubeatBackupStale (with
   # backup.enabled: no good copy for twice backup.interval) and
   # KubeatLicenseExpiring (30 days before the license ends, critical at 7
-  # days and after it ends). The outage, certificate and backup alerts hold
-  # their state over a scrape gap of up to 10 minutes, such as a Recreate.
+  # days and after it ends). The outage, certificate, backup and channel
+  # alerts hold their state over a scrape gap of up to 10 minutes, such as a
+  # Recreate.
   # KubeatDown reads the up series of job <release>-backend in the release's
   # namespace, as the ServiceMonitor above scrapes it: another scrape needs
   # the same labels, or KubeatDown keeps firing. They reach the Alertmanager
