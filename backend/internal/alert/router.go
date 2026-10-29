@@ -24,8 +24,11 @@ type Router struct {
 // in smtp and endpoints are trusted at their exact address, each by its
 // own sender alone: one on the pod's loopback, a sidecar, needs no
 // exception, and a channel aimed at its address is still refused. A nil
-// guard lets them connect anywhere.
+// guard lets them connect anywhere. The router is made as the process
+// starts, which PagerDuty's sender keeps (PagerDutySender.Started).
 func NewRouter(guard *netguard.Policy, userAgent string, smtp SMTPConfig, endpoints Endpoints) *Router {
+	// To the millisecond, as the store keeps the times it is held against.
+	started := time.Now().Truncate(time.Millisecond)
 	client := &http.Client{Transport: guard.Transport()}
 	trusting := func(service string) *http.Client {
 		return &http.Client{Transport: guard.Trust(netguard.HostPort(service)).Transport()}
@@ -43,7 +46,7 @@ func NewRouter(guard *netguard.Policy, userAgent string, smtp SMTPConfig, endpoi
 			store.ChannelEmail:      email,
 			store.ChannelDiscord:    &DiscordSender{Client: client, UserAgent: userAgent},
 			store.ChannelTelegram:   &TelegramSender{Client: trusting(endpoints.Telegram), UserAgent: userAgent, BaseURL: endpoints.Telegram},
-			store.ChannelPagerDuty:  &PagerDutySender{Client: trusting(endpoints.PagerDuty), UserAgent: userAgent, URL: endpoints.PagerDuty},
+			store.ChannelPagerDuty:  &PagerDutySender{Client: trusting(endpoints.PagerDuty), UserAgent: userAgent, URL: endpoints.PagerDuty, Started: started},
 			store.ChannelNtfy:       &NtfySender{Client: client, UserAgent: userAgent},
 			store.ChannelGotify:     &GotifySender{Client: client, UserAgent: userAgent},
 		},
@@ -107,6 +110,17 @@ func Facts(n Notification) []Fact {
 		facts = append(facts, Fact{w.factCause, cause(n)})
 	}
 	return facts
+}
+
+// withInstance is facts with the installation the notification comes from
+// as the last of them, for the channels that show it among the details:
+// Teams and Google Chat cards and the body of an e-mail. Without an
+// instance, facts as they are.
+func withInstance(n Notification, facts []Fact) []Fact {
+	if n.Instance == "" {
+		return facts
+	}
+	return append(facts, Fact{wording(n).factInstance, n.Instance})
 }
 
 // monitorFacts names the monitor a notification is about.

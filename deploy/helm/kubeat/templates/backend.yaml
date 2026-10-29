@@ -171,6 +171,10 @@ spec:
             - name: UPTIME_PUBLIC_URL
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.instanceName }}
+            - name: UPTIME_INSTANCE_NAME
+              value: {{ . | quote }}
+            {{- end }}
             - name: UPTIME_DISCOVERY_ENABLED
               value: {{ .Values.discovery.enabled | quote }}
             {{- with .Values.discovery.namespaces }}

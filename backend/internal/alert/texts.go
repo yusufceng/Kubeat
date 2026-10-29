@@ -39,6 +39,9 @@ type phrases struct {
 	subjectGroupSlow, subjectGroupSlowResolved                                                                       string // where, count
 
 	factMonitor, factTarget, factNamespace, factStart, factEnd, factCause, factThreshold, factLatency string
+	// factInstance labels the installation a notification comes from
+	// (withInstance).
+	factInstance string
 
 	// the unit words of a duration: day, hour, minute, second
 	unitDay, unitHour, unitMin, unitSec string
@@ -82,7 +85,7 @@ var languages = map[string]phrases{
 		subjectGroupSlow:        "[Kubeat] %s%d monitors are slow", subjectGroupSlowResolved: "[Kubeat] %s%d monitors respond in time again",
 
 		factMonitor: "Monitor", factTarget: "Target", factNamespace: "Namespace", factStart: "Started", factEnd: "Ended", factCause: "Cause",
-		factThreshold: "Threshold", factLatency: "Response time",
+		factThreshold: "Threshold", factLatency: "Response time", factInstance: "Instance",
 
 		unitDay: "d", unitHour: "h", unitMin: "m", unitSec: "s",
 
@@ -121,7 +124,7 @@ var languages = map[string]phrases{
 		subjectGroupSlow:        "[Kubeat] %s%d monitor yavaş yanıt veriyor", subjectGroupSlowResolved: "[Kubeat] %s%d monitor yeniden zamanında yanıt veriyor",
 
 		factMonitor: "Monitor", factTarget: "Hedef", factNamespace: "Namespace", factStart: "Başlangıç", factEnd: "Bitiş", factCause: "Neden",
-		factThreshold: "Eşik", factLatency: "Yanıt süresi",
+		factThreshold: "Eşik", factLatency: "Yanıt süresi", factInstance: "Kurulum",
 
 		unitDay: "gün", unitHour: "sa", unitMin: "dk", unitSec: "sn",
 

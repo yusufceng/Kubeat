@@ -82,13 +82,19 @@ var chatEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 var mattermostEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "@", "@​", "]", "]​")
 
 // newSlackBody is the body of a Slack or Mattermost message, with what came
-// from a monitor or a target escaped by esc.
+// from a monitor or a target escaped by esc. The footer names the
+// installation the message comes from, when there is one: "Kubeat ·
+// <instance>".
 func newSlackBody(n Notification, now time.Time, esc func(string) string) slackBody {
 	text := esc(Text(n))
+	footer := "Kubeat"
+	if n.Instance != "" {
+		footer += " · " + esc(n.Instance)
+	}
 	// The link is Kubeat's own address, which Slack takes as it is.
 	attachment := slackAttachment{
 		Color: Color(n), Fallback: text, Title: esc(subject(n)), TitleLink: URL(n),
-		Footer: "Kubeat", Timestamp: now.Unix(),
+		Footer: footer, Timestamp: now.Unix(),
 	}
 	for _, f := range Facts(n) {
 		attachment.Fields = append(attachment.Fields, slackField{Title: esc(f.Label), Value: esc(f.Value), Short: shortValue(f.Value)})
@@ -166,7 +172,7 @@ type chatOpenLink struct {
 func newChatBody(n Notification) chatBody {
 	esc := chatEscaper.Replace
 	body := chatBody{Text: esc(Text(n))}
-	facts := Facts(n)
+	facts := withInstance(n, Facts(n))
 	link := URL(n)
 	if len(facts) == 0 && link == "" {
 		return body
@@ -266,7 +272,7 @@ func newTeamsBody(n Notification) teamsBody {
 		{Type: "TextBlock", Text: Emoji(n) + " " + subject(n), Wrap: true, Weight: "Bolder", Size: "Medium", Color: teamsColor(n)},
 		{Type: "TextBlock", Text: Text(n), Wrap: true},
 	}
-	if facts := Facts(n); len(facts) > 0 {
+	if facts := withInstance(n, Facts(n)); len(facts) > 0 {
 		set := teamsElement{Type: "FactSet"}
 		for _, f := range facts {
 			set.Facts = append(set.Facts, teamsFact{Title: f.Label, Value: f.Value})

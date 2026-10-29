@@ -154,6 +154,7 @@ func main() {
 		GroupWait:         cfg.NotifyGroupWait,
 		Language:          cfg.Language,
 		PublicURL:         cfg.PublicURL,
+		Instance:          cfg.InstanceName,
 		Metrics:           meter,
 		Logger:            logger,
 		// Shutting down, what is still waiting is sent within the time

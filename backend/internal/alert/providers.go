@@ -8,6 +8,7 @@ import (
 	"html"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -193,11 +194,83 @@ func telegramText(n Notification) string {
 // PagerDutySender raises and resolves alerts through the Events API v2. The
 // channel's secret is the integration's routing key. An incident here is
 // one alert there: the events about it share a deduplication key, so the
-// recovery closes what the outage opened.
+// recovery closes what the outage opened. The key names the installation
+// (Notification.Instance), so that installations sharing a service keep
+// their alerts apart; it is made from the event every time, not stored.
 type PagerDutySender struct {
 	Client    *http.Client
 	UserAgent string
 	URL       string
+	// Started is when this process started. The end of an incident opened,
+	// or of a slowness begun, before then goes under the key without the
+	// instance as well: a version that knew no instance may have opened
+	// the alert, and which key it is open under is not kept. Zero sends it
+	// under the one key.
+	Started time.Time
+}
+
+// dedupInstanceLimit bounds the instance in a dedup key, which PagerDuty
+// takes up to 255 characters long.
+const dedupInstanceLimit = 200
+
+// dedupInstance is an instance as it goes into a dedup key: its letters,
+// digits, dots, dashes and underscores, every run of other characters
+// (spaces, a port's colon, letters outside ASCII) as one dash, none at
+// either end, at most dedupInstanceLimit characters. The key then reads
+// the same wherever PagerDuty passes it on. Empty when nothing is left.
+func dedupInstance(instance string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range instance {
+		if !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '.' || r == '-' || r == '_') {
+			dash = true
+			continue
+		}
+		if dash && b.Len() > 0 {
+			b.WriteByte('-')
+		}
+		b.WriteRune(r)
+		dash = false
+	}
+	key := b.String()
+	if len(key) > dedupInstanceLimit {
+		key = key[:dedupInstanceLimit]
+	}
+	return strings.Trim(key, "-")
+}
+
+// dedupKey is the deduplication key of the alert a notification is about:
+// "kubeat-<instance>-incident-<incident id>", or for a slow monitor, one
+// alert there about no incident here, "kubeat-<instance>-slow-<monitor
+// id>", so that the recovery closes what the slowness opened. Without an
+// instance, the keys without it and its dash.
+func dedupKey(instance string, n Notification) string {
+	key := "kubeat-"
+	if instance = dedupInstance(instance); instance != "" {
+		key += instance + "-"
+	}
+	if n.Event == EventSlow || n.Event == EventSlowResolved {
+		return key + "slow-" + strconv.FormatInt(n.Monitor.ID, 10)
+	}
+	return key + "incident-" + strconv.FormatInt(n.Incident.ID, 10)
+}
+
+// openedBefore reports whether the alert a notification ends was opened
+// before this process started: by the incident's opening (its first
+// failure for an incident from before openings were recorded), or by when
+// the monitor turned slow.
+func (s *PagerDutySender) openedBefore(n Notification) bool {
+	if s.Started.IsZero() {
+		return false
+	}
+	opened := n.Incident.OpenedAt
+	switch {
+	case n.Event == EventSlowResolved:
+		opened = n.Since
+	case opened.IsZero():
+		opened = n.Incident.StartedAt
+	}
+	return opened.Before(s.Started)
 }
 
 type pagerDutyEvent struct {
@@ -227,20 +300,13 @@ func (s *PagerDutySender) Send(ctx context.Context, ch store.Channel, n Notifica
 	event := pagerDutyEvent{
 		RoutingKey:  ch.Secret,
 		EventAction: "trigger",
-		DedupKey:    fmt.Sprintf("kubeat-incident-%d", n.Incident.ID),
+		DedupKey:    dedupKey(n.Instance, n),
 		Client:      "Kubeat",
 		ClientURL:   URL(n),
 	}
 	switch n.Event {
-	case EventUp, EventCertRenewed:
+	case EventUp, EventCertRenewed, EventSlowResolved:
 		event.EventAction = "resolve"
-	case EventSlow, EventSlowResolved:
-		// A slow monitor is one alert there, about no incident here: the
-		// recovery closes what the slowness opened.
-		event.DedupKey = fmt.Sprintf("kubeat-slow-%d", n.Monitor.ID)
-		if n.Event == EventSlowResolved {
-			event.EventAction = "resolve"
-		}
 	case EventTest:
 		// A test must not page anyone: it is raised as information and
 		// resolved by the second request below.
@@ -256,6 +322,11 @@ func (s *PagerDutySender) Send(ctx context.Context, ch store.Channel, n Notifica
 		for _, fact := range Facts(n) {
 			details[fact.Label] = fact.Value
 		}
+		if n.Instance != "" {
+			// Under a fixed name, whatever the language, for the tools
+			// that read it.
+			details["instance"] = n.Instance
+		}
 		event.Payload = &pagerDutyPayload{
 			Summary:       truncate(Text(n), pagerDutySummaryLimit-3),
 			Source:        source,
@@ -268,8 +339,17 @@ func (s *PagerDutySender) Send(ctx context.Context, ch store.Channel, n Notifica
 	if err := s.enqueue(ctx, event); err != nil {
 		return err
 	}
-	if n.Event == EventTest {
+	switch {
+	case n.Event == EventTest:
 		return s.enqueue(ctx, pagerDutyEvent{RoutingKey: ch.Secret, EventAction: "resolve", DedupKey: event.DedupKey})
+	case event.EventAction == "resolve" && s.openedBefore(n):
+		// The alert may be open under the key without the instance. Should
+		// this second request fail, the end is sent again with both:
+		// resolving a closed alert, or one that never was, changes nothing.
+		if legacy := dedupKey("", n); legacy != event.DedupKey {
+			event.DedupKey = legacy
+			return s.enqueue(ctx, event)
+		}
 	}
 	return nil
 }

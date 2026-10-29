@@ -28,7 +28,11 @@ type webhookBody struct {
 	Text  string `json:"text"`
 	// URL is where to look at this in Kubeat; absent without a public
 	// address (UPTIME_PUBLIC_URL).
-	URL      string           `json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
+	// Instance names the installation the notification comes from, for a
+	// receiver that several share (Notification.Instance); absent without
+	// one.
+	Instance string           `json:"instance,omitempty"`
 	Monitor  *webhookMonitor  `json:"monitor,omitempty"`
 	Incident *webhookIncident `json:"incident,omitempty"`
 	// Slow is set for the slow-response events, which are about no
@@ -61,7 +65,7 @@ type webhookIncident struct {
 }
 
 func newWebhookBody(n Notification) webhookBody {
-	body := webhookBody{Event: n.Event, Text: Text(n), URL: URL(n)}
+	body := webhookBody{Event: n.Event, Text: Text(n), URL: URL(n), Instance: n.Instance}
 	if n.Event == EventTest && n.Monitor.ID == 0 {
 		return body
 	}

@@ -505,33 +505,77 @@ func TestNotifyRetry(t *testing.T) {
 
 // The cap on the wait between the attempts is at least a minute, and at
 // least one attempt: shorter, a channel that is down would be sent to
-// without a pause. The end of an outage has no such floor.
-func TestNotifyRetryMaxHasAFloor(t *testing.T) {
-	for _, bad := range []string{"10s", "59s"} {
-		t.Setenv("UPTIME_NOTIFY_RETRY_MAX", bad)
-		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "UPTIME_NOTIFY_RETRY_MAX") {
-			t.Errorf("UPTIME_NOTIFY_RETRY_MAX=%q: %v, want it refused", bad, err)
+// without a pause. A shorter cap is raised to that floor with a warning
+// that names the value given and the one used, rather than refused: a
+// value an earlier version took must not keep the backend from starting.
+// Zero still turns the attempts off, and a value that is not a duration is
+// still refused (TestNotifyRetry). The end of an outage has no floor.
+func TestNotifyRetryMaxIsRaisedToItsFloor(t *testing.T) {
+	// load loads with UPTIME_NOTIFY_RETRY_MAX set to value and returns the
+	// cap in effect and the warnings.
+	load := func(value string) (time.Duration, []string) {
+		t.Helper()
+		t.Setenv("UPTIME_NOTIFY_RETRY_MAX", value)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("UPTIME_NOTIFY_RETRY_MAX=%q: %v, want the backend to start", value, err)
+		}
+		return cfg.NotifyRetryMax, cfg.Warnings
+	}
+	for _, value := range []string{"1s", "10s", "59s"} {
+		got, warnings := load(value)
+		if got != time.Minute {
+			t.Errorf("UPTIME_NOTIFY_RETRY_MAX=%s: %s in effect, want it raised to 1m", value, got)
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "UPTIME_NOTIFY_RETRY_MAX ("+value+")") ||
+			!strings.Contains(warnings[0], "raised to 1m0s") {
+			t.Errorf("UPTIME_NOTIFY_RETRY_MAX=%s: warnings = %q, want one naming %s and 1m0s", value, warnings, value)
 		}
 	}
-	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "1m")
-	if cfg, err := Load(); err != nil || cfg.NotifyRetryMax != time.Minute {
-		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=1m: %s, %v", cfg.NotifyRetryMax, err)
+	for value, want := range map[string]time.Duration{"1m": time.Minute, "0": 0, "0s": 0, "": 15 * time.Minute} {
+		if got, warnings := load(value); got != want || len(warnings) != 0 {
+			t.Errorf("UPTIME_NOTIFY_RETRY_MAX=%q: %s, warnings %q; want %s and none", value, got, warnings, want)
+		}
 	}
+
 	// An attempt of 5 tries of 30s with 10s between them is 200s long.
 	t.Setenv("UPTIME_NOTIFY_ATTEMPTS", "5")
 	t.Setenv("UPTIME_NOTIFY_TIMEOUT", "30s")
 	t.Setenv("UPTIME_NOTIFY_RETRY_DELAY", "10s")
-	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "3m")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "= 3m20s") {
-		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=3m with attempts of 3m20s: %v, want it refused", err)
+	got, warnings := load("3m")
+	if got != 200*time.Second || len(warnings) != 1 || !strings.Contains(warnings[0], "UPTIME_NOTIFY_RETRY_MAX (3m0s)") ||
+		!strings.Contains(warnings[0], "= 3m20s") || !strings.Contains(warnings[0], "raised to 3m20s") {
+		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=3m with attempts of 3m20s: %s, warnings %q; want 3m20s and one warning naming both", got, warnings)
 	}
-	t.Setenv("UPTIME_NOTIFY_RETRY_MAX", "4m")
-	if _, err := Load(); err != nil {
-		t.Errorf("UPTIME_NOTIFY_RETRY_MAX=4m with attempts of 3m20s: %v", err)
+	for value, want := range map[string]time.Duration{"4m": 4 * time.Minute, "0": 0, "": 15 * time.Minute} {
+		if got, warnings := load(value); got != want || len(warnings) != 0 {
+			t.Errorf("UPTIME_NOTIFY_RETRY_MAX=%q with attempts of 3m20s: %s, warnings %q; want %s and none", value, got, warnings, want)
+		}
 	}
 	t.Setenv("UPTIME_NOTIFY_RETRY_FOR", "30s")
 	if cfg, err := Load(); err != nil || cfg.NotifyRetryFor != 30*time.Second {
 		t.Errorf("UPTIME_NOTIFY_RETRY_FOR=30s: %s, %v", cfg.NotifyRetryFor, err)
+	}
+}
+
+// The name of the installation in notifications: as given, or else the
+// host of the public address, or none.
+func TestInstanceName(t *testing.T) {
+	for _, tc := range []struct{ name, publicURL, want string }{
+		{"", "", ""},
+		{"", "https://kubeat.apps.example/", "kubeat.apps.example"},
+		{"", "https://kubeat.apps.example:8443", "kubeat.apps.example:8443"},
+		{"", "https://user:secret@kubeat.apps.example", "kubeat.apps.example"},
+		{"", "kubeat.apps.example", ""}, // no scheme, so no host
+		{" prod-eu ", "https://kubeat.apps.example", "prod-eu"},
+		{"staging", "", "staging"},
+	} {
+		t.Setenv("UPTIME_INSTANCE_NAME", tc.name)
+		t.Setenv("UPTIME_PUBLIC_URL", tc.publicURL)
+		cfg, err := Load()
+		if err != nil || cfg.InstanceName != tc.want {
+			t.Errorf("UPTIME_INSTANCE_NAME=%q, UPTIME_PUBLIC_URL=%q: %q, %v; want %q", tc.name, tc.publicURL, cfg.InstanceName, err, tc.want)
+		}
 	}
 }
 

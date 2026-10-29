@@ -596,6 +596,12 @@ Müşteri B'nin hıçkırık bulgusu kapandı. Dead-letter görünümü, kalıc�
 kuyruk ve kapanmış olayın teslim edilmemiş `up`'ı bu maddede kalır,
 tetikleyici değişmedi.
 
+Güncelleme (2026-10-30, S28, #61): Müşteri A'nın "en azı" yapıldı: README
+"Bildirim kanalları"nda PagerDuty ve webhook satırları, kanal uzun süre
+ulaşılmaz kalabiliyorsa `UPTIME_NOTIFY_RETRY_FOR`'un bakım penceresinden
+uzun tutulmasını söyler. Kapanmış olayın teslim edilmemiş `up`'ı, dead-letter
+görünümü ve kalıcı kuyruk bu maddede kalır, tetikleyici değişmedi.
+
 ## Patlamada ölü makine kanalının teslimat kuyruğuna maliyeti
 
 2026-10-28'de ertelendi (S18'in kapsam dışı parçası, #26; PO kararı "kanal

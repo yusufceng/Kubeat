@@ -15,6 +15,18 @@ language: en
 # router picks, set it to that host once the Route exists.
 publicURL: ""   # https://kubeat.apps.example
 
+# The name of this installation in its notifications, for the receivers
+# several installations share: PagerDuty's dedup key and custom details,
+# the webhook body's "instance", the footer of Slack and Mattermost
+# messages, a field on Teams and Google Chat cards and a line in the body
+# of an e-mail (UPTIME_INSTANCE_NAME). Empty takes the host of publicURL,
+# or of route.host or ingress.host, which publicURL is derived from; with
+# none of them there is none. With several clusters, give each its name
+# here. PagerDuty's key is made from it every time, not stored: close the
+# open PagerDuty incidents before you change it or publicURL, or they are
+# not closed from here.
+instanceName: ""   # prod-eu
+
 # How many old ReplicaSets each Deployment keeps for a rollback. Kubernetes
 # keeps ten; a namespace quota on ReplicaSets (the Developer Sandbox allows
 # thirty) fills up after a few upgrades and the next one cannot roll out.
@@ -76,7 +88,7 @@ backend:
     # UPTIME_RETENTION: 168h
     # UPTIME_REMINDER_INTERVAL: 15m    # announce an ongoing outage again
     # UPTIME_NOTIFY_GROUP_WAIT: 30s    # "0" turns grouping off
-    # UPTIME_NOTIFY_RETRY_MAX: 15m     # an outage notification a channel did not take is sent again at 1, 2, 4... minutes up to this (at least 1m), at this after a refusal (4xx), at Retry-After after a 429; "0" turns it off
+    # UPTIME_NOTIFY_RETRY_MAX: 15m     # an outage notification a channel did not take is sent again at 1, 2, 4... minutes up to this, at this after a refusal (4xx), at Retry-After after a 429; "0" turns it off; under 1m or one attempt (ATTEMPTS × (TIMEOUT + RETRY_DELAY)) it is raised to that, with a warning in the log
     # UPTIME_NOTIFY_RETRY_FOR: 1h      # the end of an outage is sent again for this long at most; "0" does not send it again
     # UPTIME_NOTIFY_QUEUE_SIZE: "1000" # notifications waiting for delivery; at least the number of monitors, or an outage of them all overflows it (the backend warns once when more are enabled); 1000 take about 1 MiB of memory, 2 MiB full
     # UPTIME_SHUTDOWN_TIMEOUT: 10s     # stopping waits this long for open requests and for the notifications still waiting; keep terminationGracePeriodSeconds 5s longer
