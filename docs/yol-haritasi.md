@@ -230,15 +230,22 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   düzeltmek ya da kapatmaktır, hangi kanal olduğunu
   `KubeatNotificationsFailing` söyler ([backlog](backlog.md) "Teslimat hata
   sınıflarının kalanları").
-  Ulaşılamayan ya da meşgul bir makine kanalı (webhook, PagerDuty) yeni
-  bildirimleri kendi yeniden deneme zamanına bekletir; tek bir monitor'un
+  Ulaşılamayan ya da meşgul bir kanal, makine (webhook, PagerDuty) ya da
+  insan kanalı (Slack, e-posta…), yeni bildirimleri ve grupları kendi
+  yeniden deneme zamanına bekletir, gruplama kapalıyken
+  (`UPTIME_NOTIFY_GROUP_WAIT=0`) de: kanal dönünce yeni mesajı en çok o
+  anki bekleme süresi kadar (üst sınır `UPTIME_NOTIFY_RETRY_MAX`) gecikir.
+  Yeniden denenmeyen bir bildirimin (hatırlatma, sertifika, yavaşlık)
+  ilk denemesinde ulaşamadığı kanal, yeniden denenecek başka bir bildirimi
+  yoksa bekletilmez: birden çok namespace'te aynı anda gelen böyle grupların
+  her biri ona denenir ve döngüyü bir deneme süresi tutar ([backlog](backlog.md)
+  "Teslimat hata sınıflarının kalanları"). Tek bir monitor'un
   bildirimlerine sürekli 5xx dönen bir alıcı kanalı her geçişte yeniden
   duraklatır, yeni bildirimler en çok `UPTIME_NOTIFY_RETRY_MAX` gecikir.
   `Retry-After` yalnızca başlıktan okunur (saniye ya da HTTP tarihi);
   gövdedeki `retry_after` alanları okunmaz, sağlayıcı başına istemci
   tarafı hız sınırlayıcı yoktur. SMTP'nin kalıcı yanıtları (5xx SMTP
-  kodları) ulaşılamadı sayılır. İnsan kanalları ise gruplama kapalıyken
-  (`UPTIME_NOTIFY_GROUP_WAIT=0`) her bildirimde yine denenir.
+  kodları) ulaşılamadı sayılır.
   Deneme listesi bellektedir: yeniden
   başlatmada açık kesintininki, hiç denenmemiş olanlar (kuyrukta ya da grup
   beklemesinde kalanlar) dahil, bildirim kaydından kurulur (kaydı
