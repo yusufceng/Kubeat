@@ -959,3 +959,34 @@ Hat ve Node.js duyurularına ve Dependabot'un taban imaj PR'larına bağlıdır.
 Çözüm: yayımlanan imajlara haftalık bir imaj tarayıcısı (Trivy ya da Grype;
 SBOM'dan da çalışabilir). Tetikleyici: bir taban imaj açığının 7 günlük
 hedefi kaçırması ya da bir müşterinin tarama raporu istemesi.
+
+## Teslimat hata sınıflarının kalanları
+
+2026-10-29'da ertelendi (S26, #49; issue'nun kapsam dışı listesi ve
+developer raporu). S26 teslimat hatalarını dört sınıfa ayırdı (README
+"Alarm", hata sınıfları); şu parçalar dışarıda kaldı:
+
+- **SMTP'nin kalıcı yanıtları.** 5xx SMTP kodları (ör. 550, alıcı yok)
+  "ulaşılamadı" sayılır: kısa tekrar ve 1, 2, 4… dk bekleme alır. "Reddetti"
+  sayılmaları e-posta göndericisinin SMTP kodunu taşımasını ister.
+- **Gövdedeki `retry_after`.** `Retry-After` yalnızca başlıktan, saniye ya
+  da HTTP tarihi olarak okunur. Telegram'ın `parameters.retry_after`'ı,
+  Discord'un gövdedeki `retry_after`'ı ve ondalık saniye okunmaz; başlıksız
+  429 1 dk bekler.
+- **Düzenlemede yeniden deneme.** Düzeltilen kanalın reddettiği bildirim
+  sıradaki denemesini (en çok `UPTIME_NOTIFY_RETRY_MAX`) bekler; kanalı
+  kaydetmek denemeyi öne almaz.
+- **Kanalı durdurmak ve "bozuk" rozeti.** Sürekli reddeden kanal
+  kendiliğinden durdurulmaz, Bildirimler sayfasında ayrı bir rozet yoktur;
+  son hata kanal satırında görünür, alarm `KubeatNotificationsFailing`'dir.
+- **İstemci tarafında hız sınırlayıcı.** Sağlayıcı başına istek hızı
+  sınırlanmaz; 429'a `Retry-After` ile uyulur.
+- **Tek monitor'a 5xx dönen alıcı.** Bir monitor'un bildirimlerine sürekli
+  5xx dönen alıcı kanalı her geçişte yeniden duraklatır, yeni bildirimler
+  en çok `UPTIME_NOTIFY_RETRY_MAX` gecikir; 4xx'ten farklı olarak bunu
+  "kanal ölü" durumundan ayırmak alıcıyı tanımayı ister.
+
+Tetikleyici: pilotta ya da bir kurulumda bunlardan birinin görülmesi
+(5xx SMTP yanıtıyla dönen e-posta kanalı, hız sınırını gövdede bildiren
+sağlayıcı, düzeltildikten sonra bekleyen sayfa, tek monitor'a 5xx dönen
+ITSM).
