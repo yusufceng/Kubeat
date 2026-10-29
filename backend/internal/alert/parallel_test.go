@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -449,6 +450,245 @@ func TestABurstWithADeadWebhookKeepsTheQueueMoving(t *testing.T) {
 		if got := gathered(key); got != want {
 			t.Errorf("%s = %v, want %v", key, got, want)
 		}
+	}
+}
+
+// relay stands for an e-mail relay that does not answer: a send to its
+// channel lasts until the test ends it (timeout), as a send lasts until
+// its timeout, and fails then, not reaching the relay. The test hears when
+// one begins (tried, with the monitor it is about). Once the relay is back
+// it takes what it is sent. The sends to the other channels go to the
+// recorder, and the test hears of each one taken (paged, as
+// "channel:monitor"). Nothing here waits on the wall clock.
+type relay struct {
+	*recorder
+	channel  string
+	tried    chan string
+	timeout  chan struct{}
+	paged    chan string
+	back     atomic.Bool
+	attempts atomic.Int32
+	once     sync.Once
+}
+
+func newRelay(f *fixture, channel string) *relay {
+	r := &relay{recorder: f.sender, channel: channel, tried: make(chan string, 100),
+		timeout: make(chan struct{}), paged: make(chan string, 100)}
+	f.engine.sender = r
+	return r
+}
+
+func (r *relay) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	if ch.Name != r.channel || r.back.Load() {
+		if err := r.recorder.Send(ctx, ch, n); err != nil || ch.Name == r.channel {
+			return err
+		}
+		select {
+		case r.paged <- ch.Name + ":" + n.Monitor.Name:
+		default:
+		}
+		return nil
+	}
+	r.attempts.Add(1)
+	select {
+	case r.tried <- n.Monitor.Name:
+	default:
+	}
+	select {
+	case <-r.timeout:
+	case <-ctx.Done():
+	}
+	return errors.New("dial tcp: i/o timeout")
+}
+
+// release ends every send to the relay, under way or to come.
+func (r *relay) release() { r.once.Do(func() { close(r.timeout) }) }
+
+// An outage that spreads over namespaces while the e-mail relay does not
+// answer: each namespace's group falls due for e-mail at once, and the
+// first holds the loop for an attempt. A new outage that comes meanwhile
+// is paged to the webhook as soon as that attempt is over, whether one
+// namespace or five are down: e-mail, not reached, is paused, and the
+// groups after the first wait for its retry instead of an attempt each.
+// Nothing is lost: once the relay is back, at its retry, it is sent every
+// group that waited for it, one message a namespace. While the loop is
+// held, the queue gauge shows the outage waiting. The relay's attempts
+// end when the test says, and the loop's clock stands still until the
+// test moves it (holdClock; the loop's own timer only wakes the loop): no
+// bound here hangs on the wall clock. The test's one timer stops a test
+// that hangs, it measures nothing.
+func TestADeadMailRelayDoesNotHoldUpThePagesOfAnOutageOverNamespaces(t *testing.T) {
+	for _, namespaces := range []int{1, 3, 5} {
+		t.Run(fmt.Sprintf("%d namespaces", namespaces), func(t *testing.T) {
+			f := newFixture(t, 1, 1) // "ops", a webhook
+			f.engine.opts.Metrics = metrics.New("test")
+			f.engine.opts.Metrics.WatchQueue(f.engine.QueueLength)
+			f.engine.opts.GroupWait = 10 * time.Millisecond
+			f.engine.opts.RetryMax, f.engine.opts.RetryFor = 15*time.Minute, time.Hour
+			// One try an attempt, which lasts until the test ends it.
+			f.engine.opts.SendTimeout, f.engine.opts.Attempts = time.Hour, 1
+			mail := f.addChannel(store.Channel{Name: "mail", Type: store.ChannelEmail, Target: "ops@example.com"})
+			relay := newRelay(f, "mail")
+			// Two monitors a namespace, so that e-mail's messages are groups.
+			// The outages open after the engine started: the loop's restore
+			// leaves them to the queue.
+			f.clock = time.Now().UTC()
+			var outages [][]store.Monitor
+			for i := range namespaces {
+				ns := fmt.Sprintf("ns-%d", i)
+				outages = append(outages, []store.Monitor{f.monitorIn(ns+"-a", ns), f.monitorIn(ns+"-b", ns)})
+			}
+			late := f.monitorIn("late", "late")
+			clock := f.holdClock()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				f.engine.Run(ctx)
+			}()
+			t.Cleanup(func() {
+				relay.back.Store(true)
+				relay.release()
+				cancel()
+				<-done
+			})
+			hang := time.After(time.Minute)
+			next := func(events <-chan string, what string) string {
+				t.Helper()
+				select {
+				case event := <-events:
+					return event
+				case <-hang:
+					t.Fatalf("still waiting for %s; sent %q", what, f.sender.log())
+					return ""
+				}
+			}
+
+			// The outage spreads over the namespaces: the webhook is paged
+			// for each monitor at once, and each namespace's group waits for
+			// e-mail. A namespace's group is made by its first monitor, so
+			// every group is there once the last page is.
+			var want []string
+			for _, monitors := range outages {
+				for _, m := range monitors {
+					f.result(m, false)
+					want = append(want, "ops:"+m.Name)
+				}
+			}
+			var paged []string
+			for range want {
+				paged = append(paged, next(relay.paged, "the pages of the outage"))
+			}
+			if got := strings.Join(paged, ","); got != strings.Join(want, ",") {
+				t.Fatalf("paged %s, want %s", got, strings.Join(want, ","))
+			}
+
+			// GroupWait is up: the groups fall due together, and the first
+			// is sent to the relay, which holds the loop.
+			clock.pass(f.engine.opts.GroupWait)
+			if got := next(relay.tried, "the first group's attempt to the relay"); got != "ns-0-a" {
+				t.Fatalf("the relay was first sent %s's group, want ns-0's", got)
+			}
+			// A new outage comes while the loop is held: it waits in the
+			// queue, and the gauge says so.
+			f.result(late, false)
+			if got := f.metric("kubeat_notification_queue_length"); got != 1 {
+				t.Errorf("kubeat_notification_queue_length = %v while the loop is held, want 1", got)
+			}
+
+			// The attempt ends, as at its timeout, and the relay is not
+			// reached. The webhook is paged for the new outage before the
+			// relay is sent anything again.
+			select {
+			case relay.timeout <- struct{}{}:
+			case <-hang:
+				t.Fatal("the relay's attempt is not under way")
+			}
+			select {
+			case got := <-relay.paged:
+				if got != "ops:late" {
+					t.Fatalf("paged %s after the relay's attempt, want ops:late", got)
+				}
+			case got := <-relay.tried:
+				t.Fatalf("the relay was sent %s's group before the webhook was paged for the new outage: the page waits an attempt a group", got)
+			case <-hang:
+				t.Fatalf("the webhook was not paged for the new outage; sent %q", f.sender.log())
+			}
+			if got := f.metric("kubeat_notification_queue_length"); got != 0 {
+				t.Errorf("kubeat_notification_queue_length = %v once the loop took the queue, want 0", got)
+			}
+
+			// Shutting down sends the new outage's group to the relay's
+			// list too, not to the relay: every group waits for the relay's
+			// retry, the first attempted once, the others never.
+			cancel()
+			select {
+			case <-done:
+			case got := <-relay.tried:
+				t.Fatalf("shutting down, the loop sent the relay %s's group: it is not paused", got)
+			case <-hang:
+				t.Fatal("the loop did not stop")
+			}
+			if n := relay.attempts.Load(); n != 1 {
+				t.Errorf("the relay was attempted %d times, want once", n)
+			}
+			var waiting []string
+			for _, r := range f.engine.owed.retries {
+				var names []string
+				for _, m := range members(r.note) {
+					names = append(names, m.Monitor.Name)
+				}
+				waiting = append(waiting, fmt.Sprintf("%s:%s:%d", r.channel.Name, strings.Join(names, "+"), r.attempts))
+			}
+			wantWaiting := []string{"mail:ns-0-a+ns-0-b:1"}
+			for i := 1; i < namespaces; i++ {
+				wantWaiting = append(wantWaiting, fmt.Sprintf("mail:ns-%d-a+ns-%d-b:0", i, i))
+			}
+			wantWaiting = append(wantWaiting, "mail:late:0")
+			if got := strings.Join(waiting, ","); got != strings.Join(wantWaiting, ",") {
+				t.Fatalf("waiting (channel:monitors:failed attempts) = %s, want %s", got, strings.Join(wantWaiting, ","))
+			}
+			if got, want := f.engine.owed.undelivered()[mail.ID], 2*namespaces+1; got != want {
+				t.Errorf("%d outages wait for the relay, want %d", got, want)
+			}
+
+			// The relay is back. At its retry, a minute after its attempt,
+			// it is sent every group that waited, one message a namespace;
+			// the webhook is paged for nothing again.
+			relay.back.Store(true)
+			clock.pass(time.Minute)
+			f.flush()
+			var told []string
+			f.sender.mu.Lock()
+			for i, n := range f.sender.sent {
+				if f.sender.channels[i] != "mail" {
+					continue
+				}
+				var names []string
+				for _, m := range members(n) {
+					names = append(names, m.Monitor.Name)
+				}
+				told = append(told, string(n.Event)+":"+strings.Join(names, "+"))
+			}
+			f.sender.mu.Unlock()
+			sort.Strings(told)
+			var wantTold []string
+			for i := range namespaces {
+				wantTold = append(wantTold, fmt.Sprintf("down:ns-%d-a+ns-%d-b", i, i))
+			}
+			wantTold = append(wantTold, "down:late")
+			sort.Strings(wantTold)
+			if got := strings.Join(told, ","); got != strings.Join(wantTold, ",") {
+				t.Errorf("the relay back was sent %s, want %s", got, strings.Join(wantTold, ","))
+			}
+			if got, want := strings.Count(f.sentTo("ops"), "down:"), 2*namespaces+1; got != want {
+				t.Errorf("the webhook was paged %d times, want %d: once an outage", got, want)
+			}
+			if n := len(f.engine.owed.retries); n != 0 {
+				t.Errorf("%d retries left, want none", n)
+			}
+		})
 	}
 }
 

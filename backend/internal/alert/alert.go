@@ -512,11 +512,13 @@ func takeDue(groups map[groupKey]*pendingGroup, now time.Time, everything bool) 
 // answer for as long as one send to it takes, not once per channel, and
 // the other channels are not held up at all. An outage notification a
 // channel did not take is sent again when its wait is up (retryLater,
-// deliverOwed), with what else is owed; a channel software reads that an
-// attempt did not reach, or that was busy, is sent nothing until then
-// (paused), so that one that is down holds up the loop once per wait
-// rather than once per notification. After every turn the metrics get
-// what the channels have not taken of the outages (publish).
+// deliverOwed), with what else is owed; a channel that an attempt did not
+// reach, or that was busy, is sent nothing until then (paused), whether
+// software or people read it, so that one that is down holds up the loop
+// once per wait rather than once per notification or group: an e-mail
+// relay that does not answer while an outage spreads over namespaces does
+// not hold back the pages queued behind the groups. After every turn the
+// metrics get what the channels have not taken of the outages (publish).
 func (e *Engine) Run(ctx context.Context) {
 	defer e.publish()
 	if e.opts.DrainTimeout > 0 {
@@ -638,7 +640,10 @@ func (e *Engine) publish() {
 // deliverGroup sends the notifications of one group to the channels that
 // include accepts, as one message where more than one is for that channel.
 // With GroupWait those are the channels people read; the machine channels
-// got each notification when it arose.
+// got each notification when it arose. A paused channel is not attempted:
+// its message is held back for its next pass (paused), so that a relay
+// that does not answer costs the groups due together one attempt, not one
+// each.
 func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notification, include func(store.Channel) bool) {
 	if len(notes) == 1 {
 		e.deliverTo(ctx, notes[0], include)
@@ -651,7 +656,10 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 		return
 	}
 	now := e.now()
-	var shares []outbound
+	var (
+		shares []outbound
+		held   []failed
+	)
 	for _, ch := range channels {
 		if !ch.Enabled || (include != nil && !include(ch)) {
 			continue
@@ -664,11 +672,17 @@ func (e *Engine) deliverGroup(ctx context.Context, event Event, notes []Notifica
 				mine = append(mine, n)
 			}
 		}
-		if n, ok := grouped(event, mine); ok {
+		n, ok := grouped(event, mine)
+		switch {
+		case !ok:
+		case e.paused(ch, now) != nil:
+			// Not attempted: it waits for the channel's next pass.
+			held = append(held, failed{channel: ch, note: n, held: true})
+		default:
 			shares = append(shares, outbound{channel: ch, notes: []Notification{n}})
 		}
 	}
-	e.retryLater(e.deliver(ctx, shares))
+	e.retryLater(append(e.deliver(ctx, shares), held...))
 	e.outagesOver(notes)
 }
 
@@ -757,14 +771,15 @@ type outbound struct {
 
 // order returns the indexes of the share's notes in the order they are
 // sent: as they came up, or, when the pass stops at the first note the
-// channel does not take (deliver, a channel that pauses), the notes the
-// channel refused fewer times first, and as they came up among equals. A
-// note the channel keeps failing on while it takes the others (a receiver
-// answering 500 to the notifications of one monitor; a refusal, 4xx, stops
-// no pass) is then sent after them rather than ahead of them in every
-// pass, and a channel that is down is still attempted once a pass, each
-// time with a note it refused least. A reminder counts as its outage when
-// that is in the share too, and goes after it.
+// channel does not take (deliver, with the attempts again on), the notes
+// the channel refused fewer times first, and as they came up among equals.
+// A note the channel keeps failing on while it takes the others (a
+// receiver answering 500 to the notifications of one monitor; a refusal,
+// 4xx, stops no pass) is then sent after them rather than ahead of them in
+// every pass, and a channel that is down is still attempted once a pass,
+// each time with a note it refused least. A reminder counts as its outage
+// when that is in the share too, and goes after it; for a grouped message,
+// as the outage of any of its monitors that is.
 func (s outbound) order(stopsAtFirst bool) []int {
 	order := make([]int, len(s.notes))
 	for i := range order {
@@ -780,13 +795,20 @@ func (s outbound) order(stopsAtFirst bool) []int {
 			refused[i] = r.attempts
 		}
 		if n.Event == EventDown {
-			outages[n.Incident.ID] = refused[i]
+			for _, m := range members(n) {
+				outages[m.Incident.ID] = refused[i]
+			}
 		}
 	}
 	reminds := make([]bool, len(s.notes))
 	for i, n := range s.notes {
-		if o, ok := outages[n.Incident.ID]; ok && n.Event == EventReminder {
-			refused[i], reminds[i] = max(refused[i], o), true
+		if n.Event != EventReminder {
+			continue
+		}
+		for _, m := range members(n) {
+			if o, ok := outages[m.Incident.ID]; ok {
+				refused[i], reminds[i] = max(refused[i], o), true
+			}
 		}
 	}
 	sort.SliceStable(order, func(a, b int) bool {
@@ -819,29 +841,28 @@ type failed struct {
 // last send is recorded. The channels are sent to in parallel, one
 // goroutine each, and each channel serially, in order: a channel that is
 // slow or down holds up only itself, and a pass costs the loop its slowest
-// channel rather than the sum of them. A channel's pass stops at the first
-// note that did not reach it (unreachable), and at the first a channel
-// software reads was busy for: the notes sent to it again are held back
-// for the pass, so that a channel that is down or asks to wait costs the
-// pass one attempt, not one per note waiting on it, and they wait again
-// (retryLater). A note sent for the first time still goes to a channel
-// people read: it is news, which the channel may yet take. A channel
-// software reads (with the attempts again on) is held back all the rest,
-// and paused until it takes one (paused); it is sent the notes it refused
-// fewer times first (outbound.order). A note the receiver refused (4xx)
-// stops nothing: the channel is there and takes the rest, and is not
-// paused. Only the sends leave the loop's goroutine; what a channel is
-// owed (route, retryLater, outagesOver, paused) is settled in the loop,
-// before and after, and the store and the metrics take calls from several
-// goroutines.
+// channel rather than the sum of them. With the attempts again on, a
+// channel's pass stops at the first note that did not reach it
+// (unreachable) or that it was busy for: the rest of its share is held
+// back for the pass, so that a channel that is down or asks to wait costs
+// the pass one attempt, not one per note waiting on it, and they wait
+// again (retryLater). The channel, whether software or people read it, is
+// then paused until it takes one (paused), and is sent the notes it
+// refused fewer times first (outbound.order). A note the receiver refused
+// (4xx) stops nothing: the channel is there and takes the rest, and is not
+// paused. With the attempts again off every note is attempted, and
+// nothing pauses. Only the sends leave the loop's goroutine; what a
+// channel is owed (route, retryLater, outagesOver, paused) is settled in
+// the loop, before and after, and the store and the metrics take calls
+// from several goroutines.
 func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 	var (
 		wg       sync.WaitGroup
 		mu       sync.Mutex
 		failures []failed
 	)
+	pauses := e.pausing()
 	for _, s := range shares {
-		pauses := e.pauses(s.channel)
 		order := s.order(pauses)
 		wg.Go(func() {
 			// stop is the failure the pass stopped at, if it did.
@@ -849,11 +870,11 @@ func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 			for _, i := range order {
 				f := failed{channel: s.channel, note: s.notes[i], retry: s.retries[i]}
 				var err error
-				if stop != nil && (f.retry != nil || pauses) {
+				if stop != nil {
 					f.held, f.class, f.wait = true, stop.class, stop.wait
 				} else if f.class, f.wait, err = e.send(ctx, s.channel, f.note); err == nil {
 					continue
-				} else if stop == nil && (f.class == unreachable || f.class == busy && pauses) {
+				} else if pauses && f.class != refused {
 					stop = &f
 				}
 				mu.Lock()
@@ -863,9 +884,8 @@ func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 		})
 	}
 	wg.Wait()
-	// A channel software reads is paused once a note did not reach it or
-	// it was busy; a pass in which it took or refused all it was sent
-	// lifts the pause.
+	// A channel is paused once a note did not reach it or it was busy; a
+	// pass in which it took or refused all it was sent lifts the pause.
 	missed := make(map[int64]bool, len(failures))
 	for _, f := range failures {
 		if !f.held && f.class != refused {
@@ -874,7 +894,7 @@ func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 	}
 	for _, s := range shares {
 		switch {
-		case !e.pauses(s.channel):
+		case !pauses:
 		case missed[s.channel.ID]:
 			e.owed.failing[s.channel.ID] = true
 		default:
@@ -882,6 +902,14 @@ func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 		}
 	}
 	return failures
+}
+
+// QueueLength is how many notifications wait in the delivery queue now,
+// for kubeat_notification_queue_length: what the loop has not taken yet,
+// of the UPTIME_NOTIFY_QUEUE_SIZE that fit. Safe to call from any
+// goroutine.
+func (e *Engine) QueueLength() int {
+	return len(e.queue)
 }
 
 // send delivers one notification (single or grouped) to one channel, with
