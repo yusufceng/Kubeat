@@ -259,3 +259,91 @@ tests:
             exp_annotations:
               summary: "Kubeat's database backup is failing"
               description: "The newest backup attempt failed and none has succeeded since, so the newest good copy keeps getting older; the backend's log says why (a full backup volume, a copy that did not verify, a backup directory it cannot use). A full volume is tried again only after backup.interval, and the alert stays meanwhile."
+
+  - name: KubeatNotificationsFailing is one alert per channel for an HA pair the store does not deduplicate
+    interval: 1m
+    input_series:
+      # Both Prometheus replicas of cluster a send its backend's series. From
+      # 1m the webhook itsm answers 404 to an outage notification, which
+      # waits to be sent again; fixed, it takes it at 12m. Replica 1 stops at
+      # 8m (restarted, or gone): its series end there, its last values those
+      # of a failing channel.
+      - series: 'kubeat_channel_last_delivery_ok{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-0", channel="itsm", channel_type="webhook"}'
+        values: '1 0x10 1x5'
+      - series: 'kubeat_channel_undelivered_outages{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-0", channel="itsm", channel_type="webhook"}'
+        values: '0 1x10 0x5'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-0"}'
+        values: '1x16'
+      - series: 'kubeat_channel_last_delivery_ok{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-1", channel="itsm", channel_type="webhook"}'
+        values: '1 0x6'
+      - series: 'kubeat_channel_undelivered_outages{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-1", channel="itsm", channel_type="webhook"}'
+        values: '0 1x6'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-1"}'
+        values: '1x7'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KubeatNotificationsFailing
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: KubeatNotificationsFailing
+        exp_alerts:
+          - exp_labels: &itsm-failing-a-labels
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              cluster: a
+              channel: itsm
+              channel_type: webhook
+            exp_annotations: &itsm-failing-annotations
+              summary: "Kubeat notifications are not reaching channel itsm"
+              description: "For 5 minutes the last attempt to deliver to the webhook channel itsm has failed, or an outage it did not take has been waiting to be sent to it again, so an outage may have gone unannounced there. The Channels page shows the channel's last error: a refusal (4xx) means the channel or its receiver needs fixing."
+      - eval_time: 10m
+        alertname: KubeatNotificationsFailing
+        exp_alerts:
+          - exp_labels: *itsm-failing-a-labels
+            exp_annotations: *itsm-failing-annotations
+      # The channel took the outage at 12m. The last values of the stopped
+      # replica, from 7m, hold nothing once the other replica is scraped.
+      - eval_time: 13m
+        alertname: KubeatNotificationsFailing
+        exp_alerts: []
+
+  - name: KubeatNotificationsFailing of a cluster holds over its scrape gap while the other cluster is scraped
+    interval: 1m
+    input_series:
+      # a's webhook itsm answers 404 from 1m, and a's scrapes fail from 8m.
+      # b has a channel of the same name, which takes its notifications, and
+      # is scraped throughout.
+      - series: 'kubeat_channel_last_delivery_ok{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", channel="itsm", channel_type="webhook"}'
+        values: '1 0x6 stale'
+      - series: 'kubeat_channel_undelivered_outages{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", channel="itsm", channel_type="webhook"}'
+        values: '0 1x6 stale'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1x7 stale'
+      - series: 'kubeat_channel_last_delivery_ok{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", channel="itsm", channel_type="webhook"}'
+        values: '1x20'
+      - series: 'kubeat_channel_undelivered_outages{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", channel="itsm", channel_type="webhook"}'
+        values: '0x20'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: KubeatNotificationsFailing
+        exp_alerts:
+          - exp_labels: *itsm-failing-a-labels
+            exp_annotations: *itsm-failing-annotations
+      # The last values, from 7m, hold it for 10 minutes, whatever b's
+      # scrapes say.
+      - eval_time: 8m
+        alertname: KubeatNotificationsFailing
+        exp_alerts:
+          - exp_labels: *itsm-failing-a-labels
+            exp_annotations: *itsm-failing-annotations
+      - eval_time: 16m
+        alertname: KubeatNotificationsFailing
+        exp_alerts:
+          - exp_labels: *itsm-failing-a-labels
+            exp_annotations: *itsm-failing-annotations
+      - eval_time: 18m
+        alertname: KubeatNotificationsFailing
+        exp_alerts: []

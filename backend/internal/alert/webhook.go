@@ -208,33 +208,40 @@ func (s *WebhookSender) Send(ctx context.Context, ch store.Channel, n Notificati
 	return postJSON(ctx, s.Client, s.UserAgent, ch.Target, newWebhookBody(n))
 }
 
-// postJSON posts body as JSON; any non-2xx answer is an error.
+// postJSON posts body as JSON; any non-2xx answer is an error (a
+// *statusError).
 func postJSON(ctx context.Context, client *http.Client, userAgent, url string, body any) error {
-	status, _, err := post(ctx, client, userAgent, url, nil, body)
+	answer, err := post(ctx, client, userAgent, url, nil, body)
 	if err != nil {
 		return err
 	}
-	if status < 200 || status >= 300 {
-		return fmt.Errorf("webhook answered %d", status)
-	}
-	return nil
+	return accepted("webhook", answer, "")
 }
 
 // answerLimit bounds how much of a provider's answer is read: enough for
 // the message of an error.
 const answerLimit = 2 << 10
 
+// reply is what a provider answered: the status, the beginning of the body,
+// and its Retry-After header as sent, which says when a receiver that is
+// busy wants to be asked again (classify).
+type reply struct {
+	status     int
+	body       []byte
+	retryAfter string
+}
+
 // post sends body as JSON with the given extra headers and returns the
-// status of the answer and the beginning of its body. Its errors never
-// carry the URL, which for most providers is or contains a credential.
-func post(ctx context.Context, client *http.Client, userAgent, target string, headers map[string]string, body any) (int, []byte, error) {
+// answer. Its errors never carry the URL, which for most providers is or
+// contains a credential.
+func post(ctx context.Context, client *http.Client, userAgent, target string, headers map[string]string, body any) (reply, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return 0, nil, err
+		return reply{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
 	if err != nil {
-		return 0, nil, errors.New("the address is not a valid URL")
+		return reply{}, errors.New("the address is not a valid URL")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if userAgent != "" {
@@ -250,10 +257,10 @@ func post(ctx context.Context, client *http.Client, userAgent, target string, he
 		if errors.As(err, &urlErr) {
 			err = urlErr.Err // the cause without the URL around it
 		}
-		return 0, nil, fmt.Errorf("request failed: %w", err)
+		return reply{}, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	answer, _ := io.ReadAll(io.LimitReader(resp.Body, answerLimit))
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-	return resp.StatusCode, answer, nil
+	return reply{status: resp.StatusCode, body: answer, retryAfter: resp.Header.Get("Retry-After")}, nil
 }

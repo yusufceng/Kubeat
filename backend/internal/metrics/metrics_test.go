@@ -35,6 +35,7 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.LastBackup(time.Now())
 	m.License(time.Now())
 	m.WatchHealth(func() error { return nil })
+	m.UndeliveredOutages(map[int64]int{1: 1})
 }
 
 // kubeat_self_healthy is read from the judgement at every scrape: it follows
@@ -306,6 +307,10 @@ func (failingStore) ListMonitorStatuses(context.Context, time.Time) ([]store.Mon
 	return nil, errors.New("database is locked")
 }
 
+func (failingStore) ListChannels(context.Context) ([]store.Channel, error) {
+	return nil, errors.New("database is locked")
+}
+
 func TestScrapeSurvivesStoreFailure(t *testing.T) {
 	m := New("test")
 	m.WatchMonitors(failingStore{}, time.Second, discard)
@@ -319,5 +324,125 @@ func TestScrapeSurvivesStoreFailure(t *testing.T) {
 	}
 	if _, ok := got["kubeat_build_info{version=test}"]; !ok {
 		t.Error("other metrics are missing after a store failure")
+	}
+}
+
+// channelsFail reads the monitors and fails to read the channels.
+type channelsFail struct{ *store.SQLite }
+
+func (channelsFail) ListChannels(context.Context) ([]store.Channel, error) {
+	return nil, errors.New("database is locked")
+}
+
+// Every enabled channel attempted at least once has its last delivery from
+// its row, 1 or 0, and the outages it has not taken from the alert engine;
+// a disabled channel has neither, and one never attempted only the outages
+// it is owed, if it is owed any. The scrape
+// counts as incomplete when the channels cannot be read, as when the
+// monitors cannot: the alert rules then hold the last values.
+func TestPerChannelMetrics(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.OpenSQLite(ctx, filepath.Join(t.TempDir(), "test.db"), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	channel := func(name string, typ store.ChannelType, enabled bool) store.Channel {
+		c, err := db.CreateChannel(ctx, store.Channel{Name: name, Type: typ, Target: "https://hooks.example/" + name, Secret: "s", Enabled: enabled})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	itsm, chat, pager := channel("itsm", store.ChannelWebhook, true), channel("chat", store.ChannelSlack, true), channel("pager", store.ChannelPagerDuty, true)
+	off := channel("off", store.ChannelWebhook, false)
+	fresh := channel("fresh", store.ChannelEmail, true) // never attempted
+	at := time.Unix(1_800_000_000, 0)
+	for _, d := range []struct {
+		id  int64
+		err string
+	}{{itsm.ID, "webhook answered 422"}, {chat.ID, ""}, {pager.ID, "PagerDuty answered 429"}, {off.ID, "webhook answered 404"}} {
+		if err := db.RecordChannelDelivery(ctx, d.id, at, d.err); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m := New("test")
+	m.WatchMonitors(db, 5*time.Second, discard)
+	m.UndeliveredOutages(map[int64]int{itsm.ID: 2, off.ID: 1})
+	got, err := m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{
+		"kubeat_monitor_scrape_success":                                             1,
+		"kubeat_channel_last_delivery_ok{channel=itsm}{channel_type=webhook}":       0,
+		"kubeat_channel_last_delivery_ok{channel=chat}{channel_type=slack}":         1,
+		"kubeat_channel_last_delivery_ok{channel=pager}{channel_type=pagerduty}":    0,
+		"kubeat_channel_undelivered_outages{channel=itsm}{channel_type=webhook}":    2,
+		"kubeat_channel_undelivered_outages{channel=chat}{channel_type=slack}":      0,
+		"kubeat_channel_undelivered_outages{channel=pager}{channel_type=pagerduty}": 0,
+	}
+	for key, value := range want {
+		if v, ok := got[key]; !ok || v != value {
+			t.Errorf("%s = %v (present: %v), want %v", key, v, ok, value)
+		}
+	}
+	for key := range got {
+		if strings.HasPrefix(key, "kubeat_channel_") && (strings.Contains(key, "channel=off") || strings.Contains(key, "channel=fresh")) {
+			t.Errorf("unexpected series %s", key)
+		}
+	}
+	// The exposition carries the channel's name: /metrics needs its key.
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if body := rec.Body.String(); !strings.Contains(body, `kubeat_channel_last_delivery_ok{channel="itsm",channel_type="webhook"} 0`) ||
+		strings.Contains(body, "hooks.example") {
+		t.Errorf("the exposition of the channels:\n%s", body)
+	}
+
+	// The engine says itsm took them; the channel is fixed.
+	m.UndeliveredOutages(nil)
+	if err := db.RecordChannelDelivery(ctx, itsm.ID, at.Add(time.Minute), ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = m.Gather(); err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_channel_last_delivery_ok{channel=itsm}{channel_type=webhook}"] != 1 || got["kubeat_channel_undelivered_outages{channel=itsm}{channel_type=webhook}"] != 0 {
+		t.Errorf("after itsm took one: ok %v, undelivered %v", got["kubeat_channel_last_delivery_ok{channel=itsm}{channel_type=webhook}"],
+			got["kubeat_channel_undelivered_outages{channel=itsm}{channel_type=webhook}"])
+	}
+
+	// A channel the engine says is owed an outage has it reported before
+	// its first attempt, without a last delivery.
+	m.UndeliveredOutages(map[int64]int{fresh.ID: 1})
+	if got, err = m.Gather(); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := got["kubeat_channel_undelivered_outages{channel=fresh}{channel_type=email}"]; !ok || v != 1 {
+		t.Errorf("the channel never attempted and owed an outage: undelivered %v (present: %v), want 1", v, ok)
+	}
+	if _, ok := got["kubeat_channel_last_delivery_ok{channel=fresh}{channel_type=email}"]; ok {
+		t.Error("the channel never attempted has a last delivery")
+	}
+
+	// Channels that cannot be read: no channel series, and the scrape is
+	// incomplete; the monitors are still there.
+	broken := New("test")
+	broken.WatchMonitors(channelsFail{db}, 5*time.Second, discard)
+	if got, err = broken.Gather(); err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_monitor_scrape_success"] != 0 {
+		t.Errorf("kubeat_monitor_scrape_success = %v with the channels unread, want 0", got["kubeat_monitor_scrape_success"])
+	}
+	if _, ok := got["kubeat_monitors{state=enabled}"]; !ok {
+		t.Error("the monitors are missing when only the channels could not be read")
+	}
+	for key := range got {
+		if strings.HasPrefix(key, "kubeat_channel_") {
+			t.Errorf("unexpected series %s with the channels unread", key)
+		}
 	}
 }

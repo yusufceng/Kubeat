@@ -27,7 +27,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 15b | Ayarlar ekranı, kişi başına API anahtarları | Planlandı |
 | 17 | Annotation ile sürekli keşif: `kubeat.io/monitor` taşıyan nesneler kendiliğinden izlenir | Tamamlandı |
 | 18 | Pod bazında kontrol: Service'in arkasındaki her hazır pod'a aynı kontrol (`each_pod`) | Tamamlandı |
-| 19 | Cluster Alertmanager'ı ile alarm: chart'ta PrometheusRule | Tamamlandı; sprint 1 (S9) öz-sağlık kurallarını ekledi: `KubeatResultsDropped`, `KubeatNotificationsFailing`, `KubeatWorkersSaturated`, `KubeatBackupFailing`, `KubeatBackupStale`, `KubeatLicenseExpiring`; sprint 2 (S29): `KubeatDown` backend pod'u hiç yokken de yanar, `KubeatMonitorDown` ve `KubeatCertificateExpiring` 10 dakikaya kadar süren scrape boşluğunda çözülmez ve Recreate'te tek alarm kalır, `KubeatBackupFailing` yedek düzelene kadar açık kalır; kurallar promtool ile sınanır (`test-chart.sh`, CI); sprint 3 (S38, #50): `KubeatUnhealthy` (`critical`, `kubeat_self_healthy` 5 dakika 0); (S37, #50): `metrics.prometheusRule.clusterLabel` ile kurallar birden çok cluster'ın tek deposunda (Grafana Cloud/Mimir, global Thanos Ruler) cluster başına değerlendirilir, `KubeatDown` 24 saatlik yokluk penceresiyle; boşken 0.44'teki gibi; iki cluster'lı ikinci promtool senaryo dosyası |
+| 19 | Cluster Alertmanager'ı ile alarm: chart'ta PrometheusRule | Tamamlandı; sprint 1 (S9) öz-sağlık kurallarını ekledi: `KubeatResultsDropped`, `KubeatNotificationsFailing`, `KubeatWorkersSaturated`, `KubeatBackupFailing`, `KubeatBackupStale`, `KubeatLicenseExpiring`; sprint 2 (S29): `KubeatDown` backend pod'u hiç yokken de yanar, `KubeatMonitorDown` ve `KubeatCertificateExpiring` 10 dakikaya kadar süren scrape boşluğunda çözülmez ve Recreate'te tek alarm kalır, `KubeatBackupFailing` yedek düzelene kadar açık kalır; kurallar promtool ile sınanır (`test-chart.sh`, CI); sprint 3 (S38, #50): `KubeatUnhealthy` (`critical`, `kubeat_self_healthy` 5 dakika 0); (S37, #50): `metrics.prometheusRule.clusterLabel` ile kurallar birden çok cluster'ın tek deposunda (Grafana Cloud/Mimir, global Thanos Ruler) cluster başına değerlendirilir, `KubeatDown` 24 saatlik yokluk penceresiyle; boşken 0.44'teki gibi; iki cluster'lı ikinci promtool senaryo dosyası; (S26, #49): `KubeatNotificationsFailing` kanal başına (`channel`, `channel_type`) ve `for: 5m` ile yanar, kanalın son denemesi başarısızken ya da almadığı bir kesinti yeniden gönderilmeyi beklerken açık kalır, scrape boşluğunda çözülmez (`kubeat_channel_last_delivery_ok`, `kubeat_channel_undelivered_outages`), `clusterLabel` verilince cluster ve kanal başına toplanır |
 | 20 | Olay bağlamı: monitor sayfasında pod'ların ve workload'un cluster olayları | Tamamlandı |
 | 21 | Ekip raporları: namespace başına uptime ve kesinti özeti, CSV | Tamamlandı |
 | 22 | Alarm yönlendirme: kanalda etiket ve olay süzgeci, namespace başına gruplama, monitor sayfasında "alarm nereye gider"; workload monitor'da rollout toleransı | Tamamlandı |
@@ -135,8 +135,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   denemeyle `UPTIME_LOGIN_LOCKOUT` süresince kilitleyebilir; IP bazlı sınır
   yoktur. Kilitli bir hesap için API anahtarı, SSO ya da backend'i yeniden
   başlatmak kalır (README, "Kilitli hesaba girmek").
-- `/metrics` monitor adlarını, namespace'lerini ve sertifika bitişlerini
-  verir ve kullanıcı rollerinin namespace sınırını tanımaz; bu yüzden
+- `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
+  bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
+  sınırını tanımaz; bu yüzden
   `UPTIME_METRICS_TOKEN` ile ayrı bir anahtar ister (chart onu varsayılan
   olarak üretir). Anahtar ayarlanmazsa açıktır ve backend'e kimlerin
   ulaşabileceğini NetworkPolicy belirler. NetworkPolicy `/metrics`'i push ve
@@ -188,16 +189,35 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   [backlog](backlog.md) "Cluster API'ye ulaşılamayan kontrolü hedef hatası
   saymamak").
 - Bildirim kanalları birbirinden bağımsız teslim edilir; başarısız kesinti
-  bildirimi olay kapanana kadar artan aralıkla yeniden denenir (üst sınır
-  `UPTIME_NOTIFY_RETRY_MAX`), düzelme (`up`) bildirimi için en çok
-  `UPTIME_NOTIFY_RETRY_FOR`. Almayan bir makine kanalı (webhook,
-  PagerDuty) yeni bildirimleri kendi yeniden deneme zamanına bekletir;
-  sürekli reddettiği bir bildirim (409, 422) diğerlerini bekletmez ama
-  kanalı her geçişten sonra yeniden duraklatır, yeni bildirimler en çok
-  `UPTIME_NOTIFY_RETRY_MAX` (bir bildirimin ilk reddedildiği geçişte bir
-  geçiş daha) gecikir (4xx'i kalıcı hata sayan S26'ya kadar).
-  İnsan kanalları ise gruplama kapalıyken (`UPTIME_NOTIFY_GROUP_WAIT=0`)
-  her bildirimde yine denenir. Deneme listesi bellektedir: yeniden
+  bildirimi olay kapanana kadar yeniden denenir, düzelme (`up`) bildirimi
+  en çok `UPTIME_NOTIFY_RETRY_FOR` boyunca. Bekleme hatanın sınıfına
+  bağlıdır (README "Alarm", hata sınıfları): ulaşılamayan kanal 1, 2, 4…
+  dk (üst sınır `UPTIME_NOTIFY_RETRY_MAX`), reddeden (4xx) kanal doğrudan
+  `UPTIME_NOTIFY_RETRY_MAX`, meşgul (429) kanal `Retry-After` kadar
+  bekletilir; meşgul ve reddeden alıcıya kısa tekrar yapılmaz. 4xx dönen
+  kanal canlıdır ve duraklamaz: öteki bildirimler beklemeden gider; kanal
+  düzeltilince reddedilmiş bildirim sıradaki denemesini (en çok
+  `UPTIME_NOTIFY_RETRY_MAX`) bekler, düzenleme denemeyi öne almaz. Bunun
+  iki bedeli var: geçici bir 4xx (alıcı yeniden yayımlanırken 404) de
+  reddetme sayılır ve o bildirimi `UPTIME_NOTIFY_RETRY_MAX` kadar
+  geciktirir; her şeyi reddeden bir makine kanalı (süresi dolmuş token,
+  kaldırılmış alıcı) bekleyen her bildirim için `UPTIME_NOTIFY_RETRY_MAX`'ta
+  bir istek alır. Birlikte reddedilenler tek geçişte sırayla gider ve
+  teslimat döngüsünü istek sayısı × yanıt süresi kadar tutar (500 kesinti,
+  300 ms: her 15 dakikada ~2,5 dk); bu sırada kuyruk okunmaz. Çare kanalı
+  düzeltmek ya da kapatmaktır, hangi kanal olduğunu
+  `KubeatNotificationsFailing` söyler ([backlog](backlog.md) "Teslimat hata
+  sınıflarının kalanları").
+  Ulaşılamayan ya da meşgul bir makine kanalı (webhook, PagerDuty) yeni
+  bildirimleri kendi yeniden deneme zamanına bekletir; tek bir monitor'un
+  bildirimlerine sürekli 5xx dönen bir alıcı kanalı her geçişte yeniden
+  duraklatır, yeni bildirimler en çok `UPTIME_NOTIFY_RETRY_MAX` gecikir.
+  `Retry-After` yalnızca başlıktan okunur (saniye ya da HTTP tarihi);
+  gövdedeki `retry_after` alanları okunmaz, sağlayıcı başına istemci
+  tarafı hız sınırlayıcı yoktur. SMTP'nin kalıcı yanıtları (5xx SMTP
+  kodları) ulaşılamadı sayılır. İnsan kanalları ise gruplama kapalıyken
+  (`UPTIME_NOTIFY_GROUP_WAIT=0`) her bildirimde yine denenir.
+  Deneme listesi bellektedir: yeniden
   başlatmada açık kesintininki, hiç denenmemiş olanlar (kuyrukta ya da grup
   beklemesinde kalanlar) dahil, bildirim kaydından kurulur (kaydı
   `UPTIME_DELIVERY_RETENTION` ile silinmiş açık kesinti bir kez daha
@@ -207,8 +227,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   tümü `UPTIME_SHUTDOWN_TIMEOUT` ile sınırlıdır; yetişmeyen düzelme
   bildirimi kaybolur. Teslim edilemeyen bildirimlerin ayrı bir görünümü
   (dead-letter) yoktur; bildirim kaydı,
-  `kubeat_notification_attempts_total{result="failed"}` (chart'ın
-  `KubeatNotificationsFailing` alarmı bunu sayar) ve
+  kanal başına `kubeat_channel_last_delivery_ok` ve
+  `kubeat_channel_undelivered_outages` (chart'ın kanal başına
+  `KubeatNotificationsFailing` alarmı bunlara bakar),
+  `kubeat_notification_attempts_total{result="failed"}` ve
   `kubeat_notifications_total{result="failed"}` gösterir ([backlog](backlog.md)
   "Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı
   yeniden deneme kuyruğu").

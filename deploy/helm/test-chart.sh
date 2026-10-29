@@ -253,11 +253,16 @@ for alert in KubeatDown KubeatSchedulerStalled KubeatUnhealthy KubeatMetricsInco
 done
 rules "KubeatBackupStale without backups" lacks "alert: KubeatBackupStale"
 rules "KubeatBackupFailing without backups" has "alert: KubeatBackupFailing"
-# A failed attempt fires the notifications alert, not only a notification
-# given up on: the latter stays silent while an outage notification is
-# attempted again.
-rules "KubeatNotificationsFailing counts every attempt" has 'increase(kubeat_notification_attempts_total{result="failed"}[15m]) > 0'
+# The notifications alert is one per channel: the channel's last attempt
+# failed, or an outage it did not take waits to be sent to it again, held
+# over a scrape gap; notifications dropped from a full queue stay a separate
+# expression. It no longer counts failed attempts by channel type, nor waits
+# for the engine to give up. promtool below shows how it behaves.
+rules "KubeatNotificationsFailing on a channel's last attempt" has 'max without (instance, pod, endpoint, container, service) (kubeat_channel_last_delivery_ok) == 0'
+rules "KubeatNotificationsFailing while an outage waits for a channel" has 'max without (instance, pod, endpoint, container, service) (kubeat_channel_undelivered_outages) > 0'
+rules "KubeatNotificationsFailing over a scrape gap" has 'last_over_time(kubeat_channel_undelivered_outages[10m])'
 rules "KubeatNotificationsFailing counts the dropped" has 'increase(kubeat_notifications_dropped_total[15m]) > 0'
+rules "KubeatNotificationsFailing per channel, not per channel type" lacks 'kubeat_notification_attempts_total'
 rules "KubeatNotificationsFailing does not wait for the engine to give up" lacks 'kubeat_notifications_total{result="failed"}'
 rules "license warning at 30 days" has "< 30 * 86400"
 rules "license critical at 7 days" has "< 7 * 86400"
@@ -280,11 +285,13 @@ rules "KubeatUnhealthy reads the self-health gauge" has 'expr: max without (inst
 
 # metrics.prometheusRule.clusterLabel, for rules evaluated over the series of
 # several clusters in one store. Empty, the rules it changes render as 0.44
-# rendered them; given, they group by it beside namespace and job and keep no
-# other label a store adds, and every other rule renders the same either way.
-# promtool below shows how they behave over two clusters' series.
+# rendered them, and KubeatUnhealthy and KubeatNotificationsFailing, whose
+# expressions came with 0.45, without the scrape labels as those do; given,
+# they group by it beside namespace and job and keep no other label a store
+# adds, and every other rule renders the same either way. promtool below
+# shows how they behave over two clusters' series.
 CLUSTER=(--set metrics.prometheusRule.clusterLabel=cluster)
-BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing): '
+BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing): '
 # exprs FILE: the expression of every rule in a rendered PrometheusRule, each
 # of its lines after the rule's alert name.
 exprs() {
@@ -315,12 +322,52 @@ KubeatDown: or absent(up{job="kubeat-backend", namespace="kubeat"})
 KubeatBackupFailing: max without (instance, pod, endpoint, container, service) (max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m]))
 KubeatBackupFailing: > max without (instance, pod, endpoint, container, service) (max_over_time(kubeat_backup_last_success_timestamp_seconds[10m]))
 EOF
+# KubeatNotificationsFailing, whose expression came with 0.45. Empty, its
+# channel series drop the scrape labels and are held by namespace and job,
+# as the outage alerts above; given, they group by the cluster beside
+# namespace, job and the channel, and are held per cluster, so that an HA
+# pair raises one alert per channel and the other cluster's scrape does not
+# resolve it. Dropped notifications look at each series either way, as the
+# rules that need no cluster do.
+cat >"$WORK/channels-plain" <<'EOF'
+KubeatNotificationsFailing: (
+KubeatNotificationsFailing:   max without (instance, pod, endpoint, container, service) (kubeat_channel_last_delivery_ok) == 0
+KubeatNotificationsFailing:   or max without (instance, pod, endpoint, container, service) (kubeat_channel_undelivered_outages) > 0
+KubeatNotificationsFailing: )
+KubeatNotificationsFailing: or (
+KubeatNotificationsFailing:   (
+KubeatNotificationsFailing:     max without (instance, pod, endpoint, container, service) (last_over_time(kubeat_channel_last_delivery_ok[10m])) == 0
+KubeatNotificationsFailing:     or max without (instance, pod, endpoint, container, service) (last_over_time(kubeat_channel_undelivered_outages[10m])) > 0
+KubeatNotificationsFailing:   )
+KubeatNotificationsFailing:   unless on (namespace, job) (kubeat_monitor_scrape_success == 1)
+KubeatNotificationsFailing: )
+KubeatNotificationsFailing: or increase(kubeat_notifications_dropped_total[15m]) > 0
+EOF
+cat >"$WORK/channels-cluster" <<'EOF'
+KubeatNotificationsFailing: (
+KubeatNotificationsFailing:   max by (namespace, job, cluster, channel, channel_type) (kubeat_channel_last_delivery_ok) == 0
+KubeatNotificationsFailing:   or max by (namespace, job, cluster, channel, channel_type) (kubeat_channel_undelivered_outages) > 0
+KubeatNotificationsFailing: )
+KubeatNotificationsFailing: or (
+KubeatNotificationsFailing:   (
+KubeatNotificationsFailing:     max by (namespace, job, cluster, channel, channel_type) (last_over_time(kubeat_channel_last_delivery_ok[10m])) == 0
+KubeatNotificationsFailing:     or max by (namespace, job, cluster, channel, channel_type) (last_over_time(kubeat_channel_undelivered_outages[10m])) > 0
+KubeatNotificationsFailing:   )
+KubeatNotificationsFailing:   unless on (namespace, job, cluster) (kubeat_monitor_scrape_success == 1)
+KubeatNotificationsFailing: )
+KubeatNotificationsFailing: or increase(kubeat_notifications_dropped_total[15m]) > 0
+EOF
 if helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" \
   --set backup.enabled=true >"$WORK/rules-plain" 2>"$WORK/err" &&
   helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" \
     --set backup.enabled=true "${CLUSTER[@]}" >"$WORK/rules-cluster" 2>"$WORK/err"; then
-  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -v '^KubeatUnhealthy: ' | diff "$WORK/exprs-0.44" - >"$WORK/diff" ||
+  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing): ' |
+    diff "$WORK/exprs-0.44" - >"$WORK/diff" ||
     failed "clusterLabel empty: the rules differ from 0.44's: $(cat "$WORK/diff")"
+  exprs "$WORK/rules-plain" | grep '^KubeatNotificationsFailing: ' | diff "$WORK/channels-plain" - >"$WORK/diff" ||
+    failed "clusterLabel empty: KubeatNotificationsFailing differs: $(cat "$WORK/diff")"
+  exprs "$WORK/rules-cluster" | grep '^KubeatNotificationsFailing: ' | diff "$WORK/channels-cluster" - >"$WORK/diff" ||
+    failed "clusterLabel: KubeatNotificationsFailing is not per cluster and channel: $(cat "$WORK/diff")"
   exprs "$WORK/rules-plain" | grep -vE "$BY_CLUSTER" >"$WORK/others-plain"
   exprs "$WORK/rules-cluster" | grep -vE "$BY_CLUSTER" >"$WORK/others-cluster"
   [ -s "$WORK/others-plain" ] || failed "clusterLabel: no other rule found in the render"
@@ -338,7 +385,7 @@ rules "outages held per cluster" has 'unless on (namespace, job, cluster) (kubea
 rules "outages per cluster and monitor" has 'max by (namespace, job, cluster, monitor, monitor_namespace, type) (kubeat_monitor_incident_open) == 1' "${CLUSTER[@]}"
 rules "KubeatUnhealthy per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_self_healthy) == 0' "${CLUSTER[@]}"
 rules "no store label kept but the cluster's" lacks 'without (' "${CLUSTER[@]}"
-for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace severity; do
+for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace channel channel_type severity; do
   refuses "clusterLabel $label" "metrics.prometheusRule.clusterLabel is \"$label\"" "${RULES[@]}" --set-string metrics.prometheusRule.clusterLabel="$label"
 done
 for label in cluster k8s_cluster _cluster Cluster1; do
@@ -348,11 +395,11 @@ done
 # The rules as Prometheus reads them: promtool checks the rule groups and
 # runs the scenarios of prometheusrule-test.yaml (no backend target, a failed
 # scrape, a Recreate, an outage that closes, a failing backup, a backend that
-# stores no result) against the rules rendered for release "kubeat" in
-# namespace "kubeat", and those of prometheusrule-cluster-test.yaml (two
-# clusters, one of them failing, gone, in a scrape gap or recreated, and an
-# HA pair the store does not deduplicate) against the rules rendered with
-# clusterLabel=cluster.
+# stores no result, a channel that does not take notifications) against the
+# rules rendered for release "kubeat" in namespace "kubeat", and those of
+# prometheusrule-cluster-test.yaml (two clusters, one of them failing, gone,
+# in a scrape gap or recreated, and an HA pair the store does not
+# deduplicate) against the rules rendered with clusterLabel=cluster.
 PROMTOOL="${PROMTOOL:-promtool}"
 # rulefile FILE VALUES...: writes the rule groups of the PrometheusRule
 # rendered with these values (and the rules on) to FILE.

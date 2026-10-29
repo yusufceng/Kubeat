@@ -44,6 +44,12 @@ type Metrics struct {
 	// MaxThrottledHosts of them, a new host is counted as OtherHost.
 	mu    sync.Mutex
 	hosts map[string]bool
+
+	// undelivered are the outages each channel, by ID, has not taken and
+	// is still to be sent again, as the alert engine last said
+	// (UndeliveredOutages); read at scrape time.
+	undeliveredMu sync.Mutex
+	undelivered   map[int64]int
 }
 
 // MaxThrottledHosts bounds the host labels of kubeat_target_throttled_total:
@@ -308,6 +314,30 @@ func (m *Metrics) NotificationDropped() {
 	}
 }
 
+// UndeliveredOutages records, by channel ID, how many outages each channel
+// has not taken and is still to be sent again: the alert engine's list of
+// what it sends again, as it stands. A channel missing from it has none.
+// The scrape reports it per channel (kubeat_channel_undelivered_outages).
+func (m *Metrics) UndeliveredOutages(byChannel map[int64]int) {
+	if m == nil {
+		return
+	}
+	counts := make(map[int64]int, len(byChannel))
+	for id, n := range byChannel {
+		counts[id] = n
+	}
+	m.undeliveredMu.Lock()
+	m.undelivered = counts
+	m.undeliveredMu.Unlock()
+}
+
+// undeliveredOutages is the channel's count from UndeliveredOutages.
+func (m *Metrics) undeliveredOutages() map[int64]int {
+	m.undeliveredMu.Lock()
+	defer m.undeliveredMu.Unlock()
+	return m.undelivered
+}
+
 // Heartbeat outcomes.
 const (
 	HeartbeatSent     = "sent"
@@ -362,9 +392,11 @@ func (m *Metrics) LastBackup(at time.Time) {
 	}
 }
 
-// StatusLister is the part of the store read at scrape time.
+// StatusLister is the part of the store read at scrape time: the monitors,
+// and the channels with their last delivery.
 type StatusLister interface {
 	ListMonitorStatuses(ctx context.Context, since time.Time) ([]store.MonitorStatus, error)
+	ListChannels(ctx context.Context) ([]store.Channel, error)
 }
 
 var (
@@ -389,23 +421,55 @@ var (
 	monitorsTotal = prometheus.NewDesc("kubeat_monitors",
 		"Number of monitors, by whether they are enabled.", []string{"state"}, nil)
 	scrapeOK = prometheus.NewDesc("kubeat_monitor_scrape_success",
-		"1 if the per-monitor metrics could be read from the database for this scrape.", nil, nil)
+		"1 if the per-monitor and per-channel metrics could be read from the database for this scrape.", nil, nil)
+
+	// A channel by its name, which is unique, and its type.
+	channelLabels = []string{"channel", "channel_type"}
+
+	channelDelivered = prometheus.NewDesc("kubeat_channel_last_delivery_ok",
+		"1 if the last attempt to deliver a notification to the channel succeeded, 0 if it failed, as the channel's row says. Only for enabled channels attempted at least once.", channelLabels, nil)
+	channelUndelivered = prometheus.NewDesc("kubeat_channel_undelivered_outages",
+		"Outages (down notifications) the channel has not taken and is still to be sent again: ones it did not take, and ones held back for it while it is paused; 0 when there are none. For every enabled channel attempted at least once or owed such an outage.", channelLabels, nil)
 )
+
+// collectChannels reports, for every enabled channel attempted at least
+// once, its last delivery from its row and the outages it has not taken
+// from the alert engine. A channel disabled, or deleted, leaves at once.
+func (c *monitorCollector) collectChannels(channels []store.Channel, gauge func(*prometheus.Desc, float64, ...string)) {
+	undelivered := c.metrics.undeliveredOutages()
+	for _, channel := range channels {
+		pending := undelivered[channel.ID]
+		if !channel.Enabled || channel.LastAttemptAt.IsZero() && pending == 0 {
+			continue
+		}
+		labels := []string{channel.Name, string(channel.Type)}
+		if !channel.LastAttemptAt.IsZero() {
+			ok := 0.0
+			if channel.LastOK {
+				ok = 1
+			}
+			gauge(channelDelivered, ok, labels...)
+		}
+		gauge(channelUndelivered, float64(pending), labels...)
+	}
+}
 
 type monitorCollector struct {
 	store   StatusLister
 	timeout time.Duration
 	logger  *slog.Logger
+	metrics *Metrics
 }
 
-// WatchMonitors adds per-monitor metrics, read from the store on every
-// scrape with the given timeout.
+// WatchMonitors adds per-monitor and per-channel metrics, read from the
+// store on every scrape with the given timeout.
 func (m *Metrics) WatchMonitors(st StatusLister, timeout time.Duration, logger *slog.Logger) {
-	m.registry.MustRegister(&monitorCollector{store: st, timeout: timeout, logger: logger})
+	m.registry.MustRegister(&monitorCollector{store: st, timeout: timeout, logger: logger, metrics: m})
 }
 
 func (c *monitorCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, d := range []*prometheus.Desc{monitorUp, monitorLatency, monitorLastCheck, monitorIncident, monitorSlow, monitorCertExpiry, monitorsTotal, scrapeOK} {
+	for _, d := range []*prometheus.Desc{monitorUp, monitorLatency, monitorLastCheck, monitorIncident, monitorSlow, monitorCertExpiry, monitorsTotal, scrapeOK,
+		channelDelivered, channelUndelivered} {
 		ch <- d
 	}
 }
@@ -419,13 +483,27 @@ func (c *monitorCollector) Collect(ch chan<- prometheus.Metric) {
 	statuses, err := c.store.ListMonitorStatuses(ctx, time.Now())
 	if err != nil {
 		c.logger.Error("reading monitors for metrics failed", "error", err)
-		ch <- prometheus.MustNewConstMetric(scrapeOK, prometheus.GaugeValue, 0)
-		return
 	}
-	ch <- prometheus.MustNewConstMetric(scrapeOK, prometheus.GaugeValue, 1)
+	channels, channelsErr := c.store.ListChannels(ctx)
+	if channelsErr != nil {
+		c.logger.Error("reading channels for metrics failed", "error", channelsErr)
+	}
+	// The alert rules hold the last values of what a scrape lacks only
+	// while this is 0 (KubeatMonitorDown, KubeatNotificationsFailing).
+	ok := 0.0
+	if err == nil && channelsErr == nil {
+		ok = 1
+	}
+	ch <- prometheus.MustNewConstMetric(scrapeOK, prometheus.GaugeValue, ok)
 
 	gauge := func(desc *prometheus.Desc, value float64, labels ...string) {
 		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value, labels...)
+	}
+	if channelsErr == nil {
+		c.collectChannels(channels, gauge)
+	}
+	if err != nil {
+		return
 	}
 	seconds := func(t time.Time) float64 { return float64(t.UnixMilli()) / 1000 }
 

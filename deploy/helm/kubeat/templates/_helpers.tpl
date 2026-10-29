@@ -95,7 +95,7 @@ rules use themselves.
 */}}
 {{- define "kubeat.clusterLabel" -}}
 {{- $label := dig "prometheusRule" "clusterLabel" "" .Values.metrics | default "" | toString -}}
-{{- $taken := list "namespace" "job" "instance" "pod" "endpoint" "container" "service" "monitor" "monitor_namespace" "type" "severity" "alertname" -}}
+{{- $taken := list "namespace" "job" "instance" "pod" "endpoint" "container" "service" "monitor" "monitor_namespace" "type" "channel" "channel_type" "severity" "alertname" -}}
 {{- if and $label (or (not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" $label)) (hasPrefix "__" $label) (has $label $taken)) -}}
 {{- fail (printf "metrics.prometheusRule.clusterLabel is %q: give the name of the label that tells the clusters apart, such as cluster: a Prometheus label name (letters, digits and _), none of %s" $label (join ", " $taken)) -}}
 {{- end -}}

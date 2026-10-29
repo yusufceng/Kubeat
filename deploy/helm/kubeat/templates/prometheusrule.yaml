@@ -10,25 +10,27 @@ raising them a second time.
 {{- $up := printf "up{job=%q, namespace=%q}" (printf "%s-backend" .Release.Name) .Release.Namespace }}
 {{- /*
 What tells one installation's series from another's, and what the alerts of
-an installation and of one of its monitors are aggregated by. By default
-namespace and job, and everything but the scrape labels: each cluster's own
-Prometheus evaluates the rules, and the rules render as in 0.44. With
-metrics.prometheusRule.clusterLabel the rules are evaluated over the series
-of several clusters in one store (Grafana Cloud or Mimir, a global Thanos
-Ruler): they then group by that label beside namespace and job, so that one
-cluster's backend does not hide another's, and drop every other label the
-store adds, such as the replica label of an HA pair it does not
-deduplicate, by which one replica's gone series would raise a false alert or
-a second one.
+an installation, of one of its monitors and of one of its channels are
+aggregated by. By default namespace and job, and everything but the scrape
+labels: each cluster's own Prometheus evaluates the rules, and the rules
+render as in 0.44. With metrics.prometheusRule.clusterLabel the rules are
+evaluated over the series of several clusters in one store (Grafana Cloud
+or Mimir, a global Thanos Ruler): they then group by that label beside
+namespace and job, so that one cluster's backend does not hide another's,
+and drop every other label the store adds, such as the replica label of an
+HA pair it does not deduplicate, by which one replica's gone series would
+raise a false alert or a second one.
 */}}
 {{- $cluster := include "kubeat.clusterLabel" . }}
 {{- $installation := "namespace, job" }}
 {{- $byInstallation := printf "without (%s)" $scrape }}
 {{- $byMonitor := printf "without (%s)" $scrape }}
+{{- $byChannel := printf "without (%s)" $scrape }}
 {{- if $cluster }}
 {{- $installation = printf "namespace, job, %s" $cluster }}
 {{- $byInstallation = printf "by (%s)" $installation }}
 {{- $byMonitor = printf "by (%s, monitor, monitor_namespace, type)" $installation }}
+{{- $byChannel = printf "by (%s, channel, channel_type)" $installation }}
 {{- end }}
 # Alerts the cluster's own Prometheus raises from Kubeat's metrics, so that
 # outages reach the Alertmanager and receivers the platform already has.
@@ -142,7 +144,7 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Kubeat could not read its monitors from the database for the metrics"
+            summary: "Kubeat could not read its monitors or channels from the database for the metrics"
         - alert: KubeatResultsDropped
           expr: increase(kubeat_results_dropped_total[10m]) > 0
           labels:
@@ -150,16 +152,39 @@ spec:
           annotations:
             summary: "Kubeat is losing check results"
             description: "Check results could not be written to the database in the last 10 minutes, so the uptime history has gaps; the backend's log says why (a full data volume, a database that stays locked)."
-        # Every attempt counts, not only the notification given up on: an
-        # outage notification is attempted again while the outage lasts,
-        # and the alert must fire while the channel is not taking it.
+        # One alert per channel, with its name, so that it says which channel
+        # is broken and can be routed to whoever owns it: the channel's last
+        # attempt failed, or an outage it did not take is still to be sent
+        # to it again. The latter keeps the alert on while the channel takes
+        # the other notifications (a receiver refusing one monitor), the
+        # former between the attempts of a channel tried again only every
+        # UPTIME_NOTIFY_RETRY_MAX; 5 minutes leave out a hiccup the next
+        # attempt gets over. While the channel metrics are not scraped (a
+        # failed scrape, a Recreate, a scrape in which the database could not
+        # be read), the last value of the past 10 minutes holds the alert, as
+        # for KubeatMonitorDown; a channel disabled or deleted while Kubeat
+        # is scraped resolves at once. Notifications dropped from a full
+        # queue are about no channel: a separate expression, without one.
         - alert: KubeatNotificationsFailing
-          expr: increase(kubeat_notification_attempts_total{result="failed"}[15m]) > 0 or increase(kubeat_notifications_dropped_total[15m]) > 0
+          expr: |-
+            (
+              max {{ $byChannel }} (kubeat_channel_last_delivery_ok) == 0
+              or max {{ $byChannel }} (kubeat_channel_undelivered_outages) > 0
+            )
+            or (
+              (
+                max {{ $byChannel }} (last_over_time(kubeat_channel_last_delivery_ok[10m])) == 0
+                or max {{ $byChannel }} (last_over_time(kubeat_channel_undelivered_outages[10m])) > 0
+              )
+              unless on ({{ $installation }}) (kubeat_monitor_scrape_success == 1)
+            )
+            or increase(kubeat_notifications_dropped_total[15m]) > 0
+          for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "Kubeat notifications are not being delivered"
-            description: {{ `"{{ if $labels.channel_type }}An attempt to deliver to a {{ $labels.channel_type }} channel failed{{ else }}Notifications were dropped because the delivery queue was full{{ end }} in the last 15 minutes, so an outage may have gone unannounced. An outage notification is attempted again while the outage lasts, so this fires while a channel is not taking it, not once the engine gives up; the Channels page shows each channel's last delivery error, and the backend's log the rest."` }}
+            summary: {{ `"{{ if $labels.channel }}Kubeat notifications are not reaching channel {{ $labels.channel }}{{ else }}Kubeat notifications are being dropped{{ end }}"` }}
+            description: {{ `"{{ if $labels.channel }}For 5 minutes the last attempt to deliver to the {{ $labels.channel_type }} channel {{ $labels.channel }} has failed, or an outage it did not take has been waiting to be sent to it again, so an outage may have gone unannounced there. The Channels page shows the channel's last error: a refusal (4xx) means the channel or its receiver needs fixing.{{ else }}Notifications were dropped because the delivery queue was full in the last 15 minutes, so an outage may have gone unannounced.{{ end }}"` }}
         - alert: KubeatWorkersSaturated
           expr: increase(kubeat_scheduler_dispatch_skipped_total[10m]) > 0
           for: 15m
