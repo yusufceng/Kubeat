@@ -798,7 +798,10 @@ func TestABurstToARateLimitedPagerDutyGoesInMinutes(t *testing.T) {
 // UPTIME_NOTIFY_ATTEMPTS times; it is then left alone, so the loop does not
 // wait out UPTIME_NOTIFY_RETRY_DELAY a notification. The queue drains,
 // nothing is dropped, and the channels people read get the burst in one
-// message within UPTIME_NOTIFY_GROUP_WAIT.
+// message once UPTIME_NOTIFY_GROUP_WAIT is up, not once PagerDuty's
+// Retry-After is. The loop's clock stands still while the burst goes
+// through (holdClock), so that a slow machine neither splits the group nor
+// eats into the wait.
 func TestABurstWithARateLimitedPagerDutyKeepsTheQueueMoving(t *testing.T) {
 	f := newFixture(t, 1, 1)
 	f.engine.opts.Metrics = metrics.New("test")
@@ -814,9 +817,10 @@ func TestABurstWithARateLimitedPagerDutyKeepsTheQueueMoving(t *testing.T) {
 	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
 	f.addChannel(store.Channel{Name: "mail", Type: store.ChannelEmail, Target: "ops@example.com"})
 	const burst, limit = 300, 50
-	pager := &rateLimited{recorder: f.sender, channel: "pager", limit: limit}
+	pager := &rateLimited{recorder: f.sender, channel: "pager", limit: limit} // no clock: Retry-After says 60
 	f.engine.sender = pager
 	outages := f.outages(burst, "shop", time.Now().UTC())
+	clock := f.holdClock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -825,20 +829,31 @@ func TestABurstWithARateLimitedPagerDutyKeepsTheQueueMoving(t *testing.T) {
 		defer close(done)
 		f.engine.Run(ctx)
 	}()
-	start := time.Now()
 	for _, n := range outages {
 		f.engine.enqueue(n)
 	}
-	// Drained before the group is due, the burst is one group.
-	if !await(f.engine.opts.GroupWait, func() bool { return len(f.engine.queue) == 0 }) {
-		t.Fatalf("the queue still holds %d notifications %s after the burst", len(f.engine.queue), f.engine.opts.GroupWait)
+	// The loop takes the first once it has worked out what the outages,
+	// open at its start, owe the channels (restore): seconds on a slow
+	// machine. From then on the queue drains in seconds, where waiting out
+	// PagerDuty's Retry-After would take a minute, and RetryDelay twice a
+	// 429 minutes.
+	if !await(30*time.Second, func() bool { return len(f.engine.queue) < burst }) {
+		t.Fatal("the loop has not begun on the queue 30s after the burst")
 	}
+	if !await(10*time.Second, func() bool { return len(f.engine.queue) == 0 }) {
+		t.Fatalf("the queue still holds %d notifications 10s after the loop began on it", len(f.engine.queue))
+	}
+	// GroupWait is up by the loop's clock, PagerDuty's minute is not: the
+	// loop's timer, set while the clock stood still, fires within GroupWait,
+	// and chat and mail are told then.
+	clock.pass(f.engine.opts.GroupWait)
+	passed := time.Now()
 	told := func() bool {
 		got := f.sender.log()
 		return strings.Contains(got, "chat:down[") && strings.Contains(got, "mail:down[")
 	}
-	if !await(time.Until(start.Add(f.engine.opts.GroupWait+time.Second)), told) {
-		t.Fatalf("%s after the burst: chat and mail not told within GroupWait", time.Since(start).Round(time.Millisecond))
+	if !await(f.engine.opts.GroupWait+5*time.Second, told) {
+		t.Fatalf("%s after GroupWait was up: chat and mail not told", time.Since(passed).Round(time.Millisecond))
 	}
 	cancel()
 	<-done

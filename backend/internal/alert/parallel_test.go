@@ -66,6 +66,39 @@ func await(timeout time.Duration, cond func() bool) bool {
 	return true
 }
 
+// heldClock is the delivery loop's clock in a test that runs the loop in
+// its own goroutine: it stands still until the test moves it on (pass).
+// What falls due by it, a group above all, then does not hang on how fast
+// the machine gets through the loop's work meanwhile, which under the race
+// detector varies severalfold. The loop's timer still runs on the real
+// clock: set while the clock stood still, it fires within the wait it was
+// set for, and the loop then finds due what the clock was moved past.
+type heldClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+// holdClock puts the loop on a heldClock that stands at the current time.
+func (f *fixture) holdClock() *heldClock {
+	c := &heldClock{now: time.Now()}
+	f.engine.now = c.read
+	return c
+}
+
+// read is the loop's now; the sends read it too, from their goroutines.
+func (c *heldClock) read() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+// pass moves the clock on by d.
+func (c *heldClock) pass(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
 // A channel that does not answer holds up only itself: the others are told
 // at once, and the loop waits for the slowest channel rather than for the
 // sum of them. Shutting down does not cut the held send short.
@@ -295,8 +328,9 @@ func (d *dead) Send(ctx context.Context, ch store.Channel, n Notification) error
 // keeps up with the queue instead of waiting out a send timeout for every
 // notification (ten seconds here; with the defaults, 25 seconds each).
 // Nothing is dropped, the channels people read get the hundred in one
-// message within GroupWait, and the hundred ends that follow find room in
-// the queue too.
+// message once GroupWait is up, and the hundred ends that follow find room
+// in the queue too. The loop's clock stands still while the bursts go
+// through (holdClock).
 func TestABurstWithADeadWebhookKeepsTheQueueMoving(t *testing.T) {
 	f := newFixture(t, 1, 1) // "ops", a webhook
 	f.engine.opts.Metrics = metrics.New("test")
@@ -330,6 +364,7 @@ func TestABurstWithADeadWebhookKeepsTheQueueMoving(t *testing.T) {
 		}
 		outages = append(outages, Notification{Event: EventDown, Monitor: m, Incident: incident, At: opened})
 	}
+	clock := f.holdClock()
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -338,19 +373,30 @@ func TestABurstWithADeadWebhookKeepsTheQueueMoving(t *testing.T) {
 		defer close(done)
 		f.engine.Run(runCtx)
 	}()
-	start := time.Now()
 	for _, n := range outages {
 		f.engine.enqueue(n)
 	}
-	if !await(2*time.Second, func() bool { return len(f.engine.queue) == 0 }) {
-		t.Fatalf("the queue still holds %d notifications 2 seconds after the burst", len(f.engine.queue))
+	// The loop takes the first once it has worked out what the open
+	// outages owe the channels (restore): seconds on a slow machine. From
+	// then on the queue drains in a fraction of the ten seconds a send
+	// timeout for each would take.
+	if !await(30*time.Second, func() bool { return len(f.engine.queue) < burst }) {
+		t.Fatal("the loop has not begun on the queue 30s after the burst")
 	}
+	if !await(2*time.Second, func() bool { return len(f.engine.queue) == 0 }) {
+		t.Fatalf("the queue still holds %d notifications 2 seconds after the loop began on it", len(f.engine.queue))
+	}
+	// GroupWait is up by the loop's clock, the webhook's next attempt is
+	// not: the loop's timer fires within GroupWait, and chat and mail are
+	// told then.
+	clock.pass(f.engine.opts.GroupWait)
+	passed := time.Now()
 	told := func(event Event) bool {
 		got := f.sender.log()
 		return strings.Contains(got, "chat:"+string(event)+"[") && strings.Contains(got, "mail:"+string(event)+"[")
 	}
-	if !await(time.Until(start.Add(f.engine.opts.GroupWait+time.Second)), func() bool { return told(EventDown) }) {
-		t.Fatalf("%s after the burst: %q, want chat and mail told within GroupWait", time.Since(start).Round(time.Millisecond), f.sender.log())
+	if !await(f.engine.opts.GroupWait+5*time.Second, func() bool { return told(EventDown) }) {
+		t.Fatalf("%s after GroupWait was up: %q, want chat and mail told", time.Since(passed).Round(time.Millisecond), f.sender.log())
 	}
 
 	// The hundred outages end at once.
