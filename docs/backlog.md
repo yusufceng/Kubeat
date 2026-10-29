@@ -496,6 +496,13 @@ gelmesi, `KubeatBackupStale`'in bir Recreate'te "resolved" göndermesi ya da
 ServiceMonitor'süz kurulumda sürekli yanan `KubeatDown` için ilk kullanıcı
 şikâyeti.
 
+Güncelleme (2026-10-29, S38, #50): yeni `KubeatUnhealthy` de bu gruptadır.
+Scrape etiketleri dışında toplandığı için Recreate'te tek alarmdır, ama
+boşlukta durumunu tutmaz: volume dolu kalırken backend yeniden başlarsa
+alarm boşlukta çözülür ve yeni pod'un ilk penceresinden 5 dakika sonra
+yeniden yanar. Tetikleyici aynı; ek olarak bu alarmın bir yeniden başlatmada
+"resolved" göndermesi.
+
 ## Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı yeniden deneme kuyruğu
 
 2026-10-28'de ertelendi (S17, #27). Kanalın almadığı kesinti bildirimi
