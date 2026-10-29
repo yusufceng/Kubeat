@@ -502,3 +502,24 @@ bir yetenektir, söz değil. Tetikleyici: ilk satın alma görüşmesi. Başlang
 sonra 90 gün kritik/yüksek CVE ve taban imaj düzeltmesi, aynı anda en çok
 iki hat. Gerekçe: söz sonradan verilebilir; verilip geri alınırsa güven
 kaybolur.
+
+## Aynı adla yeniden kurulumda yeniden üretilen Secret'lar
+
+2026-10-29'da ertelendi (S31'in geliştirmesinde çıktı, #38). 0.44'ten beri
+`helm uninstall` veri ve yedek PVC'lerini ve `<release>-secret-key`'i
+bırakır, ama chart'ın ürettiği `<release>-admin`, `<release>-api-token` ve
+`<release>-metrics-token` Secret'ları kaldırmayla gider. Aynı ad ve
+namespace'le yeniden kurulumda yeniden üretilirler: kurulum notları
+yönetici parolasını yeni `<release>-admin` Secret'ından okutur, o parola
+kalan veritabanında geçmez; API ve metrik anahtarları da değişir. README
+"Yedekleme ve geri yükleme" ("Kazayla kaldırmadan dönüş") davranışı ve
+`UPTIME_ADMIN_PASSWORD_RESET` yolunu yazıyor; kullanıcı belgesinde eksik
+yok, eksik olan kurulum anındaki uyarı.
+İki seçenek: kurulum notlarında `lookup` ile "veri PVC'si var, yönetici
+Secret'ı yeni üretildi" uyarısı (yalnızca metin; `helm template` ve Argo
+CD'de `lookup` boş döner, uyarı çıkmaz) ya da bu üç Secret'a da
+`helm.sh/resource-policy: keep` (yeniden kurulum eski değerleri sahiplenir;
+bilerek kaldırmada silinecek nesne artar, kurulum notlarındaki silme komutu
+onları da saymalı). Tetikleyici: kullanıcının minikube provası (sprint 2
+"Kullanıcıda kalanlar" 3) yeni Secret'taki parolanın geçmediğini doğrularsa
+ya da gerçek bir yeniden kurulumda yönetici bu yüzden takılırsa.

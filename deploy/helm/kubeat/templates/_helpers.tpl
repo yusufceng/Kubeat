@@ -42,6 +42,35 @@ kubeat.ingressTLS say "true" or nothing.
 {{- end -}}
 
 {{/*
+Whether removing the release leaves the database's PVC (kubeat.keepData) and
+the backups' PVC (kubeat.keepBackup, only the one the chart creates) in
+place: "true" or nothing. keepOnUninstall is read with dig and a default of
+true: a release upgraded with --reuse-values from 0.43 has no such value,
+and reading it as .Values.a.b would turn the protection off without a word.
+*/}}
+{{- define "kubeat.keepData" -}}
+{{- if dig "persistence" "keepOnUninstall" true .Values.backend }}true{{ end -}}
+{{- end -}}
+
+{{- define "kubeat.keepBackup" -}}
+{{- if and .Values.backup.enabled (not .Values.backup.persistence.existingClaim) (dig "persistence" "keepOnUninstall" true .Values.backup) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The annotations of a PVC that outlives the release. helm uninstall skips a
+resource with helm.sh/resource-policy: keep, as it does the encryption key's
+Secret. Argo CD (and OpenShift GitOps, built on it) renders the chart with
+helm template and runs the release itself. It honours both annotations
+since 2.7, when deleting the application leaves a resource with either, and
+neither before, when a cascade delete takes these PVCs too. Delete=false is
+Argo CD's own name for Helm's annotation and adds no protection of its own.
+*/}}
+{{- define "kubeat.keepAnnotations" -}}
+helm.sh/resource-policy: keep
+argocd.argoproj.io/sync-options: Delete=false
+{{- end -}}
+
+{{/*
 Fails the render on values no template reads, which would otherwise be
 dropped without a word: backend.env and frontend.env, which values files
 of 0.37.0 and before have, unless they are empty. extraEnv took their

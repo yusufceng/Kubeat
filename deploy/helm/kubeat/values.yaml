@@ -34,6 +34,13 @@ backend:
   persistence:
     size: 2Gi
     storageClass: ""   # empty uses the cluster default
+    # Leaves this PVC, <release>-data with the database, in place when the
+    # release is removed (helm uninstall, or deleting the Argo CD
+    # application from Argo CD 2.7 on): installing again with the same
+    # release name and namespace carries on with the monitors, channels,
+    # incidents and history. The install notes print the command that
+    # deletes it. false lets it go with the release, as up to 0.43.
+    keepOnUninstall: true
   # How long the backend may take to start before it is restarted:
   # failureThreshold × periodSeconds, 10 minutes. The first start with an
   # encryption key compacts the database (VACUUM) before it answers, which
@@ -222,6 +229,17 @@ backup:
     size: 5Gi            # >= (keep + 1) x database size: 7 copies of up to ~640 MiB
     storageClass: ""     # empty uses the cluster default
     existingClaim: ""    # use this PVC instead of creating one
+    # Leaves the PVC the chart creates, <release>-backup with the copies, in
+    # place when the release is removed, like backend.persistence: the
+    # copies are there for the mistake that removes the release. A PVC that
+    # already carries the keep annotation (created by, or upgraded to, 0.44)
+    # also stays when a helm upgrade turns backups off or moves them to an
+    # existingClaim; delete it yourself then. One created by 0.43 does not:
+    # helm upgrade keeps a resource it no longer renders only if the live
+    # object carries the annotation, so upgrade to 0.44 with the same values
+    # first and make that change in a later upgrade. The chart never deletes
+    # an existingClaim. false lets it go with the release, as up to 0.43.
+    keepOnUninstall: true
 
 # The Kubeat Enterprise license. Without one Kubeat is the community
 # edition: monitoring, notifications and status pages work either way; the

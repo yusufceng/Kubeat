@@ -73,6 +73,73 @@ renders "empty env" --set-json 'backend.env={}' --set-json 'frontend.env={}'
 refuses "backend.env" "move its variables to backend.extraEnv" --set backend.env.UPTIME_RETENTION=48h
 refuses "frontend.env" "move its variables to frontend.extraEnv" --set frontend.env.REFRESH_INTERVAL_MS=10000
 
+# Removing the release leaves the database's and the backups' PVCs: helm
+# uninstall skips what carries helm.sh/resource-policy, deleting an Argo CD
+# application (2.7 or later) what carries either that or Delete=false. Each
+# claim has a switch of its own, read with a default of true: a value set
+# to null, as a release upgraded with --reuse-values from 0.43 renders
+# without it, keeps them too.
+# The backups' claim exists only when the chart creates it.
+# claim NAME CLAIM has|lacks|absent TEXT VALUES...: the PersistentVolumeClaim
+# CLAIM rendered with these values has TEXT, lacks it, or is not rendered.
+claim() {
+  local name="$1" claim="$2" want="$3" text="$4"
+  shift 4
+  if ! helm template kubeat "$CHART" --show-only templates/backend.yaml "$@" >"$WORK/backend" 2>"$WORK/err"; then
+    failed "$name: refused: $(cat "$WORK/err")"
+    return
+  fi
+  awk -v claim="$claim" '
+    function flush() {
+      if (index(doc, "\nkind: PersistentVolumeClaim\n") && index(doc, "\n  name: " claim "\n")) printf "%s", doc
+      doc = "\n"
+    }
+    BEGIN { doc = "\n" }
+    /^---/ { flush(); next }
+    { doc = doc $0 "\n" }
+    END { flush() }
+  ' "$WORK/backend" >"$WORK/claim"
+  if [ ! -s "$WORK/claim" ]; then
+    [ "$want" = absent ] || failed "$name: $claim is not rendered"
+  elif [ "$want" = absent ]; then
+    failed "$name: $claim is rendered"
+  elif grep -qF -- "$text" "$WORK/claim"; then
+    [ "$want" = has ] || failed "$name: $claim has \"$text\""
+  else
+    [ "$want" = lacks ] || failed "$name: $claim lacks \"$text\""
+  fi
+}
+BACKUPS=(--set backup.enabled=true)
+NO_KEEP_VALUES=(--set backend.persistence.keepOnUninstall=null --set backup.persistence.keepOnUninstall=null)
+for text in "helm.sh/resource-policy: keep" "argocd.argoproj.io/sync-options: Delete=false"; do
+  claim "defaults" kubeat-data has "$text"
+  claim "backups" kubeat-data has "$text" "${BACKUPS[@]}"
+  claim "backups" kubeat-backup has "$text" "${BACKUPS[@]}"
+  claim "no keepOnUninstall values" kubeat-data has "$text" "${BACKUPS[@]}" "${NO_KEEP_VALUES[@]}"
+  claim "no keepOnUninstall values" kubeat-backup has "$text" "${BACKUPS[@]}" "${NO_KEEP_VALUES[@]}"
+  claim "data not kept" kubeat-data lacks "$text" "${BACKUPS[@]}" --set backend.persistence.keepOnUninstall=false
+  claim "data not kept" kubeat-backup has "$text" "${BACKUPS[@]}" --set backend.persistence.keepOnUninstall=false
+  claim "backups not kept" kubeat-backup lacks "$text" "${BACKUPS[@]}" --set backup.persistence.keepOnUninstall=false
+  claim "backups not kept" kubeat-data has "$text" "${BACKUPS[@]}" --set backup.persistence.keepOnUninstall=false
+  claim "backup existingClaim" kubeat-data has "$text" "${BACKUPS[@]}" --set backup.persistence.existingClaim=kubeat-old-backup
+done
+claim "defaults" kubeat-backup absent ""
+claim "backup existingClaim" kubeat-backup absent "" "${BACKUPS[@]}" --set backup.persistence.existingClaim=kubeat-old-backup
+# The install notes name the claims left behind, and the command that
+# deletes them names those alone.
+DELETE_PVC="kubectl -n kubeat delete pvc"
+notes "kept claims" says "$DELETE_PVC kubeat-data kubeat-backup" --namespace kubeat "${BACKUPS[@]}"
+notes "kept claims without the values" says "$DELETE_PVC kubeat-data kubeat-backup" --namespace kubeat "${BACKUPS[@]}" "${NO_KEEP_VALUES[@]}"
+notes "kept data claim without backups" says "$DELETE_PVC kubeat-data" --namespace kubeat
+notes "kept data claim without backups" omits "kubeat-backup" --namespace kubeat
+notes "backups not kept" omits "kubeat-backup" --namespace kubeat "${BACKUPS[@]}" --set backup.persistence.keepOnUninstall=false
+notes "backup existingClaim" omits "kubeat-backup" --namespace kubeat "${BACKUPS[@]}" --set backup.persistence.existingClaim=kubeat-old-backup
+notes "data not kept" says "$DELETE_PVC kubeat-backup" --namespace kubeat "${BACKUPS[@]}" --set backend.persistence.keepOnUninstall=false
+notes "data not kept" omits "kubeat-data" --namespace kubeat "${BACKUPS[@]}" --set backend.persistence.keepOnUninstall=false
+notes "nothing kept" omits "delete pvc" --namespace kubeat "${BACKUPS[@]}" \
+  --set backend.persistence.keepOnUninstall=false --set backup.persistence.keepOnUninstall=false
+notes "nothing kept without backups" omits "delete pvc" --namespace kubeat --set backend.persistence.keepOnUninstall=false
+
 # The SSO redirect URL: the chart takes what the backend's checkCallbackURL
 # takes, refuses the rest, and names the value a refused one came from.
 renders "redirect from route.host" "${SSO[@]}" "${ROUTE[@]}"

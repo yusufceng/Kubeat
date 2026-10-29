@@ -279,6 +279,27 @@ Bu yüzden GitOps ile kurarken dört Secret'ı kendiniz oluşturun (Sealed
 Secrets, External Secrets Operator, ...) ve adlarını yukarıdaki
 `existingSecret` değerleriyle verin; chart o zaman bunları üretmez.
 
+Uygulamayı silmek, Argo CD 2.7 ve sonrasında cascade silme de, veri ve
+yedek PVC'lerini bırakır: chart onlara Helm'in `helm.sh/resource-policy: keep`
+annotation'ının yanında `argocd.argoproj.io/sync-options: Delete=false` da
+basar (`backend.persistence.keepOnUninstall`,
+`backup.persistence.keepOnUninstall`). Argo CD Helm'i yalnızca manifest
+üretmek için kullanır (`helm template`), kurulumu kendisi yönetir; iki
+annotation'ı da 2.7'den beri okur. Daha eski sürümlerde (ve onları taşıyan
+OpenShift GitOps'ta) ikisi de yok sayılır ve cascade silme PVC'leri de
+siler; orada uygulamayı cascade'siz silin
+(`argocd app delete <uygulama> --cascade=false`) ya da önce kopyaları
+dışarı alın ("Yedekleme ve geri yükleme"). Aynı adla aynı namespace'e
+yeniden oluşturulan uygulama aynı adlı PVC'leri bağlar; Secret'lar
+yukarıdaki gibi sizin olduğundan anahtar ve parolalar da aynı kalır.
+PVC'leri bilerek silmek için uygulamayı sildikten sonra
+`kubectl -n <namespace> delete pvc <release>-data <release>-backup`
+(release adı, `helm.releaseName` verilmediyse uygulamanın adıdır) ya da önce
+iki `keepOnUninstall`'ı `false` yapıp eşitleyin, sonra uygulamayı silin.
+`Delete=false` yalnızca uygulamanın silinmesine karşıdır: değerlerden çıkan
+bir PVC'yi (örneğin `backup.enabled=false` ile yedek PVC'sini) prune'u açık
+bir uygulama yine siler.
+
 ### OpenShift
 
 OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakılır,
@@ -339,8 +360,10 @@ SCC admission'ın UID'yi kendisinin ataması, service CA'nın pod'a
 kendiliğinden gelmesi, Thanos Querier'ın gerçek yetki kuralı, iç registry ve
 pull secret'lar, OAuth proxy. Bunlar ilk gerçek kurulumda denenmelidir.
 
-Benzetimi kaldırmak: `helm -n kubeat-ocp uninstall kubeat`; CRD'ler ve
-`openshift-monitoring` namespace'i kalır.
+Benzetimi kaldırmak: `helm --kube-context minikube -n kubeat-ocp uninstall
+kubeat`; CRD'ler, `openshift-monitoring` namespace'i ve `kubeat-ocp`'deki veri
+ve yedek PVC'leri kalır (`kubectl --context minikube -n kubeat-ocp delete pvc
+kubeat-data kubeat-backup`).
 
 ## Güvenlik
 
@@ -2206,6 +2229,44 @@ Yedek dizini veritabanından **ayrı bir volume** olmalıdır; aynı volume'daki
 kopya veritabanıyla birlikte kaybolur. Chart'ta `backup.enabled=true` bunun
 için ayrı bir PVC oluşturur. Bu yine aynı cluster'dadır: cluster'ın
 tamamını kaybetmeye karşı kopyaların dışarıya da taşınması gerekir.
+
+**Kazayla kaldırmadan dönüş.** `helm uninstall` veri (`<release>-data`) ve
+yedek (`<release>-backup`) PVC'lerini silmez: şifreleme anahtarının
+`<release>-secret-key` Secret'ı gibi ikisi de `helm.sh/resource-policy: keep`
+taşır ve Helm kaldırırken onları "These resources were kept due to the
+resource policy" diye sayar. Yanlış release'i kaldırmak ya da takılı bir
+release'i kaldırıp yeniden kurmak bu yüzden monitor'ları, kanalları,
+olayları ve geçmişi götürmez: **aynı release adı ve namespace'le** (ve aynı
+values ile) yapılan yeniden kurulum, `helm install` ya da
+`helm upgrade --install`, kalan PVC'leri ve anahtarı olduğu gibi alır ve
+backend veritabanını kaldığı yerden açar. Chart'ın ürettiği öteki Secret'lar
+kaldırmayla gider ve yeniden üretilir: hesaplar eski parolalarıyla kalır,
+yeni `<release>-admin` Secret'ındaki parola geçmez (unutulduysa
+`UPTIME_ADMIN_PASSWORD_RESET`, bkz. "Hesaplar ve giriş"); API ve metrik
+anahtarları da yenilenir, eskilerini kullanan betikler ve elle
+yapılandırılmış bir Prometheus yenilerini almalıdır.
+
+PVC'leri bilerek silmek için release'i kaldırdıktan sonra (kurulum notları
+komutu yalnızca kalacak PVC'lerle yazar):
+
+```sh
+kubectl -n kubeat delete pvc kubeat-data kubeat-backup
+```
+
+Ya da önce `backend.persistence.keepOnUninstall=false` ve
+`backup.persistence.keepOnUninstall=false` ile yükseltin; `helm uninstall`
+ikisini de 0.43'e kadar olduğu gibi siler. `keep` annotation'ını zaten
+taşıyan yedek PVC'si (0.44 ile oluşturulmuş ya da 0.44'e yükseltilmiş)
+yükseltmede de korunur: `backup.enabled=false` ya da
+`backup.persistence.existingClaim` ile yükseltmek chart'ın oluşturduğu yedek
+PVC'sini kopyalarıyla bırakır, gerekmiyorsa onu da elle silin;
+`existingClaim` ile verilen PVC'yi chart hiç silmez. 0.43'ten gelirken yedeği kapatmayı ya da `existingClaim`'e geçişi
+yükseltmeyle aynı adımda yapmayın: Helm yükseltmede artık üretmediği bir
+kaynağı ancak cluster'daki nesne `keep` taşıyorsa bırakır, 0.43'ün
+oluşturduğu yedek PVC'si taşımaz ve kopyalarıyla silinir. Önce aynı values
+ile 0.44'e yükseltin, değişikliği sonraki yükseltmede yapın. Namespace'i
+silmek ise PVC'leri de siler: kopyaların cluster dışına taşınması bunun için
+de gerekir.
 
 Kopyaları cluster dışına almak için (backend imajında `tar` olmadığından
 `kubectl cp` çalışmaz):
