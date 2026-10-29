@@ -336,7 +336,8 @@ func (channelsFail) ListChannels(context.Context) ([]store.Channel, error) {
 
 // Every enabled channel attempted at least once has its last delivery from
 // its row, 1 or 0, and the outages it has not taken from the alert engine;
-// a disabled channel and one never attempted have neither. The scrape
+// a disabled channel has neither, and one never attempted only the outages
+// it is owed, if it is owed any. The scrape
 // counts as incomplete when the channels cannot be read, as when the
 // monitors cannot: the alert rules then hold the last values.
 func TestPerChannelMetrics(t *testing.T) {
@@ -355,7 +356,7 @@ func TestPerChannelMetrics(t *testing.T) {
 	}
 	itsm, chat, pager := channel("itsm", store.ChannelWebhook, true), channel("chat", store.ChannelSlack, true), channel("pager", store.ChannelPagerDuty, true)
 	off := channel("off", store.ChannelWebhook, false)
-	channel("fresh", store.ChannelEmail, true) // never attempted
+	fresh := channel("fresh", store.ChannelEmail, true) // never attempted
 	at := time.Unix(1_800_000_000, 0)
 	for _, d := range []struct {
 		id  int64
@@ -411,6 +412,19 @@ func TestPerChannelMetrics(t *testing.T) {
 	if got["kubeat_channel_last_delivery_ok{channel=itsm}{channel_type=webhook}"] != 1 || got["kubeat_channel_undelivered_outages{channel=itsm}{channel_type=webhook}"] != 0 {
 		t.Errorf("after itsm took one: ok %v, undelivered %v", got["kubeat_channel_last_delivery_ok{channel=itsm}{channel_type=webhook}"],
 			got["kubeat_channel_undelivered_outages{channel=itsm}{channel_type=webhook}"])
+	}
+
+	// A channel the engine says is owed an outage has it reported before
+	// its first attempt, without a last delivery.
+	m.UndeliveredOutages(map[int64]int{fresh.ID: 1})
+	if got, err = m.Gather(); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := got["kubeat_channel_undelivered_outages{channel=fresh}{channel_type=email}"]; !ok || v != 1 {
+		t.Errorf("the channel never attempted and owed an outage: undelivered %v (present: %v), want 1", v, ok)
+	}
+	if _, ok := got["kubeat_channel_last_delivery_ok{channel=fresh}{channel_type=email}"]; ok {
+		t.Error("the channel never attempted has a last delivery")
 	}
 
 	// Channels that cannot be read: no channel series, and the scrape is

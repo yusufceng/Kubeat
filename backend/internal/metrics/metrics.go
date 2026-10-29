@@ -429,7 +429,7 @@ var (
 	channelDelivered = prometheus.NewDesc("kubeat_channel_last_delivery_ok",
 		"1 if the last attempt to deliver a notification to the channel succeeded, 0 if it failed, as the channel's row says. Only for enabled channels attempted at least once.", channelLabels, nil)
 	channelUndelivered = prometheus.NewDesc("kubeat_channel_undelivered_outages",
-		"Outages (down notifications) the channel has not taken and is still to be sent again: ones it did not take, and ones held back for it while it is paused; 0 when there are none. For the channels kubeat_channel_last_delivery_ok is reported for.", channelLabels, nil)
+		"Outages (down notifications) the channel has not taken and is still to be sent again: ones it did not take, and ones held back for it while it is paused; 0 when there are none. For every enabled channel attempted at least once or owed such an outage.", channelLabels, nil)
 )
 
 // collectChannels reports, for every enabled channel attempted at least
