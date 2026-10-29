@@ -2642,20 +2642,23 @@ verilir (ör. `--set metrics.prometheusRule.clusterLabel=cluster`) ve o depoya
 bu değerle render edilen kurallar taşınır.
 
 - **Neden.** Boşken `KubeatDown` `up` serisini `namespace` ve `job`'a göre
-  toplar; `KubeatMonitorDown` ile `KubeatCertificateExpiring` de scrape
-  boşluğunda tuttukları değeri `namespace` ve `job` eşleşmesiyle bırakır.
-  Tek depoda, aynı release adı ve namespace'le kurulu bir cluster ayaktayken
-  öbürünün `KubeatDown`'ı yanmaz, açık kesinti alarmı da öbürünün başarılı
-  scrape'iyle erken çözülür.
+  toplar; `KubeatMonitorDown`, `KubeatCertificateExpiring` ve
+  `KubeatNotificationsFailing` de scrape boşluğunda tuttukları değeri
+  `namespace` ve `job` eşleşmesiyle bırakır. Tek depoda, aynı release adı ve
+  namespace'le kurulu bir cluster ayaktayken öbürünün `KubeatDown`'ı yanmaz,
+  açık kesinti ve kanal alarmı da öbürünün başarılı scrape'iyle erken
+  çözülür.
 - **Ne değişir.** `KubeatDown`, `KubeatUnhealthy`, `KubeatBackupFailing`,
-  `KubeatMonitorDown` ve `KubeatCertificateExpiring` bu etiketle,
-  `namespace` ve `job`'un yanında, cluster başına toplanır ve dış
-  etiketlerden yalnızca onu taşır. Depo bir HA çiftinin kopyalarını
-  tekilleştirmiyorsa kopyanın etiketi (ör. `prometheus_replica`) de
-  toplanır: bir kopyanın serisi kesilince yanlış `KubeatDown` yanmaz, açık
-  kesinti tek alarm kalır. Recreate'te de alarm tektir. Öteki kurallar her
-  seriye ayrı baktığından zaten cluster başınadır ve etiketlerinin tümünü
-  taşır.
+  `KubeatMonitorDown`, `KubeatCertificateExpiring` ve
+  `KubeatNotificationsFailing`'in kanal ifadeleri bu etiketle, `namespace`
+  ve `job`'un yanında (ve monitor ya da kanal etiketleriyle), cluster başına
+  toplanır ve dış etiketlerden yalnızca onu taşır. Depo bir HA çiftinin
+  kopyalarını tekilleştirmiyorsa kopyanın etiketi (ör. `prometheus_replica`)
+  de toplanır: bir kopyanın serisi kesilince yanlış `KubeatDown` yanmaz,
+  açık kesinti ve bildirim alamayan kanal tek alarm kalır. Recreate'te de
+  alarm tektir. Öteki kurallar, `KubeatNotificationsFailing`'in kuyrukta
+  düşen bildirim ifadesi de, her seriye ayrı baktığından zaten cluster
+  başınadır ve etiketlerinin tümünü taşır.
 - **Yokluk penceresi.** Hiç backend pod'u kalmayan bir cluster'ın
   `KubeatDown`'ı, o cluster'ın `up` serisi son 24 saatte görüldüyse 5
   dakikada yanar ve pencere boyunca açık kalır. 24 saatten uzun yokluğu bu

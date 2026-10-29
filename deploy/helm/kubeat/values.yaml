@@ -380,18 +380,19 @@ metrics:
     # The severity label of the per-monitor alerts.
     severity: warning
     certWarningDays: 14
-    # The label that tells clusters apart, e.g. "cluster", for rules
-    # evaluated over the series of several clusters in one store (Grafana
-    # Cloud or Mimir, a global Thanos Ruler): copy the rules rendered with
-    # it there. KubeatDown, KubeatUnhealthy, KubeatBackupFailing and the
-    # outage and certificate alerts then group by it beside namespace and
-    # job, so that one cluster's Kubeat is not hidden by another's, and keep
-    # no other label the store adds (the replica label of an HA pair it does
-    # not deduplicate). KubeatDown also fires for a cluster whose backend was
-    # seen in the last 24 hours and is gone; a longer absence is the
-    # heartbeat's to tell. Leave it empty where each cluster's own
-    # Prometheus evaluates the rules (OpenShift's user workload monitoring,
-    # kube-prometheus-stack): the rules then render as up to 0.44.
+    # The label that tells clusters apart, e.g. "cluster", for rules evaluated
+    # over the series of several clusters in one store (Grafana Cloud or
+    # Mimir, a global Thanos Ruler): copy the rules rendered with it there.
+    # KubeatDown, KubeatUnhealthy, KubeatBackupFailing and the outage,
+    # certificate and channel alerts (KubeatNotificationsFailing) then group
+    # by it beside namespace and job (and the monitor or the channel), so that
+    # one cluster's Kubeat is not hidden by another's, and keep no other label
+    # the store adds (the replica label of an HA pair it does not
+    # deduplicate). KubeatDown also fires for a cluster whose backend was seen
+    # in the last 24 hours and is gone; a longer absence is the heartbeat's to
+    # tell. Leave it empty where each cluster's own Prometheus evaluates the
+    # rules (OpenShift's user workload monitoring, kube-prometheus-stack): the
+    # rules then render as up to 0.44.
     clusterLabel: ""
 
 # Dead man's switch: the backend requests this URL at every interval while

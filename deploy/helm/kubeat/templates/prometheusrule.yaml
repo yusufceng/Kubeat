@@ -10,25 +10,27 @@ raising them a second time.
 {{- $up := printf "up{job=%q, namespace=%q}" (printf "%s-backend" .Release.Name) .Release.Namespace }}
 {{- /*
 What tells one installation's series from another's, and what the alerts of
-an installation and of one of its monitors are aggregated by. By default
-namespace and job, and everything but the scrape labels: each cluster's own
-Prometheus evaluates the rules, and the rules render as in 0.44. With
-metrics.prometheusRule.clusterLabel the rules are evaluated over the series
-of several clusters in one store (Grafana Cloud or Mimir, a global Thanos
-Ruler): they then group by that label beside namespace and job, so that one
-cluster's backend does not hide another's, and drop every other label the
-store adds, such as the replica label of an HA pair it does not
-deduplicate, by which one replica's gone series would raise a false alert or
-a second one.
+an installation, of one of its monitors and of one of its channels are
+aggregated by. By default namespace and job, and everything but the scrape
+labels: each cluster's own Prometheus evaluates the rules, and the rules
+render as in 0.44. With metrics.prometheusRule.clusterLabel the rules are
+evaluated over the series of several clusters in one store (Grafana Cloud
+or Mimir, a global Thanos Ruler): they then group by that label beside
+namespace and job, so that one cluster's backend does not hide another's,
+and drop every other label the store adds, such as the replica label of an
+HA pair it does not deduplicate, by which one replica's gone series would
+raise a false alert or a second one.
 */}}
 {{- $cluster := include "kubeat.clusterLabel" . }}
 {{- $installation := "namespace, job" }}
 {{- $byInstallation := printf "without (%s)" $scrape }}
 {{- $byMonitor := printf "without (%s)" $scrape }}
+{{- $byChannel := printf "without (%s)" $scrape }}
 {{- if $cluster }}
 {{- $installation = printf "namespace, job, %s" $cluster }}
 {{- $byInstallation = printf "by (%s)" $installation }}
 {{- $byMonitor = printf "by (%s, monitor, monitor_namespace, type)" $installation }}
+{{- $byChannel = printf "by (%s, channel, channel_type)" $installation }}
 {{- end }}
 # Alerts the cluster's own Prometheus raises from Kubeat's metrics, so that
 # outages reach the Alertmanager and receivers the platform already has.
@@ -166,15 +168,15 @@ spec:
         - alert: KubeatNotificationsFailing
           expr: |-
             (
-              max without ({{ $scrape }}) (kubeat_channel_last_delivery_ok) == 0
-              or max without ({{ $scrape }}) (kubeat_channel_undelivered_outages) > 0
+              max {{ $byChannel }} (kubeat_channel_last_delivery_ok) == 0
+              or max {{ $byChannel }} (kubeat_channel_undelivered_outages) > 0
             )
             or (
               (
-                max without ({{ $scrape }}) (last_over_time(kubeat_channel_last_delivery_ok[10m])) == 0
-                or max without ({{ $scrape }}) (last_over_time(kubeat_channel_undelivered_outages[10m])) > 0
+                max {{ $byChannel }} (last_over_time(kubeat_channel_last_delivery_ok[10m])) == 0
+                or max {{ $byChannel }} (last_over_time(kubeat_channel_undelivered_outages[10m])) > 0
               )
-              unless on (namespace, job) (kubeat_monitor_scrape_success == 1)
+              unless on ({{ $installation }}) (kubeat_monitor_scrape_success == 1)
             )
             or increase(kubeat_notifications_dropped_total[15m]) > 0
           for: 5m
