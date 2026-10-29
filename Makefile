@@ -69,6 +69,7 @@ test:
 	cd frontend && npm test
 	deploy/helm/test-chart.sh
 	scripts/test-check-versions.sh
+	scripts/test-release-notes.sh
 
 # check-versions.sh: Chart.yaml, VERSION, README ve docs/pilot.md'deki
 # sürümler aynı mı (CONTRIBUTING.md, "Sürümler").

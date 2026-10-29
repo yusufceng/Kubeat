@@ -1,11 +1,18 @@
 name: Release
 
-# A version tag publishes the images and the chart:
-#   ghcr.io/yusufceng/kubeat-backend:<version>, kubeat-frontend:<version> (amd64, arm64)
+# A version tag publishes, signs and describes a release:
+#   ghcr.io/yusufceng/kubeat-backend:<version>, kubeat-frontend:<version>
+#     (amd64, arm64; BuildKit's SPDX SBOM and SLSA provenance in the index)
 #   oci://ghcr.io/yusufceng/charts/kubeat --version <version>
+# cosign signs the three digests keyless (GitHub OIDC, Sigstore), the
+# signatures are verified as README "Tedarik zinciri" tells users to, and the
+# tag's GitHub Release lists the digests and carries the SBOMs. Nothing pushes
+# `latest`.
 # Run by hand (workflow_dispatch, e.g. gh workflow run release.yml --ref
-# <branch>) it is a dry run: the checks run and the images and the chart are
-# built, but nothing is pushed and no tag is touched.
+# <branch>) it is a dry run of all of that under packages of its own,
+# ghcr.io/yusufceng/kubeat-dry-run/..., never the release packages: no release
+# tag is pushed or moved and no GitHub Release is made; the notes and the
+# SBOMs are the run's artifact. CONTRIBUTING.md, "Sürümler".
 on:
   push:
     tags: ["v*"]
@@ -14,6 +21,16 @@ on:
 permissions:
   contents: read
   packages: write
+
+env:
+  # Where this run pushes: the release packages for a tag, packages of their
+  # own for a dry run, which the release manager deletes afterwards.
+  REGISTRY_PATH: ${{ github.event_name == 'push' && format('ghcr.io/{0}', github.repository_owner) || format('ghcr.io/{0}/kubeat-dry-run', github.repository_owner) }}
+  PLATFORMS: linux/amd64,linux/arm64
+  # Pinned (CONTRIBUTING.md, "Sabit araç sürümleri"): the checksum is that of
+  # cosign-linux-amd64 in the release's cosign_checksums.txt.
+  COSIGN_VERSION: v3.1.4
+  COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
 
 jobs:
   # Before anything is pushed: the tag must be Chart.yaml's version, and the
@@ -42,6 +59,11 @@ jobs:
   images:
     runs-on: ubuntu-latest
     needs: versions
+    # GitHub merges the outputs of a matrix's jobs; each sets the one named
+    # after its component.
+    outputs:
+      backend: ${{ steps.digest.outputs.backend }}
+      frontend: ${{ steps.digest.outputs.frontend }}
     strategy:
       matrix:
         component: [backend, frontend]
@@ -50,27 +72,57 @@ jobs:
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
-        if: github.event_name == 'push'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v7
+      # The version tag only. The SBOM and the provenance (mode=max: the
+      # build's parameters and sources) go into the image's index as
+      # attestations, so the signature on the index's digest covers them.
+      - id: build
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.component }}
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' }}
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          sbom: true
+          provenance: mode=max
           build-args: VERSION=${{ needs.versions.outputs.version }}
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/kubeat-${{ matrix.component }}:${{ needs.versions.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/kubeat-${{ matrix.component }}:latest
+          tags: ${{ env.REGISTRY_PATH }}/kubeat-${{ matrix.component }}:${{ needs.versions.outputs.version }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ needs.versions.outputs.version }}
+      - id: digest
+        env:
+          COMPONENT: ${{ matrix.component }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest from the build: '$DIGEST'"; exit 1; }
+          echo "$COMPONENT=$DIGEST" >> "$GITHUB_OUTPUT"
+      # The index's SPDX SBOMs, one per platform, for the Release.
+      - name: SBOMs
+        env:
+          IMAGE: ${{ env.REGISTRY_PATH }}/kubeat-${{ matrix.component }}@${{ steps.build.outputs.digest }}
+          NAME: kubeat-${{ matrix.component }}-${{ needs.versions.outputs.version }}
+        run: |
+          mkdir -p sbom
+          for platform in ${PLATFORMS//,/ }; do
+            file="sbom/$NAME-${platform//\//-}.spdx.json"
+            docker buildx imagetools inspect "$IMAGE" --format "{{ json (index .SBOM \"$platform\").SPDX }}" > "$file"
+            jq -e '.spdxVersion | startswith("SPDX-")' "$file" > /dev/null || { echo "$file: not an SPDX document"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom-${{ matrix.component }}
+          path: sbom/
+          if-no-files-found: error
+          overwrite: true
 
   chart:
     runs-on: ubuntu-latest
     needs: [versions, images]
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
       # The Helm CI tests the chart with (ci.yml); raise the two together.
@@ -79,9 +131,156 @@ jobs:
           version: v4.3.1
       - run: helm lint deploy/helm/kubeat
       - run: helm package deploy/helm/kubeat --destination dist
-      - if: github.event_name == 'push'
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
-      - if: github.event_name == 'push'
+      - run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+      # helm push prints the digest it pushed; the sign job signs that one.
+      - id: push
         env:
           VERSION: ${{ needs.versions.outputs.version }}
-        run: helm push "dist/kubeat-$VERSION.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+        run: |
+          helm push "dist/kubeat-$VERSION.tgz" "oci://$REGISTRY_PATH/charts" > push.log 2>&1 || { cat push.log; exit 1; }
+          cat push.log
+          digest="$(awk '$1 == "Digest:" { print $2 }' push.log)"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest in helm push's output"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+  # The only job that may ask GitHub for an OIDC token, and it runs nothing
+  # but cosign: keyless signatures (a Fulcio certificate for release.yml at
+  # this run's ref, an entry in Rekor) on the digests the build and helm push
+  # reported. Each signature is pushed next to its artifact as a Sigstore
+  # bundle (an OCI 1.1 referrer; on ghcr.io the sha256-<digest> tag).
+  sign:
+    runs-on: ubuntu-latest
+    needs: [images, chart]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Install cosign
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$RUNNER_TEMP/bin/cosign" "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-amd64"
+          echo "$COSIGN_SHA256  $RUNNER_TEMP/bin/cosign" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/bin/cosign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$TOKEN" | cosign login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Sign the digests
+        env:
+          BACKEND_DIGEST: ${{ needs.images.outputs.backend }}
+          FRONTEND_DIGEST: ${{ needs.images.outputs.frontend }}
+          CHART_DIGEST: ${{ needs.chart.outputs.digest }}
+        run: |
+          for digest in "$BACKEND_DIGEST" "$FRONTEND_DIGEST" "$CHART_DIGEST"; do
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "not a digest: '$digest'"; exit 1; }
+          done
+          for ref in "$REGISTRY_PATH/kubeat-backend@$BACKEND_DIGEST" \
+            "$REGISTRY_PATH/kubeat-frontend@$FRONTEND_DIGEST" \
+            "$REGISTRY_PATH/charts/kubeat@$CHART_DIGEST"; do
+            cosign sign --yes --oidc-provider github-actions "$ref"
+          done
+
+  # Checks the signatures as README "Tedarik zinciri" tells users to, with
+  # read-only access like theirs and the identity README names (release.yml
+  # at this run's ref): online, then from disk with no network, as in an
+  # air-gapped cluster. Then writes the Release notes
+  # (scripts/release-notes.sh) and keeps them with the SBOMs.
+  verify:
+    runs-on: ubuntu-latest
+    needs: [versions, images, chart, sign]
+    permissions:
+      contents: read
+      packages: read
+    env:
+      VERSION: ${{ needs.versions.outputs.version }}
+      BACKEND_DIGEST: ${{ needs.images.outputs.backend }}
+      FRONTEND_DIGEST: ${{ needs.images.outputs.frontend }}
+      CHART_DIGEST: ${{ needs.chart.outputs.digest }}
+      IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+      ISSUER: https://token.actions.githubusercontent.com
+      DRY_RUN: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install cosign
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$RUNNER_TEMP/bin/cosign" "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-amd64"
+          echo "$COSIGN_SHA256  $RUNNER_TEMP/bin/cosign" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/bin/cosign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # A dry run's packages may be private.
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$TOKEN" | cosign login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Verify the signatures
+        run: |
+          cosign verify \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer "$ISSUER" \
+            "$REGISTRY_PATH/kubeat-backend@$BACKEND_DIGEST" \
+            "$REGISTRY_PATH/kubeat-frontend@$FRONTEND_DIGEST" \
+            "$REGISTRY_PATH/charts/kubeat@$CHART_DIGEST"
+      # README's air-gapped steps: the trusted root from Sigstore's TUF
+      # repository, an image and the chart saved to disk with their
+      # signatures, and the check with --trusted-root while a proxy that
+      # refuses every connection stands in for the air gap.
+      - name: Verify offline
+        run: |
+          cosign initialize
+          root="$HOME/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json"
+          test -s "$root" || { echo "no trusted root at $root"; exit 1; }
+          cosign save --dir "$RUNNER_TEMP/offline/backend" "$REGISTRY_PATH/kubeat-backend@$BACKEND_DIGEST"
+          cosign save --dir "$RUNNER_TEMP/offline/chart" "$REGISTRY_PATH/charts/kubeat@$CHART_DIGEST"
+          for artifact in backend chart; do
+            HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 NO_PROXY= \
+              cosign verify --trusted-root "$root" --local-image \
+                --certificate-identity "$IDENTITY" \
+                --certificate-oidc-issuer "$ISSUER" \
+                "$RUNNER_TEMP/offline/$artifact"
+          done
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: sbom-*
+          path: release/sbom
+          merge-multiple: true
+      - name: Release notes
+        run: |
+          scripts/release-notes.sh release/sbom/*.spdx.json > release/notes.md
+          cat release/notes.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ needs.versions.outputs.version }}
+          path: release/
+          if-no-files-found: error
+          overwrite: true
+
+  # The tag's GitHub Release, from what the verify job wrote. The only job
+  # that may write to the repository; a dry run has none.
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [versions, verify]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ needs.versions.outputs.version }}
+          path: release
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.versions.outputs.version }}
+        run: |
+          # A patch for an older minor, tagged from a release/v* branch, does
+          # not become the repository's latest release.
+          newest="$(gh api "repos/$GITHUB_REPOSITORY/tags" --paginate --jq '.[].name' \
+            | sed -n 's/^v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' | sort -V | tail -n 1)"
+          latest=false
+          if [ "$newest" = "$VERSION" ]; then latest=true; fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --latest="$latest" --title "Kubeat $VERSION" --notes-file release/notes.md \
+            release/sbom/*.spdx.json

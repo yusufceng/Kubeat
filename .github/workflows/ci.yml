@@ -83,6 +83,9 @@ jobs:
         run: |
           scripts/check-versions.sh
           scripts/test-check-versions.sh
+      # The notes release.yml writes for a tag's GitHub Release.
+      - name: The release notes script
+        run: scripts/test-release-notes.sh
       # test-chart.sh checks the alert rules with promtool and runs their
       # scenarios, and fails under CI without it. A pinned Prometheus
       # release (an LTS line), the archive checked against its checksum.
