@@ -161,7 +161,10 @@ koşar:
 6. `release`: etiketin GitHub Release'ini açar: sürümün yükseltme notuna
    bağlantı (etiketteki `docs/yukseltme.md`'de sürümün bölümü), üç digest,
    doğrulama komutu ve backend ile frontend için SPDX SBOM'lar.
-   `contents: write` yalnızca bu iştedir.
+   `contents: write` yalnızca bu iştedir. Bağlantının çapası bölüm
+   başlığından ("0.46'ya yükseltme" → `#046ya-yükseltme`) gelir; sürüm PR'ı
+   `Chart.yaml`'ı yükseltirken minor'ın bu biçimdeki bölümünü de yazar, yoksa
+   `scripts/test-release-notes.sh` düşer.
 
 İş akışı düzeyindeki izinler `contents: read` ve `packages: write`'tır.
 

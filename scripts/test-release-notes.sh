@@ -3,8 +3,9 @@
 # checks that the notes link the version's upgrade notes, name each artifact
 # with its digest, carry a verify command the shell can parse and list the
 # SBOM files; that the link's anchor is the one GitHub makes from each
-# upgrade notes heading in the repository; and that a missing or malformed
-# value fails before any notes are written.
+# upgrade notes heading in the repository, and that Chart.yaml's version
+# has its heading; and that a missing or malformed value fails before any
+# notes are written.
 # Usage: scripts/test-release-notes.sh
 set -u
 
@@ -153,16 +154,31 @@ headings="$(cat "$ROOT/README.md" "$ROOT/docs/yukseltme.md" 2>/dev/null |
 if [ -z "$headings" ]; then
   failed "no \"<sürüm>'e yükseltme\" heading in docs/yukseltme.md or README.md"
 fi
+anchors=""
 while IFS= read -r heading; do
   [ -n "$heading" ] || continue
   version="$(printf '%s\n' "$heading" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/').0"
   anchor="$(printf '%s\n' "$heading" | sed -e 's/[.]//g' -e "s/'//g" -e 's/’//g' -e 's/ /-/g')"
+  anchors="$anchors$anchor
+"
   if notes VERSION="$version" GITHUB_REF_NAME="v$version"; then
     has "the heading \"$heading\"" "/docs/yukseltme.md#$anchor)."
   else
     failed "the heading \"$heading\": failed: $(cat "$WORK/err")"
   fi
 done <<<"$headings"
+
+# The release of Chart.yaml's version links a section that is there: the
+# release PR writes the minor's upgrade notes along with the version.
+version="$(awk '/^version:/ { v = $2; gsub(/["\047]/, "", v); print v; exit }' "$ROOT/deploy/helm/kubeat/Chart.yaml")"
+if notes VERSION="$version" GITHUB_REF_NAME="v$version"; then
+  anchor="$(sed -n 's/.*docs\/yukseltme\.md#\([^)]*\)).*/\1/p' "$WORK/out")"
+  if [ -z "$anchor" ] || ! printf '%s' "$anchors" | grep -qxF -- "$anchor"; then
+    failed "Chart.yaml's $version: its release would link #$anchor, a section docs/yukseltme.md does not have"
+  fi
+else
+  failed "Chart.yaml's $version: failed: $(cat "$WORK/err")"
+fi
 
 refuses "no SBOM" "usage:" --
 refuses "no chart digest" "CHART_DIGEST is not set" CHART_DIGEST=
