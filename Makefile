@@ -94,7 +94,8 @@ minikube-deploy: images
 # Minikube'u Kubeat'in gözünde OpenShift'e benzetir (Route ve ServiceMonitor
 # CRD'leri, token ve TLS isteyen bir thanos-querier, kısıtlı pod güvenliği) ve
 # chart'ı OpenShift'teki ayarlarıyla ayrı bir namespace'e kurar. Önce
-# minikube-demo gerekir. Kaldırmak için: helm -n kubeat-ocp uninstall kubeat
+# minikube-demo gerekir. Kaldırmak için:
+# helm --kube-context minikube -n kubeat-ocp uninstall kubeat
 # (veri ve yedek PVC'leri kalır; silme komutu README "OpenShift"te).
 minikube-openshift-sim: images
 	KUBE_CONTEXT=$(KUBE_CONTEXT) deploy/demo/openshift-sim/install.sh

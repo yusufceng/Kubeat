@@ -360,9 +360,10 @@ SCC admission'ın UID'yi kendisinin ataması, service CA'nın pod'a
 kendiliğinden gelmesi, Thanos Querier'ın gerçek yetki kuralı, iç registry ve
 pull secret'lar, OAuth proxy. Bunlar ilk gerçek kurulumda denenmelidir.
 
-Benzetimi kaldırmak: `helm -n kubeat-ocp uninstall kubeat`; CRD'ler,
-`openshift-monitoring` namespace'i ve `kubeat-ocp`'deki veri ve yedek
-PVC'leri kalır (`kubectl -n kubeat-ocp delete pvc kubeat-data kubeat-backup`).
+Benzetimi kaldırmak: `helm --kube-context minikube -n kubeat-ocp uninstall
+kubeat`; CRD'ler, `openshift-monitoring` namespace'i ve `kubeat-ocp`'deki veri
+ve yedek PVC'leri kalır (`kubectl --context minikube -n kubeat-ocp delete pvc
+kubeat-data kubeat-backup`).
 
 ## Güvenlik
 
