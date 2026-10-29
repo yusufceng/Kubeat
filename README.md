@@ -52,8 +52,17 @@ cluster'a kurulum:
 
 ```
 helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0 \
+  --set podSecurityContext.fsGroup=1001 \
   -n kubeat --create-namespace
 ```
+
+OpenShift'te `--set podSecurityContext.fsGroup=1001` satırını atlayın; UID
+ve fsGroup'u SCC atar (bkz. "OpenShift"). Öteki cluster'larda bu satır
+gerekir: imajlar 1001 UID'siyle çalışır ve volume'un kökü root'a aitse
+backend fsGroup olmadan `/data`'ya yazamaz, açılışta `open database failed`
+ile durur; yedek volume'u da yazılamaz. `podSecurityContext` boşken kurulum
+notları OpenShift dışındaki bir cluster'da bunu WARNING ile söyler. Geri
+yükleme pod'u da aynı fsGroup'u alır ("Yedekleme ve geri yükleme").
 
 İmajları kendi registry'nize aynalıyorsanız `backend.image.repository`,
 `frontend.image.repository` ve gerekirse `imagePullSecrets` değerlerini
@@ -2467,6 +2476,7 @@ metadata:
   name: kubeat-restore
 spec:
   restartPolicy: Never
+  securityContext: { fsGroup: 1001 }             # OpenShift'te bu satırı çıkarın
   containers:
     - name: restore
       image: ghcr.io/yusufceng/kubeat-backend:<sürüm>
@@ -2485,6 +2495,18 @@ spec:
     - name: backup                               # yeni kurulumda bu ikisini çıkarın
       persistentVolumeClaim: { claimName: kubeat-backup }
 ```
+
+Pod düzeyindeki `securityContext`, yardımcı pod'un volume'lara backend gibi
+yazabilmesi içindir; kurulum komutundaki `podSecurityContext.fsGroup=1001`'in
+karşılığıdır (bkz. "Cluster'a kurulum"). Olmazsa volume'un kökü root'a ait
+bir cluster'da aşağıdaki kopyalama `/data`'ya yazamaz ve backend o sırada
+sıfır replikada, yani izleme durmuş hâlde kalır.
+
+- **OpenShift'te** bu satırı çıkarın; UID ve fsGroup'u SCC atar.
+- **Kurulumda başka bir `podSecurityContext` verdiyseniz** satırdaki değeri
+  onunla değiştirin. Kurulumdaki değer:
+  `kubectl get deploy kubeat-backend -o jsonpath='{.spec.template.spec.securityContext}'`
+  (çıktı, ör. `{"fsGroup":1001}`, olduğu gibi yazılabilir).
 
 Aynı kurulumda, yedek volume'undaki bir kopyaya dönmek:
 

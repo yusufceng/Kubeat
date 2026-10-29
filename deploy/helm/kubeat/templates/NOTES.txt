@@ -1,4 +1,14 @@
 Kubeat is installed.
+{{- if and (not .Values.podSecurityContext) (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) }}
+
+WARNING: the backend may be unable to write to its volumes (the database,
+the backups). podSecurityContext is empty, and this cluster is not
+OpenShift, whose SCC would assign an fsGroup. Where a volume belongs to
+root, the backend stops at startup with "open database failed". Install or
+upgrade with
+  --set podSecurityContext.fsGroup=1001
+as the install command in the README ("Cluster'a kurulum") does.
+{{- end }}
 
 Sign in as "admin" with the password
 {{- if .Values.auth.existingSecret }}
