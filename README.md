@@ -2392,8 +2392,8 @@ yayınlar. Başlıcaları:
 | `kubeat_notifications_total{channel_type,event,result}` | Bildirimler, son sonucuyla: kanal alınca `sent`, denemeler bitince `failed` (bkz. "Alarm") |
 | `kubeat_notification_attempts_total{channel_type,result}` | Kanala yapılan her teslimat denemesi, kesinti bildiriminin yeniden denemeleri dahil; bildirim kaydındaki her satır için bir artış. Her kanal türünün `sent` ve `failed` serisi açılışta 0 ile yayınlanır, böylece `increase()` ilk başarısız denemeyi de görür |
 | `kubeat_notifications_dropped_total` | Teslimat kuyruğu dolu olduğu için düşürülen bildirimler |
-| `kubeat_channel_last_delivery_ok{channel,channel_type}` | Kanalın son teslimat denemesi başarılıysa 1, değilse 0; her scrape'te kanal satırındaki **Son gönderim**'den okunur. Etkin ve en az bir kez denenmiş her kanal için; kanal adı `channel` etiketindedir |
-| `kubeat_channel_undelivered_outages{channel,channel_type}` | Kanalın almadığı ve yeniden gönderilmeyi bekleyen kesinti (`down`) bildirimi sayısı: reddettiği ya da ulaşılamayan, ve almıyor sayıldığı sürece bekletilenler; yoksa 0. `kubeat_channel_last_delivery_ok`'un yayınlandığı kanallar için (bkz. "Alarm") |
+| `kubeat_channel_last_delivery_ok{channel,channel_type}` | Kanalın son teslimat denemesi başarılıysa 1, değilse 0; her scrape'te kanal satırındaki **Son gönderim**'den okunur. Kanal testi de deneme sayılır; yeniden başlatma ve kanalı düzenlemek değeri değiştirmez. Etkin ve en az bir kez denenmiş her kanal için; kanal adı `channel` etiketindedir |
+| `kubeat_channel_undelivered_outages{channel,channel_type}` | Kanalın almadığı ve yeniden gönderilmeyi bekleyen kesinti (`down`) bildirimi sayısı: reddettiği ya da ulaşılamayan, ve almıyor sayıldığı sürece bekletilenler; yoksa 0. Etkin ve en az bir kez denenmiş ya da böyle bir kesintisi bekleyen her kanal için (bkz. "Alarm") |
 | `kubeat_backups_total{result}` | Yedek denemeleri, `ok` ya da `failed`; iki seri de açılışta 0'dan başlar |
 | `kubeat_backup_last_success_timestamp_seconds` | En yeni yedek kopyanın zamanı; yeniden başlatmada yedek dizinindeki en yeni dosyadan okunur (bkz. "Yedekleme ve geri yükleme") |
 | `kubeat_backup_last_failure_timestamp_seconds` | Son başarısız yedek denemesinin zamanı, süreç açıldığından beri; yoksa 0. Son başarılı kopyadan yeniyse yedekleme başarısızdır (`KubeatBackupFailing`) |
@@ -2425,7 +2425,7 @@ yapılır. Kurallar:
 | `KubeatUnhealthy` | `kubeat_self_healthy` 5 dakikadır 0: kontroller zamanlanmıyor ya da sonuçlarının hiçbiri yazılamıyor (dolu ya da salt okunur veri volume'u, takılı bir yazım) (`critical`). Heartbeat olmadan da yanar; yalnızca bazı sonuçların düşmesi `KubeatResultsDropped`'ın uyarısıdır. Backend pod'u yokken yanmaz, o `KubeatDown`'ın işidir; scheduler durunca `KubeatSchedulerStalled` ile birlikte yanar |
 | `KubeatMetricsIncomplete` | Monitor ya da kanal metrikleri veritabanından okunamıyor |
 | `KubeatResultsDropped` | Son 10 dakikada veritabanına yazılamayan kontrol sonucu var; uptime geçmişinde boşluk oluşur |
-| `KubeatNotificationsFailing` | Kanal başına: kanalın son teslimat denemesi başarısız (`kubeat_channel_last_delivery_ok == 0`) ya da kanalın almadığı bir kesinti yeniden gönderilmeyi bekliyor (`kubeat_channel_undelivered_outages > 0`), 5 dakikadır (`for: 5m`); bir kesinti o kanalda duyurulmamış olabilir. Etiketlerinde `channel`, `channel_type`, `namespace`, `job` ve `severity` (`warning`); açıklama kanalın adını söyler. 30 sn'lik bir hıçkırıkta yanmaz; `UPTIME_NOTIFY_RETRY_MAX` aralığıyla seyrek denenen kanalda denemeler arasında sönmez; tek monitor'u reddedip ötekileri alan kanalda da yanar (bkz. aşağıda "Kanal başına bildirim alarmı"). Scrape boşluğunda açık kalır, Kubeat çalışırken kapatılan ya da silinen kanalınki hemen çözülür. Kuyruk dolu olduğu için düşen bildirim aynı kuralın ayrı ve kanalsız ifadesidir (`increase(kubeat_notifications_dropped_total[15m]) > 0`) |
+| `KubeatNotificationsFailing` | Kanal başına: kanalın son teslimat denemesi başarısız (`kubeat_channel_last_delivery_ok == 0`) ya da kanalın almadığı bir kesinti yeniden gönderilmeyi bekliyor (`kubeat_channel_undelivered_outages > 0`), 5 dakikadır (`for: 5m`); bir kesinti o kanalda duyurulmamış olabilir. Etiketlerinde `channel`, `channel_type`, `namespace`, `job` ve `severity` (`warning`); açıklama kanalın adını söyler. 30 sn'lik bir hıçkırıkta yanmaz; `UPTIME_NOTIFY_RETRY_MAX` aralığıyla seyrek denenen kanalda denemeler arasında sönmez; tek monitor'u reddedip ötekileri alan kanalda da yanar (bkz. aşağıda "Kanal başına bildirim alarmı"). Scrape boşluğunda açık kalır, Kubeat çalışırken kapatılan ya da silinen kanalınki hemen çözülür. Kuyruk dolu olduğu için düşen bildirim aynı kuralın ayrı ve kanalsız ifadesidir (`increase(kubeat_notifications_dropped_total[15m]) > 0`); `for: 5m` ona da uygulanır, ilk düşüşten 5 dakika sonra yanar |
 | `KubeatWorkersSaturated` | 15 dakikadır sırası gelen kontroller boş worker olmadığı için sonraki tick'e kalıyor; `UPTIME_WORKERS` düşük ya da hedefler kontrolleri zaman aşımına kadar oyalıyor |
 | `KubeatBackupFailing` | Son yedek denemesi başarısız oldu ve o zamandan beri başarılı kopya yok (`kubeat_backup_last_failure_timestamp_seconds` son başarılı kopyadan yeni). İlk başarısız denemede yanar ve bir kopya başarılı olana kadar açık kalır: dolu volume'un bir aralık süren beklemesi ve hiç kopya olmaması dahil; yeniden başlatmada da, yeniden başlama ve ilk deneme 10 dakikayı aşmadıkça (bkz. "Scrape boşluğu" ve "Yedekleme ve geri yükleme") |
 | `KubeatBackupStale` | `backup.interval` değerinin iki katı süredir başarılı yedek yok; yalnızca `backup.enabled=true` iken üretilir |
@@ -2528,7 +2528,16 @@ için ayrı yanar; kanalın adı `channel`, türü `channel_type` etiketindedir.
 - **Ne yapılır.** Kanal satırındaki **Son gönderim** hatası nedeni söyler:
   reddedildiyse (4xx) kanalın adresi, anahtarı ya da alıcının ayarı
   düzeltilir; ulaşılamıyorsa (bağlantı, zaman aşımı, 5xx) alıcı ya da ağ
-  yolu (bkz. "Alarm", hata sınıfları).
+  yolu (bkz. "Alarm", hata sınıfları). Düzelttikten sonra kanalı test edin
+  (**Test gönder**): başarılı test son denemeyi başarılı yapar ve alarm bir
+  sonraki scrape'te söner; kanalın almadığı bir kesinti bekliyorsa o
+  kesinti sıradaki denemesinde gidince (en çok `UPTIME_NOTIFY_RETRY_MAX`
+  sonra) söner. Kanalı düzenlemek tek başına söndürmez; kapatmak söndürür.
+- **Tek seferlik bildirim.** Hatırlatma, sertifika ve yavaşlık bildirimi
+  (`UPTIME_NOTIFY_RETRY_FOR=0` iken düzelme de) yeniden denenmez: biri
+  kanala ulaşamadıysa (ör. kısa tekrarların hepsini kaplayan bir hıçkırık)
+  son deneme başarısız kalır ve alarm kanalın sonraki teslimatına ya da
+  başarılı bir teste kadar, günler sürse de, açık kalır.
 
 Çok ekipli bir cluster'da namespace'iyle sınırlı bir kanalın sahibi o
 namespace'in ekibidir (kanalı editörü açar, bkz. "Hesaplar ve giriş");
@@ -3037,18 +3046,35 @@ adımı ona göre seçer.
   olmayan bir CI'ya 422, elle kapatılmış bir kaydın düzelmesine 409, iptal
   edilmiş bir token'a 401). Kısa tekrar yapılmaz ve kanal canlıdır: aynı
   geçişte arkasındaki bildirimler denenir, yeni kesintiler ve düzelmeler
-  anında gider. Reddedilen bildirim `UPTIME_NOTIFY_RETRY_MAX` aralıkla
-  yeniden denenir (`down` olay kapanana kadar, `up`
-  `UPTIME_NOTIFY_RETRY_FOR` boyunca); kanal satırındaki **Son gönderim**
-  hatası ve log satırı ("refused by the receiver: fix the channel's address
-  or key, or the receiver's settings") kanalın ya da alıcının ayarının
-  düzeltilmesi gerektiğini söyler. Kanal düzeltilince bekleyen bildirim
-  sıradaki denemesinde gider (en çok `UPTIME_NOTIFY_RETRY_MAX` sonra);
-  kanalı düzenlemek denemeyi öne almaz, düzeltmeyi kanal testi (`POST
-  /api/v1/channels/{id}/test`) hemen sınar. 0.44'te böyle bir bildirim paylaşılan
-  makine kanalını her geçişten sonra almıyor saydırıyor, öteki ekiplerin
-  sayfaları `UPTIME_NOTIFY_RETRY_MAX`'a kadar gecikiyordu; bu gecikme
-  kalktı.
+  anında gider. 0.44'te böyle bir bildirim paylaşılan makine kanalını her
+  geçişten sonra almıyor saydırıyor, öteki ekiplerin sayfaları
+  `UPTIME_NOTIFY_RETRY_MAX`'a kadar gecikiyordu; bu gecikme kalktı.
+  - *Yeniden deneme.* Reddedilen bildirim `UPTIME_NOTIFY_RETRY_MAX`
+    aralıkla yeniden denenir (`down` olay kapanana kadar, `up`
+    `UPTIME_NOTIFY_RETRY_FOR` boyunca). Geçici bir 4xx de reddetme sayılır
+    (alıcı yeniden yayımlanırken Ingress'in 404'ü, token yenilenirken 401):
+    o bildirim `UPTIME_NOTIFY_RETRY_MAX` kadar gecikir.
+  - *Düzeltme.* Kanal satırındaki **Son gönderim** hatası ve log satırı
+    ("refused by the receiver: fix the channel's address or key, or the
+    receiver's settings") kanalın ya da alıcının ayarının düzeltilmesi
+    gerektiğini söyler. Kanal düzeltilince bekleyen bildirim sıradaki
+    denemesinde gider (en çok `UPTIME_NOTIFY_RETRY_MAX` sonra); kanalı
+    düzenlemek denemeyi öne almaz, düzeltmeyi kanal testi (`POST
+    /api/v1/channels/{id}/test`) hemen sınar.
+  - *Her şeyi reddeden makine kanalı.* Süresi dolmuş bir token'a 401 ya da
+    kaldırılmış bir alıcıya 404 dönen bir webhook ya da PagerDuty kanalı,
+    bekleyen her bildirim için `UPTIME_NOTIFY_RETRY_MAX`'ta bir istek alır;
+    0.44'te geçiş başına tek deneme alıyordu. Birlikte reddedilenler (kanal
+    bir süre ulaşılamaz kaldıktan ya da Kubeat yeniden başladıktan sonra)
+    aynı ana planlanır ve sonraki geçişlerde de birlikte, sırayla gider.
+    Teslimat döngüsü bu geçişi bekler: istek sayısı × alıcının yanıt süresi
+    (yanıt başına en çok `UPTIME_NOTIFY_TIMEOUT`); 500 kesinti ve 300 ms'lik
+    yanıtla her 15 dakikada yaklaşık 2,5 dakika. Bu sırada kuyruk okunmaz:
+    öteki kanalların yeni bildirimleri ile Slack ve e-posta grupları bekler,
+    kuyruk dolarsa yeni bildirim düşer. Çare kanalı düzeltmek ya da
+    kapatmaktır (kapatılan kanalın bekleyen bildirimleri istek gönderilmeden
+    düşer); hangi kanal olduğunu `KubeatNotificationsFailing` söyler (bkz.
+    "Aracın kendi sağlığı").
 
 **Geçiş.** Bir kanal bir geçişte bir bildirime ulaşılamazsa, o geçişte ona
 yeniden gönderilecek diğer bildirimler denenmez ve beklemeleri ikiye

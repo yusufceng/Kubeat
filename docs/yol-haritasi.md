@@ -197,7 +197,17 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   bekletilir; meşgul ve reddeden alıcıya kısa tekrar yapılmaz. 4xx dönen
   kanal canlıdır ve duraklamaz: öteki bildirimler beklemeden gider; kanal
   düzeltilince reddedilmiş bildirim sıradaki denemesini (en çok
-  `UPTIME_NOTIFY_RETRY_MAX`) bekler, düzenleme denemeyi öne almaz.
+  `UPTIME_NOTIFY_RETRY_MAX`) bekler, düzenleme denemeyi öne almaz. Bunun
+  iki bedeli var: geçici bir 4xx (alıcı yeniden yayımlanırken 404) de
+  reddetme sayılır ve o bildirimi `UPTIME_NOTIFY_RETRY_MAX` kadar
+  geciktirir; her şeyi reddeden bir makine kanalı (süresi dolmuş token,
+  kaldırılmış alıcı) bekleyen her bildirim için `UPTIME_NOTIFY_RETRY_MAX`'ta
+  bir istek alır. Birlikte reddedilenler tek geçişte sırayla gider ve
+  teslimat döngüsünü istek sayısı × yanıt süresi kadar tutar (500 kesinti,
+  300 ms: her 15 dakikada ~2,5 dk); bu sırada kuyruk okunmaz. Çare kanalı
+  düzeltmek ya da kapatmaktır, hangi kanal olduğunu
+  `KubeatNotificationsFailing` söyler ([backlog](backlog.md) "Teslimat hata
+  sınıflarının kalanları").
   Ulaşılamayan ya da meşgul bir makine kanalı (webhook, PagerDuty) yeni
   bildirimleri kendi yeniden deneme zamanına bekletir; tek bir monitor'un
   bildirimlerine sürekli 5xx dönen bir alıcı kanalı her geçişte yeniden

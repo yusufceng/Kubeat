@@ -595,8 +595,8 @@ diğerlerini bekletmez. Kalan: `UPTIME_NOTIFY_GROUP_WAIT=0` iken yanıt
 vermeyen bir insan kanalı her bildirimde yine denenir (README'de sınır
 olarak); sürekli reddedilen bir bildirim kanalı her geçişten sonra yeniden
 duraklatır, yeni bildirimler en çok `UPTIME_NOTIFY_RETRY_MAX` (bir
-bildirimin ilk reddedildiği geçişte bir geçiş daha) gecikir (4xx'i kalıcı
-hata sayan S26'ya girdi: 4xx dönen kanal canlıdır).
+bildirimin ilk reddedildiği geçişte bir geçiş daha) gecikir (S26 ile
+kapandı; bkz. aşağıda "Güncelleme (2026-10-29, S26, #49)").
 
 Güncelleme (2026-10-29, sprint 2 kapanışı): Müşteri A iki önemli bulgu
 yazdı. Birincisi: 4xx alan tek bir bildirim paylaşılan makine kanalını her
@@ -624,6 +624,18 @@ varsayılanı; ondan türetilmez). Etkin monitor sayısı kuyruğu aşınca back
 bunu bir kez, iki sayıyla WARN olarak loglar: açılışta ya da sonradan sınır
 ilk geçildiğinde. Bellek bedeli README "Alarm"da: 1000'lik kuyruk ≈ 1 MiB,
 doluyken ≈ 1,7 MiB.
+
+Güncelleme (2026-10-29, S26, #49): S25'in "Kalan" cümlesindeki 4xx kısmı
+kapandı. Reddedilen (4xx) bildirim makine kanalını almıyor saydırmaz ve
+geçişi durdurmaz: arkasındakiler aynı geçişte, yeni kesintiler ve
+düzelmeler beklemeden gider; almıyor sayılan yalnızca ulaşılamayan ve
+meşgul (429, `Retry-After`'lı 503) kanaldır (README "Alarm", hata
+sınıfları). Kalanlar "Teslimat hata sınıflarının kalanları"nda: tek bir
+monitor'un bildirimlerine sürekli 5xx dönen alıcı kanalı yine her geçişte
+duraklatır; her şeyi reddeden makine kanalı ise artık duraklamadığı için
+bekleyen her bildirim için `UPTIME_NOTIFY_RETRY_MAX`'ta bir istek alır ve
+o geçiş teslimat döngüsünü tutar. `UPTIME_NOTIFY_GROUP_WAIT=0` iken yanıt
+vermeyen insan kanalı değişmedi.
 
 ## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
 
@@ -985,8 +997,37 @@ developer raporu). S26 teslimat hatalarını dört sınıfa ayırdı (README
   5xx dönen alıcı kanalı her geçişte yeniden duraklatır, yeni bildirimler
   en çok `UPTIME_NOTIFY_RETRY_MAX` gecikir; 4xx'ten farklı olarak bunu
   "kanal ölü" durumundan ayırmak alıcıyı tanımayı ister.
+- **Her şeyi reddeden makine kanalının geçiş maliyeti** (S26'nın SRE
+  incelemesi). Reddeden kanal canlı sayıldığı için (PO kararı) süresi
+  dolmuş token'a 401 ya da kaldırılmış alıcıya 404 dönen paylaşılan bir
+  webhook ya da PagerDuty kanalı, bekleyen her bildirim için
+  `UPTIME_NOTIFY_RETRY_MAX`'ta bir istek alır; 0.44'te geçiş başına tek
+  deneme alıyordu. Birlikte reddedilenler (kanal bir süre ulaşılamaz
+  kaldıktan ya da Kubeat yeniden başladıktan sonra) aynı ana planlanır ve
+  tek geçişte sırayla gider; teslimat döngüsü geçişi beklediği için bu
+  sırada kuyruk okunmaz. İncelemedeki sonda testinde 200 açık kesintide
+  1., 16., 31. ve 46. dakikada geçiş başına 200 istek gitti; 300 ms'lik bir
+  ITSM ve 500 kesintide döngü her 15 dakikada ~2,5 dakika tutulur, yavaş
+  dönen bir 401'de daha uzun (yanıt başına en çok `UPTIME_NOTIFY_TIMEOUT`).
+  Bugünkü çare kanalı düzeltmek ya da kapatmak (README "Alarm", Reddetti).
+  Seçenekler: (a) reddedilen bildirimin yeniden denemesini geçişin
+  sonundan değil kendi reddedildiği andan saymak: ilk birlikte geçişten
+  sonra anlar yayılır, toplam istek aynı kalır ama döngü parça parça
+  tutulur ve kuyruk arada okunur, "reddeden kanal canlıdır" kararı
+  değişmez; (b) bir geçişte gönderilenlerin hepsini reddeden makine
+  kanalında geçişi sınırlamak (ilk birkaç reddetmeden sonra kalanları
+  bekletmek): istek sayısı da düşer ama kararı daraltır, PO kararı ister.
+  Öneri: önce (a); (b) yalnızca (a)'dan sonra da gecikme görülürse. Aynı
+  karar geçici bir 4xx'i de (alıcı yeniden yayımlanırken 404) reddetme
+  sayar ve o bildirimi `UPTIME_NOTIFY_RETRY_MAX` kadar geciktirir.
+  Tetikleyici: reddeden bir kanal varken Slack ya da e-posta grubunun
+  `UPTIME_NOTIFY_GROUP_WAIT`'ten geç gitmesi ya da kuyrukta düşen bildirim
+  (`kubeat_notifications_dropped_total`), bir geçişte yüzlerce
+  `notification to be sent again` satırı (`failure` = `refused`) ya da
+  geçici bir 4xx yüzünden geç kalan bir sayfa.
 
 Tetikleyici: pilotta ya da bir kurulumda bunlardan birinin görülmesi
 (5xx SMTP yanıtıyla dönen e-posta kanalı, hız sınırını gövdede bildiren
 sağlayıcı, düzeltildikten sonra bekleyen sayfa, tek monitor'a 5xx dönen
-ITSM).
+ITSM, her şeyi reddeden kanalın geçişinde geç kalan grup ya da düşen
+bildirim).
