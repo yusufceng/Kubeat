@@ -36,10 +36,10 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 25 | İki dil: arayüz (tarayıcıya göre, değiştirilebilir) ve bildirimler İngilizce/Türkçe | Tamamlandı |
 | 26 | Namespace'le sınırlı keşif: cluster-admin olmadan kurulum (Role), Thanos'un namespace ucu | Tamamlandı |
 | 27 | Open-core: Kubeat Enterprise lisansı, çevrimdışı imzalı lisans dosyası ([ADR-0002](adr/0002-open-core-lisans.md)) | Tamamlandı |
-| 28 | Pilot: gerçek bir cluster'da üç hafta kullanım ([pilot.md](pilot.md)) | Developer Sandbox'ta (2026-10-27'den itibaren; 2026-10-28'den beri 0.43.0, sprint 2 sonunda 0.44.0; pilot değerleri; karar 2026-11-27); şirket cluster'ı ve ekip olmadığından geri bildirim sprint ekibinin müşteri ve SRE ajanlarından |
-| 29 | Sprint ekibi: müşteri, SRE, BA, PO, PMO ve developer ajanlarıyla düzenli sprintler ([agents/sprint-takimi.md](agents/sprint-takimi.md), [sprints/](sprints/)) | Sprint 1 (2026-10-27–28) tamamlandı, 0.43.0: bildirim teslimatı (S18, S17), yedek dayanıklılığı (S19), öz-sağlık alarmları (S9); puanlar 4,0/5 ve retro [sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md); sprint 2 (2026-10-28–29) tamamlandı, 0.44.0: Kubeat'in kendi arızası sessiz kalmaz ve kayıp yaratmaz (S29 öz-sağlık kuralları + CI'da promtool, S25 kesinti bildirimi kaybı ve ölü makine kanalı, S31 kaldırmada PVC koruması, S32 sonuç yazılamazken heartbeat); sandbox 0.44.0'da; gerçek ortam provaları (firing, kaldırma ve yeniden kurulum, SIGTERM, dolu volume) kullanıcıda; puanlar 3,5/5 ve retro [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md); sprint 3 (2026-10-29) tamamlandı, 0.45.0: ilk imzalı ve SBOM'lu yayım (S1 #48), OpenShift dışında da yazılabilir volume'la kuran ve sürümü CI'da denetlenen README komutu (S10+S11 #47), 4xx'te duraklamayan ve bildirim alamayan kanalı adıyla alarmlayan teslimat (S26 #49), heartbeat'siz kurulumda da critical yanan ve tek depoda cluster başına değerlendirilen öz-sağlık kuralları (S38+S37 #50); imza ve fsGroup'lu kurulum provaları geçti, sandbox 0.44.0'da ve alarm provası kullanıcıda; puanlar 3,75/5 ve retro [sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md); sprint 4 önerisi: S12+S15+S30 doküman paketi ve S28 (korumalı), S41+S39, yayım hattının güvencesi (yeşil CI'a bağlı etiket, CI'da hava boşluklu aynalama) |
-| 30 | Tedarik zinciri: cosign ile imzalı imaj ve chart, SBOM/provenance, SECURITY.md | Tamamlandı. Sprint 3'te S1 (#48) 0.45.0 ile yayımlandı: iki imajın ve chart'ın digest'i cosign v3 ile keyless imzalanır (GitHub OIDC; `id-token: write` yalnızca imzalayan işte), imajlar SPDX SBOM ve `mode=max` provenance taşır, `latest` itilmez; iş akışı imzaları README "Tedarik zinciri"ndeki komutlarla çevrimiçi ve ağsız doğrular, etiketin GitHub Release'i digest'leri ve SBOM'ları taşır; SECURITY.md (yalnızca son minor, kritik/yüksek açık için 7 günlük hedef), haftalık `govulncheck` ve `npm audit` (security.yml), govulncheck sabit sürümde; `make release` `release/v*` dalından da etiketler (yetenek, söz değil). Kuru deneme `kubeat-dry-run/` altındaki kendi paketlerine iter. İmza v0.45.0 etiketinde ve başka bir makinede doğrulandı ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md) "Provaların sonucu" 1). Açık kalanlar: yayımın yeşil CI'a bağlanması ve hava boşluklu aynalama yolunun CI'da doğrulanması (sprint 4 önerisi); destek penceresi taahhüdü yok ([backlog](backlog.md)) |
-| 31 | Hızlı başlangıç ve kurulum belgeleri: güncel kurulum komutu, OpenShift dışı fsGroup notu, yükseltme notları docs/yukseltme.md, lisansın nasıl istendiği, operator'süz cluster için öz-sağlık kuralları (S30) | Sprint 3'te S10+S11 geldi (#47, 0.45.0 ile yayımlandı; fsGroup uygulayan bir CSI sürücüsünde kurulum ve geri yükleme provası geçti, GKE'de koşulmadı): kurulum komutunda ve geri yükleme pod'unda `fsGroup=1001` (OpenShift'te atlanır), OpenShift dışında `podSecurityContext` boşken NOTES uyarısı; README ve docs/pilot.md'deki kurulum ve aynalama komutlarının sürümünü `scripts/check-versions.sh` CI chart işinde ve yayımın imajlardan önceki ilk işinde denetler (etiket = Chart.yaml); Helm iki iş akışında v4.3.1'e sabit, CI chart işi ayrıca Helm 3 (v3.22.1) ile koşar; release.yml'in `workflow_dispatch` kuru denemesi yayım paketlerine ve etiketlere dokunmaz. S12+S15+S30 sprint 4'ün korumalı 1. maddesi |
+| 28 | Pilot: gerçek bir cluster'da üç hafta kullanım ([pilot.md](pilot.md)) | Developer Sandbox'ta (2026-10-27'den itibaren; 2026-10-28'de 0.43.0, doğrulanmış yedekten sonra 2026-10-29'dan beri 0.45.0; sprint 3'ün alarm provası (2) sandbox UWM'de geçti; pilot değerleri; karar 2026-11-27); şirket cluster'ı ve ekip olmadığından geri bildirim sprint ekibinin müşteri ve SRE ajanlarından |
+| 29 | Sprint ekibi: müşteri, SRE, BA, PO, PMO ve developer ajanlarıyla düzenli sprintler ([agents/sprint-takimi.md](agents/sprint-takimi.md), [sprints/](sprints/)) | Sprint 1 (2026-10-27–28) tamamlandı, 0.43.0: bildirim teslimatı (S18, S17), yedek dayanıklılığı (S19), öz-sağlık alarmları (S9); puanlar 4,0/5 ve retro [sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md); sprint 2 (2026-10-28–29) tamamlandı, 0.44.0: Kubeat'in kendi arızası sessiz kalmaz ve kayıp yaratmaz (S29 öz-sağlık kuralları + CI'da promtool, S25 kesinti bildirimi kaybı ve ölü makine kanalı, S31 kaldırmada PVC koruması, S32 sonuç yazılamazken heartbeat); sandbox 0.44.0'da; gerçek ortam provaları (firing, kaldırma ve yeniden kurulum, SIGTERM, dolu volume) kullanıcıda; puanlar 3,5/5 ve retro [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md); sprint 3 (2026-10-29) tamamlandı, 0.45.0: ilk imzalı ve SBOM'lu yayım (S1 #48), OpenShift dışında da yazılabilir volume'la kuran ve sürümü CI'da denetlenen README komutu (S10+S11 #47), 4xx'te duraklamayan ve bildirim alamayan kanalı adıyla alarmlayan teslimat (S26 #49), heartbeat'siz kurulumda da critical yanan ve tek depoda cluster başına değerlendirilen öz-sağlık kuralları (S38+S37 #50); imza ve fsGroup'lu kurulum provaları geçti, sandbox 0.45.0'da, alarm provası geçti; puanlar 3,75/5 ve retro [sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md); sprint 4 (2026-10-29) planı: doküman paketi (S12, S15, S30, S46, S51; #59, #60), PagerDuty ve webhook'ta kurulum kimliği ile kısa RETRY_MAX'ta açılış (S28+S36 #61), ulaşılamayan insan kanalının sayfaları geciktirmemesi (S55 #62), yeşil CI'a bağlı yayım ve CI'da imzalı aynalama (S52 #63); 0.46.0 ile [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md) |
+| 30 | Tedarik zinciri: cosign ile imzalı imaj ve chart, SBOM/provenance, SECURITY.md | Tamamlandı. Sprint 3'te S1 (#48) 0.45.0 ile yayımlandı: iki imajın ve chart'ın digest'i cosign v3 ile keyless imzalanır (GitHub OIDC; `id-token: write` yalnızca imzalayan işte), imajlar SPDX SBOM ve `mode=max` provenance taşır, `latest` itilmez; iş akışı imzaları README "Tedarik zinciri"ndeki komutlarla çevrimiçi ve ağsız doğrular, etiketin GitHub Release'i digest'leri ve SBOM'ları taşır; SECURITY.md (yalnızca son minor, kritik/yüksek açık için 7 günlük hedef), haftalık `govulncheck` ve `npm audit` (security.yml), govulncheck sabit sürümde; `make release` `release/v*` dalından da etiketler (yetenek, söz değil). Kuru deneme `kubeat-dry-run/` altındaki kendi paketlerine iter. İmza v0.45.0 etiketinde ve başka bir makinede doğrulandı ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md) "Provaların sonucu" 1). Açık kalanlar: yeşil CI'a bağlı yayım ve CI'da hava boşluklu aynalama sprint 4'te (S52, #63); etiket, Release ve registry etiketinin değişmezliği (S53) ile derleme girdilerinin sabitlenmesi (S54) sprint 5'te ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)); destek penceresi taahhüdü yok ([backlog](backlog.md)) |
+| 31 | Hızlı başlangıç ve kurulum belgeleri: güncel kurulum komutu, OpenShift dışı fsGroup notu, yükseltme notları docs/yukseltme.md, lisansın nasıl istendiği, operator'süz cluster için öz-sağlık kuralları (S30) | Sprint 3'te S10+S11 geldi (#47, 0.45.0 ile yayımlandı; fsGroup uygulayan bir CSI sürücüsünde kurulum ve geri yükleme provası geçti, GKE'de koşulmadı): kurulum komutunda ve geri yükleme pod'unda `fsGroup=1001` (OpenShift'te atlanır), OpenShift dışında `podSecurityContext` boşken NOTES uyarısı; README ve docs/pilot.md'deki kurulum ve aynalama komutlarının sürümünü `scripts/check-versions.sh` CI chart işinde ve yayımın imajlardan önceki ilk işinde denetler (etiket = Chart.yaml); Helm iki iş akışında v4.3.1'e sabit, CI chart işi ayrıca Helm 3 (v3.22.1) ile koşar; release.yml'in `workflow_dispatch` kuru denemesi yayım paketlerine ve etiketlere dokunmaz. Sprint 4'ün 1. maddesi: S12, S15, S30, S46, S51 ve S34 ile S56'nın belge kısımları (#59, #60; [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)) |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
@@ -119,8 +119,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   Azure Files gibi ağ dosya sistemlerinde iki pod aynı anda yazıp SQLite'ı
   bozabilir. Node çökünce backend pod'u Terminating'de kalabilir ve yeni pod
   volume'u bağlayamayabilir (Multi-Attach); Kubeat kendiliğinden dönmeyebilir
-  ve `KubeatDown` yanar. Adımlar S41'de (sprint 4 kuyruğu,
-  [sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+  ve `KubeatDown` yanar. Adımlar S41'de (sprint 5'in korumalı 1. maddesi,
+  [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 - Veri volume'u dolunca kontrol sonuçları yazılamaz ve kaybolur (bellekte
   tutulmaz): olay açılmaz, bildirim gitmez. Kubeat bunu kendi bildirim
   kanallarından duyuramaz. 0.45'ten beri `kubeat_self_healthy` 0 olur ve
@@ -149,7 +149,14 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   [backlog](backlog.md) "Okuma havuzuna bağlantı sınırı ve durum sayfasına
   eşzamanlılık sınırı").
 - Gizli değerler `UPTIME_SECRET_KEY` ile şifrelenir; anahtar değiştirme
-  (rotation) yoktur ve push token'ları şifrelenmez.
+  (rotation) yoktur ve push token'ları şifrelenmez (S58, [backlog](backlog.md)
+  "Şifreleme anahtarını döndürmek ve anahtar sızınca izlenecek yol").
+- TLS router'da ya da Ingress controller'da biter: router → frontend ve
+  frontend → backend trafiği pod ağında düz HTTP'dir. LDAP parolası bu
+  yoldan geçer; OVN-Kubernetes IPsec açık değilse pod ağında şifresizdir.
+  Route yalnızca edge'dir, reencrypt seçeneği yoktur (S59,
+  [backlog](backlog.md) "Route'ta reencrypt ve arayüz ile backend arasında
+  cluster içi TLS").
 - Hedef politikası yalnızca loopback, link-local (bulut metadata servisi) ve
   multicast adreslerini kapatır; özel ağlar bilerek açıktır, yani monitor ya
   da kanal düzenleyebilen biri cluster içindeki her servise istek
@@ -165,12 +172,12 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   OOMKill'den sonraki açılış yine eşitlemeyle başladığı için döngü kurulur
   ve kontroller durur. Aralığı uzatmak belleği değiştirmez: büyük cluster'da
   `backend.resources.limits.memory` artırılmalı ya da keşif
-  `discovery.namespaces` ile sınırlanmalıdır (S42, sprint 4 kuyruğu).
+  `discovery.namespaces` ile sınırlanmalıdır (S42, sprint 5 kuyruğu).
 - Annotation eşitlemesinin hatası yalnızca WARN olarak loglanır; metriği ve
   alarmı yoktur. Namespace sınırlı keşifte listedeki tek bir namespace
   okunamazsa (silinmiş ya da 403) bütün tur bırakılır: öteki
   namespace'lerde yeni annotation'lar izlenmez, kaldırılanların monitor'leri
-  yerinde kalır (S43, sprint 4 kuyruğu).
+  yerinde kalır (S43, sprint 5 kuyruğu).
 - Gateway API HTTPRoute okunmaz; keşif adayı ya da annotation hedefi
   değildir. Ingress'ten HTTPRoute'a geçerken Ingress silinince monitor
   geçmişiyle birlikte kalkar; geçişten önce elle monitor oluşturun (S49,
@@ -182,7 +189,7 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   `downtime_seconds` kullanılmalıdır (S45, [backlog](backlog.md) "Duyurulan
   bakımı durum sayfası ve rapor uptime'ından ayırmak").
 - Raporlar son N günü UTC'de ve o anki saatle biten bir dönem için verir;
-  takvim ayı alınamaz (S44, sprint 4 kuyruğu).
+  takvim ayı alınamaz (S44, sprint 5 kuyruğu).
 - Cluster API'ye monitor'ün başarısızlık eşiği kadar kontrol boyunca
   ulaşılamazsa `workload` ve `each_pod` monitor'leri kesinti açar ve
   bildirim gönderir; API kesintisi hedefin kendi hatasından ayrılmaz (S20,
@@ -241,7 +248,7 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   çakışır: `dedup_key` kurulum kimliği taşımaz (`kubeat-incident-<n>`), bir
   cluster'ın kesintisi diğerinin açık alarmına eklenir ve ilk düzelme
   ikisini de kapatır. Her kuruluma ayrı bir PagerDuty servisi verin (S28,
-  sprint 4'ün korumalı maddesi; [sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+  sprint 4, #61; [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 - Chart'ın alarmları backend'i cluster'ın Prometheus'u scrape edebildiği
   sürece görür: Kubeat 10 dakikadan uzun düşerse kesinti, sertifika ve yedek
   alarmları çözülür. README'deki susturma kuralı, alarmları alan

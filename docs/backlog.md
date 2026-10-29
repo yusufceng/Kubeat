@@ -93,6 +93,15 @@ S30 gelene kadar operator'süz kurulumun tek öz-koruması heartbeat. PMO
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)
 "Müşterilerin yeni bulguları" 4).
 
+Güncelleme (2026-10-29, sprint 4 planı): Müşteri B'nin NOTES önerisi (iki
+kopyalanabilir satır, PrometheusRule CRD'si yokken kural önerilmemesi) S30
+ile sprint 4 doküman paketinde (#60); README tarafındaki iki satır #59'da.
+Aynı pakette operator'süz cluster için önerilen yol da yazılır: CRD'ler
+kuruluyken Grafana Alloy `mimir.rules.kubernetes` ile kurallar chart'la
+yükselir; kopyalayan için her yükseltmede koşacak eşitleme komutu. 2026-10-12
+kararı (PrometheusRule) korunur
+([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
@@ -299,6 +308,15 @@ kopyaları cluster dışına almak) S12'nin `docs/yukseltme.md` "Yapılacak"
 adımına bağlanır. Retronun süreç kısmı `tar` gerektirmez: kopya `exec ...
 cat` ile alınıp sağlama toplamıyla pod'daki dosyaya karşı doğrulanır; bu
 planla [pilot.md](pilot.md) "Yükseltmeden önce yedek"e yazıldı.
+
+Güncelleme (2026-10-29, sprint 4 planı): S7 sprint 5 kuyruğunda; NOTES'a
+dokunduğu için S30'dan (#60) sonra gelir. Sprint 4'te S12'nin
+`docs/yukseltme.md`'si (#59) "yükseltmeden önce yedek" için pilot.md
+"Yükseltmeden önce yedek"e bağlanır (`exec … cat` ve sağlama toplamı; `tar`
+gerekmez). Müşteri B'nin istediği GKE yolu (VolumeSnapshot ya da Backup for
+GKE) ve NOTES'taki yedek notunun platformdan bağımsız yazılması, SRE'nin
+namespace ya da cluster kaybındaki RPO cümlesi S7'nin kabul ölçütünde
+([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
 ## Yedek kopyalarını S3 uyumlu depoya yüklemek
 
@@ -786,6 +804,17 @@ seçilmedi, çünkü `helm template`'te ve Argo CD'de boş kalır. Hikâye S39;
 sprint 4 kuyruğunda 3. sırada, S41 ile
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
 
+Güncelleme (2026-10-29, sprint 4 planı): S39, S41 ile sprint 5'in
+korumalı 1. maddesine kaydı. NOTES'taki "helm uninstall leaves" bloğu
+sprint 4'te S30 ve S34'ün NOTES değişikliğiyle (#60) çakışırdı. Karar değişmez: `keep`,
+metrik anahtarı dahil, `backend.persistence.keepOnUninstall`'a bağlı.
+Müşteri B (önemli): Terraform destroy/apply API anahtarını değiştiriyor ve
+GitHub Actions'taki secret uyarısız bozuluyor; SRE (orta) API ve metrik
+anahtarını alarm açmadan yenileme adımlarını aynı PR'da istiyor. Ara önlem:
+README "Kazayla kaldırmadan dönüş" (eski parola,
+`UPTIME_ADMIN_PASSWORD_RESET`)
+([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+
 ## Dolan veri volume'u: büyütme, kotaya göre saklama, yazılamayan sonuçlar
 
 2026-10-29'da ertelendi (S32'nin kapsam dışı parçaları, #39). 0.44'ten
@@ -902,6 +931,12 @@ listenin kesinti bildirimleri kanal başına
 `KubeatNotificationsFailing` açık kalır). Bekletilen hatırlatma, sertifika
 ve yavaşlık bildirimleri ile kuyruk doluluğu sayılmaz; o kısım bu maddede
 kalır, tetikleyicisi değişmedi.
+
+Güncelleme (2026-10-29, sprint 4 planı): 3. köşenin kuyruk doluluğu
+parçası S55 (#62) ile sprint 4'te: kuyruk doluluğu `/metrics`'te bir
+gauge'la. 4. köşe S27, 2. köşe S40 ile sprint 5 kuyruğunda; `alert`
+paketinin sırası S55 → S27 → S40 → S57. Notlar merge'de yazılır
+([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
 ## Duyurulan bakımı durum sayfası ve rapor uptime'ından ayırmak
 
@@ -1081,6 +1116,14 @@ yaygınlaştırma" eklenir; kararı PO verir
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)
 "Müşteri puanları").
 
+Güncelleme (2026-10-29, sprint 4 planı): PO PMO önerisini kabul etti;
+tetikleyiciye "pilotta 'devam' kararıyla filoya yaygınlaştırma" eklendi.
+Müşteri A (a) seçeneğini bunun ön koşulu sayıyor ve tek ekipli sandbox
+pilotunda tetikleyici yanamaz. Ulaşılamayan bir insan kanalının makine
+kanallarını geciktirmesi S55 (#62) ile duraklatmayla kapanır; yapısal
+mekanizma ((a) ve kanal başına goroutine) seçilmedi
+([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+
 ## Yayım hattının kalanları: sürüm sabitleri, kuru deneme, imza kapsamı
 
 2026-10-29'da ertelendi (#47 ve #48'in kapsam dışı parçaları; developer
@@ -1131,6 +1174,21 @@ kod kısmı sprint 4'ün 4. maddesi
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)
 "Müşterilerin yeni bulguları" 1, 2 ve 6).
 
+Güncelleme (2026-10-29, sprint 4 planı): depo ayarları sprint 3 kapanışında
+açıldı: main yalnız PR'la ve beş check yeşilken değişir, `v*` etiketlerini
+yalnız yönetici atar. Yeşil CI kapısı, CI'da hava boşluklu aynalama, Release
+bağlantısı ve Chart.yaml `home`/`sources` sprint 4'te S52 (#63) ile gelir.
+Yeni bulgular sprint 5'in korumalı 2. maddesi oldu: etiketin, Release'in ve
+registry etiketinin değişmezliği (S53; `v*` kural setinde yönetici bypass'ı
+"always", Release değiştirilebilir, images ve chart işleri koşulsuz itiyor)
+ve derleme girdilerinin sabitlenmesi (S54; taşınabilir major etiketli
+action'lar, iş akışı düzeyinde `packages: write`). S53'ün iki kural seti
+ayarı slot almadan sprint 4'ün başında yapılır (`v*` kural seti ikiye
+bölünür: oluşturmada yönetici bypass'ı kalır, güncelleme, silme ve
+non_fast_forward bypass'sız olur; main kural seti `release/v*` dallarını da
+kapsar); "Immutable releases" S53 ile açılır
+([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+
 ## Öz-sağlık kurallarının ve kuyruk uyarısının kalanları
 
 2026-10-29'da ertelendi (#50; SRE incelemesinin düşük bulguları ve
@@ -1164,3 +1222,91 @@ backend WARN yazar. Dışarıda kalanlar:
 Tetikleyici: ilk iki parça için S30'un belgesi. Ötekiler için tek depoda bu
 durumlardan birini gören ilk kurulum ya da kuyrukta düşen bildirim
 (`kubeat_notifications_dropped_total`).
+
+Güncelleme (2026-10-29, sprint 4 planı): ilk iki parça (seyrek kurulumda
+pencere, bütün cluster'lar birlikte kaybolunca ek `KubeatDown`) S30 ile
+sprint 4 doküman paketinde (#60) yazılır. Kuyruk doluluğu metriği S55 (#62)
+ile gelir; uyarının tekrarı bu maddede kalır. Kapandı notları merge'de
+yazılır ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+
+## Hiçbir kanala ulaşamayan kesintide heartbeat'i kesmek
+
+2026-10-29'da ertelendi (S56'nın kod kısmı,
+[sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)). Müşteri
+B (önemli): tek Slack kanalı bildirim alamaz olunca heartbeat'li kurulum
+bunu duymuyor; kurulum notu heartbeat'i kurallarla eşdeğer gösteriyor
+("Turn on either", `NOTES.txt:136-144`). Heartbeat'in kararı
+(`scheduler.Healthy`, `scheduler.go:115-138`) yalnızca tick'e, takılı yazıma
+ve yazılamayan sonuca bakar; heartbeat ve `kubeat_self_healthy` aynı kararı
+kullanır (`main.go:265-271`). Belge kısmı sprint 4 doküman paketinde (#60):
+heartbeat bildirim alamayan kanalı duymaz, tek kanallı kurulumda ikinci
+türde bir kanal ya da `KubeatNotificationsFailing` gerekir. Kod, S38'in
+"`Healthy` genişletilmez" kararını ve heartbeat ile `kubeat_self_healthy`'nin
+aynı anlamı taşıması sözünü açar. İhtiyacı, S30'un chart'la yükselen Alloy
+yoluyla taşınan kanal başına `KubeatNotificationsFailing` cluster-native
+olarak karşılıyor. Tetikleyici: kuralları taşımamış, heartbeat'li bir
+kurulumun tek kanalı ölüp kesintiyi kaçırması ya da S30 yolunun
+operator'süz ortamda uygulanamaz çıkması. BA varsayılanları kayıtta:
+yalnızca heartbeat kesilir, gauge ve `KubeatUnhealthy` değişmez; T =
+max(`UPTIME_HEARTBEAT_INTERVAL`, 5 dk), `KubeatNotificationsFailing`'in
+`for: 5m`'iyle aynı, ayar değil; kapsayan kanalı olmayan monitor, gecikmesi
+dolmamış gecikmeli kanal, bakımda susturulan kesinti ve kapalı kanal
+sayılmaz; kanallardan biri aldıysa sağlıklı.
+
+## Şifreleme anahtarını döndürmek ve anahtar sızınca izlenecek yol
+
+2026-10-29'da ertelendi (S58,
+[sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)). Müşteri
+A (önemli): `UPTIME_SECRET_KEY` döndürülemiyor (README "Gizli değerlerin
+şifrelenmesi": "Anahtar değiştirme (rotation) yoktur", README:877) ve
+anahtar sızınca izlenecek yol yazılı değil; kurumun anahtar yönetimi
+standardı anahtarı belli aralıklarla ve sızmadan sonra döndürmeyi istiyor.
+Var olan yeniden şifreleme yolu (`protectSecrets`, `main.go:468-528`: düz
+değerleri şifreler ve sıkıştırır) kullanılabilir, şema değişmez. Durum
+sayfası ziyaretçi token'ları anahtardan türer (`main.go:801-805`):
+döndürmede parola korumalı sayfaların ziyaretçileri parolayı yeniden girer.
+Ortada gerçek bir kurumsal güvenlik incelemesi yok; S5 (oturum boşta kalma)
+ile aynı tetikleyici sınıfında. Tetikleyici: ilk kurumsal güvenlik
+incelemesi ya da pilotta "devam" kararıyla filoya yaygınlaştırma. O zaman
+belge ("Anahtar sızarsa": yalnızca anahtar sızdıysa döndürmek; veritabanı ya
+da yedek de sızdıysa kanal ve monitor sırlarını kaynağında yenilemek;
+yedekler eski anahtarla kalır) ve kod birlikte gelir: önceki anahtar ayrı
+bir ortam değişkeniyle verilir, backend açılışta yeniden şifreler, kesilen
+açılış veriyi iki anahtar arasında okunamaz bırakmaz; chart'ta ikinci
+`existingSecret`. Kapsam dışı: çoklu anahtar halkası, push token'larını
+şifrelemek, yedekleri yeniden şifrelemek, KMS/Vault entegrasyonu. S39'un
+anahtar yenileme bölümü (sprint 5) buna bağlanır. Bilinen sınır yol
+haritasında.
+
+## Route'ta reencrypt ve arayüz ile backend arasında cluster içi TLS
+
+2026-10-29'da ertelendi (S59'un kod kısmı,
+[sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)). Müşteri
+A (önemli): güvenlik incelemesinde uçtan uca şifreli taşıma gösterilmeli,
+ama AD parolası cluster içinde düz HTTP'den geçiyor. Route'ta
+`termination: edge` sabit (`templates/expose.yaml:24-26`), values'ta Route
+TLS alanı yok; frontend backend'e `http://` ile gider
+(`templates/frontend.yaml:38-39`) ve kendisi düz HTTP sunar. OVN-Kubernetes
+IPsec yoksa pod ağı şifresizdir; bu platformun kararı. Kod L ve iki bileşene
+TLS ekler (şişirme riski orta). Sprint 4'te yalnızca bilinen sınır cümlesi
+(README "Dışarıya açma", #60) ve yol haritası satırı girer. Tetikleyici: bir
+güvenlik incelemesinin IPsec'siz cluster'da düz metin parola yolunu bulgu
+olarak yazması. Karar taslağı (BA): `route.tls.termination` (`edge`
+varsayılan, `reencrypt`); reencrypt'te frontend ve backend OpenShift service
+CA sertifikasıyla TLS sunar, Route `destinationCACertificate`'i taşır,
+frontend backend'e https ile gider; edge'de render değişmez; pilot.md "Ön
+koşullar"a güvenlik satırı (IPsec var mı). Kapsam dışı: Ingress'te uçtan uca
+TLS, mTLS, cert-manager ile pod sertifikası.
+
+## E-posta konusunda kurulum kimliği
+
+2026-10-29'da ertelendi (S28'in kapsam dışı parçası, sprint 4 PO kararı,
+[sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)). S28
+(#61) kurulum kimliğini (`UPTIME_INSTANCE_NAME`, boşsa `UPTIME_PUBLIC_URL`'ün
+host'u) PagerDuty `dedup_key`'ine, `custom_details`'e ve webhook gövdesine
+(`instance`), Slack ve Mattermost alt bilgisine, Teams ve Google Chat
+kartına ve e-posta gövdesine koyar. E-posta konusu (`Subject()`,
+`router.go:139`; `email.go:111`) bilerek değişmez: konuya göre kurulmuş
+posta kuralları kırılmasın. Bu, BA varsayılanından (konunun başında
+`[<kimlik>]`) bilinçli bir sapma. Tetikleyici: birden çok cluster'ı
+e-postayla izleyen bir kullanıcının kurulumları konudan ayırt etme isteği.
