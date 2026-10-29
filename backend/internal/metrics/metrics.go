@@ -213,6 +213,24 @@ func (m *Metrics) WatchHealth(healthy func() error) {
 	}))
 }
 
+// WatchQueue adds kubeat_notification_queue_length, read from length on
+// every scrape: how many notifications wait in the alert engine's delivery
+// queue right now. A queue that fills up while the loop is held up drops
+// what comes next (kubeat_notifications_dropped_total); this shows it
+// filling, and a sustained high value means UPTIME_NOTIFY_QUEUE_SIZE is
+// short for the outages the loop has to get through.
+func (m *Metrics) WatchQueue(length func() int) {
+	if m == nil {
+		return
+	}
+	m.registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "kubeat_notification_queue_length",
+		Help: "Notifications waiting in the delivery queue right now, read at every scrape. The queue holds UPTIME_NOTIFY_QUEUE_SIZE at most; one that comes while it is full is dropped (kubeat_notifications_dropped_total).",
+	}, func() float64 {
+		return float64(length())
+	}))
+}
+
 // Handler serves the metrics.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
