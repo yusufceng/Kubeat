@@ -2651,8 +2651,9 @@ kez reddedildiği geçişte arkasında kalanlar bir geçiş daha bekler.
 Normalde yeniden denenmeyen hatırlatma, sertifika ve yavaşlık bildirimleri
 (`UPTIME_NOTIFY_RETRY_FOR=0` iken düzelme de) kanalın sıradaki geçişinde
 bir kez denenir (önündeki bir bildirim alınmazsa sonraki bir geçişte),
-kanal yine almazsa düşer; aynı monitor için bekleyen hatırlatmanın yerini
-yenisi alır. Bekletilen bir düzelmenin `UPTIME_NOTIFY_RETRY_FOR` süresi
+kanal yine almazsa düşer; aynı monitor için bekleyen hatırlatmanın ve
+yavaşlık bildiriminin yerini yenisi alır.
+Bekletilen bir düzelmenin `UPTIME_NOTIFY_RETRY_FOR` süresi
 bekletildiği andan değil, ilk denemesinden başlar: kanalın geçişi
 ertelenir ya da düzelme geçişte yeniden bekletilirse süre de onunla
 kayar. Kanal bir geçişte kendisine gönderilenlerin hepsini alınca durum
