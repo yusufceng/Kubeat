@@ -766,7 +766,9 @@ func (r *failingOn) Send(ctx context.Context, ch store.Channel, n Notification) 
 // passes runs the loop at each time something falls due, up to the
 // fixture's start plus until, and leaves the clock there. Each pass may
 // see one failed attempt at most: a webhook that does not take what it
-// is sent costs the loop one attempt a pass.
+// is sent costs the loop one attempt a pass. One that refuses (4xx) is
+// not paused and is sent every note due, a request each (README "Alarm",
+// Reddetti), so the tests that use this have it refuse one at most.
 func (f *fixture) passes(start time.Time, until time.Duration) {
 	f.t.Helper()
 	failed := func() float64 {

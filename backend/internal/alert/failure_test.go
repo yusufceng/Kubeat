@@ -1,9 +1,12 @@
 package alert
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -178,6 +181,64 @@ func TestClassify(t *testing.T) {
 	off := New(nil, nil, Options{})
 	if class, wait := off.classify(&statusError{status: 429, retryAfter: "30"}, now); class != busy || wait != 0 {
 		t.Errorf("429 with RetryMax 0: %s for %s, want busy for 0s", class, wait)
+	}
+}
+
+// logged keeps what a logger writes; the engine logs from the goroutines
+// of a pass.
+type logged struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *logged) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+// failures reads the JSON lines written so far and returns the failure
+// field of each line that has one, by the line's message.
+func (l *logged) failures(t *testing.T) map[string]any {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	got := make(map[string]any)
+	for _, line := range bytes.Split(bytes.TrimSpace(l.buf.Bytes()), []byte("\n")) {
+		var entry map[string]any
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatalf("a log line is not JSON: %q: %v", line, err)
+		}
+		if failure, ok := entry["failure"]; ok {
+			got[fmt.Sprint(entry["msg"])] = failure
+		}
+	}
+	return got
+}
+
+// The log names the class of a failure in words in the JSON the backend
+// writes (cmd/server), "failure":"refused" rather than the number the
+// class is held as, so that a log query for refusals finds them.
+func TestTheLogNamesTheFailureClass(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		class  string
+	}{{http.StatusNotFound, "refused"}, {http.StatusTooManyRequests, "busy"}, {http.StatusBadGateway, "unreachable"}} {
+		t.Run(tc.class, func(t *testing.T) {
+			f := newFixture(t, 1, 1) // "ops", a webhook; "api"
+			f.retrying(15*time.Minute, time.Hour)
+			out := &logged{}
+			f.engine.opts.Logger = slog.New(slog.NewJSONHandler(out, nil))
+			f.answer().set("ops", tc.status, "")
+			f.check(false)
+			f.deliverLive()
+			got := out.failures(t)
+			for _, msg := range []string{"notification failed", "notification to be sent again"} {
+				if got[msg] != tc.class {
+					t.Errorf("%q logs failure %#v, want %q", msg, got[msg], tc.class)
+				}
+			}
+		})
 	}
 }
 

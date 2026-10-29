@@ -2,6 +2,7 @@ package alert
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,6 +44,13 @@ func (f failure) String() string {
 		return "refused"
 	}
 	return "unreachable"
+}
+
+// LogValue logs the class by its name: the JSON handler the backend logs
+// with (cmd/server) would write the number a failure is held as, which
+// no log query for "refused" finds.
+func (f failure) LogValue() slog.Value {
+	return slog.StringValue(f.String())
 }
 
 // refusedAdvice follows the error of a refused attempt, on the channel's
