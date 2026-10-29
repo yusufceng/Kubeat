@@ -385,7 +385,7 @@ rules "outages held per cluster" has 'unless on (namespace, job, cluster) (kubea
 rules "outages per cluster and monitor" has 'max by (namespace, job, cluster, monitor, monitor_namespace, type) (kubeat_monitor_incident_open) == 1' "${CLUSTER[@]}"
 rules "KubeatUnhealthy per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_self_healthy) == 0' "${CLUSTER[@]}"
 rules "no store label kept but the cluster's" lacks 'without (' "${CLUSTER[@]}"
-for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace severity; do
+for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace channel channel_type severity; do
   refuses "clusterLabel $label" "metrics.prometheusRule.clusterLabel is \"$label\"" "${RULES[@]}" --set-string metrics.prometheusRule.clusterLabel="$label"
 done
 for label in cluster k8s_cluster _cluster Cluster1; do

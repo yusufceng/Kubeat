@@ -2670,8 +2670,8 @@ bu değerle render edilen kurallar taşınır.
   cluster'ın `KubeatDown`'ı öbür cluster'daki aynı namespace'in alarmlarını
   da susturur.
 - **Etiket adı.** Prometheus etiket adı olmalı ve kuralların kendi
-  kullandığı etiketlerden (`namespace`, `job`, `pod`, `monitor`…) biri
-  olmamalıdır; chart aksini reddeder.
+  kullandığı etiketlerden (`namespace`, `job`, `pod`, `monitor`,
+  `channel`…) biri olmamalıdır; chart aksini reddeder.
 
 ## Yedekleme ve geri yükleme
 

@@ -65,6 +65,15 @@ yapmayan, her seriye ayrı bakan öteki öz-sağlık kuralları (ör.
 tekilleştirilmeyen bir HA çiftinde kopya başına bir kez yanar; tetikleyici:
 böyle bir depoda çift alarm şikâyeti.
 
+Güncelleme (2026-10-29, S26, #49): kanal başına olan
+`KubeatNotificationsFailing`'in kanal ifadeleri de `clusterLabel`
+verilince bu etiketle, `channel` ve `channel_type`'ın yanında cluster
+başına toplanır ve scrape boşluğunda cluster başına tutulur; `channel` ve
+`channel_type` `clusterLabel` olarak reddedilir. Aynı kuralın kuyrukta
+düşen bildirim ifadesi "Kalan"daki kurallar gibi her seriye ayrı bakar ve
+tekilleştirilmeyen HA çiftinde kopya başına bir kez yanar; tetikleyici
+aynı.
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
