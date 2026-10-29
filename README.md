@@ -1874,7 +1874,9 @@ dolarsa yalnızca ham sonuçlar ≈ 2,6 GB tutar: volume'u büyütün
 artırılıp yükseltilir) ya da `UPTIME_RETENTION`'ı kısaltın. Volume dolunca
 sonuçlar yazılamaz ve kaybolur, olay açılmaz, bildirim gitmez; bunu
 dışarıdaki heartbeat ve `KubeatResultsDropped` alarmı söyler (bkz. "Aracın
-kendi sağlığı").
+kendi sağlığı"). Yedek açıksa yedek volume'u da büyür: (keep + 1) ×
+veritabanı boyutu kadar yer ister ve varsayılan 5Gi yaklaşık 640 MiB'lık bir
+veritabanına yeter (bkz. "Yedekleme ve geri yükleme").
 
 ### Kesinti anına gitmek
 
@@ -2281,8 +2283,10 @@ sonuçları yazılamıyorsa da (veri volume'u doldu ya da salt okunur oldu, bir
 yazım aralıktan uzun sürdü) istekler kesilir. Yazılamayan sonuçtan olay
 açılmaz, bildirim gitmez; Kubeat bunu kendisi duyuramaz. Hiç sonuç gelmeyen
 bir aralık (sırası gelen kontrol yoktu) sağlıklı sayılır; bazı satırların
-düşmesi de, örneğin kontrolü sürerken silinen bir monitor'un sonucu,
-heartbeat'i kesmez (`kubeat_results_dropped_total` sayar). Gönderilmeyen her
+düşmesi de, örneğin kontrolü sürerken silinen bir monitor'un sonucu, aynı
+aralıkta başka sonuçlar yazıldıkça heartbeat'i kesmez; aralığın tek sonucuysa
+o aralığın heartbeat'i bir kez tutulur (`kubeat_results_dropped_total`
+sayar). Gönderilmeyen her
 heartbeat `kubeat_heartbeats_total{result="withheld"}` sayacını artırır;
 nedeni backend log'undaki `heartbeat withheld` satırında, yazım hatası
 `batch insert failed` satırındadır (yazım başına tek satır, düşen sonuç

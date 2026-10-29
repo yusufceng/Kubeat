@@ -576,6 +576,9 @@ kendiliğinden büyütülmesi (StorageClass `allowVolumeExpansion` isterse
 `backend.persistence.size` artırılır, chart'ta ek iş yok), `UPTIME_RETENTION`'ın
 monitor sayısına ve aralığa göre kendiliğinden ayarlanması, yazılamayan
 sonuçların bellekte tutulması (volume doluyken de olay açılır ve bildirim
-gider, ama bellek sınırı ister ve yeniden başlatmada kaybolur). Tetikleyici:
+gider, ama bellek sınırı ister ve yeniden başlatmada kaybolur), düşen
+satırların `monitor_id`'lerinin ve ilk satır hatasının toplu log satırına
+eklenmesi (bugün yalnızca sayı loglanır; bir monitor'un sonucu kalıcı
+reddedilirse hangisi olduğu görünmez). Tetikleyici:
 boyut kuralını aşan bir kurulum ya da loglarda `dropped` değeri `rows`'a eşit
 `batch insert failed` satırları ve `heartbeat withheld`.
