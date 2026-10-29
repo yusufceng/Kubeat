@@ -187,6 +187,26 @@ func (m *Metrics) TargetThrottled(host string) {
 	m.targetThrottled.WithLabelValues(host).Inc()
 }
 
+// WatchHealth adds kubeat_self_healthy, read from healthy on every scrape: 1
+// while it returns nil, 0 while it says why Kubeat is not doing its job.
+// main gives it the judgement the heartbeat sends on, so that a cluster's
+// own Prometheus hears what an external dead man's switch would, with or
+// without one.
+func (m *Metrics) WatchHealth(healthy func() error) {
+	if m == nil {
+		return
+	}
+	m.registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "kubeat_self_healthy",
+		Help: "1 while Kubeat is doing its job, 0 while not, judged at every scrape as the heartbeat judges it: 0 when the scheduler completed no tick over the last UPTIME_HEARTBEAT_INTERVAL, or check results came in that time and none of them could be stored, or one write of them has outlasted it. An interval in which no result came is healthy.",
+	}, func() float64 {
+		if healthy() != nil {
+			return 0
+		}
+		return 1
+	}))
+}
+
 // Handler serves the metrics.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})

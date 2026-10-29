@@ -365,3 +365,94 @@ tests:
         exp_alerts:
           - exp_labels: *backup-failing-labels
             exp_annotations: *backup-failing-annotations
+
+  - name: KubeatUnhealthy fires after 5 minutes of a backend that stores no result
+    interval: 1m
+    input_series:
+      # From 2m results come and none of them can be stored (a full data
+      # volume): the backend's own health reads 0.
+      - series: 'kubeat_self_healthy{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: KubeatUnhealthy
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: KubeatUnhealthy
+        exp_alerts:
+          - exp_labels: &kubeat-unhealthy-labels
+              severity: critical
+              job: kubeat-backend
+              namespace: kubeat
+            exp_annotations: &kubeat-unhealthy-annotations
+              summary: "Kubeat's checks are not running, or their results are not stored"
+              description: "For 5 minutes Kubeat has not been doing its job (kubeat_self_healthy, what the heartbeat sends on): in the last heartbeat interval its scheduler completed no tick, or check results came and none of them could be stored (a full or read-only data volume), or one write of them outlasted the interval (a hung volume). No outage is opened and no notification sent meanwhile; the backend's log says why (list monitors failed, batch insert failed)."
+      - eval_time: 12m
+        alertname: KubeatUnhealthy
+        exp_alerts:
+          - exp_labels: *kubeat-unhealthy-labels
+            exp_annotations: *kubeat-unhealthy-annotations
+
+  - name: KubeatUnhealthy stays silent for 3 minutes of it
+    interval: 1m
+    input_series:
+      # Unhealthy at 2m, 3m and 4m; from 5m results are stored again.
+      - series: 'kubeat_self_healthy{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 0 0 0 1x7'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: KubeatUnhealthy
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: KubeatUnhealthy
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: KubeatUnhealthy
+        exp_alerts: []
+
+  - name: A loss of some results is only KubeatResultsDropped's warning
+    interval: 1m
+    input_series:
+      # From 2m a result is lost now and then (its monitor was deleted while
+      # its check ran), the others are stored: the backend stays healthy.
+      - series: 'kubeat_results_dropped_total{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 1+1x10'
+      - series: 'kubeat_self_healthy{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1x12'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: KubeatResultsDropped
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              service: kubeat-backend
+              endpoint: http
+              container: backend
+              pod: kubeat-backend-6c9d7f5b8-a1b2c
+              instance: 10.128.2.15:8080
+            exp_annotations:
+              summary: "Kubeat is losing check results"
+              description: "Check results could not be written to the database in the last 10 minutes, so the uptime history has gaps; the backend's log says why (a full data volume, a database that stays locked)."
+      - eval_time: 8m
+        alertname: KubeatUnhealthy
+        exp_alerts: []
+
+  - name: KubeatUnhealthy stays silent without a backend, which is KubeatDown's
+    interval: 1m
+    input_series:
+      # Unhealthy from the start; the pod is gone at 3m.
+      - series: 'kubeat_self_healthy{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 0 stale'
+      - series: 'up{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 1 stale'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: KubeatUnhealthy
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: KubeatDown
+        exp_alerts:
+          - exp_labels: *kubeat-down-labels
+            exp_annotations: *kubeat-down-annotations

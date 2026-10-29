@@ -389,6 +389,43 @@ func TestSetUpOIDC(t *testing.T) {
 	}
 }
 
+// More enabled monitors than the delivery queue holds is said once, with
+// both numbers: at start if there are already, else the first time a tick
+// finds them past it. Ticks at or under the size say nothing.
+func TestQueueWarning(t *testing.T) {
+	warnings := func(counts ...int) []string {
+		var logs bytes.Buffer
+		check := queueWarning(1000, slog.New(slog.NewTextHandler(&logs, nil)))
+		for _, n := range counts {
+			check(n)
+		}
+		return strings.Split(strings.TrimSpace(logs.String()), "\n")
+	}
+	for _, tt := range []struct {
+		name    string
+		counts  []int
+		enabled string // in the one warning; empty for none
+	}{
+		{"never past the queue", []int{3, 999, 1000, 1000}, ""},
+		{"past it at start", []int{1200, 1200, 1300, 900, 1250}, "enabled_monitors=1200"},
+		{"past it later", []int{998, 1000, 1001, 1002, 1000, 1003}, "enabled_monitors=1001"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := warnings(tt.counts...)
+			if tt.enabled == "" {
+				if lines[0] != "" {
+					t.Errorf("logged %q, want nothing", lines)
+				}
+				return
+			}
+			if len(lines) != 1 || !strings.Contains(lines[0], "level=WARN") || !strings.Contains(lines[0], tt.enabled) ||
+				!strings.Contains(lines[0], "notify_queue_size=1000") || !strings.Contains(lines[0], "UPTIME_NOTIFY_QUEUE_SIZE") {
+				t.Errorf("logged %q, want one WARN with %s and notify_queue_size=1000", lines, tt.enabled)
+			}
+		})
+	}
+}
+
 // TestMain makes password hashes cheap: these tests sign in and set up
 // accounts hundreds of times, and at the real cost they time out under the
 // race detector on a small CI runner.

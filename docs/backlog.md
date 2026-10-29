@@ -588,6 +588,13 @@ S26 (#49): 4xx dönen makine kanalı canlı sayılır ve duraklamaz; yalnızca
 çıkınca WARN verilir. "Otomatik türetme yok" kararı korunur
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
 
+Güncelleme (2026-10-29, S38, #50): ikinci bulgu karşılandı.
+`UPTIME_NOTIFY_QUEUE_SIZE` varsayılanı 1000 (`UPTIME_MAX_MONITORS`'ın
+varsayılanı; ondan türetilmez). Etkin monitor sayısı kuyruğu aşınca backend
+bunu bir kez, iki sayıyla WARN olarak loglar: açılışta ya da sonradan sınır
+ilk geçildiğinde. Bellek bedeli README "Alarm"da: 1000'lik kuyruk ≈ 1 MiB,
+doluyken ≈ 1,7 MiB.
+
 ## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
 
 2026-10-28'de ertelendi (S33,
@@ -733,6 +740,16 @@ warning olarak kalır. Log taşkını notu (sprint 2 provası 4a): volume
 doluyken backend her toplu yazımda bir WARN yazıyor; öneri dakikada bir
 özet satırı, tetikleyici log hacmi şikâyeti. Dolu volume'dan dönüş runbook'u
 S41'de (sprint 4 kuyruğu, 3. sıra).
+
+Güncelleme (2026-10-29, S38, #50): Müşteri A'nın önerisi geldi.
+Heartbeat'in kararı (`scheduler.Healthy`) `kubeat_self_healthy` gauge'unda
+her scrape'te, heartbeat kapalıyken de yayınlanır; chart'ın
+`KubeatUnhealthy` kuralı gauge 5 dakika 0 kalınca `critical` yanar.
+`KubeatResultsDropped` warning olarak kaldı; liveness ve readiness bu
+karara bağlanmadı. Bu maddenin kalanları değişmedi: PVC'nin kendiliğinden
+büyümesi, saklamanın kotaya göre ayarlanması, yazılamayan sonuçların
+bellekte tutulması, toplu log satırına `monitor_id`'ler ve dakikada bir
+özet satırı.
 
 ## Kaldırmaya karşı korumanın kalanları: Argo CD prune, PV düzeyi, prova kaydı
 

@@ -9,7 +9,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 1 | Keşif: Service/Ingress/Route'ları bulma, namespace görünümü | Tamamlandı |
 | 2 | Arayüz derinliği: grafik, uzun dönem uptime, düzenleme/durdurma, HTTP seçenekleri, sertifika süresi | Tamamlandı |
 | 3 | Alarm olgunluğu: Slack/Teams/e-posta, bakım pencereleri, susturma, hatırlatma | Tamamlandı |
-| 4 | Aracın kendi sağlığı: `/metrics`, heartbeat | Tamamlandı; sprint 1 (S9): düşen sonuç, başarısız bildirim, dolu worker, duran ve yaşlanan yedek, biten lisans PrometheusRule'da alarm (bkz. 19); sprint 2 (S32): heartbeat sonuçlar yazılamazken de kesilir (sonuç gelmeyen aralık sağlıklı sayılır), veri PVC'si için boyut kuralı README "Geçmiş verisi"nde |
+| 4 | Aracın kendi sağlığı: `/metrics`, heartbeat | Tamamlandı; sprint 1 (S9): düşen sonuç, başarısız bildirim, dolu worker, duran ve yaşlanan yedek, biten lisans PrometheusRule'da alarm (bkz. 19); sprint 2 (S32): heartbeat sonuçlar yazılamazken de kesilir (sonuç gelmeyen aralık sağlıklı sayılır), veri PVC'si için boyut kuralı README "Geçmiş verisi"nde; sprint 3 (S38, #50): heartbeat'in kararı `kubeat_self_healthy` gauge'unda ve heartbeat'siz kurulumda da `critical` yanan `KubeatUnhealthy` kuralında (bkz. 19), `UPTIME_NOTIFY_QUEUE_SIZE` varsayılanı 1000 ve etkin monitor sayısı kuyruğu aşınca bir kez WARN, heartbeat de kurallar da kapalıysa ve yedek kapalıysa kurulum notunda uyarı |
 | 5 | Cluster metrikleri: monitor'un arkasındaki pod'lar, Prometheus/Thanos'tan CPU ve bellek | Tamamlandı |
 | 6 | Agent ve çoklu cluster: her cluster'da hafif agent, merkeze push | Ertelendi: şimdilik tek cluster yeterli (2026-10-12) |
 | 7 | Üretime hazırlık: API koruması, yük testi, yedekleme, yönetici parolasıyla giriş | Tamamlandı |
@@ -27,7 +27,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 15b | Ayarlar ekranı, kişi başına API anahtarları | Planlandı |
 | 17 | Annotation ile sürekli keşif: `kubeat.io/monitor` taşıyan nesneler kendiliğinden izlenir | Tamamlandı |
 | 18 | Pod bazında kontrol: Service'in arkasındaki her hazır pod'a aynı kontrol (`each_pod`) | Tamamlandı |
-| 19 | Cluster Alertmanager'ı ile alarm: chart'ta PrometheusRule | Tamamlandı; sprint 1 (S9) öz-sağlık kurallarını ekledi: `KubeatResultsDropped`, `KubeatNotificationsFailing`, `KubeatWorkersSaturated`, `KubeatBackupFailing`, `KubeatBackupStale`, `KubeatLicenseExpiring`; sprint 2 (S29): `KubeatDown` backend pod'u hiç yokken de yanar, `KubeatMonitorDown` ve `KubeatCertificateExpiring` 10 dakikaya kadar süren scrape boşluğunda çözülmez ve Recreate'te tek alarm kalır, `KubeatBackupFailing` yedek düzelene kadar açık kalır; kurallar promtool ile sınanır (`test-chart.sh`, CI) |
+| 19 | Cluster Alertmanager'ı ile alarm: chart'ta PrometheusRule | Tamamlandı; sprint 1 (S9) öz-sağlık kurallarını ekledi: `KubeatResultsDropped`, `KubeatNotificationsFailing`, `KubeatWorkersSaturated`, `KubeatBackupFailing`, `KubeatBackupStale`, `KubeatLicenseExpiring`; sprint 2 (S29): `KubeatDown` backend pod'u hiç yokken de yanar, `KubeatMonitorDown` ve `KubeatCertificateExpiring` 10 dakikaya kadar süren scrape boşluğunda çözülmez ve Recreate'te tek alarm kalır, `KubeatBackupFailing` yedek düzelene kadar açık kalır; kurallar promtool ile sınanır (`test-chart.sh`, CI); sprint 3 (S38, #50): `KubeatUnhealthy` (`critical`, `kubeat_self_healthy` 5 dakika 0) |
 | 20 | Olay bağlamı: monitor sayfasında pod'ların ve workload'un cluster olayları | Tamamlandı |
 | 21 | Ekip raporları: namespace başına uptime ve kesinti özeti, CSV | Tamamlandı |
 | 22 | Alarm yönlendirme: kanalda etiket ve olay süzgeci, namespace başına gruplama, monitor sayfasında "alarm nereye gider"; workload monitor'da rollout toleransı | Tamamlandı |
@@ -122,11 +122,13 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   ve `KubeatDown` yanar. Adımlar S41'de (sprint 4 kuyruğu,
   [sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
 - Veri volume'u dolunca kontrol sonuçları yazılamaz ve kaybolur (bellekte
-  tutulmaz): olay açılmaz, bildirim gitmez. Kubeat bunu kendisi duyuramaz;
-  dışarıdaki heartbeat kesilir ve chart'ın `KubeatResultsDropped` alarmı
-  yanar. Volume kendiliğinden büyümez; boyut kuralı README "Geçmiş
-  verisi"nde ([backlog](backlog.md) "Dolan veri volume'u: büyütme, kotaya
-  göre saklama, yazılamayan sonuçlar").
+  tutulmaz): olay açılmaz, bildirim gitmez. Kubeat bunu kendi bildirim
+  kanallarından duyuramaz. 0.45'ten beri `kubeat_self_healthy` 0 olur ve
+  chart'ın kuralları açıksa `KubeatUnhealthy` 5 dakikada `critical` yanar,
+  heartbeat olmadan da; heartbeat varsa o da kesilir. İkisi de kapalıysa
+  kimse duymaz; kurulum notu bunu uyarır. Volume kendiliğinden büyümez;
+  boyut kuralı README "Geçmiş verisi"nde ([backlog](backlog.md) "Dolan veri
+  volume'u: büyütme, kotaya göre saklama, yazılamayan sonuçlar").
 - Giriş kilidi sayacı backend belleğindedir; yeniden başlatınca sıfırlanır.
   Tek replica olduğu için şimdilik sorun değildir. Kilit kullanıcı adına
   göredir: adını bilen biri bir hesabı `UPTIME_LOGIN_MAX_FAILURES` yanlış

@@ -46,6 +46,9 @@ type Options struct {
 	// OnResults, if set, is called with each group of results after they
 	// have been stored. Calls are sequential.
 	OnResults func(ctx context.Context, results []store.CheckResult)
+	// OnTick, if set, is called at the end of every completed tick with the
+	// number of enabled monitors. Calls are sequential.
+	OnTick func(enabled int)
 	// TargetMaxRate and ClusterTargetMaxRate are how many checks a minute
 	// one host name gets from all monitors together, for names outside and
 	// inside the cluster (netguard.InCluster); AddressMaxRate how many one
@@ -308,6 +311,9 @@ dispatch:
 
 	s.lastTick.Store(now.UnixNano())
 	s.opts.Metrics.SchedulerTick(now)
+	if s.opts.OnTick != nil {
+		s.opts.OnTick(len(seen))
+	}
 }
 
 // nextAfter returns the first time after now that is a whole number of

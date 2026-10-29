@@ -40,7 +40,8 @@ backend:
     # much again for compacting it (VACUUM) and its write-ahead log. At the
     # default retentions, 2Gi holds about 1000 monitors checked every 60s,
     # 600 every 30s or 350 every 15s (README, "Geçmiş verisi"). Once the
-    # volume is full, results are lost and the heartbeat stops.
+    # volume is full, results are lost, the heartbeat stops and the
+    # PrometheusRule's KubeatUnhealthy fires.
     size: 2Gi
     storageClass: ""   # empty uses the cluster default
     # Leaves this PVC, <release>-data with the database, in place when the
@@ -77,7 +78,7 @@ backend:
     # UPTIME_NOTIFY_GROUP_WAIT: 30s    # "0" turns grouping off
     # UPTIME_NOTIFY_RETRY_MAX: 15m     # an outage notification a channel did not take is sent again at 1, 2, 4... minutes, up to this (at least 1m); "0" turns it off
     # UPTIME_NOTIFY_RETRY_FOR: 1h      # the end of an outage is sent again for this long at most; "0" does not send it again
-    # UPTIME_NOTIFY_QUEUE_SIZE: "100"  # notifications waiting for delivery; at least the number of monitors, or an outage of them all overflows it
+    # UPTIME_NOTIFY_QUEUE_SIZE: "1000" # notifications waiting for delivery; at least the number of monitors, or an outage of them all overflows it (the backend warns once when more are enabled); 1000 take about 1 MiB of memory, 2 MiB full
     # UPTIME_SHUTDOWN_TIMEOUT: 10s     # stopping waits this long for open requests and for the notifications still waiting; keep terminationGracePeriodSeconds 5s longer
     # UPTIME_RECOVERY_THRESHOLD: "1"
     # UPTIME_DEFAULT_FAILURE_THRESHOLD: "3"
@@ -356,7 +357,9 @@ metrics:
   # Creates a PrometheusRule so the cluster's Prometheus raises alerts from
   # the metrics: KubeatMonitorDown per open outage, KubeatCertificateExpiring,
   # and for Kubeat itself KubeatDown (also when there is no backend pod at
-  # all), KubeatSchedulerStalled, KubeatMetricsIncomplete,
+  # all), KubeatSchedulerStalled, KubeatUnhealthy (critical: for 5 minutes
+  # no tick, or no check result stored, as the heartbeat judges it; also
+  # without a heartbeat), KubeatMetricsIncomplete,
   # KubeatResultsDropped, KubeatNotificationsFailing, KubeatWorkersSaturated,
   # KubeatBackupFailing (until a backup succeeds), KubeatBackupStale (with
   # backup.enabled: no good copy for twice backup.interval) and
@@ -380,7 +383,10 @@ metrics:
 # it is scheduling checks and storing their results (an interval in which
 # no check was due counts as working). Point it at a service that alerts
 # when the requests stop (healthchecks.io, an Uptime Kuma push monitor,
-# ...), ideally one that runs outside this cluster.
+# ...), ideally one that runs outside this cluster. The same judgement is
+# the metric kubeat_self_healthy, with or without a heartbeat, which the
+# PrometheusRule's KubeatUnhealthy alerts on; only the heartbeat is heard
+# when the whole cluster is down.
 heartbeat:
   interval: 1m
   # The URL usually embeds a secret key, so it is read from a Secret.

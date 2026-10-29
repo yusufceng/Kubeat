@@ -217,6 +217,20 @@ grace "grace period by default" 30
 grace "grace period given" 45 --set backend.terminationGracePeriodSeconds=45
 grace "grace period missing from older values" 30 --set backend.terminationGracePeriodSeconds=null
 
+# Kubeat's own failures: the install notes warn while neither a heartbeat
+# nor the alert rules would tell of them, and say when no backups are taken.
+UNHEARD="nobody hears when Kubeat itself fails"
+notes "no heartbeat, no rules" says "$UNHEARD"
+notes "no heartbeat, no rules" says '"Aracın kendi sağlığı"'
+notes "heartbeat from its Secret" omits "$UNHEARD" --set heartbeat.urlSecret.name=kubeat-heartbeat
+notes "heartbeat in extraEnv" omits "$UNHEARD" --set backend.extraEnv.UPTIME_HEARTBEAT_URL=https://hc-ping.example/x
+notes "empty heartbeat URL in extraEnv" says "$UNHEARD" --set-string backend.extraEnv.UPTIME_HEARTBEAT_URL=
+notes "alert rules" omits "$UNHEARD" --set metrics.prometheusRule.enabled=true
+NO_BACKUPS="No backups of the database are taken"
+notes "backups off" says "$NO_BACKUPS"
+notes "backups off" says "Velero, OADP"
+notes "backups on" omits "$NO_BACKUPS" "${BACKUPS[@]}"
+
 # The alert rules: Kubeat's self-health rules render, the backup staleness
 # rule only with backups on, with a threshold read from backup.interval.
 RULES=(--set metrics.prometheusRule.enabled=true)
@@ -233,7 +247,7 @@ rules() {
     [ "$want" = lacks ] || failed "$name: the rules lack \"$text\""
   fi
 }
-for alert in KubeatDown KubeatSchedulerStalled KubeatMetricsIncomplete KubeatResultsDropped \
+for alert in KubeatDown KubeatSchedulerStalled KubeatUnhealthy KubeatMetricsIncomplete KubeatResultsDropped \
   KubeatNotificationsFailing KubeatWorkersSaturated KubeatBackupFailing KubeatBackupStale KubeatLicenseExpiring; do
   rules "$alert with backups" has "alert: $alert" --set backup.enabled=true
 done
@@ -260,11 +274,15 @@ done
 rules "KubeatDown without a backend target" has 'absent(up{job="kubeat-backend", namespace="default"})'
 rules "KubeatMonitorDown over a scrape gap" has 'last_over_time(kubeat_monitor_incident_open[10m])'
 rules "KubeatBackupFailing until a backup succeeds" has 'max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m])'
+# KubeatUnhealthy reads what the heartbeat judges, one alert across a
+# Recreate; a loss of some results stays KubeatResultsDropped's warning.
+rules "KubeatUnhealthy reads the self-health gauge" has 'expr: max without (instance, pod, endpoint, container, service) (kubeat_self_healthy) == 0'
 
 # The rules as Prometheus reads them: promtool checks the rule groups and
 # runs the scenarios of prometheusrule-test.yaml (no backend target, a failed
-# scrape, a Recreate, an outage that closes, a failing backup) against the
-# rules rendered for release "kubeat" in namespace "kubeat".
+# scrape, a Recreate, an outage that closes, a failing backup, a backend that
+# stores no result) against the rules rendered for release "kubeat" in
+# namespace "kubeat".
 PROMTOOL="${PROMTOOL:-promtool}"
 # rulefile FILE VALUES...: writes the rule groups of the PrometheusRule
 # rendered with these values (and the rules on) to FILE.
