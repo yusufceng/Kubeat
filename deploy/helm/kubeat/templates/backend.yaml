@@ -73,8 +73,10 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # Lets in-flight checks stop and the last results be written.
-      terminationGracePeriodSeconds: 30
+      # Lets in-flight checks stop, the last results be written and the
+      # notifications still waiting be sent (UPTIME_SHUTDOWN_TIMEOUT). Came
+      # after 0.37.0: dig takes the default of values.yaml (_helpers.tpl).
+      terminationGracePeriodSeconds: {{ dig "terminationGracePeriodSeconds" 30 .Values.backend | int }}
       containers:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"

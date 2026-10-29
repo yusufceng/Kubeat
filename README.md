@@ -2606,7 +2606,10 @@ bildirim etkin kanallara aynı anda gider (her kanala kendi sırasıyla), yani
 yanıt vermeyen bir webhook ya da PagerDuty, Slack'in ya da e-postanın
 teslimatını geciktirmez; teslimat döngüsü yalnızca en yavaş kanal kadar
 bekler ve bu sırada gelen bildirimler kuyrukta (`UPTIME_NOTIFY_QUEUE_SIZE`)
-birikir.
+birikir. Kuyruk doluyken gelen bildirim düşer ve
+`kubeat_notifications_dropped_total` artar; bu yüzden
+`UPTIME_NOTIFY_QUEUE_SIZE` en az monitor sayısı kadar olmalıdır: tüm
+monitor'ların birlikte düştüğü bir kesinti (DNS, Ingress) kuyruğa sığar.
 
 Teslim edilemeyen kesinti bildirimi kaybolmaz. Bir deneme, kanala
 `UPTIME_NOTIFY_ATTEMPTS` kısa tekrar (aralarında `UPTIME_NOTIFY_RETRY_DELAY`)
@@ -2625,25 +2628,83 @@ Gruplanmış bir mesaj tek mesaj olarak yeniden denenir; bu arada düzelen
 monitor'lar mesajdan düşer. Bir kanal bir geçişte bir bildirimi almazsa, o
 geçişte ona yeniden gönderilecek diğer bildirimler denenmez ve bekleme
 süreleri yine ikiye katlanır: kapalı bir kanal her geçişte en çok bir
-denemenin süresi kadar tutar, bildirim başına değil. Her deneme bildirim
-kaydına yazılır ve `kubeat_notification_attempts_total` sayacını artırır
-(denenmeden bekletilen bildirim yazılmaz ve sayılmaz);
+denemenin süresi kadar tutar, bildirim başına değil.
+
+Yazılımın okuduğu bir kanal (`webhook`, `pagerduty`) bir bildirimi
+almazsa, yeniden denemesinin zamanına kadar **almıyor** sayılır: bu sürede
+gelen yeni bildirimler ona denenmez, yeniden deneme listesine yazılır ve
+kanalın sıradaki yeniden deneme geçişinde, bekleyenlerle birlikte gider.
+Yeni bir kesinti sayfası böylece en çok kanalın o anki bekleme süresi kadar
+(`UPTIME_NOTIFY_RETRY_MAX`'a kadar) gecikir, ama ölü bir webhook ya da
+PagerDuty bir patlamada her bildirim için bir denemenin süresini
+(varsayılanlarla 25 sn) beklemez: kuyruk akar, Slack ve e-posta gruplarını
+zamanında alır. Geçişte kanalın daha az reddettiği bildirimler önce denenir
+(hatırlatma kendi kesintisinden sonra) ve geçiş kanalın almadığı ilk
+bildirimde durur: ölü bir kanal geçiş başına bir kez denenir. Kanalın
+sürekli reddettiği bir bildirim (eşlemesi olmayan bir monitor'a 422, elle
+kapatılmış bir kaydın düzelmesine 409) böylece diğerlerinin arkasına düşer
+ve onları bekletmez, ama kanalı her geçişten sonra yeniden almıyor
+saydırır: o bildirim yeniden denendikçe (`down` olay kapanana kadar, `up`
+`UPTIME_NOTIFY_RETRY_FOR` boyunca) yeni bildirimler kanalın sıradaki
+geçişini, en çok `UPTIME_NOTIFY_RETRY_MAX` kadar bekler; bir bildirimin ilk
+kez reddedildiği geçişte arkasında kalanlar bir geçiş daha bekler.
+Normalde yeniden denenmeyen hatırlatma, sertifika ve yavaşlık bildirimleri
+(`UPTIME_NOTIFY_RETRY_FOR=0` iken düzelme de) kanalın sıradaki geçişinde
+bir kez denenir (önündeki bir bildirim alınmazsa sonraki bir geçişte),
+kanal yine almazsa düşer; aynı monitor için bekleyen hatırlatmanın ve
+yavaşlık bildiriminin yerini yenisi alır.
+Bekletilen bir düzelmenin `UPTIME_NOTIFY_RETRY_FOR` süresi
+bekletildiği andan değil, ilk denemesinden başlar: kanalın geçişi
+ertelenir ya da düzelme geçişte yeniden bekletilirse süre de onunla
+kayar. Kanal bir geçişte kendisine gönderilenlerin hepsini alınca durum
+kalkar, yeni bildirimler yine anında gider. İnsanların okuduğu kanallar
+almıyor sayılmaz: her yeni mesaj onlara yine denenir. Gruplama açıkken bu
+grup başına bir denemedir; `UPTIME_NOTIFY_GROUP_WAIT=0` ile her bildirim
+ayrı denenir ve yanıt vermeyen bir insan kanalı patlamada kuyruğu yine
+yavaşlatır.
+
+Her deneme bildirim kaydına yazılır ve `kubeat_notification_attempts_total`
+sayacını artırır (denenmeden bekletilen bildirim yazılmaz ve sayılmaz);
 `kubeat_notifications_total` bildirimi bir kez, son sonucuyla sayar (kanal
 alınca `sent`, denemeler bitince `failed`). Chart'ın `KubeatNotificationsFailing`
 alarmı başarısız denemeyi sayar: kanal almadığı sürece yanar, motorun
-vazgeçmesini beklemez (bkz. "Aracın kendi sağlığı"). Kanal satırındaki **Son
+vazgeçmesini beklemez (bkz. "Aracın kendi sağlığı"); denemeler
+`UPTIME_NOTIFY_RETRY_MAX` aralığına seyreldiğinde, özellikle almıyor sayılan
+bir kanalda, iki deneme arasında kısa süre sönebilir. Kanal satırındaki **Son
 gönderim** son denemeyi gösterir: başarısız deneme orada hatasıyla görünür,
 kanal alınca yerini başarılı gönderim alır. Test, hatırlatma, sertifika ve
 yavaşlık bildirimleri yeniden denenmez: testin sonucu kanal satırında
 görünür, sonraki hatırlatma kendi aralığında gelir. Deneme listesi
 bellektedir: backend yeniden başlayınca açık kesintilerin hangi kanallara
 teslim edilemediğine bildirim kaydından bakılır ve o kanallara hemen
-yeniden gönderilir; bekleyen bir düzelme bildirimi ise yeniden başlatmayla
-düşer. `UPTIME_NOTIFY_RETRY_MAX=0` yeniden denemeyi tümüyle,
-`UPTIME_NOTIFY_RETRY_FOR=0` yalnızca düzelme için kapatır;
+yeniden gönderilir. Kayıtta hiç denemesi olmayan açık kesinti de gönderilir:
+yeniden başlatma onu kuyrukta, grup beklemesinde ya da almıyor sayılan bir
+kanalın listesinde yakalamıştır. Gecikmesiz kanallara hemen gider (gecikmeli
+kanallar için bkz. "Gecikme ve tekrar"), insanların okuduğu kanala aynı
+namespace'in kesintileri tek mesajda; kanal almazsa her zamanki gibi
+yeniden denenir. Kaydı `UPTIME_DELIVERY_RETENTION` (varsayılan 1 yıl) ile
+silinmiş, bu süreden uzun süren açık bir kesinti de yeniden başlatmada bir
+kez daha gönderilir. Kesintiden sonra oluşturulan kanal eski kesintiyi
+almaz; kesinti açıldığında onu duymayan eski bir kanal ise (o sırada
+kapalıydı ya da kapsamı veya olay seçimi sonradan genişledi) yeniden
+başlatmada onu alabilir. Bekleyen bir düzelme bildirimi yeniden başlatmayla
+düşer. `UPTIME_NOTIFY_RETRY_MAX=0` yeniden denemeyi ve almıyor saymayı
+tümüyle, `UPTIME_NOTIFY_RETRY_FOR=0` yalnızca düzelme için kapatır (yeniden
+başlatmada hiç denenmemiş kesinti yine bir kez gönderilir);
 `UPTIME_NOTIFY_RETRY_MAX` en az 1 dakika ve bir denemenin süresi
 (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`,
 varsayılanlarla 30 sn) olmalıdır; daha kısası reddedilir, backend başlamaz.
+
+**Kapanış.** Backend durdurulurken (sürüm yükseltme, pod'un taşınması,
+`SIGTERM`) önce grup beklemesindeki bildirimler insanların okuduğu
+kanallara gider, sonra kuyrukta kalanlar ve o ana kadar zamanı gelenler.
+Bunun tümü `UPTIME_SHUTDOWN_TIMEOUT` (varsayılan 10 sn) ile sınırlıdır: süre
+dolunca süren gönderim kesilir, kalanlar gönderilmez ve sayısı loga
+yazılır. Gönderilemeyen açık kesintiler sonraki açılışta yukarıdaki gibi
+gider; kapanmış bir kesintinin gönderilemeyen düzelmesi ise kaybolur.
+Chart'ın `backend.terminationGracePeriodSeconds` değeri (varsayılan 30) bu
+süreden en az 5 sn uzun tutulmalıdır; kısa kalırsa Kubernetes backend'i
+kapanış bitmeden durdurur.
 
 HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
 `UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir "sertifika" olayı
@@ -2841,8 +2902,9 @@ odeme-api (unexpected status 503), …". Bir namespace'in tamamı düştüğünd
 30 ayrı mesaj yerine bir mesaj okunur; düzelme ve hatırlatmalar da aynı
 şekilde gruplanır. Yazılımın okuduğu kanallar (`webhook`, `pagerduty`)
 hiçbir zaman gruplanmaz ve **beklemez**: olay açıldığı anda, kendi kaydıyla
-giderler; nöbetçiyi çağıran sayfa gruplama beklemesine takılmaz. `0`
-gruplamayı kapatır.
+giderler; nöbetçiyi çağıran sayfa gruplama beklemesine takılmaz (son
+bildirimi almamış bir kanal yalnızca kendi yeniden denemesini bekler; bkz.
+"Alarm"). `0` gruplamayı kapatır.
 
 Bekleme sırasında bir monitor hakkında daha yeni bir haber gelirse (düzeldi,
 yeniden düştü ya da yeni bir hatırlatma), o monitor'un kuyrukta bekleyen
@@ -3096,7 +3158,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_HTTP_WRITE_TIMEOUT` | `2m` | Başlıkları okunan bir isteğin yanıtının yazılıp bitmesi için süre |
 | `UPTIME_HTTP_IDLE_TIMEOUT` | `2m` | Boşta bekleyen keep-alive bağlantının kapatılma süresi |
 | `UPTIME_HTTP_MAX_HEADER_BYTES` | `1048576` | İstek başlıklarının en büyük boyutu (bayt) |
-| `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi için süre |
+| `UPTIME_SHUTDOWN_TIMEOUT` | `10s` | Kapanışta açık isteklerin bitmesi ve bekleyen bildirimlerin gönderilmesi için süre (bkz. "Alarm", **Kapanış**); chart'ın `backend.terminationGracePeriodSeconds` değeri bundan en az 5 sn uzun olmalıdır |
 | `UPTIME_SCHEDULER_TICK` | `1s` | Zamanı gelen monitor'ların ve monitor değişikliklerinin kontrol sıklığı |
 | `UPTIME_MAX_JITTER` | `5s` | Çalışırken eklenen bir monitor'un ilk kontrolünden önceki rastgele gecikmenin üst sınırı. Açılışta var olan monitor'lar kendi aralıklarına yayılır |
 | `UPTIME_WORKERS` | `20` | Aynı anda çalışabilecek kontrol sayısı |
@@ -3138,9 +3200,9 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_ATTEMPTS` | `3` | Bir bildirim denemesinin kanal başına kısa tekrar sayısı; hepsi başarısız olursa deneme başarısızdır (kesinti bildirimi için bkz. `UPTIME_NOTIFY_RETRY_MAX`) |
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bir denemenin kısa tekrarları arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir kısa tekrarın zaman aşımı |
-| `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Teslimat döngüsünün önünde bekleyebilecek en fazla bildirim sayısı. Döngü bir bildirimi tüm kanallara aynı anda gönderir ve yalnızca en yavaş kanalın denemeleri kadar bekler; bu sırada gelenler burada birikir, kuyruk doluysa düşer ve `kubeat_notifications_dropped_total` artar |
+| `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Teslimat döngüsünün önünde bekleyebilecek en fazla bildirim sayısı. Döngü bir bildirimi tüm kanallara aynı anda gönderir ve yalnızca en yavaş kanalın denemeleri kadar bekler; bu sırada gelenler burada birikir, kuyruk doluysa düşer ve `kubeat_notifications_dropped_total` artar. En az monitor sayısı kadar olmalıdır: tüm monitor'ların birlikte düştüğü bir kesintinin bildirimleri sığar |
 | `UPTIME_NOTIFY_RETRY_MAX` | `15m` | Kanalın almadığı kesinti (`down`, `up`) bildiriminin yeniden denenme aralığının üst sınırı: aralık 1 dakikadan başlar, her başarısız denemede ikiye katlanır; `down` olay kapanana kadar denenir (bkz. "Alarm"). `0` yeniden denemeyi kapatır; aksi halde en az `1m` ve bir denemenin süresi (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`), daha kısası reddedilir |
-| `UPTIME_NOTIFY_RETRY_FOR` | `1h` | Düzelme (`up`) bildiriminin ilk başarısız denemeden itibaren en çok ne kadar süre yeniden deneneceği; `0` düzelmeyi yeniden denemez |
+| `UPTIME_NOTIFY_RETRY_FOR` | `1h` | Düzelme (`up`) bildiriminin ilk başarısız denemeden itibaren en çok ne kadar süre yeniden deneneceği (almıyor sayılan bir kanal için bekletilen düzelmede süre ilk denemeyle başlar); `0` düzelmeyi yeniden denemez |
 | `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz. `UPTIME_OIDC_REDIRECT_URL` boşsa SSO dönüş adresi de bundan türetilir |
 | `UPTIME_LANGUAGE` | `en` | Bildirim metinlerinin ve ilk yönetici hesabının görünen adının dili: `en` ya da `tr` |
 | `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |

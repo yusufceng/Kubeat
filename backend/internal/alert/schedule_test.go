@@ -3,6 +3,8 @@ package alert
 import (
 	"context"
 	"errors"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -29,9 +31,10 @@ func (r *recorder) log() string {
 }
 
 // useClock makes the delivery loop read the fixture's clock, which the
-// checks advance by 30 seconds each.
+// checks advance by 30 seconds each, and the engine start at it.
 func (f *fixture) useClock() {
 	f.engine.now = func() time.Time { return f.clock }
+	f.engine.started = f.clock
 }
 
 func (f *fixture) addChannel(ch store.Channel) store.Channel {
@@ -437,6 +440,139 @@ func TestRestoreTellsWhatTheRestartMissed(t *testing.T) {
 func (f *fixture) restart() {
 	f.engine = New(f.db, f.sender, f.engine.opts)
 	f.useClock()
+}
+
+// liveClock sets the fixture's clock to the store's, which stamps a
+// channel's creation (to the millisecond), so that the channels made so
+// far are older than an outage the next check opens. A channel made with
+// addChannelLater after that check is newer than the outage.
+func (f *fixture) liveClock() {
+	time.Sleep(2 * time.Millisecond)
+	f.clock = time.Now().UTC().Add(-30 * time.Second) // the next check is now
+	f.useClock()
+}
+
+// addChannelLater adds a channel a moment after what happened so far, by
+// the store's clock.
+func (f *fixture) addChannelLater(ch store.Channel) store.Channel {
+	time.Sleep(2 * time.Millisecond)
+	return f.addChannel(ch)
+}
+
+// An outage still queued when the process went away was never attempted,
+// so the delivery log has nothing of it: at the next start it is told to
+// the channels without a delay that were there when it opened, and not
+// again after that. A channel created after it opened does not hear of
+// it.
+func TestARestartSendsTheOutageThatWasStillQueued(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.addChannel(store.Channel{Name: "mail", Type: store.ChannelEmail, Target: "ops@example.com"})
+	f.liveClock()
+	f.check(false) // the outage opens, and its notification is queued
+	f.addChannelLater(store.Channel{Name: "late", Type: store.ChannelWebhook, Target: "http://unused"})
+
+	// The process goes away with the notification in its queue, and is
+	// back a minute later.
+	f.clock = f.clock.Add(time.Minute)
+	f.restart()
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,mail:down" {
+		t.Fatalf("after the restart: %q, want ops:down,mail:down and nothing to the channel created since", got)
+	}
+	var logged []string
+	for _, d := range f.deliveries(f.incidents()[0].ID) {
+		logged = append(logged, d.ChannelName+":"+d.Event+":"+strconv.FormatBool(d.Delivered))
+	}
+	sort.Strings(logged)
+	if got := strings.Join(logged, ","); got != "mail:down:true,ops:down:true" {
+		t.Errorf("delivery log = %q, want both taken", got)
+	}
+	f.restart()
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,mail:down" {
+		t.Errorf("after a second restart: %q, want nothing told again", got)
+	}
+}
+
+// An outage waiting for its group when the process went away reached the
+// channels software reads, which do not wait, and none that people read:
+// at the next start these are told it, the outages of a namespace in one
+// message.
+func TestARestartDuringGroupWaitTellsThePeopleChannels(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.engine.opts.GroupWait = time.Minute
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	cart, orders := f.monitorIn("cart", "shop"), f.monitorIn("orders", "shop")
+	f.liveClock()
+	f.clock = f.clock.Add(30 * time.Second)
+	f.result(cart, false)
+	f.result(orders, false)
+	// What the loop does with them (Run's add): the webhook hears of each
+	// at once, and chat's group waits; the process goes away before it is
+	// due.
+	for i := 0; i < 2; i++ {
+		f.engine.deliverTo(context.Background(), <-f.engine.queue, func(ch store.Channel) bool { return machine(ch.Type) })
+	}
+	f.sender.settle()
+	if got := f.sender.log(); got != "ops:down,ops:down" {
+		t.Fatalf("before the restart: %q, want the webhook told of both", got)
+	}
+
+	f.clock = f.clock.Add(time.Minute)
+	f.restart()
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:down,chat:down[cart orders]" {
+		t.Errorf("after the restart: %q, want chat told of both in one message, the webhook not again", got)
+	}
+}
+
+// With the attempts off, an outage still queued at a restart is told at
+// the next start all the same: it was never attempted. Not taken then, it
+// is not sent again, then or at a later start.
+func TestARestartWithTheAttemptsOffTellsAQueuedOutageOnce(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook; RetryMax is zero
+	f.liveClock()
+	f.check(false)
+	f.clock = f.clock.Add(time.Minute)
+	f.restart()
+	f.sender.fail("ops", 3) // every try of the attempt
+	f.flush()
+	if n := len(f.deliveries(f.incidents()[0].ID)); n != 1 {
+		t.Fatalf("delivery log has %d entries after the restart, want the attempt", n)
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries with the attempts off, want none", n)
+	}
+	f.restart()
+	f.flush()
+	if got, n := f.sender.log(), len(f.deliveries(f.incidents()[0].ID)); got != "" || n != 1 {
+		t.Errorf("after a second restart: sent %q, %d entries; want nothing sent again", got, n)
+	}
+}
+
+// An outage open since before the delivery log was kept (opened before
+// 0.39, with no OpenedAt) has no attempt there whether or not it was
+// told: a restart does not tell it again. An outage the log covers, with
+// no attempt there, is told.
+func TestARestartDoesNotTellAnOutageOlderThanTheLog(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.addChannel(store.Channel{Name: "mail", Type: store.ChannelEmail, Target: "ops@example.com"})
+	older, queued := f.monitorIn("older", ""), f.monitorIn("queued", "")
+	f.liveClock()
+	opened := f.clock.Add(30 * time.Second) // after the channels were made
+	ctx := context.Background()
+	if _, err := f.db.OpenIncident(ctx, store.Incident{MonitorID: older.ID, StartedAt: opened, Cause: "refused"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.OpenIncident(ctx, store.Incident{MonitorID: queued.ID, StartedAt: opened, OpenedAt: opened, Cause: "refused"}); err != nil {
+		t.Fatal(err)
+	}
+	f.clock = opened.Add(time.Minute)
+	f.restart()
+	f.flush()
+	if got := f.sentTo("ops") + " " + f.sentTo("mail"); got != "down:queued down:queued" {
+		t.Errorf("after the restart: ops and mail were sent %q, want queued's outage alone", got)
+	}
 }
 
 // outage keeps the monitor failing for the given number of minutes, a

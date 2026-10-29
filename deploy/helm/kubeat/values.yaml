@@ -60,6 +60,12 @@ backend:
   startupProbe:
     periodSeconds: 5
     failureThreshold: 120
+  # How long Kubernetes waits for the backend to stop before it kills it.
+  # Stopping, the backend ends its checks, writes their last results and
+  # sends the notifications still waiting within UPTIME_SHUTDOWN_TIMEOUT
+  # (10s by default): keep this at least 5 seconds longer than that. The
+  # outages among what is not sent in time go at the next start.
+  terminationGracePeriodSeconds: 30
   # Any UPTIME_* setting the chart has no value for, as environment variables
   # (the README lists them all). Do not repeat variables the chart itself
   # sets, such as UPTIME_ADDR, UPTIME_DB_PATH or UPTIME_SECRET_KEY. This is
@@ -71,6 +77,8 @@ backend:
     # UPTIME_NOTIFY_GROUP_WAIT: 30s    # "0" turns grouping off
     # UPTIME_NOTIFY_RETRY_MAX: 15m     # an outage notification a channel did not take is sent again at 1, 2, 4... minutes, up to this (at least 1m); "0" turns it off
     # UPTIME_NOTIFY_RETRY_FOR: 1h      # the end of an outage is sent again for this long at most; "0" does not send it again
+    # UPTIME_NOTIFY_QUEUE_SIZE: "100"  # notifications waiting for delivery; at least the number of monitors, or an outage of them all overflows it
+    # UPTIME_SHUTDOWN_TIMEOUT: 10s     # stopping waits this long for open requests and for the notifications still waiting; keep terminationGracePeriodSeconds 5s longer
     # UPTIME_RECOVERY_THRESHOLD: "1"
     # UPTIME_DEFAULT_FAILURE_THRESHOLD: "3"
     # UPTIME_CERT_WARNING: 336h

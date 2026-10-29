@@ -155,6 +155,10 @@ func main() {
 		PublicURL:         cfg.PublicURL,
 		Metrics:           meter,
 		Logger:            logger,
+		// Shutting down, what is still waiting is sent within the time
+		// the HTTP server has to drain too: the pod's grace period
+		// (backend.terminationGracePeriodSeconds) must outlast both.
+		DrainTimeout: cfg.ShutdownTimeout,
 	})
 	// Notifications raised by the scheduler's final flush must still go out,
 	// so delivery stops only after the scheduler has.

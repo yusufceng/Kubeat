@@ -160,11 +160,24 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 - Bildirim kanalları birbirinden bağımsız teslim edilir; başarısız kesinti
   bildirimi olay kapanana kadar artan aralıkla yeniden denenir (üst sınır
   `UPTIME_NOTIFY_RETRY_MAX`), düzelme (`up`) bildirimi için en çok
-  `UPTIME_NOTIFY_RETRY_FOR`. Deneme listesi bellektedir: yeniden
-  başlatmada açık kesintininki bildirim kaydından kurulur, bekleyen düzelme
-  bildirimi düşer; kanal almadan yeni bir kesinti açılırsa da düşer. Teslim
-  edilemeyen bildirimlerin ayrı bir görünümü (dead-letter) yoktur; bildirim
-  kaydı, `kubeat_notification_attempts_total{result="failed"}` (chart'ın
+  `UPTIME_NOTIFY_RETRY_FOR`. Almayan bir makine kanalı (webhook,
+  PagerDuty) yeni bildirimleri kendi yeniden deneme zamanına bekletir;
+  sürekli reddettiği bir bildirim (409, 422) diğerlerini bekletmez ama
+  kanalı her geçişten sonra yeniden duraklatır, yeni bildirimler en çok
+  `UPTIME_NOTIFY_RETRY_MAX` (bir bildirimin ilk reddedildiği geçişte bir
+  geçiş daha) gecikir (4xx'i kalıcı hata sayan S26'ya kadar).
+  İnsan kanalları ise gruplama kapalıyken (`UPTIME_NOTIFY_GROUP_WAIT=0`)
+  her bildirimde yine denenir. Deneme listesi bellektedir: yeniden
+  başlatmada açık kesintininki, hiç denenmemiş olanlar (kuyrukta ya da grup
+  beklemesinde kalanlar) dahil, bildirim kaydından kurulur (kaydı
+  `UPTIME_DELIVERY_RETENTION` ile silinmiş açık kesinti bir kez daha
+  gider); bekleyen düzelme bildirimi düşer, kanal almadan yeni bir kesinti
+  açılırsa da düşer.
+  Kapanışta insan kanallarının grupları kuyruktan önce gider ve kapanışın
+  tümü `UPTIME_SHUTDOWN_TIMEOUT` ile sınırlıdır; yetişmeyen düzelme
+  bildirimi kaybolur. Teslim edilemeyen bildirimlerin ayrı bir görünümü
+  (dead-letter) yoktur; bildirim kaydı,
+  `kubeat_notification_attempts_total{result="failed"}` (chart'ın
   `KubeatNotificationsFailing` alarmı bunu sayar) ve
   `kubeat_notifications_total{result="failed"}` gösterir ([backlog](backlog.md)
   "Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı

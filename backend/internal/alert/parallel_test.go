@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -269,5 +270,299 @@ func TestOwedDeliveriesDoNotWaitForASlowChannel(t *testing.T) {
 	f.sender.settle()
 	if got := f.sender.log(); got != "ops:down,pager:down,mail:down" {
 		t.Errorf("after the release: %q, want ops:down,pager:down,mail:down", got)
+	}
+}
+
+// dead is a Sender to which one channel does not answer: a send to it
+// lasts until its timeout. The other channels' sends go to the recorder.
+type dead struct {
+	*recorder
+	channel  string
+	attempts atomic.Int32
+}
+
+func (d *dead) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	if ch.Name != d.channel {
+		return d.recorder.Send(ctx, ch, n)
+	}
+	d.attempts.Add(1)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// A hundred monitors of a namespace go down at once while the webhook
+// does not answer: it is attempted once and then paused, so that the loop
+// keeps up with the queue instead of waiting out a send timeout for every
+// notification (ten seconds here; with the defaults, 25 seconds each).
+// Nothing is dropped, the channels people read get the hundred in one
+// message within GroupWait, and the hundred ends that follow find room in
+// the queue too.
+func TestABurstWithADeadWebhookKeepsTheQueueMoving(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.engine.opts.Metrics = metrics.New("test")
+	f.engine.opts.QueueSize = 100 // the default
+	f.engine.queue = make(chan Notification, f.engine.opts.QueueSize)
+	f.engine.opts.GroupWait = 2 * time.Second
+	f.engine.opts.RetryMax, f.engine.opts.RetryFor = 15*time.Minute, time.Hour
+	f.engine.opts.SendTimeout, f.engine.opts.Attempts = 100*time.Millisecond, 1
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	f.addChannel(store.Channel{Name: "mail", Type: store.ChannelEmail, Target: "ops@example.com"})
+	webhook := &dead{recorder: f.sender, channel: "ops"}
+	f.engine.sender = webhook
+	gathered := func(name string) float64 {
+		t.Helper()
+		values, err := f.engine.opts.Metrics.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return values[name]
+	}
+
+	ctx := context.Background()
+	const burst = 100
+	opened := time.Now().UTC()
+	var outages []Notification
+	for i := 1; i <= burst; i++ {
+		m := f.monitorIn("api-"+strconv.Itoa(i), "shop")
+		incident, err := f.db.OpenIncident(ctx, store.Incident{MonitorID: m.ID, StartedAt: opened, OpenedAt: opened, Cause: "refused"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		outages = append(outages, Notification{Event: EventDown, Monitor: m, Incident: incident, At: opened})
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.engine.Run(runCtx)
+	}()
+	start := time.Now()
+	for _, n := range outages {
+		f.engine.enqueue(n)
+	}
+	if !await(2*time.Second, func() bool { return len(f.engine.queue) == 0 }) {
+		t.Fatalf("the queue still holds %d notifications 2 seconds after the burst", len(f.engine.queue))
+	}
+	told := func(event Event) bool {
+		got := f.sender.log()
+		return strings.Contains(got, "chat:"+string(event)+"[") && strings.Contains(got, "mail:"+string(event)+"[")
+	}
+	if !await(time.Until(start.Add(f.engine.opts.GroupWait+time.Second)), func() bool { return told(EventDown) }) {
+		t.Fatalf("%s after the burst: %q, want chat and mail told within GroupWait", time.Since(start).Round(time.Millisecond), f.sender.log())
+	}
+
+	// The hundred outages end at once.
+	resolved := time.Now().UTC()
+	for _, n := range outages {
+		if err := f.db.ResolveIncident(ctx, n.Incident.ID, resolved); err != nil {
+			t.Fatal(err)
+		}
+		n.Event, n.Incident.ResolvedAt, n.At = EventUp, resolved, resolved
+		f.engine.enqueue(n)
+	}
+	if !await(2*time.Second, func() bool { return len(f.engine.queue) == 0 }) {
+		t.Fatalf("the queue still holds %d ends 2 seconds after they came", len(f.engine.queue))
+	}
+	cancel()
+	<-done
+	f.sender.settle()
+
+	got := map[string][]string{}
+	f.sender.mu.Lock()
+	for i, n := range f.sender.sent {
+		got[f.sender.channels[i]] = append(got[f.sender.channels[i]], fmt.Sprintf("%s:%d", n.Event, max(len(n.Group), 1)))
+	}
+	f.sender.mu.Unlock()
+	for _, ch := range []string{"chat", "mail"} {
+		if g := strings.Join(got[ch], ","); g != "down:100,up:100" {
+			t.Errorf("%s got %q, want down:100,up:100: the outages in one message, their ends in another", ch, g)
+		}
+	}
+	if n := webhook.attempts.Load(); n != 1 {
+		t.Errorf("the webhook was attempted %d times, want once", n)
+	}
+	// The outages ended before the webhook took them; their ends wait for it.
+	var waiting int
+	for _, r := range f.engine.owed.retries {
+		if r.channel.Name == "ops" && r.note.Event == EventUp && !r.once {
+			waiting++
+		}
+	}
+	if waiting != burst || len(f.engine.owed.retries) != burst {
+		t.Errorf("%d retries, %d of them ends for the webhook; want the %d ends alone", len(f.engine.owed.retries), waiting, burst)
+	}
+	for key, want := range map[string]float64{
+		"kubeat_notifications_dropped_total":                                          0,
+		"kubeat_notification_attempts_total{channel_type=webhook}{result=failed}":     1,
+		"kubeat_notifications_total{channel_type=webhook}{event=down}{result=failed}": burst,
+		"kubeat_notifications_total{channel_type=slack}{event=down}{result=sent}":     1,
+		"kubeat_notifications_total{channel_type=email}{event=up}{result=sent}":       1,
+	} {
+		if got := gathered(key); got != want {
+			t.Errorf("%s = %v, want %v", key, got, want)
+		}
+	}
+}
+
+// gated holds the sends to a channel about a monitor, keyed
+// "channel/monitor", until that gate is released; the other sends go to
+// the recorder at once.
+type gated struct {
+	*recorder
+	gates   map[string]chan struct{}
+	once    map[string]*sync.Once
+	holding atomic.Int32 // sends waiting at a gate right now
+}
+
+func (f *fixture) gate(keys ...string) *gated {
+	g := &gated{recorder: f.sender, gates: make(map[string]chan struct{}), once: make(map[string]*sync.Once)}
+	for _, key := range keys {
+		g.gates[key], g.once[key] = make(chan struct{}), new(sync.Once)
+	}
+	f.engine.sender = g
+	f.t.Cleanup(func() {
+		for _, key := range keys {
+			g.release(key)
+		}
+	})
+	return g
+}
+
+func (g *gated) release(key string) { g.once[key].Do(func() { close(g.gates[key]) }) }
+
+func (g *gated) Send(ctx context.Context, ch store.Channel, n Notification) error {
+	if gate, ok := g.gates[ch.Name+"/"+n.Monitor.Name]; ok {
+		g.holding.Add(1)
+		defer g.holding.Add(-1)
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return g.recorder.Send(ctx, ch, n)
+}
+
+// Shutting down, the groups people wait for go before the queue is
+// drained: a webhook that does not answer about what is still queued does
+// not keep chat from the outage it is waiting to hear of.
+func TestShutdownTellsPeopleBeforeTheQueue(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	// Chat's groups are not due while the test runs.
+	f.engine.opts.GroupWait = time.Minute
+	f.engine.opts.SendTimeout, f.engine.opts.Attempts = 25*time.Second, 1
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	sender := f.gate("ops/a", "ops/b")
+	outage := func(name string) Notification {
+		return Notification{Event: EventDown, Monitor: store.Monitor{Name: name, Namespace: "shop"}, Incident: store.Incident{StartedAt: f.clock, Cause: "refused"}}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.engine.Run(ctx)
+	}()
+	// The webhook is slow to take a's outage and chat's group waits; b's
+	// outage comes meanwhile, and so does the shutdown.
+	f.engine.enqueue(outage("a"))
+	if !await(time.Second, func() bool { return sender.holding.Load() == 1 }) {
+		t.Fatal("the send of a's outage to the webhook is not being held")
+	}
+	f.engine.enqueue(outage("b"))
+	cancel()
+	sender.release("ops/a")
+	if !await(2*time.Second, func() bool { return strings.Contains(f.sender.log(), "chat:down") }) {
+		t.Fatalf("while the webhook is slow to take b's outage: %q, want chat told of a's", f.sender.log())
+	}
+	if !await(time.Second, func() bool { return sender.holding.Load() == 1 }) {
+		t.Fatal("the send of b's outage to the webhook is not being held")
+	}
+	sender.release("ops/b")
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the loop did not return once the webhook took b's outage")
+	}
+	f.sender.settle()
+	got := map[string][]string{}
+	f.sender.mu.Lock()
+	for i, n := range f.sender.sent {
+		got[f.sender.channels[i]] = append(got[f.sender.channels[i]], n.Monitor.Name)
+	}
+	f.sender.mu.Unlock()
+	for ch, want := range map[string]string{"ops": "a b", "chat": "a b"} {
+		if g := strings.Join(got[ch], " "); g != want {
+			t.Errorf("%s got %q, want %q", ch, g, want)
+		}
+	}
+}
+
+// Shutting down takes DrainTimeout at most: a send still under way then
+// is cut short, and what is left is not sent. The outages among it are
+// sent at the next start: again to the webhook, which did not take a's,
+// and to chat, which heard of neither.
+func TestShutdownStopsAtTheDrainTimeout(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.engine.opts.GroupWait = time.Minute
+	f.engine.opts.DrainTimeout = 200 * time.Millisecond
+	f.engine.opts.RetryMax, f.engine.opts.RetryFor = 15*time.Minute, time.Hour
+	f.engine.opts.SendTimeout, f.engine.opts.Attempts = 25*time.Second, 1
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	sender := f.gate("ops/a")
+
+	time.Sleep(2 * time.Millisecond) // the outages open after the channels were made
+	ctx := context.Background()
+	var outages []Notification
+	for _, name := range []string{"a", "b"} {
+		m := f.monitorIn(name, "shop")
+		opened := time.Now().UTC()
+		incident, err := f.db.OpenIncident(ctx, store.Incident{MonitorID: m.ID, StartedAt: opened, OpenedAt: opened, Cause: "refused"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		outages = append(outages, Notification{Event: EventDown, Monitor: m, Incident: incident, At: opened})
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.engine.Run(runCtx)
+	}()
+	f.engine.enqueue(outages[0])
+	if !await(time.Second, func() bool { return sender.holding.Load() == 1 }) {
+		t.Fatal("the send of a's outage to the webhook is not being held")
+	}
+	f.engine.enqueue(outages[1])
+	cancel()
+	stopped := time.Now()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the loop did not stop at its drain timeout")
+	}
+	if took := time.Since(stopped); took > time.Second {
+		t.Errorf("shutting down took %s, want about the drain timeout, %s", took.Round(time.Millisecond), f.engine.opts.DrainTimeout)
+	}
+	f.sender.settle()
+	if got := f.sender.log(); got != "" {
+		t.Errorf("while shutting down: %q, want nothing taken", got)
+	}
+	if d := f.deliveries(outages[0].Incident.ID); len(d) != 1 || d[0].ChannelName != "ops" || d[0].Delivered {
+		t.Errorf("a's delivery log = %+v, want the webhook's attempt, cut short", d)
+	}
+	if n := len(f.deliveries(outages[1].Incident.ID)); n != 0 {
+		t.Errorf("b's delivery log has %d entries, want none", n)
+	}
+
+	// The next start.
+	sender.release("ops/a")
+	f.engine = New(f.db, sender, f.engine.opts)
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,ops:down,chat:down[a b]" {
+		t.Errorf("at the next start: %q, want both outages to the webhook and to chat", got)
 	}
 }
