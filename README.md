@@ -52,7 +52,7 @@ beri imajlar ve chart imzalıdır; sürümün GitHub Release'i digest'leri ve
 SBOM'ları taşır (bkz. "Tedarik zinciri"). 0.44.0 ve öncesi imzasızdır. Herhangi bir cluster'a kurulum:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0 \
   --set podSecurityContext.fsGroup=1001 \
   -n kubeat --create-namespace
 ```
@@ -304,10 +304,12 @@ yerlerde değişir:
   alarmlarını taşıyın. Veri PVC'sinin boyut kuralı "Geçmiş verisi"nde.
 - **Bildirim yeniden başlatmada ve ölü makine kanalında kaybolmaz.**
   Yeniden başlatmada kuyrukta ya da grup beklemesinde kalmış açık
-  kesintiler, kesintiden önce var olan kanallara gönderilir. 0.44'ün ilk
-  açılışında bildirim kaydında hiç denemesi olmayan açık kesintiler de (0.43'te
-  kuyrukta kaybolmuş ya da kanal kapalı veya kapsam dışıyken açılmış olanlar)
-  bir kez gider; yükseltmeden önce açık kesintilere bakın. Bildirim almayan
+  kesintiler, kesintiden önce var olan kanallara gönderilir. Bildirim
+  kaydında hiç denemesi olmayan açık kesintiler de her yeniden başlatmada,
+  kesintiden önce var olan ve onu kapsayan kanallara gider; 0.44'ün ilk
+  açılışında bu, 0.43'te kuyrukta kaybolmuş ya da kanal kapalı veya kapsam
+  dışıyken açılmış kesintileri de kapsar. Yükseltmeden önce açık kesintilere
+  bakın. Bildirim almayan
   bir webhook ya da PagerDuty kanalına yeni bildirim denenmez, kanalın
   yeniden deneme zamanında gider; bir bildirimi sürekli reddeden (ör. 409)
   kanalda diğer bildirimler en çok `UPTIME_NOTIFY_RETRY_MAX` (bir bildirimin
@@ -326,6 +328,65 @@ yeniden denemeyi kapatın. Birden çok kurulumu aynı PagerDuty servisine
 bağlamayın: olay numaraları her kurulumda 1'den başlar, iki kurulumun aynı
 numaralı olayları tek alarmda birleşir ve birinin düzelmesi ötekini de
 kapatır. Her kuruluma ayrı bir servis verin.
+
+### 0.45'e yükseltme
+
+0.45 ilk imzalı sürümdür; bildirim teslimatında hata sınıflarını ayırır ve
+Kubeat'in körleşmesini dış heartbeat olmadan da duyurur. Şema değişmez (26);
+0.44.0'a `helm rollback` ile dönülebilir. Varsayılan davranış şu yerlerde
+değişir:
+
+- **İmzalı yayım, `latest` yok.** İmajlar ve chart cosign ile imzalı
+  yayımlanır, imajlar SBOM ve provenance taşır ve her sürümün GitHub
+  Release'i digest'leri ve SBOM'ları yazar (bkz. "Tedarik zinciri").
+  `latest` etiketi artık itilmez ve 0.44.0'da kalır: onu kullanan bir sürüm
+  etiketine ya da digest'e geçmeli.
+- **Reddeden makine kanalı duraklamaz.** Webhook ya da PagerDuty kanalı bir
+  bildirimi 429, 407 ve 408 dışında bir 4xx ile reddederse kanal artık
+  duraklamaz, aynı kanaldaki öteki bildirimler beklemeden gider. Reddedilen
+  bildirim kısa tekrar almaz ve 1, 2, 4… dk yerine doğrudan
+  `UPTIME_NOTIFY_RETRY_MAX` (varsayılan 15 dk) sonra yeniden denenir; geçici
+  bir 4xx (alıcı yeniden yayımlanırken 404, token yenilenirken 401) sayfayı
+  bu kadar geciktirebilir. Her şeyi reddeden bir makine kanalı bekleyen her
+  bildirim için bu aralıkla bir istek alır. 429'da ve `Retry-After`'lı 503'te
+  kısa tekrar yapılmaz, `Retry-After`'a uyulur.
+- **`KubeatNotificationsFailing` kanal başına.** Alarm `channel` ve
+  `channel_type` etiketleriyle ve `for: 5m` ile yanar; kanalın son denemesine
+  bakar ve kanal bir bildirimi alana ya da başarılı bir testten geçene kadar
+  açık kalır, 0.44'teki gibi 15 dakikada kendiliğinden sönmez. Kanal hâlâ
+  teslim edilmemiş bir açık kesinti taşıyorsa başarılı test alarmı söndürmez;
+  alarm kesinti teslim edilene ya da kapanana kadar açık kalır. Yükseltmeden 5
+  dakika sonra son denemesi başarısız kalmış her etkin kanal için yanar
+  (eski bir kanal testi dahil): yükseltmeden önce ya da sonra Bildirimler
+  sayfasında **Son gönderim**'i hatalı kanalları test edin ya da kapatın.
+  Kuyrukta düşen bildirim aynı adla, kanalsız ve 5 dakika sonra yanar;
+  `KubeatMetricsIncomplete` kanallar okunamadığında da yanar. Bu alarma bağlı
+  Alertmanager yönlendirmeleri ve susturmaları ile README'deki `KubeatDown`
+  susturma kuralı güncellenmelidir; `/metrics` artık kanal adlarını da verir.
+- **Körleşme heartbeat olmadan da duyulur.** Yeni critical alarm
+  `KubeatUnhealthy`, `kubeat_self_healthy` 5 dakika 0 kalınca yanar:
+  scheduler ilerlemiyor, kontrol sonuçlarının hiçbiri yazılamıyor ya da bir
+  yazım takıldı. Nedeni, karar değişince backend'in bir kez yazdığı
+  `self-health failing` log satırındadır. Scheduler durunca
+  `KubeatSchedulerStalled` ile birlikte yanar; tek sayfa isteyen "Aracın
+  kendi sağlığı"ndaki isteğe bağlı susturma kuralını ekler.
+- **Bildirim kuyruğu 1000.** `UPTIME_NOTIFY_QUEUE_SIZE` varsayılanı 100'den
+  1000'e çıktı; etkin monitor sayısı kuyruğu aşınca backend bir kez WARN
+  loglar. İsteğe bağlı `metrics.prometheusRule.clusterLabel` boşken kurallar
+  0.44'teki gibi kalır.
+- **Kurulum notlarında fsGroup uyarısı.** OpenShift dışında
+  `podSecurityContext`'i boş kurulumların `helm upgrade` notlarında yeni bir
+  fsGroup uyarısı çıkar. Render edilen manifest aynıdır; backend bugün
+  volume'a yazabiliyorsa uyarı yok sayılabilir. Yeni kurulumlar README
+  komutundaki `--set podSecurityContext.fsGroup=1001` ile yapılır; OpenShift'te
+  bu satır atlanır, UID ve fsGroup'u SCC atar.
+
+Geri dönüş: şema 26, `helm rollback` ile 0.44.0. Dönüşte
+`KubeatNotificationsFailing` eski ifadesine ve etiketlerine döner, yani
+yönlendirmeler yine güncellenir; `KubeatUnhealthy` ve yeni metrikler kalkar,
+`metrics.prometheusRule.clusterLabel` yok sayılır, açıkça verilmemişse kuyruk
+varsayılanı 100'e döner. Yayımlanmış imzalar kalır. 0.42 ya da 0.43'ten
+doğrudan geçiyorsanız "0.44'e yükseltme"yi ve öncesini de okuyun.
 
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
@@ -379,7 +440,7 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
