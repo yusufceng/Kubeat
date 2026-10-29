@@ -121,9 +121,12 @@ minikube-password:
 	@kubectl --context $(KUBE_CONTEXT) -n $(NAMESPACE) get secret kubeat-admin -o jsonpath='{.data.password}' | base64 -d; echo
 
 # Sürümü etiketler ve iter; GitHub Actions imajları ghcr.io'ya, chart'ı
-# oci://ghcr.io/yusufceng/charts'a yayımlar (.github/workflows/release.yml).
+# oci://ghcr.io/yusufceng/charts'a imzalı ve SBOM'lu yayımlar ve etiketin
+# GitHub Release'ini açar (.github/workflows/release.yml). Etiket main'den ya
+# da yayımlanmış bir minor'ın yama hattından (release/vX.Y) atılır; bu bir
+# yetenektir, destek sözü değildir (SECURITY.md, CONTRIBUTING.md "Sürümler").
 release:
-	@test "$$(git branch --show-current)" = main || (echo "release main'den yapılır"; exit 1)
+	@case "$$(git branch --show-current)" in main|release/v*) ;; *) echo "release main'den ya da release/v* dalından yapılır"; exit 1;; esac
 	@test -z "$$(git status --porcelain)" || (echo "çalışma ağacı temiz değil"; exit 1)
 	git tag -a v$(VERSION) -m "Kubeat $(VERSION)"
 	git -c http.sslVerify=true push origin v$(VERSION)
