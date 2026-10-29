@@ -542,6 +542,14 @@ denenmemiş kesinti bildirimini yeniden başlatmada bildirim kaydından kurar;
 kalıcı kuyruk yine yok. `KubeatNotificationsFailing`'in kanal başına
 gauge'ı ve `for: 5m` S26'da (sonraki sprint havuzu).
 
+Güncelleme (2026-10-29, S26, #49): `KubeatNotificationsFailing` kanal
+başına (`channel`, `channel_type`) ve `for: 5m` ile yanar; başarısız deneme
+sayısına değil kanalın son denemesine (`kubeat_channel_last_delivery_ok`)
+ve almadığı kesintilere (`kubeat_channel_undelivered_outages`) bakar.
+Müşteri B'nin hıçkırık bulgusu kapandı. Dead-letter görünümü, kalıcı
+kuyruk ve kapanmış olayın teslim edilmemiş `up`'ı bu maddede kalır,
+tetikleyici değişmedi.
+
 ## Patlamada ölü makine kanalının teslimat kuyruğuna maliyeti
 
 2026-10-28'de ertelendi (S18'in kapsam dışı parçası, #26; PO kararı "kanal
@@ -830,6 +838,19 @@ S26'daki "teslim edilmemiş kesinti bildirimi kanalın alarmını açık tutar"
 kararının (PO'nun ek kabul ölçütü) mekanizması olabilir; developer seçer.
 2. köşe S40'a, 4. köşe S27'ye gider (sprint 4 kuyruğu, 6. ve 5. sıra)
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+
+1. köşe kapandı (S26, #49): reddedilen (4xx) bildirim kanalın geçişini
+durdurmaz; insan kanalının sürekli reddettiği bir yeniden deneme o kanalın
+öteki yeniden denemelerini bekletmez, aynı geçişte arkasındakiler gider
+(`go test -race`, `TestARefusedChatMessageDoesNotHoldBackTheOthers`). Bir
+geçişte ulaşılamayan kanal ise öteki yeniden denemeleri yine bekletir:
+kapalı kanal geçiş başına bir kez denenir. 3. köşe kısmen: bekleyen
+listenin kesinti bildirimleri kanal başına
+`kubeat_channel_undelivered_outages` ile sayılır ve PO'nun ek kabul
+ölçütünün mekanizmasıdır (kanalın almadığı kesinti beklerken
+`KubeatNotificationsFailing` açık kalır). Bekletilen hatırlatma, sertifika
+ve yavaşlık bildirimleri ile kuyruk doluluğu sayılmaz; o kısım bu maddede
+kalır, tetikleyicisi değişmedi.
 
 ## Duyurulan bakımı durum sayfası ve rapor uptime'ından ayırmak
 

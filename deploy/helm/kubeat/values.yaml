@@ -76,7 +76,7 @@ backend:
     # UPTIME_RETENTION: 168h
     # UPTIME_REMINDER_INTERVAL: 15m    # announce an ongoing outage again
     # UPTIME_NOTIFY_GROUP_WAIT: 30s    # "0" turns grouping off
-    # UPTIME_NOTIFY_RETRY_MAX: 15m     # an outage notification a channel did not take is sent again at 1, 2, 4... minutes, up to this (at least 1m); "0" turns it off
+    # UPTIME_NOTIFY_RETRY_MAX: 15m     # an outage notification a channel did not take is sent again at 1, 2, 4... minutes up to this (at least 1m), at this after a refusal (4xx), at Retry-After after a 429; "0" turns it off
     # UPTIME_NOTIFY_RETRY_FOR: 1h      # the end of an outage is sent again for this long at most; "0" does not send it again
     # UPTIME_NOTIFY_QUEUE_SIZE: "1000" # notifications waiting for delivery; at least the number of monitors, or an outage of them all overflows it (the backend warns once when more are enabled); 1000 take about 1 MiB of memory, 2 MiB full
     # UPTIME_SHUTDOWN_TIMEOUT: 10s     # stopping waits this long for open requests and for the notifications still waiting; keep terminationGracePeriodSeconds 5s longer
