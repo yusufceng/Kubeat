@@ -47,8 +47,9 @@ uyarıyla atlar, CI'da ise atlamaz.
 Her sürüm etiketi (`vX.Y.Z`) imajları `ghcr.io/yusufceng/kubeat-backend`
 ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
 `oci://ghcr.io/yusufceng/charts/kubeat` olarak yayımlar
-([.github/workflows/release.yml](.github/workflows/release.yml)). Herhangi bir
-cluster'a kurulum:
+([.github/workflows/release.yml](.github/workflows/release.yml)). İmajlar ve
+chart imzalıdır; sürümün GitHub Release'i digest'leri ve SBOM'ları taşır (bkz.
+"Tedarik zinciri"). Herhangi bir cluster'a kurulum:
 
 ```
 helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0 \
@@ -66,7 +67,7 @@ yükleme pod'u da aynı fsGroup'u alır ("Yedekleme ve geri yükleme").
 
 İmajları kendi registry'nize aynalıyorsanız `backend.image.repository`,
 `frontend.image.repository` ve gerekirse `imagePullSecrets` değerlerini
-verin. Chart kaynaktan da kurulabilir: [deploy/helm/kubeat](deploy/helm/kubeat).
+verin; imzalarıyla aynalamak ve digest'le sabitlemek için "Tedarik zinciri". Chart kaynaktan da kurulabilir: [deploy/helm/kubeat](deploy/helm/kubeat).
 Minikube için (imajlar yerelde derlenir, registry gerekmez):
 
 ```
@@ -1291,6 +1292,12 @@ CA); ikisi birlikte verilirse kurulum notları uyarır.
 
 ### Tedarik zinciri
 
+Her sürüm etiketi iki imajı ve chart'ı imzalı yayımlar; imajlar SBOM ve
+provenance taşır. Açık bildirmek, hangi sürümün düzeltme aldığı ve kritik ya
+da yüksek açıklar için hedef süre: [SECURITY.md](SECURITY.md).
+
+#### Derleme ve bağımlılıklar
+
 - Taban imajlar (`golang`, `ubi9/ubi-minimal`, `node`,
   `ubi9/nodejs-24-minimal`) `latest` gibi kayan etiketlerle değil, tam sürüm
   etiketleriyle sabitlenir; bir sürümün neyle derlendiği böylece bellidir.
@@ -1303,9 +1310,154 @@ CA); ikisi birlikte verilirse kurulum notları uyarır.
   çalışma imajınınkiyle (`nodejs-24-minimal`) aynı olmalıdır.
 - CI'daki `govulncheck` işi bilinen açıkları kodun gerçekten çağırdığı
   yerlerde arar (bağımlılıklar ve standart kütüphane); bulursa CI kırmızı
-  olur.
-- İmajlar yalnızca sürüm etiketinde derlenir; taban imajdaki bir düzeltme
-  kullanıcılara bir sonraki sürümle ulaşır.
+  olur. Aracın sürümü sabittir.
+- Haftalık güvenlik taraması
+  ([security.yml](.github/workflows/security.yml)) aynı `govulncheck`'i ve
+  frontend'in çalışma zamanı bağımlılıkları için
+  `npm audit --omit=dev --audit-level=high`'ı koşar. İki sürüm arasında
+  yayımlanan bir açık böylece yeni bir PR'ı beklemeden görünür; tarama PR'ları
+  kırmaz.
+- İmajlar yalnızca sürüm etiketinde derlenir ve yayımlanmış bir sürümün imajı
+  yeniden itilmez. Taban imajdaki kritik ya da yüksek bir açığın düzeltmesi
+  yeni bir yama sürümüyle gelir (SECURITY.md).
+
+#### İmza, SBOM ve provenance
+
+- Yayım iş akışı ([release.yml](.github/workflows/release.yml)) iki imajın
+  ve chart'ın digest'ini cosign ile keyless imzalar: anahtar yoktur, iş akışı
+  GitHub'ın OIDC kimliğiyle Sigstore'dan (Fulcio) kısa ömürlü bir sertifika
+  alır ve imza Sigstore'un şeffaflık kaydına (Rekor) yazılır. Sertifikadaki
+  kimlik iş akışının kendisidir:
+  `https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v<sürüm>`.
+- İmza imajın ve chart'ın yanında Sigstore bundle'ı olarak durur (OCI 1.1
+  referrer; GHCR referrers API'sini sunmadığı için `sha256-<digest>`
+  etiketinde). Bundle sertifikayı, imzayı ve şeffaflık kaydının kanıtını
+  taşır; Sigstore'un trusted root'u elinizdeyse doğrulama Sigstore'a
+  bağlanmadan yapılır ("Hava boşluklu ortamda doğrulamak").
+- İmajların index'i BuildKit'in SPDX SBOM'unu ve SLSA provenance'ını
+  (`mode=max`: derlemenin parametreleri ve kaynakları) attestation olarak
+  taşır. İmza index'in digest'ine atıldığı için bunlar da imzanın
+  kapsamındadır. SBOM'u okumak:
+  `docker buildx imagetools inspect ghcr.io/yusufceng/kubeat-backend:<sürüm> --format '{{ json (index .SBOM "linux/amd64").SPDX }}'`.
+- Her sürümün GitHub Release'i iki imajın ve chart'ın digest'ini, doğrulama
+  komutunu ve backend ile frontend için platform başına SPDX SBOM dosyalarını
+  taşır.
+- 0.45'ten beri `latest` etiketi itilmez; 0.44.0'da kalır. Sürüm etiketini ya
+  da digest'i kullanın. Chart imaj etiketini zaten `appVersion`'dan alır.
+
+#### İmzayı doğrulamak
+
+cosign v3 ile; komutlar yayım iş akışının kullandığı v3.1.4'le yazıldı.
+`<sürüm>` sürüm numarasıdır (`X.Y.Z`); `<backend-digest>` gibi yer tutucular
+sürümün GitHub Release'indeki `sha256:…` değerleridir:
+
+```sh
+cosign verify \
+  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v<sürüm> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/yusufceng/kubeat-backend@<backend-digest> \
+  ghcr.io/yusufceng/kubeat-frontend@<frontend-digest> \
+  ghcr.io/yusufceng/charts/kubeat@<chart-digest>
+```
+
+- Etiketle de doğrulanır (`ghcr.io/yusufceng/kubeat-backend:<sürüm>`);
+  digest'le doğrulamak, doğruladığınızla kurduğunuzun aynı olmasını sağlar.
+- Chart'ın cosign referansında `oci://` yoktur. `helm pull` ve `helm install`
+  OCI'dan çektikleri chart'ın digest'ini `Digest:` satırında yazar; Release'teki
+  chart digest'iyle aynı olmalıdır.
+- Hangi sürüm olursa olsun yayım iş akışının imzasını kabul etmek için
+  `--certificate-identity` yerine
+  `--certificate-identity-regexp '^https://github\.com/yusufceng/Kubeat/\.github/workflows/release\.yml@refs/tags/v'`.
+
+#### İmzalarla aynalamak
+
+İmza ve attestation'lar imajla birlikte taşınmazsa iç registry'de doğrulama
+yapılamaz. Referrer'ları da kopyalayan bir araç gerekir, ör.
+[ORAS](https://oras.land):
+
+```sh
+R=registry.sirket.local/kubeat
+oras cp -r ghcr.io/yusufceng/kubeat-backend:<sürüm>  $R/kubeat-backend:<sürüm>
+oras cp -r ghcr.io/yusufceng/kubeat-frontend:<sürüm> $R/kubeat-frontend:<sürüm>
+oras cp -r ghcr.io/yusufceng/charts/kubeat:<sürüm>   registry.sirket.local/charts/kubeat:<sürüm>
+```
+
+- `oras cp` index'i iki mimarisi ve attestation'larıyla, `-r` de imza
+  bundle'ını kopyalar; digest değişmez. Sonra "İmzayı doğrulamak"taki komut
+  aynalanan referanslarla çalıştırılır.
+- `cosign copy` bu iş için kullanılmaz: cosign v3'te kullanımdan kalktı ve
+  yalnızca eski biçimdeki imzaları (`sha256-<digest>.sig` etiketi) taşır.
+- `skopeo copy --all` imajı attestation'larıyla taşır, imzayı taşımaz:
+  containers/image'a dayanan araçlar (skopeo, podman, CRI-O) sigstore
+  eklerini (`use-sigstore-attachments`) yalnızca eski biçimin `.sig`
+  etiketinde arar. Aynı nedenle CRI-O'nun imza politikası bu imzaları görmez;
+  doğrulamayı aynalama adımında `cosign verify` ile yapın.
+- `helm pull` ile `helm push` chart'ı taşır, imzasını taşımaz.
+  [docs/pilot.md](docs/pilot.md) "İmajları aynalamak"taki komutlar imzasız
+  aynalamadır.
+- İki ağ arasında registry bağlantısı yoksa imaj ve chart diskle taşınır.
+  Bağlı tarafta
+  `cosign save --dir kubeat-backend ghcr.io/yusufceng/kubeat-backend@<backend-digest>`
+  imajı imzasıyla bir dizine yazar; dizin içeri taşınınca
+  `cosign load --dir kubeat-backend $R/kubeat-backend:<sürüm>` onu iç
+  registry'ye yükler. Frontend ve chart için de aynısı yapılır.
+
+#### Hava boşluklu ortamda doğrulamak
+
+Bundle doğrulama için gerekenleri yanında taşır; Sigstore'un servislerine
+ulaşmak gerekmez. Dışarıdan gereken tek dosya Sigstore'un trusted root'udur
+(Fulcio'nun CA'sı, Rekor'un ve zaman damgası servisinin anahtarları):
+
+```sh
+# Bağlı bir makinede: trusted root'u Sigstore'un TUF deposundan, imzasını
+# denetleyerek indirir (TUF_ROOT verilmişse onun altına).
+cosign initialize
+cp ~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json .
+
+# İç ağda, aynalanan referanslarla:
+cosign verify --trusted-root trusted_root.json \
+  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v<sürüm> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  $R/kubeat-backend@<backend-digest> \
+  $R/kubeat-frontend@<frontend-digest> \
+  registry.sirket.local/charts/kubeat@<chart-digest>
+```
+
+- `cosign save` ile yazılan dizin, registry'ye yüklenmeden de doğrulanır:
+  aynı bayraklarla `cosign verify --trusted-root trusted_root.json --local-image ./kubeat-backend`.
+- `--offline` gerekmez: cosign v3'te işlevi yoktur ve kullanımdan kalktı.
+  `--trusted-root` verilince cosign ne TUF'a ne Rekor'a bağlanır.
+- Sigstore anahtarlarını zaman zaman yeniler. Trusted root'un kopyasını her
+  yeni sürümü doğrulamadan önce yenileyin; eski kopya yeni anahtarla atılmış
+  bir imzayı doğrulayamaz.
+- Sigstore'un TUF deposunu iç ağa aynalıyorsanız kopya yerine
+  `cosign initialize --mirror <adres> --root <root.json>` ile ona bağlanın;
+  `cosign verify` o zaman `--trusted-root`'suz çalışır.
+- Yayım iş akışı bu adımları her sürümde kendisi de dener: `cosign save` ile
+  diske yazdığı backend imajını ve chart'ı, ağ bağlantısı kesilmişken
+  `--trusted-root` ve `--local-image` ile doğrular.
+
+#### Digest'le sabitlemek
+
+Chart imaj referansını `repository:tag` olarak kurar. `tag`'e digest eklemek
+geçerli bir referans verir (`<sürüm>@sha256:…`); çalışma zamanı digest'i
+kullanır, etiket okunurluk içindir:
+
+```yaml
+backend:
+  image:
+    repository: registry.sirket.local/kubeat/kubeat-backend
+    tag: "<sürüm>@<backend-digest>"
+frontend:
+  image:
+    repository: registry.sirket.local/kubeat/kubeat-frontend
+    tag: "<sürüm>@<frontend-digest>"
+```
+
+- Digest'ler sürümün GitHub Release'indedir; `oras cp` ve `cosign load`
+  digest'i değiştirmez.
+- Yükseltirken `tag`'i yeni sürümün digest'iyle birlikte değiştirin; yoksa
+  pod'lar eski sürümde kalır ("Cluster'a kurulum"daki `--reuse-values` notu).
 
 ## Arayüz
 
