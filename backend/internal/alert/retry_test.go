@@ -2,7 +2,6 @@ package alert
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -747,18 +746,19 @@ func TestAHeldBackReminderGivesWayToANewerOne(t *testing.T) {
 	}
 }
 
-// refusing is a Sender to whose channel every notification about one
-// monitor is refused, as by a receiver answering 422 about a monitor it
-// has no mapping for, or 409 to the end of an outage whose ticket was
-// closed by hand; the channel takes the rest.
-type refusing struct {
+// failingOn is a Sender to whose channel every notification about one
+// monitor fails as one that does not reach a receiver able to take it, as
+// from a receiver answering 500 to whatever it cannot handle about that
+// monitor; the channel takes the rest. (A refusal, 4xx, pauses nothing:
+// TestAWebhookRefusingOneMonitorTakesTheOthersAtOnce.)
+type failingOn struct {
 	*recorder
 	channel, monitor string
 }
 
-func (r *refusing) Send(ctx context.Context, ch store.Channel, n Notification) error {
+func (r *failingOn) Send(ctx context.Context, ch store.Channel, n Notification) error {
 	if ch.Name == r.channel && n.Monitor.Name == r.monitor {
-		return errors.New("422 Unprocessable Entity")
+		return &statusError{provider: "webhook", status: 500}
 	}
 	return r.recorder.Send(ctx, ch, n)
 }
@@ -783,30 +783,31 @@ func (f *fixture) passes(start time.Time, until time.Duration) {
 	f.clock = start.Add(until)
 }
 
-// A webhook that refuses every notification about one monitor, its outage
-// and the end of it, still takes the others: in each of its passes what it
-// refused fewer times goes first, and a refusal ends the pass. The others
-// wait for the webhook's next pass, RetryMax away at most; one behind a
-// notification refused for the first time waits a pass more.
-func TestAWebhookRefusingOneMonitorTakesTheOthers(t *testing.T) {
+// A webhook that fails on every notification about one monitor (500), its
+// outage and the end of it, still takes the others: in each of its passes
+// what it refused fewer times goes first, and the failure ends the pass
+// and pauses the webhook. The others wait for the webhook's next pass,
+// RetryMax away at most; one behind a notification failed on for the
+// first time waits a pass more.
+func TestAWebhookFailingOnOneMonitorTakesTheOthers(t *testing.T) {
 	f := newFixture(t, 1, 1) // "ops", a webhook
 	f.retrying(15*time.Minute, time.Hour)
-	f.engine.sender = &refusing{recorder: f.sender, channel: "ops", monitor: "bad"}
+	f.engine.sender = &failingOn{recorder: f.sender, channel: "ops", monitor: "bad"}
 	bad, good, late := f.monitorIn("bad", ""), f.monitorIn("good", ""), f.monitorIn("late", "")
 	start := f.clock
 
 	f.clock = start.Add(30 * time.Second)
-	f.result(bad, false) // 0:30: refused; the webhook waits for its retry at 1:30
+	f.result(bad, false) // 0:30: failed on; the webhook waits for its retry at 1:30
 	f.flush()
 	f.clock = start.Add(time.Minute)
 	f.result(good, false) // 1:00: held back for that retry
 	f.flush()
 	f.passes(start, 90*time.Second)
 	if got := f.sentTo("ops"); got != "down:good" {
-		t.Fatalf("at the webhook's retry: %q, want good's outage, sent ahead of bad's, refused again", got)
+		t.Fatalf("at the webhook's retry: %q, want good's outage, sent ahead of bad's, failed on again", got)
 	}
 
-	// bad's outage goes on, refused at 3:30, 7:30, 15:30 and 30:30; late's
+	// bad's outage goes on, failed on at 3:30, 7:30, 15:30 and 30:30; late's
 	// goes in the webhook's pass at 30:30, 10.5 minutes after it opened.
 	f.passes(start, 20*time.Minute)
 	f.result(late, false)
@@ -821,7 +822,7 @@ func TestAWebhookRefusingOneMonitorTakesTheOthers(t *testing.T) {
 	}
 
 	// The two outages end. The end of bad's, held back for the webhook's
-	// pass at 45:30, comes ahead of good's there and is refused for the
+	// pass at 45:30, comes ahead of good's there and is failed on for the
 	// first time: good's waits for the next pass, at 1:00:30.
 	f.clock = start.Add(31 * time.Minute)
 	f.result(bad, true)
@@ -956,12 +957,12 @@ func TestAReminderFollowsItsOutageToAWebhook(t *testing.T) {
 // What is held back for a webhook to go once, as it is not sent again
 // otherwise (a certificate warning; the end of an outage with
 // UPTIME_NOTIFY_RETRY_FOR=0), is not given up untried when a notification
-// ahead of it is refused for the first time and ends the webhook's pass:
-// it goes in the next pass, ahead of what the webhook refused.
+// ahead of it is failed on for the first time and ends the webhook's
+// pass: it goes in the next pass, ahead of what the webhook failed on.
 func TestWhatGoesOnceIsNotGivenUpUntried(t *testing.T) {
 	f := newFixture(t, 1, 1) // "ops", a webhook; the fixture's "api" has a certificate
 	f.retrying(15*time.Minute, 0)
-	f.engine.sender = &refusing{recorder: f.sender, channel: "ops", monitor: "bad"}
+	f.engine.sender = &failingOn{recorder: f.sender, channel: "ops", monitor: "bad"}
 	x, bad, good := f.monitorIn("x", ""), f.monitorIn("bad", ""), f.monitorIn("good", "")
 	start := f.clock
 	f.clock = start.Add(10 * time.Second)
@@ -981,8 +982,8 @@ func TestWhatGoesOnceIsNotGivenUpUntried(t *testing.T) {
 	f.checkCert(10 * 24 * time.Hour)      // 1:15: held back, to go once
 	f.flush()
 
-	// 1:30: bad's outage, which the webhook never refused before, goes
-	// first and is refused; the rest of the pass is held back.
+	// 1:30: bad's outage, which the webhook never failed on before, goes
+	// first and is failed on; the rest of the pass is held back.
 	f.passes(start, 90*time.Second)
 	if got := f.sentTo("ops"); got != "down:good" {
 		t.Fatalf("at 1:30: %q, want nothing more taken", got)
@@ -998,7 +999,7 @@ func TestWhatGoesOnceIsNotGivenUpUntried(t *testing.T) {
 		t.Errorf("waiting for the webhook (monitor:event:failed attempts:once) = %s, want the two that go once still there", got)
 	}
 
-	// 3:30: they go first, and are taken; bad's outage is refused again.
+	// 3:30: they go first, and are taken; bad's outage is failed on again.
 	f.passes(start, 3*time.Minute+30*time.Second)
 	if got := f.sentTo("ops"); got != "down:good,up:good,cert_expiring:api,down:x" {
 		t.Errorf("at 3:30: %q, want good's end and the warning, then x's outage", got)
@@ -1014,7 +1015,7 @@ func TestWhatGoesOnceIsNotGivenUpUntried(t *testing.T) {
 // UPTIME_NOTIFY_RETRY_FOR, shorter here than UPTIME_NOTIFY_RETRY_MAX, counts
 // from the first attempt of the end of an outage held back for a webhook,
 // however long the end waits for that attempt: when its pass is put off to
-// a later retry of the webhook's, and when a refusal ahead of it in its
+// a later retry of the webhook's, and when a failure ahead of it in its
 // pass holds it back again.
 func TestAHeldBackEndCountsRetryForFromItsFirstAttempt(t *testing.T) {
 	t.Run("its pass put off", func(t *testing.T) {
@@ -1058,14 +1059,14 @@ func TestAHeldBackEndCountsRetryForFromItsFirstAttempt(t *testing.T) {
 	t.Run("held back again in its pass", func(t *testing.T) {
 		f := newFixture(t, 1, 1) // "ops", a webhook
 		f.retrying(15*time.Minute, 5*time.Minute)
-		f.engine.sender = &refusing{recorder: f.sender, channel: "ops", monitor: "bad"}
+		f.engine.sender = &failingOn{recorder: f.sender, channel: "ops", monitor: "bad"}
 		bad, d := f.monitorIn("bad", ""), f.monitorIn("d", "")
 		start := f.clock
 		f.clock = start.Add(10 * time.Second)
 		f.result(d, false) // 0:10: taken
 		f.flush()
 		f.clock = start.Add(30 * time.Second)
-		f.result(bad, false) // 0:30: refused, and at 1:30, 3:30, 7:30, 15:30 and 30:30; the next pass is at 45:30
+		f.result(bad, false) // 0:30: failed on, and at 1:30, 3:30, 7:30, 15:30 and 30:30; the next pass is at 45:30
 		f.flush()
 		f.passes(start, 31*time.Minute)
 		f.clock = start.Add(32 * time.Minute)
@@ -1074,7 +1075,7 @@ func TestAHeldBackEndCountsRetryForFromItsFirstAttempt(t *testing.T) {
 		f.clock = start.Add(34 * time.Minute)
 		f.result(d, true) // 34:00: held back for 45:30, behind bad's end
 		f.flush()
-		// 45:30: bad's end goes first and is refused; d's is held back
+		// 45:30: bad's end goes first and is failed on; d's is held back
 		// again, to 1:00:30, and is not given up untried.
 		f.passes(start, 45*time.Minute+30*time.Second)
 		if n := len(f.engine.owed.retries); n != 1 {

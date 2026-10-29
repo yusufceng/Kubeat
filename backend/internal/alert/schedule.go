@@ -24,24 +24,28 @@ import (
 // an outage loses nothing but a reminder that fell due during it.
 //
 // The schedule also keeps what a channel did not take (retry): an outage
-// notification, or the end of one, that every try of an attempt failed
-// to deliver is attempted again while the outage lasts, after a minute
-// and then after twice the wait each time, up to Options.RetryMax; the
-// end of an outage for Options.RetryFor at most, and only while no newer
-// outage of the monitor has opened: told the end after the start of the
-// next, the channel would read the monitor as up while it is down. A
-// grouped message is attempted again as one, less the monitors whose
-// outages ended meanwhile. A channel software reads that did not take what
-// it was sent is paused until its next retry (Engine.paused): what comes
-// up for it meanwhile is not attempted but held back for that retry's
-// pass, where it goes with what else waits for the channel, once only if
-// it is not attempted again otherwise (retry.once), and what the channel
-// refused fewer times goes first (outbound.order). These too are in
-// memory: at a start the delivery log says which open outages a channel
-// was sent and did not take, and they are sent again, and which a channel
-// without a delay was never sent, having been queued or waiting for its
-// group at the restart, and they are told then (restore); an end of an
-// outage still to be sent again is lost with the restart.
+// notification, or the end of one, that an attempt failed to deliver is
+// attempted again while the outage lasts; the end of an outage for
+// Options.RetryFor at most, and only while no newer outage of the monitor
+// has opened: told the end after the start of the next, the channel would
+// read the monitor as up while it is down. How long it waits depends on
+// what the failure said (failure): after one that did not reach the
+// channel, a minute and then twice the wait each time, up to
+// Options.RetryMax; after a refusal, RetryMax; after a busy answer, its
+// Retry-After, without doubling the wait. A grouped message is attempted
+// again as one, less the monitors whose outages ended meanwhile. A channel
+// software reads that an attempt did not reach, or that was busy, is
+// paused until its next retry (Engine.paused): what comes up for it
+// meanwhile is not attempted but held back for that retry's pass, where it
+// goes with what else waits for the channel, once only if it is not
+// attempted again otherwise (retry.once), and what the channel refused
+// fewer times goes first (outbound.order). A refusal does not pause it:
+// the receiver is there, and the rest goes. These too are in memory: at a
+// start the delivery log says which open outages a channel was sent and
+// did not take, and they are sent again, and which a channel without a
+// delay was never sent, having been queued or waiting for its group at the
+// restart, and they are told then (restore); an end of an outage still to
+// be sent again is lost with the restart.
 
 // owedKind is what a channel is still owed about an outage.
 type owedKind int
@@ -84,17 +88,26 @@ type retry struct {
 	// wait is how long the attempt after the next waits: twice the last
 	// wait, Options.RetryMax at most.
 	wait time.Duration
-	// attempts are the attempts that failed so far: for the log, and for
-	// the order a channel that pauses is sent its notes in (outbound.order).
+	// attempts are the attempts that failed so far, a busy answer aside:
+	// for the log, and for the order a channel that pauses is sent its
+	// notes in (outbound.order). tried says whether the note was attempted
+	// at all, a busy answer included: until it is, its since moves with it.
 	attempts int
-	// once marks a notification held back for a paused channel that is
-	// not attempted again otherwise (Engine.retries): a reminder, a
-	// certificate or slowness notification, the end of an outage with
-	// RetryFor zero. It goes in the pass it was held back for, or, held
-	// back again there behind a note the channel refused, in a later one;
-	// it is given up if the channel does not take it when it is attempted.
-	// A reminder or slowness notification gives way meanwhile to a newer
-	// one about the same monitor (supersede).
+	tried    bool
+	// refused says the last attempt was refused (4xx): the note waits
+	// RetryMax for the receiver to be fixed, and that wait is no pass of
+	// the channel's, which a channel that pauses would wait for (paused).
+	refused bool
+	// once marks a notification held back for a paused channel, or one a
+	// busy receiver asked to be sent later, that is not attempted again
+	// otherwise (Engine.retries): a reminder, a certificate or slowness
+	// notification, the end of an outage with RetryFor zero. It goes in the
+	// pass it was held back for, or, held back again there behind a note
+	// the channel did not take, in a later one; it is given up if the
+	// channel refuses it or the attempt does not reach the channel, and
+	// goes again later if the channel is busy. A reminder or slowness
+	// notification gives way meanwhile to a newer one about the same
+	// monitor (supersede).
 	once bool
 }
 
@@ -325,27 +338,30 @@ func (e *Engine) retries(n Notification) bool {
 	return n.Event == EventDown || n.Event == EventUp && e.opts.RetryFor > 0
 }
 
-// pauses says whether the channel is paused once it does not take a
-// notification: a channel software reads, with the attempts again on.
+// pauses says whether the channel is paused once an attempt does not
+// reach it or it is busy: a channel software reads, with the attempts
+// again on.
 func (e *Engine) pauses(ch store.Channel) bool {
 	return machine(ch.Type) && e.opts.RetryMax > 0
 }
 
 // paused returns the retry that a channel software reads waits for when
-// its last attempt failed: the first of its retries still to come. Until
-// it is due the channel is sent nothing, and what comes up for it is held
-// back for that retry's pass (retryLater), where it goes with what else
-// waits for the channel: a channel that is down costs the loop one
-// attempt per wait rather than one per notification, and the queue keeps
-// moving. Nil when the channel took the last it was sent, or has nothing
-// to be sent again.
+// its last pass stopped at a failure that did not reach it or a busy
+// answer: the first of its retries still to come, those waiting out a
+// refusal aside. Until it is due the channel is sent nothing, and what
+// comes up for it is held back for that retry's pass (retryLater), where
+// it goes with what else waits for the channel: a channel that is down
+// costs the loop one attempt per wait rather than one per notification, a
+// busy one is asked again when it said, and the queue keeps moving. Nil
+// when the channel took or refused all it was sent last, or has nothing
+// to be sent again but what it refused.
 func (e *Engine) paused(ch store.Channel, now time.Time) *retry {
 	if !e.pauses(ch) || !e.owed.failing[ch.ID] {
 		return nil
 	}
 	var first *retry
 	for _, r := range e.owed.retries {
-		if r.channel.ID == ch.ID && r.due.After(now) && (first == nil || r.due.Before(first.due)) {
+		if r.channel.ID == ch.ID && !r.refused && r.due.After(now) && (first == nil || r.due.Before(first.due)) {
 			first = r
 		}
 	}
@@ -353,33 +369,38 @@ func (e *Engine) paused(ch store.Channel, now time.Time) *retry {
 }
 
 // retryLater notes, after a pass through the channels, what to send
-// again: a notification of an outage or of its end that a channel did
-// not take waits retryBase, then twice the last wait each time, RetryMax
-// at most; the end of an outage is not waited for past RetryFor from the
-// first failure. A note held back because the channel took none of the
-// others (deliver) waits the same way, with no attempt counted against
-// it. A first note held back for a channel software reads (deliver,
-// paused) waits for the channel's next pass and goes in it, once only if
-// it is not attempted again otherwise, and its RetryFor counts from that
-// pass, its first attempt: not from when it was held back, which a wait
-// longer than RetryFor would end before any attempt. Held back again
-// before any attempt, a note's RetryFor moves with it to its next pass,
-// and a note that goes once still goes then: only the channel refusing
-// it gives it up. Everything else, and everything with the attempts off,
-// has failed for good.
+// again, by what each failure said (failure). A notification of an outage
+// or of its end that did not reach a channel waits retryBase, then twice
+// the last wait each time, RetryMax at most; one the receiver refused
+// waits RetryMax; the end of an outage is not waited for past RetryFor
+// from the first failure. One the receiver was busy for goes again when
+// the receiver said, and so does any other but a test: not a refusal, it
+// is not counted against the note, and the wait after it is not doubled.
+// A note held back in a pass that stopped at a failure (deliver) waits the
+// same way, behind a failure that did not reach the channel twice as long
+// as before, behind a busy answer until the channel said, with no attempt
+// counted against it. A first note held back for a channel software reads
+// (deliver, paused) waits for the channel's next pass and goes in it, once
+// only if it is not attempted again otherwise, and its RetryFor counts
+// from that pass, its first attempt: not from when it was held back, which
+// a wait longer than RetryFor would end before any attempt. Held back
+// again before any attempt, a note's RetryFor moves with it to its next
+// pass, and a note that goes once still goes then: only the channel
+// refusing it or not taking it gives it up. Everything else, and
+// everything with the attempts off, has failed for good.
 func (e *Engine) retryLater(failures []failed) {
 	now := e.now()
 	held := make(map[string]int)
 	for _, f := range failures {
 		r := f.retry
 		switch {
-		case r != nil && r.once && !f.held:
-			e.owed.dropRetry(r)
-			e.gaveUp(f.channel, f.note, "not taken when attempted")
-			continue
-		case r != nil:
-			r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
-			if f.held && r.attempts == 0 {
+		case f.held && r != nil:
+			if f.class == busy {
+				r.due = now.Add(f.wait)
+			} else {
+				r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
+			}
+			if !r.tried {
 				r.since = r.due
 			}
 		case f.held:
@@ -395,6 +416,25 @@ func (e *Engine) retryLater(failures []failed) {
 			}
 			r = e.owed.addRetry(f.channel, f.note, due, due, next)
 			r.once = !e.retries(f.note)
+		case f.class == busy && e.opts.RetryMax > 0 && (r != nil || f.note.Event != EventTest):
+			if r == nil {
+				if f.note.Event == EventReminder || slowness(f.note.Event) {
+					e.owed.supersede(f.channel.ID, f.note)
+				}
+				r = e.owed.addRetry(f.channel, f.note, now, now, min(retryBase, e.opts.RetryMax))
+				r.once = !e.retries(f.note)
+			}
+			r.due, r.tried, r.refused = now.Add(f.wait), true, false
+		case r != nil && r.once:
+			e.owed.dropRetry(r)
+			e.gaveUp(f.channel, f.note, "not taken when attempted")
+			continue
+		case r != nil && f.class == refused:
+			r.due, r.wait = now.Add(e.opts.RetryMax), e.opts.RetryMax
+		case r != nil:
+			r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
+		case e.retries(f.note) && f.class == refused:
+			r = e.owed.addRetry(f.channel, f.note, now, now.Add(e.opts.RetryMax), e.opts.RetryMax)
 		case e.retries(f.note):
 			wait := min(retryBase, e.opts.RetryMax)
 			r = e.owed.addRetry(f.channel, f.note, now, now.Add(wait), min(wait*2, e.opts.RetryMax))
@@ -402,8 +442,9 @@ func (e *Engine) retryLater(failures []failed) {
 			e.gaveUp(f.channel, f.note, "")
 			continue
 		}
-		if !f.held {
+		if !f.held && f.class != busy {
 			r.attempts++
+			r.tried, r.refused = true, f.class == refused
 		}
 		if f.note.Event == EventUp && !r.once && r.due.After(r.since.Add(e.opts.RetryFor)) {
 			e.owed.dropRetry(r)
@@ -415,7 +456,7 @@ func (e *Engine) retryLater(failures []failed) {
 			continue
 		}
 		e.opts.Logger.Warn("notification to be sent again", "channel", f.channel.Name, "event", f.note.Event, "monitor", about(f.note),
-			"in", r.due.Sub(now).String(), "failed_attempts", r.attempts)
+			"in", r.due.Sub(now).String(), "failure", f.class, "failed_attempts", r.attempts)
 	}
 	for channel, count := range held {
 		e.opts.Logger.Warn("notifications held back, the channel took none; to be sent later", "channel", channel, "count", count)
@@ -697,7 +738,7 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 		if p := e.paused(ch, now); p != nil {
 			// The channel took none of late: this goes in its next pass,
 			// and a note not attempted yet counts its RetryFor from there.
-			if r.attempts == 0 {
+			if !r.tried {
 				r.since = p.due
 			}
 			r.due = p.due

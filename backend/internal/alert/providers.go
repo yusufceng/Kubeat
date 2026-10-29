@@ -27,20 +27,40 @@ type Endpoints struct {
 // reasonLimit bounds how much of a provider's reason an error repeats.
 const reasonLimit = 200
 
+// statusError is an answer outside 2xx from where a channel sends: the
+// provider, the status, the provider's reason when it gave one, and the
+// answer's Retry-After header as sent. The engine reads the status and the
+// header to tell a receiver that is busy from one that refused the
+// notification and from one that could not take it (classify).
+type statusError struct {
+	provider   string
+	status     int
+	reason     string
+	retryAfter string
+}
+
+func (e *statusError) Error() string {
+	if e.reason != "" {
+		return fmt.Sprintf("%s answered %d: %s", e.provider, e.status, e.reason)
+	}
+	return fmt.Sprintf("%s answered %d", e.provider, e.status)
+}
+
 // accepted turns an answer outside 2xx into an error that names the
-// provider and the status. Of the answer's body it keeps only reason, which
-// the sender read from the field the provider documents for it: the answer
-// comes from wherever the channel's address points, which need not be the
-// provider, and a test delivery must not read other services' answers back
-// to whoever set the address. Without a reason the status stands alone.
-func accepted(provider string, status int, reason string) error {
-	if status >= 200 && status < 300 {
+// provider and the status (a *statusError). Of the answer's body it keeps
+// only reason, which the sender read from the field the provider documents
+// for it: the answer comes from wherever the channel's address points,
+// which need not be the provider, and a test delivery must not read other
+// services' answers back to whoever set the address. Without a reason the
+// status stands alone.
+func accepted(provider string, answer reply, reason string) error {
+	if answer.status >= 200 && answer.status < 300 {
 		return nil
 	}
 	if reason = strings.TrimSpace(reason); reason != "" {
-		return fmt.Errorf("%s answered %d: %s", provider, status, truncate(reason, reasonLimit))
+		reason = truncate(reason, reasonLimit)
 	}
-	return fmt.Errorf("%s answered %d", provider, status)
+	return &statusError{provider: provider, status: answer.status, reason: reason, retryAfter: answer.retryAfter}
 }
 
 // jsonReason returns the text in one field of a JSON object, where a
@@ -123,12 +143,12 @@ func newDiscordBody(n Notification, now time.Time) map[string]any {
 }
 
 func (s *DiscordSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
-	status, answer, err := post(ctx, s.Client, s.UserAgent, ch.Target, nil, newDiscordBody(n, time.Now()))
+	answer, err := post(ctx, s.Client, s.UserAgent, ch.Target, nil, newDiscordBody(n, time.Now()))
 	if err != nil {
 		return err
 	}
 	// Discord explains a refusal in "message".
-	return accepted("Discord", status, jsonReason(answer, "message"))
+	return accepted("Discord", answer, jsonReason(answer.body, "message"))
 }
 
 // TelegramSender sends a message as a bot. The channel's target is the chat
@@ -141,7 +161,7 @@ type TelegramSender struct {
 
 func (s *TelegramSender) Send(ctx context.Context, ch store.Channel, n Notification) error {
 	target := strings.TrimSuffix(s.BaseURL, "/") + "/bot" + ch.Secret + "/sendMessage"
-	status, answer, err := post(ctx, s.Client, s.UserAgent, target, nil, map[string]any{
+	answer, err := post(ctx, s.Client, s.UserAgent, target, nil, map[string]any{
 		"chat_id":                  ch.Target,
 		"text":                     telegramText(n),
 		"parse_mode":               "HTML",
@@ -151,7 +171,7 @@ func (s *TelegramSender) Send(ctx context.Context, ch store.Channel, n Notificat
 		return err
 	}
 	// Telegram explains a refusal in "description".
-	return accepted("Telegram", status, jsonReason(answer, "description"))
+	return accepted("Telegram", answer, jsonReason(answer.body, "description"))
 }
 
 // telegramText is the message as Telegram's limited HTML: the subject in
@@ -266,11 +286,11 @@ func pagerDutySeverity(e Event) string {
 }
 
 func (s *PagerDutySender) enqueue(ctx context.Context, event pagerDutyEvent) error {
-	status, answer, err := post(ctx, s.Client, s.UserAgent, s.URL, nil, event)
+	answer, err := post(ctx, s.Client, s.UserAgent, s.URL, nil, event)
 	if err != nil {
 		return err
 	}
-	return accepted("PagerDuty", status, pagerDutyReason(answer))
+	return accepted("PagerDuty", answer, pagerDutyReason(answer.body))
 }
 
 // pagerDutyReason is how the Events API explains a refusal: what is wrong
@@ -339,12 +359,12 @@ func (s *NtfySender) Send(ctx context.Context, ch store.Channel, n Notification)
 	if ch.Secret != "" {
 		headers = map[string]string{"Authorization": "Bearer " + ch.Secret}
 	}
-	status, answer, err := post(ctx, s.Client, s.UserAgent, server, headers, message)
+	answer, err := post(ctx, s.Client, s.UserAgent, server, headers, message)
 	if err != nil {
 		return err
 	}
 	// ntfy explains a refusal in "error".
-	return accepted("ntfy", status, jsonReason(answer, "error"))
+	return accepted("ntfy", answer, jsonReason(answer.body, "error"))
 }
 
 // GotifySender creates a message on a Gotify server. The channel's target
@@ -364,13 +384,13 @@ func (s *GotifySender) Send(ctx context.Context, ch store.Channel, n Notificatio
 	if link := URL(n); link != "" {
 		message["extras"].(map[string]any)["client::notification"] = map[string]any{"click": map[string]string{"url": link}}
 	}
-	status, answer, err := post(ctx, s.Client, s.UserAgent, strings.TrimSuffix(ch.Target, "/")+"/message",
+	answer, err := post(ctx, s.Client, s.UserAgent, strings.TrimSuffix(ch.Target, "/")+"/message",
 		map[string]string{"X-Gotify-Key": ch.Secret}, message)
 	if err != nil {
 		return err
 	}
 	// Gotify explains a refusal in "errorDescription".
-	return accepted("Gotify", status, jsonReason(answer, "errorDescription"))
+	return accepted("Gotify", answer, jsonReason(answer.body, "errorDescription"))
 }
 
 // gotifyMarkdown is the message as Gotify renders markdown: the text, the
