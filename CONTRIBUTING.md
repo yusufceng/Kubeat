@@ -27,12 +27,22 @@ Trunk-based, kısa ömürlü branch'ler (GitHub Flow).
 
 ### Merge
 
-- PR en az 1 onay ve yeşil CI ile merge edilir.
+- PR, CI'daki beş check (`backend`, `frontend`, `chart`, `chart (Helm 3)`,
+  `govulncheck`) yeşil olmadan merge edilemez. Bunu deponun `main` kural seti
+  zorunlu kılar; yönetici dahil kimse kırmızıyla merge edemez, `main`'e
+  doğrudan push, force push ve silme reddedilir. Kararsız bir testin
+  kırmızısı da kırmızıdır: test düzeltilir, yeniden koşturup geçirmek
+  yetmez. Tek bakımcılı depoda onay sayısı zorunlu değildir; inceleme
+  sprint ekibinin SRE ya da BA'sı tarafından yapılır
+  ([docs/agents/sprint-takimi.md](docs/agents/sprint-takimi.md)).
 - Squash merge kullanılır; `main` geçmişi lineer kalır. PR başlığı squash
   commit mesajı olur, bu yüzden Conventional Commits formatındadır.
 - Merge edilen branch silinir.
 
 ### Sürümler
+
+`v*` etiketlerini yalnızca depo yöneticisi oluşturabilir; bir etiket
+sonradan taşınamaz ve silinemez (deponun etiket kural seti).
 
 - Sürümler `main` üzerinde `vMAJOR.MINOR.PATCH` etiketiyle (SemVer) çıkar:
   `make release` etiketi `Makefile`'daki `VERSION` ile atar ve iter,

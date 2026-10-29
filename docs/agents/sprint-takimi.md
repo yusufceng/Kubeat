@@ -30,6 +30,8 @@ sonunda bakar ve yön verir.
    bulgular kanıtlı ve bir işe bağlıdır.
 2. **Analiz**: BA bulguları birleştirir, hikâyelere çevirir, kabul
    ölçütlerini ve kapsam dışını yazar, ilke ve ADR çakışmalarını işaretler.
+   Kurulum notlarına (NOTES) dokunan hikâyede, NOTES'un gösterdiği README
+   bölümünde önerdiği değerin geçmesi kabul ölçütüdür.
 3. **Öncelik**: PO sprint hedefini, en çok dört maddelik sıralı listeyi ve
    gerekçeli "yapılmayacaklar"ı verir. Bir hikâyenin bilinen yan etkisi
    sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
@@ -37,23 +39,30 @@ sonunda bakar ve yön verir.
 4. **Plan**: PMO `docs/sprints/<tarih>-sprint-<n>.md` dosyasını yazar ve
    her madde için `ready-for-agent` etiketli bir GitHub issue açar.
 5. **Geliştirme** (paralel, ayrı worktree): her developer bir issue'yu kendi
-   dalında yapar, test eder, commit'ler; push etmez.
+   dalında yapar, test eder, commit'ler; push etmez. Release manager
+   teslimatın başında sandbox oturumunu denetler; düşmüşse kullanıcıdan
+   sürümden önce giriş ister.
 6. **İnceleme**: SRE ya da BA diff'i kabul ölçütlerine göre doğrular;
-   release manager CI'yı bekler, squash-merge eder, issue kapanır. Merge'de
-   developer'ın yükseltme notu cümlesini sprint dosyasının "Yükseltme notu"
-   tablosuna işler.
+   release manager CI'yı bekler, squash-merge eder, issue kapanır. Kırmızı
+   check'le merge edilmez (main kural seti de zorlar); kararsız bir testin
+   kırmızısı da kırmızıdır: yeniden koşturup geçirilmez, düzeltilir.
+   Merge'de developer'ın yükseltme notu cümlesini sprint dosyasının
+   "Yükseltme notu" tablosuna işler.
 7. **Sprint sonu**: release manager sürümü çıkarır. Sandbox'ı yükseltmeden
    önce en yeni yedeği ve şifreleme anahtarını dışarı alıp kopyayı pod'daki
    dosyayla karşılaştırır ([pilot.md](../pilot.md) "Yükseltmeden önce
    yedek"); karşılaştırma tutmazsa yükseltmez. Müşteri puanından önce
    "Kullanıcıda kalanlar"dan en çok üç provayı koşar ve sonucu sprint
-   dosyasına yazar. Sonra müşteriler teslimatı puanlar, PMO retro yazar;
+   dosyasına yazar; sandbox yükseltmesi ve sandbox provası sürümden sonraki
+   ilk provadır. Sonra müşteriler teslimatı puanlar, PMO retro yazar;
    bunlar sonraki sprintin girdisidir. Sprint takvimle değil teslimatla
    kapanır: issue'lar merge edilir, sürüm çıkar, müşteriler puanlar. Ajan
    sınırı içinde doğrulanamayan maddeler (gerçek cluster, sandbox, gerçek
    Prometheus) sprint dosyasında "Kullanıcıda kalanlar" listesine yazılır;
    sonraki sprintin keşfi bu listenin sonucuyla ve koşulmayan maddeleriyle
-   başlar.
+   başlar. Bir hikâye bir müşterinin asıl kurulum ya da aynalama yolunu
+   belgeliyorsa o yol ya CI'da koşar ya da bu listeye zorunlu prova olarak
+   yazılır; "isteğe bağlı" yalnızca yan yollar içindir.
 
 Ret alan bir madde en çok üç düzeltme turu görür. Dördüncü inceleme
 sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
@@ -130,15 +139,21 @@ Etiketler: `ready-for-agent` ve `bug` / `enhancement` / `documentation`.
 - `make test` ve `make lint` geçer: backend `go test -race`, frontend
   `node --test`, chart `deploy/helm/test-chart.sh`; `gofmt`, `go vet`,
   `eslint`, `helm lint`.
+- `alert` ve `scheduler` paketlerinde süreye bağlı yeni ya da değişen
+  testler duvar saatiyle sınır koymaz; sahte saat ve olay tabanlı bekleme
+  kullanır. Developer bu testleri rapordan önce `go test -race -count=20`
+  ile ve bir kez `-cpu=1` ile koşar; reviewer bunu raporda arar.
 - Kabul ölçütleri reviewer tarafından diff üzerinden doğrulandı.
 - README, docs ve iki dil güncel; yeni ayar varsa README tablosu,
   `.env.example` ve chart values de.
 - Ertelenen parçalar backlog'da, yol haritası satırı güncel.
 - Davranış değiştiren madde, developer raporunda sprint dosyasının
-  "Yükseltme notu" başlığına bir cümle verir. Sürüm PR'ı README'deki
-  "### <sürüm>'e yükseltme" bölümünü taşır: bölümü o başlıktaki tablodan ve
-  "ayrıca" listesinden yazar, PR açıklamasında madde madde işaretler; BA
-  bölümü sprint dosyasına karşı okur.
+  "Yükseltme notu" başlığına bir cümle verir. Sürüm PR'ı yükseltme
+  bölümünü taşır; 0.46'dan itibaren bölüm `docs/yukseltme.md`'dedir
+  ("<sürüm>'e yükseltme"), README'de bağlantı kalır. Bölümü o başlıktaki
+  tablodan ve "ayrıca" listesinden yazar, PR açıklamasında madde madde
+  işaretler; BA bölümü sprint dosyasına karşı okur, release manager
+  okumayı sürüm PR'ına yorum olarak yazar.
 - README'de bir paragrafı aşan davranış açıklaması alt başlıklarla ve
   maddeli yazılır.
 - CI yeşil, squash-merge edildi, issue kapandı.
