@@ -1,0 +1,44 @@
+name: Security
+
+# Weekly, and by hand: known vulnerabilities that have been published since
+# the last change, in what the release images ship. govulncheck checks the
+# code the backend actually calls, with the same pinned release as CI's PR
+# job; npm audit checks the frontend's runtime dependencies for high and
+# critical advisories. Nothing here runs on pull requests, so a new advisory
+# turns this workflow red, not a PR. GitHub notifies the user who created the
+# workflow or last changed its cron line of a failed scheduled run; in a
+# public repository it disables the schedule after 60 days without activity.
+# SECURITY.md says what follows a red run; CONTRIBUTING.md, "Sürümler".
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # The lockfile is what the image installs; devDependencies do not ship.
+      - run: npm audit --omit=dev --audit-level=high
