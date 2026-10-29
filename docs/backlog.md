@@ -635,6 +635,29 @@ sonra 90 gün kritik/yüksek CVE ve taban imaj düzeltmesi, aynı anda en çok
 iki hat. Gerekçe: söz sonradan verilebilir; verilip geri alınırsa güven
 kaybolur.
 
+Güncelleme (2026-10-29, S1 #48): SECURITY.md geldi. "Yalnızca son minor"
+der: düzeltme o hatta yeni bir yama olarak çıkar, eski minor'lara geri
+taşınmaz; kritik/yüksek açık için 7 günlük hedef (sözleşmeli bir hizmet
+düzeyi değil) ve taban imaj düzeltmesinde yeniden derleme. `make release`
+`release/v*` dalından da etiketler; CONTRIBUTING.md "Sürümler" bunu destek
+sözü olmayan bir yetenek olarak yazar ve böyle bir yamanın GitHub Release'i
+"Latest" olmaz. Karar ve tetikleyici değişmedi.
+
+## containers/image'ın okuduğu biçimde ikinci imza
+
+2026-10-29'da ertelendi (S1'in geliştirmesinde çıktı, #48). 0.45'ten beri
+imajlar ve chart cosign v3 ile imzalanır: imza Sigstore bundle'ı olarak OCI
+1.1 referrer'ında durur (GHCR'de `sha256-<digest>` etiketi). containers/image
+(skopeo, podman, CRI-O) yalnızca eski biçimin `sha256-<digest>.sig` ekini
+okur; bu imzaları ne taşır ne doğrular, yani CRI-O'nun imza politikası
+(`policy.json`'da `sigstoreSigned`) onları görmez. Bugünkü yol: aynalamada
+`oras cp -r`, doğrulama `cosign verify` ile (README "Tedarik zinciri").
+Seçenek: yayımda ikinci bir imza, `cosign sign --new-bundle-format=false`;
+bayrak cosign v3'te kullanımdan kalktı ve v4'te kalkacak, her artefakta
+ikinci bir Rekor kaydı demek. Tetikleyici: imzayı cluster'da CRI-O'nun
+politikasıyla doğrulamak isteyen ilk kurulum ya da containers/image'ın
+bundle desteği.
+
 ## Aynı adla yeniden kurulumda yeniden üretilen Secret'lar
 
 2026-10-29'da ertelendi (S31'in geliştirmesinde çıktı, #38). 0.44'ten beri
@@ -861,3 +884,15 @@ matrisi birlikte değişir. Tetikleyici: Helm projesinin Helm 3'e güvenlik
 yamalarını bitirmesi, `chart (Helm 3)` koşusunun chart düzeltilerek
 onarılamayan bir nedenle kalıcı kırılması ya da yalnızca Helm 4'te olan bir
 chart özelliğine ihtiyaç.
+
+## Yayımlanan imajları işletim sistemi paketleri için taramak
+
+2026-10-29'da ertelendi (#48'in kapsam dışı parçası). Haftalık güvenlik
+taraması (`security.yml`) Go modüllerini ve frontend'in npm çalışma zamanı
+bağımlılıklarını tarar; taban imajların (UBI) işletim sistemi paketleri ve
+frontend imajındaki Node.js çalışma zamanı taranmaz. SECURITY.md taban imaj
+açıkları için 7 günlük hedef verir, ama bu açıkların fark edilmesi bugün Red
+Hat ve Node.js duyurularına ve Dependabot'un taban imaj PR'larına bağlıdır.
+Çözüm: yayımlanan imajlara haftalık bir imaj tarayıcısı (Trivy ya da Grype;
+SBOM'dan da çalışabilir). Tetikleyici: bir taban imaj açığının 7 günlük
+hedefi kaçırması ya da bir müşterinin tarama raporu istemesi.

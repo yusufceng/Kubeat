@@ -88,6 +88,10 @@ Values'ta `backend.image.repository`, `frontend.image.repository` ve
 registry parola istiyorsa `imagePullSecrets` verilir; chart
 `oci://registry.sirket.local/charts/kubeat` adresinden kurulur.
 
+Bu komutlar imzaları taşımaz. 0.45'ten beri imajlar ve chart imzalı
+yayımlanır; imzalarıyla aynalamak ve iç ağda doğrulamak için README "Tedarik
+zinciri".
+
 ## Kurulum
 
 ### 1. Namespace ve Secret'lar

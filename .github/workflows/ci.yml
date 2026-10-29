@@ -26,6 +26,8 @@ jobs:
   # dependencies' and the standard library's. The standard library is that
   # of the toolchain line in go.mod, which the release image's builder
   # matches, so a Go security release fails this until both are raised.
+  # govulncheck is pinned, the same release as security.yml's weekly run;
+  # raise the two together (CONTRIBUTING.md, "Sabit araç sürümleri").
   govulncheck:
     runs-on: ubuntu-latest
     defaults:
@@ -36,7 +38,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
-      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -83,6 +85,9 @@ jobs:
         run: |
           scripts/check-versions.sh
           scripts/test-check-versions.sh
+      # The notes release.yml writes for a tag's GitHub Release.
+      - name: The release notes script
+        run: scripts/test-release-notes.sh
       # test-chart.sh checks the alert rules with promtool and runs their
       # scenarios, and fails under CI without it. A pinned Prometheus
       # release (an LTS line), the archive checked against its checksum.
