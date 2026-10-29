@@ -164,7 +164,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   PagerDuty) yeni bildirimleri kendi yeniden deneme zamanına bekletir;
   sürekli reddettiği bir bildirim (409, 422) diğerlerini bekletmez ama
   kanalı her geçişten sonra yeniden duraklatır, yeni bildirimler en çok
-  `UPTIME_NOTIFY_RETRY_MAX` gecikir (4xx'i kalıcı hata sayan S26'ya kadar).
+  `UPTIME_NOTIFY_RETRY_MAX` (bir bildirimin ilk reddedildiği geçişte bir
+  geçiş daha) gecikir (4xx'i kalıcı hata sayan S26'ya kadar).
   İnsan kanalları ise gruplama kapalıyken (`UPTIME_NOTIFY_GROUP_WAIT=0`)
   her bildirimde yine denenir. Deneme listesi bellektedir: yeniden
   başlatmada açık kesintininki, hiç denenmemiş olanlar (kuyrukta ya da grup
