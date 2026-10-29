@@ -31,19 +31,29 @@ sonunda bakar ve yön verir.
 2. **Analiz**: BA bulguları birleştirir, hikâyelere çevirir, kabul
    ölçütlerini ve kapsam dışını yazar, ilke ve ADR çakışmalarını işaretler.
 3. **Öncelik**: PO sprint hedefini, en çok dört maddelik sıralı listeyi ve
-   gerekçeli "yapılmayacaklar"ı verir.
+   gerekçeli "yapılmayacaklar"ı verir. Bir hikâyenin bilinen yan etkisi
+   sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
+   olarak planlanır.
 4. **Plan**: PMO `docs/sprints/<tarih>-sprint-<n>.md` dosyasını yazar ve
    her madde için `ready-for-agent` etiketli bir GitHub issue açar.
 5. **Geliştirme** (paralel, ayrı worktree): her developer bir issue'yu kendi
    dalında yapar, test eder, commit'ler; push etmez.
 6. **İnceleme**: SRE ya da BA diff'i kabul ölçütlerine göre doğrular;
-   release manager CI'yı bekler, squash-merge eder, issue kapanır.
-7. **Sprint sonu**: müşteriler teslimatı puanlar, PMO retro yazar; bunlar
-   sonraki sprintin girdisidir. Sprint takvimle değil teslimatla kapanır:
-   issue'lar merge edilir, sürüm çıkar, müşteriler puanlar. Ajan sınırı
-   içinde doğrulanamayan maddeler (gerçek cluster, sandbox, gerçek
+   release manager CI'yı bekler, squash-merge eder, issue kapanır. Merge'de
+   developer'ın yükseltme notu cümlesini sprint dosyasının "Yükseltme notu"
+   tablosuna işler.
+7. **Sprint sonu**: release manager sürümü çıkarır. Sandbox'ı yükseltmeden
+   önce en yeni yedeği ve şifreleme anahtarını dışarı alıp kopyayı pod'daki
+   dosyayla karşılaştırır ([pilot.md](../pilot.md) "Yükseltmeden önce
+   yedek"); karşılaştırma tutmazsa yükseltmez. Müşteri puanından önce
+   "Kullanıcıda kalanlar"dan en çok üç provayı koşar ve sonucu sprint
+   dosyasına yazar. Sonra müşteriler teslimatı puanlar, PMO retro yazar;
+   bunlar sonraki sprintin girdisidir. Sprint takvimle değil teslimatla
+   kapanır: issue'lar merge edilir, sürüm çıkar, müşteriler puanlar. Ajan
+   sınırı içinde doğrulanamayan maddeler (gerçek cluster, sandbox, gerçek
    Prometheus) sprint dosyasında "Kullanıcıda kalanlar" listesine yazılır;
-   sonraki sprintin keşfi bu listenin sonucuyla başlar.
+   sonraki sprintin keşfi bu listenin sonucuyla ve koşulmayan maddeleriyle
+   başlar.
 
 Ret alan bir madde en çok üç düzeltme turu görür. Dördüncü inceleme
 sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
@@ -79,6 +89,9 @@ Adımlar `.claude/workflows/` altındaki iş akışlarıyla koşar:
 - Hiçbir ajan `kubectl`, `helm`, `oc` çalıştırmaz, cluster'a ya da
   sandbox'a dokunmaz; değerlendirme depo, dokümanlar ve lokal testlerle
   yapılır. Makinedeki kubeconfig gerçek iş cluster'larını içerir.
+- Release manager provaları ve sandbox yükseltmesini yalnızca açıkça
+  verilen bağlamla yapar: minikube'da `--context minikube` (helm'de
+  `--kube-context minikube`). Varsayılan bağlam kullanılmaz.
 - Backend ya da frontend lokalde çalıştırılmaz; kullanıcının kendi `make dev`
   süreçleri ve veritabanı vardır. Yalnızca testler koşulur.
 - Gizli değer (token, parola, anahtar) okunmaz ve yazdırılmaz; `.dev/`,
@@ -122,8 +135,12 @@ Etiketler: `ready-for-agent` ve `bug` / `enhancement` / `documentation`.
   `.env.example` ve chart values de.
 - Ertelenen parçalar backlog'da, yol haritası satırı güncel.
 - Davranış değiştiren madde, developer raporunda sprint dosyasının
-  "Yükseltme notu" başlığına bir cümle verir; sürüm PR'ı README'deki
-  "### <sürüm>'e yükseltme" bölümünü taşır.
+  "Yükseltme notu" başlığına bir cümle verir. Sürüm PR'ı README'deki
+  "### <sürüm>'e yükseltme" bölümünü taşır: bölümü o başlıktaki tablodan ve
+  "ayrıca" listesinden yazar, PR açıklamasında madde madde işaretler; BA
+  bölümü sprint dosyasına karşı okur.
+- README'de bir paragrafı aşan davranış açıklaması alt başlıklarla ve
+  maddeli yazılır.
 - CI yeşil, squash-merge edildi, issue kapandı.
 
 ## Sprint dosyası

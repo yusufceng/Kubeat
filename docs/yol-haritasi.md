@@ -37,9 +37,9 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 26 | Namespace'le sınırlı keşif: cluster-admin olmadan kurulum (Role), Thanos'un namespace ucu | Tamamlandı |
 | 27 | Open-core: Kubeat Enterprise lisansı, çevrimdışı imzalı lisans dosyası ([ADR-0002](adr/0002-open-core-lisans.md)) | Tamamlandı |
 | 28 | Pilot: gerçek bir cluster'da üç hafta kullanım ([pilot.md](pilot.md)) | Developer Sandbox'ta (2026-10-27'den itibaren; 2026-10-28'den beri 0.43.0, sprint 2 sonunda 0.44.0; pilot değerleri; karar 2026-11-27); şirket cluster'ı ve ekip olmadığından geri bildirim sprint ekibinin müşteri ve SRE ajanlarından |
-| 29 | Sprint ekibi: müşteri, SRE, BA, PO, PMO ve developer ajanlarıyla düzenli sprintler ([agents/sprint-takimi.md](agents/sprint-takimi.md), [sprints/](sprints/)) | Sprint 1 (2026-10-27–28) tamamlandı, 0.43.0: bildirim teslimatı (S18, S17), yedek dayanıklılığı (S19), öz-sağlık alarmları (S9); puanlar 4,0/5 ve retro [sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md); sprint 2 (2026-10-28–29) tamamlandı, 0.44.0: Kubeat'in kendi arızası sessiz kalmaz ve kayıp yaratmaz (S29 öz-sağlık kuralları + CI'da promtool, S25 kesinti bildirimi kaybı ve ölü makine kanalı, S31 kaldırmada PVC koruması, S32 sonuç yazılamazken heartbeat); sandbox 0.44.0'da; gerçek ortam provaları (firing, kaldırma ve yeniden kurulum, SIGTERM, dolu volume) kullanıcıda; puanlar 3,5/5 ve retro [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md); sprint 3 önerisi: S10+S11, S1, S26 (4xx'te duraklama ve çok cluster'lı kural etiketleri), S12+S15+S30 doküman paketi |
-| 30 | Tedarik zinciri: cosign ile imzalı imaj ve chart, SBOM/provenance, SECURITY.md | Planlandı (sprint 3 adayı, S1; sprint 2'de kritik/yüksek SRE riskleri önce alındı); release.yml değişikliği S11'in denetiminden sonra gelir, sprint 3'ün sürüm etiketinde doğrulanır; destek penceresi taahhüdü yok ([backlog](backlog.md)) |
-| 31 | Hızlı başlangıç ve kurulum belgeleri: güncel kurulum komutu, OpenShift dışı fsGroup notu, yükseltme notları docs/yukseltme.md, lisansın nasıl istendiği, operator'süz cluster için öz-sağlık kuralları (S30) | Planlandı (sprint 3: S10+S11 ilk madde, S12+S15+S30 doküman paketi) |
+| 29 | Sprint ekibi: müşteri, SRE, BA, PO, PMO ve developer ajanlarıyla düzenli sprintler ([agents/sprint-takimi.md](agents/sprint-takimi.md), [sprints/](sprints/)) | Sprint 1 (2026-10-27–28) tamamlandı, 0.43.0: bildirim teslimatı (S18, S17), yedek dayanıklılığı (S19), öz-sağlık alarmları (S9); puanlar 4,0/5 ve retro [sprints/2026-10-27-sprint-01.md](sprints/2026-10-27-sprint-01.md); sprint 2 (2026-10-28–29) tamamlandı, 0.44.0: Kubeat'in kendi arızası sessiz kalmaz ve kayıp yaratmaz (S29 öz-sağlık kuralları + CI'da promtool, S25 kesinti bildirimi kaybı ve ölü makine kanalı, S31 kaldırmada PVC koruması, S32 sonuç yazılamazken heartbeat); sandbox 0.44.0'da; gerçek ortam provaları (firing, kaldırma ve yeniden kurulum, SIGTERM, dolu volume) kullanıcıda; puanlar 3,5/5 ve retro [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md); sprint 3 (2026-10-29'dan) planlandı, hedef 0.45.0: imzalı ve SBOM'lu yayım, OpenShift dışında da yazılabilir volume'la kuran ve sürümü CI'da denetlenen README komutu, 4xx'te duraklamayan ve bildirim alamayan kanalı adıyla alarmlayan teslimat, heartbeat'siz kurulumda da critical yanan ve tek depoda cluster başına değerlendirilen öz-sağlık kuralları (S10+S11 #47, S1 #48, S26 #49, S38+S37 #50; [sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)); sprint 4'ün korumalı yerleri: S12+S15+S30 doküman paketi ve S28 |
+| 30 | Tedarik zinciri: cosign ile imzalı imaj ve chart, SBOM/provenance, SECURITY.md | Sprint 3'te (S1, #48); release.yml S11'in etiket denetiminden (#47) sonra değişir; doğrulama önce `workflow_dispatch` kuru denemesinde, sonra v0.45.0 etiketinde; destek penceresi taahhüdü yok ([backlog](backlog.md)) |
+| 31 | Hızlı başlangıç ve kurulum belgeleri: güncel kurulum komutu, OpenShift dışı fsGroup notu, yükseltme notları docs/yukseltme.md, lisansın nasıl istendiği, operator'süz cluster için öz-sağlık kuralları (S30) | Sprint 3: S10+S11 (#47; fsGroup'lu komut ve NOTES uyarısı, CI'da ve yayımda denetlenen sürüm, sabit Helm); S12+S15+S30 sprint 4'ün korumalı 1. maddesi |
 
 Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
 
@@ -115,6 +115,12 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 
 - Backend tek replica çalışır; güncelleme sırasında kontroller durur
   (gerçek OpenShift'te ölçülen boşluk 23–27 sn).
+- Veri PVC'si attach'i uygulayan blok depolama ister. NFS, CephFS, EFS,
+  Azure Files gibi ağ dosya sistemlerinde iki pod aynı anda yazıp SQLite'ı
+  bozabilir. Node çökünce backend pod'u Terminating'de kalabilir ve yeni pod
+  volume'u bağlayamayabilir (Multi-Attach); Kubeat kendiliğinden dönmeyebilir
+  ve `KubeatDown` yanar. Adımlar S41'de (sprint 4 kuyruğu,
+  [sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
 - Veri volume'u dolunca kontrol sonuçları yazılamaz ve kaybolur (bellekte
   tutulmaz): olay açılmaz, bildirim gitmez. Kubeat bunu kendisi duyuramaz;
   dışarıdaki heartbeat kesilir ve chart'ın `KubeatResultsDropped` alarmı
@@ -149,9 +155,31 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun ağına bağlıdır.
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye
   `kubeat.io/monitor` annotation'ı eklenir.
-- Annotation eşitlemesi her turda tüm cluster'ın Service, Pod, Ingress, Route
-  ve workload listesini çeker; binlerce pod'lu cluster'da aralık uzatılmalıdır.
-- Bakım sırasındaki başarısız kontroller uptime'a dahildir.
+- Annotation eşitlemesi her turda Service, Pod, EndpointSlice, Ingress,
+  Route ve workload listelerini (cluster geneli keşifte tüm cluster'ınkini)
+  sayfalamadan belleğe alır. SRE'nin yerel sentetik ölçümüne göre
+  varsayılan 256Mi bellek limiti 6–7 bin pod civarında aşılabilir;
+  OOMKill'den sonraki açılış yine eşitlemeyle başladığı için döngü kurulur
+  ve kontroller durur. Aralığı uzatmak belleği değiştirmez: büyük cluster'da
+  `backend.resources.limits.memory` artırılmalı ya da keşif
+  `discovery.namespaces` ile sınırlanmalıdır (S42, sprint 4 kuyruğu).
+- Annotation eşitlemesinin hatası yalnızca WARN olarak loglanır; metriği ve
+  alarmı yoktur. Namespace sınırlı keşifte listedeki tek bir namespace
+  okunamazsa (silinmiş ya da 403) bütün tur bırakılır: öteki
+  namespace'lerde yeni annotation'lar izlenmez, kaldırılanların monitor'leri
+  yerinde kalır (S43, sprint 4 kuyruğu).
+- Gateway API HTTPRoute okunmaz; keşif adayı ya da annotation hedefi
+  değildir. Ingress'ten HTTPRoute'a geçerken Ingress silinince monitor
+  geçmişiyle birlikte kalkar; geçişten önce elle monitor oluşturun (S49,
+  [backlog](backlog.md) "Gateway API HTTPRoute keşfi ve annotation
+  hedefi").
+- Bakım sırasındaki başarısız kontroller durum sayfasında ve raporda
+  uptime'a dahildir. Bakımda olay açılmadığından rapor CSV'sinde aynı
+  kontroller `uptime_percent`'e girer, `downtime_seconds`'a girmez; SLA için
+  `downtime_seconds` kullanılmalıdır (S45, [backlog](backlog.md) "Duyurulan
+  bakımı durum sayfası ve rapor uptime'ından ayırmak").
+- Raporlar son N günü UTC'de ve o anki saatle biten bir dönem için verir;
+  takvim ayı alınamaz (S44, sprint 4 kuyruğu).
 - Cluster API'ye monitor'ün başarısızlık eşiği kadar kontrol boyunca
   ulaşılamazsa `workload` ve `each_pod` monitor'leri kesinti açar ve
   bildirim gönderir; API kesintisi hedefin kendi hatasından ayrılmaz (S20,
@@ -189,7 +217,7 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   çakışır: `dedup_key` kurulum kimliği taşımaz (`kubeat-incident-<n>`), bir
   cluster'ın kesintisi diğerinin açık alarmına eklenir ve ilk düzelme
   ikisini de kapatır. Her kuruluma ayrı bir PagerDuty servisi verin (S28,
-  sprint 3 adayı; [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)).
+  sprint 4'ün korumalı maddesi; [sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
 - Chart'ın alarmları backend'i cluster'ın Prometheus'u scrape edebildiği
   sürece görür: Kubeat 10 dakikadan uzun düşerse kesinti, sertifika ve yedek
   alarmları çözülür. README'deki susturma kuralı, alarmları alan

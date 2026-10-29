@@ -307,6 +307,45 @@ Veritabanı bozulursa yedekten dönüş README "Yedekleme ve geri yükleme"
 bölümündedir; şifreleme anahtarı `kubeat-secret-key` Secret'ındadır ve
 yedekle birlikte saklanmalıdır.
 
+## Yükseltmeden önce yedek
+
+Sandbox her sürümle yükseltilir; gerçek bir pilotta yükseltme yalnızca
+ekibi engelleyen bir hata için yapılır (yukarıda "Dokunmayın"). İkisinde de
+yükseltmeden önce en yeni yedek kopyası ve şifreleme anahtarı cluster
+dışına alınır ve kopyanın sağlama toplamı pod'daki dosyanınkiyle
+karşılaştırılır. Blok "yedek doğrulandı" demiyorsa yükseltme yapılmaz.
+Backend imajında `tar` olmadığından `kubectl cp` yerine `exec ... cat`
+kullanılır:
+
+```sh
+NS=kubeat                          # sandbox'ta kendi namespace'iniz
+B=$(oc -n "$NS" exec deploy/kubeat-backend -- sh -c 'ls -1 /backup/kubeat-*.db | tail -n 1')
+F=$(basename "$B")
+oc -n "$NS" exec deploy/kubeat-backend -- cat "$B" > "$F"
+oc -n "$NS" get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d > kubeat-secret.key
+POD=$(oc -n "$NS" exec deploy/kubeat-backend -- sha256sum "$B" | cut -d' ' -f1)
+YEREL=$(shasum -a 256 "$F" | cut -d' ' -f1)   # Linux'ta: sha256sum "$F"
+if [ -n "$POD" ] && [ "$POD" = "$YEREL" ] && [ -s kubeat-secret.key ]; then
+  echo "yedek doğrulandı: $F"
+else
+  echo "YEDEK DOĞRULANMADI: yükseltmeyin"
+fi
+```
+
+- Kopya adları zamana göre sıralanır, son satır en yeni kopyadır; yazılmakta
+  olan kopya (`.partial`) listeye girmez. `/backup` boşsa ya da yoksa
+  yedekleme kapalıdır (`backup.enabled`).
+- Backend pod'u yoksa (sandbox uyutmuşsa) önce
+  `oc -n "$NS" scale deploy/kubeat-backend --replicas=1` ve
+  `oc -n "$NS" rollout status deploy/kubeat-backend`.
+- Kopya en yeni yedektir: yaşı en çok `backup.interval` kadardır ve
+  kaybedilebilecek veri budur. Kopyayı ve anahtarı ayrı, erişimi kısıtlı
+  yerlerde saklayın; yükseltme sorun çıkarırsa dönüş README "Yedekleme ve
+  geri yükleme"dedir.
+- Release adı `kubeat` değilse `kubeat-backend` ve `kubeat-secret-key`
+  adlarındaki ön eki değiştirin. `kubectl` ile komutlar aynıdır; minikube'da
+  yalnızca `--context minikube` ile.
+
 ## Pilot sonunda
 
 Ekiple son görüşme, üç karar sorusu:
@@ -327,9 +366,10 @@ Ekiple son görüşme, üç karar sorusu:
 - Lisans süresi ve kapsamı sözleşmeye göre yenilenir.
 
 **Durdur** kararı verildiyse, veriyi saklamak istiyorsanız kaldırmadan önce
-son yedeği ve anahtarı dışarı alın (README "Yedekleme ve geri yükleme");
-oradaki kopyalama komutları backend Deployment'ı üzerinden çalışır ve
-kaldırmayla o da gider. Sonra:
+son yedeği ve anahtarı dışarı alın (yukarıdaki "Yükseltmeden önce yedek"
+bloğu bunu doğrulayarak yapar; README "Yedekleme ve geri yükleme").
+Kopyalama komutları backend Deployment'ı üzerinden çalışır ve kaldırmayla o
+da gider. Sonra:
 
 ```sh
 helm -n kubeat uninstall kubeat

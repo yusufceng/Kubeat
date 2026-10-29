@@ -40,6 +40,16 @@ düzeltmesi S26 ile birlikte ve S30'dan önce yapılır
 ([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
 "Müşterilerin yeni bulguları" 4).
 
+Güncelleme (2026-10-29, sprint 3 planı): kural düzeltmesi S37 olarak sprint
+3'te geliyor, S26 ile değil S38 ile aynı maddede (#50): yeni chart değeri
+`metrics.prometheusRule.clusterLabel` (varsayılan boş; boşken kurallar 0.44
+ile aynı, verilince ifadeler bu etiketi `by` ile taşır, yokluk penceresi 24
+saat). `without (...)` seçilmedi, çünkü dedup'suz depoda replica etiketini
+tutar. Belge (S30) sprint 4 doküman paketinde ve S37'den sonra; S37 bu
+sprintte çıkarılırsa S30 "kuralları cluster başına değerlendirin"
+uyarısıyla yayımlanır. 2026-10-12 kararı (PrometheusRule) korunur
+([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
@@ -236,6 +246,17 @@ girdiği, 0600 dosyalar için aynı UID'de çalışan CronJob örneği) ve
 imaja `tar` kabul (UBI paketi, taban imaj güncellemesiyle Dependabot
 kapsar).
 
+Güncelleme (2026-10-29, sprint 3 planı): tetikleyici (pilot kararı)
+bilerek açıldı. Müşteri A filoya yaygınlaştırma için tek ve doğrulanabilir
+bir yükseltme öncesi yedek adımını şart koşuyor; sprint 2 retrosunda
+sandbox yükseltmesinden önceki yerel kopya bir komut hatası yüzünden
+alınamamıştı. Sprint 3'te dolgu yeri yok, sprint 4 kuyruğunda 8. sırada.
+Ürün kısmı (imaja `tar`, README'de "Yükseltmeden önce yedek" bloğu,
+kopyaları cluster dışına almak) S12'nin `docs/yukseltme.md` "Yapılacak"
+adımına bağlanır. Retronun süreç kısmı `tar` gerektirmez: kopya `exec ...
+cat` ile alınıp sağlama toplamıyla pod'daki dosyaya karşı doğrulanır; bu
+planla [pilot.md](pilot.md) "Yükseltmeden önce yedek"e yazıldı.
+
 ## Yedek kopyalarını S3 uyumlu depoya yüklemek
 
 2026-10-27'de ertelendi (S8). `UPTIME_BACKUP_S3_*` ile her başarılı kopyanın
@@ -315,6 +336,13 @@ BA'nın "sprint 3'ün ilk adayı" önerisi kabul edilmedi, çünkü sprint 3'ün
 ilk yerleri müşteri engelleyicilerinin (S10+S11, S1); sprint 3–4 adayı.
 README'deki GKE zonal notu sprint 3'te S12 ile gelir.
 
+Güncelleme (2026-10-29, sprint 3 planı): yeni kanıt yok ve tetikleyici
+bilerek genişletildi, çünkü sandbox pod'ları uyuttuğu için pilotta
+ölçülemiyor ([pilot.md](pilot.md) "Güncelleme (2026-10-27)"). Yeni
+tetikleyici: ilk gerçek cluster kurulumunda ya da GKE zonal control plane
+yükseltmesinde görülen, API kaynaklı yanlış kesinti. GKE zonal notu
+README'ye S12 ile, sprint 4'te gelir.
+
 ## Okuma havuzuna bağlantı sınırı ve durum sayfasına eşzamanlılık sınırı
 
 2026-10-27'de ertelendi (S21). Okuma havuzu sınırsız (`sqlite.go`
@@ -345,6 +373,13 @@ kaldı. Tetikleyici: alarm yanınca ya da sprint 3. Karar: varsayılan `60s`,
 monitor'lere dokunulmaz, açılışta WARN ile listelenir, sonraki düzenlemede
 reddedilir; `UPTIME_WORKERS` açıklamasına boyutlandırma kuralı.
 
+Güncelleme (2026-10-29, sprint 3 planı): tetikleyicinin "sprint 3" yarısı
+bilerek kaldırıldı. Dört yer daha yüksek risklere gitti, yeni kanıt yok,
+tespit yolu (`KubeatWorkersSaturated`) yerinde ve yanmadı. Yeni tetikleyici:
+`KubeatWorkersSaturated`'ın yanması ya da S38'in "`Healthy` takılı
+worker'ları da saysın mı" sorusunun açılması; ikisi birlikte
+değerlendirilir.
+
 ## .env.example'ı tamamlamak ve config ile karşılaştıran CI denetimi
 
 2026-10-27'de ertelendi (S24). `.env.example` 11 ayarı eksik (OIDC claim/CA/
@@ -355,6 +390,11 @@ denetler. Sprint 3 dolgusu (S); tetikleyici: chart dışı kurulum isteyen ilk
 kullanıcı ya da sprint 1-2'de bir sapma görülürse. Karar: betik Makefile'da
 (`make lint`), CI onu çağırır; chart values ile karşılaştırma yok (chart her
 ayarı `extraEnv` ile alır).
+
+Güncelleme (2026-10-29, sprint 3 planı): sprint 3'te de alınmadı. Sapma
+büyümedi, eksik yine aynı 11 değişken; tamamlanma tanımı yeni ayarlarda
+işliyor ve dolgu yeri yok. Tetikleyici aynı: chart dışı kurulum isteyen ilk
+kullanıcı ya da yeni bir sapma.
 
 ## Yedek sıkıştırma ve dolan yedek PVC'sini büyütme
 
@@ -540,6 +580,14 @@ vermek; otomatik türetme gerekmiyor. İkisi de sprint 3 PO turunda
 değerlendirilir ([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
 "Müşterilerin yeni bulguları" 2 ve 3).
 
+Güncelleme (2026-10-29, sprint 3 planı): ikisi de sprint 3'te. Birincisi
+S26 (#49): 4xx dönen makine kanalı canlı sayılır ve duraklamaz; yalnızca
+"ulaşılamadı" ve "meşgul" (429, `Retry-After`'lı 503) sınıfları duraklatır.
+İkincisi S38 (#50): `UPTIME_NOTIFY_QUEUE_SIZE` varsayılanı 1000 olur
+(`UPTIME_MAX_MONITORS` ile aynı), etkin monitor sayısı kuyruğun üstüne
+çıkınca WARN verilir. "Otomatik türetme yok" kararı korunur
+([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+
 ## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
 
 2026-10-28'de ertelendi (S33,
@@ -617,6 +665,16 @@ kurulum"a bir cümle. PMO bunu sprint 3 doküman paketine öneriyor
 "Müşterilerin yeni bulguları" 5). Minikube provası henüz yapılmadı; kararı
 PO verir.
 
+Güncelleme (2026-10-29, sprint 3 planı): tetikleyici 2026-10-29 minikube
+provasında yandı: eski yönetici parolası 200, kurulum notlarının gösterdiği
+parola 401 aldı ([yedek-geri-yukleme.md](yedek-geri-yukleme.md) "Prova:
+2026-10-29"). PO kararı ikinci seçenek: `helm.sh/resource-policy: keep` üç
+Secret'a da girer, metrik anahtarı dahil, ve
+`backend.persistence.keepOnUninstall`'a bağlanır. NOTES'ta `lookup` uyarısı
+seçilmedi, çünkü `helm template`'te ve Argo CD'de boş kalır. Hikâye S39;
+sprint 4 kuyruğunda 3. sırada, S41 ile
+([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+
 ## Dolan veri volume'u: büyütme, kotaya göre saklama, yazılamayan sonuçlar
 
 2026-10-29'da ertelendi (S32'nin kapsam dışı parçaları, #39). 0.44'ten
@@ -645,6 +703,13 @@ heartbeat'ten bağımsız bir gauge olarak yayınlamak ve `critical` bir
 kalır, böylece PO kararı bozulmaz. Kararı sprint 3 PO turu verir
 ([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
 "Müşterilerin yeni bulguları" 1; PMO önerisi kuyruğun 5. sırası).
+
+Güncelleme (2026-10-29, sprint 3 planı): Müşteri A'nın gauge ve critical
+kural önerisi S38 (#50) ile sprint 3'te geliyor; `KubeatResultsDropped`
+warning olarak kalır. Log taşkını notu (sprint 2 provası 4a): volume
+doluyken backend her toplu yazımda bir WARN yazıyor; öneri dakikada bir
+özet satırı, tetikleyici log hacmi şikâyeti. Dolu volume'dan dönüş runbook'u
+S41'de (sprint 4 kuyruğu, 3. sıra).
 
 ## Kaldırmaya karşı korumanın kalanları: Argo CD prune, PV düzeyi, prova kaydı
 
@@ -693,3 +758,93 @@ almayacağına bakar.
   değil. S27 ile birlikte alınır.
 
 Tetikleyici: S26 ya da S27 sprint'e girdiğinde, ya da pilotta görülürse.
+
+Güncelleme (2026-10-29, sprint 3 planı): 1. köşe S26 (#49) ile sprint 3'te;
+kabul ölçütü maddeye kapandı notu ister. 3. köşedeki bekleyen liste ölçüsü,
+S26'daki "teslim edilmemiş kesinti bildirimi kanalın alarmını açık tutar"
+kararının (PO'nun ek kabul ölçütü) mekanizması olabilir; developer seçer.
+2. köşe S40'a, 4. köşe S27'ye gider (sprint 4 kuyruğu, 6. ve 5. sıra)
+([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+
+## Duyurulan bakımı durum sayfası ve rapor uptime'ından ayırmak
+
+2026-10-29'da ertelendi (S45,
+[sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+Müşteri B (önemli): durum sayfası planlı bakımı müşteriye uptime kaybı
+olarak gösteriyor; 1 saatlik planlı bir bakım 30 günlük %99,9 hedefini tek
+başına deliyor. Müşteri A (önemli, aynı kök): bakımdaki başarısız
+kontroller rapor CSV'sinde `uptime_percent`'e giriyor, ama bakımda olay
+açılmadığı için `downtime_seconds`'a girmiyor; aynı satırdaki iki sayı
+birbirini tutmuyor. L boyutlu ve migration ister (saatlik özetler bakımı
+ayırmıyor). Ön koşulu S33 ve S6, yani üç slot: "Sustur" bugün bir bakım
+penceresi açtığı için S33'süz ayırmak gerçek bir kesintiyi uptime'dan
+silerdi. Müşteriye dönük sayfanın asıl yeri dışarıdan bakan tamamlayıcı
+araçtır (S35 kararı). Tetikleyici: durum sayfasının dışarı açılması (S33,
+S35 ve S21 ile aynı) ya da gerçek bir SLA şikâyeti. Kararlar: varsayılan
+değişmez; ayrı `maintenance_seconds` sütunu eklenir, eski sütunların yeri
+değişmez; yalnızca duyurulan bakım penceresi ayrılır, susturma ayrılmaz.
+Ara önlem: yol haritası "Bilinen sınırlar" iki sayının uyuşmazlığını ve
+SLA için `downtime_seconds`'ı yazar (bu plan), README cümlesi S12 ile.
+
+## Kapsamlarda namespace önek deseni, ör. `odeme-*`
+
+2026-10-29'da ertelendi (S47). Müşteri A (önemli): ekip yetkilendirmesi 60
+ekip × 30 cluster'da elle yürüyor. Kapsam yalnızca tam namespace adı
+alıyor; ekip yeni bir namespace açınca her cluster'daki grup eşlemesi ve
+ekibin kanal kapsamı elle güncelleniyor, o zamana kadar ekip annotation'la
+gelen monitor'ü göremiyor. L boyutlu ve yetki modelinin bütün okuyucularına
+dokunur: `CanRead`/`CanEdit`, kanalın ve bakım penceresinin `Covers`'ı, olay
+listesinin SQL süzgeci, lisansın `narrows`'u; risk orta. Pilot bunu
+gerektirmiyor. Tetikleyici: pilot "devam" kararıyla çok cluster'a
+yaygınlaştırma ya da ilk kurumsal görüşme. Karar taslağı: yalnızca sondaki
+tek `*` kabul edilir (`odeme-*`), başka joker API'de reddedilir; `narrows`
+deseni tanır; desenli kapsam koymak `scoped_access` ister; OpenShift
+RBAC'tan rol türetilmez (giriş kararı). ADR-0002 notu hikâyeyle girer:
+desen kısıtın kendisidir, lisans bitince desene uyan yeni namespace'lerin
+görünmesi erişimi genişletmiş sayılmaz.
+
+## Lisans bitiminden sonra sabit ek süre
+
+2026-10-29'da ertelendi (S48). Müşteri A (önemli, risk): lisans bittiği an
+LDAP ve OIDC ile giriş kapanıyor; geriye yerel admin ve API anahtarı
+kalıyor, izleme durmuyor. Satın alma onayı ve imzalı dosyanın 30 cluster'a
+dağıtılması bitişten önceki 30 günlük uyarıyı aşabilir; "lisans bitince
+kullanıcıları dışarıda bırakıyor" maddesi risk komitesinde açılıyor.
+Tetikleyici yanmadı: satın alma görüşmesi ya da sözleşme taslağı yok, pilot
+lisansı süreye bir ay pay içeriyor. Müşteri A kararı sözleşmeden önce
+istediği için yön şimdiden verildi: ek süre kodda sabit 30 gün olur; ayar
+ya da lisans dosyası alanı eklenmez (ADR-0002: uyarı süresi ürün kararıdır,
+ayar değildir). Ek sürede kurumsal özellikler açık kalır ve yöneticiler
+uyarı görür; `kubeat_license_expiry_timestamp_seconds` sözleşme bitişini
+vermeye devam eder. İzleme durmadığı ve erişim genişlemediği için
+ilkelere aykırı değil; ADR-0002'ye tarihli ek not hikâyeyle girer.
+Tetikleyici: ilk satın alma görüşmesi ya da sözleşme taslağı.
+
+## Gateway API HTTPRoute keşfi ve annotation hedefi
+
+2026-10-29'da ertelendi (S49). Müşteri B (önemli): Ingress'ten Gateway
+API'ye (HTTPRoute) geçince annotation ile izleme uyarısız bitiyor.
+HTTPRoute'taki `kubeat.io/monitor` okunmuyor; Ingress silinince monitor
+geçmişiyle birlikte kalkıyor ve durum sayfasından düşüyor, kanala bir şey
+gitmiyor. Keşif RBAC'ında `gateway.networking.k8s.io` yok; adaylar Route,
+Ingress, Service ve workload. HTTPRoute, OpenShift Route'unun üst akımdaki
+karşılığı: cluster-native farkın doğal ve stratejik bir genişlemesi.
+ingress-nginx'in bakımdan çıkması Müşteri B'nin beyanı (doğrulanmadı). Bugün
+Gateway API kullanan bir kurulum yok; iş L boyutlu (backend, chart RBAC, iki
+dil, belge). Tetikleyici: Gateway API kullanan ilk kurulum ya da
+Ingress'ten HTTPRoute'a ilk gerçek geçiş. Kararlar: CRD ya da okuma izni
+yoksa sessizce atlanır (Route gibi); geçişte monitor geçmişi taşınmaz. Ara
+önlem: yol haritası "Bilinen sınırlar" satırı (bu plan; geçişten önce elle
+monitor oluşturun), README cümlesi S12 ile.
+
+## Prometheus yokken pod CPU ve belleğini metrics.k8s.io'dan okumak
+
+2026-10-29'da ertelendi (S50). Müşteri B (hoş olur): GKE'de monitor
+sayfasındaki pod panelinin CPU ve belleği boş kalıyor. Kubeat yalnızca
+bearer token'lı bir Prometheus okuyor; her GKE cluster'ında hazır olan
+`metrics.k8s.io` (metrics-server) kullanılmıyor. Kanıt zayıf ve aynı işi
+başka araç yapıyor: Müşteri B aynı veriyi Grafana Cloud'un Kubernetes
+panolarında görüyor; şişirme riski var. Tetikleyici: operator'süz ilk
+gerçek kurulum. Karar taslağı: `prometheus.url` boşken anlık değerler
+PodMetrics'ten okunur, ek ayar yok, geçmiş grafiği yok. Sınır paragrafı S30
+ile (sprint 4 doküman paketi).

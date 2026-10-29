@@ -1,7 +1,7 @@
 export const meta = {
   name: 'kubeat-sprint-delivery',
   description: 'Sprint geliştirme: her issue kendi worktree’sinde bir developer ajanıyla yapılır, SRE ya da BA inceler, ret alan madde için bir düzeltme turu',
-  whenToUse: 'Plan main'e girince. args: sprintFile, storiesFile (seçilen hikâyeler JSON), coauthor (commit atıf satırı), chains (paralel zincirler; her öğe issue, story, branch, base, reviewer). Döner: her madde için item, dev, review, rounds.',
+  whenToUse: 'Plan main dalına girince. args: sprintFile, storiesFile (seçilen hikâyeler JSON), coauthor (commit atıf satırı), chains (paralel zincirler; her öğe issue, story, branch, base, reviewer). Döner: her madde için item, dev, review, rounds.',
   phases: [
     { title: 'Geliştirme', detail: 'Developer ajanları, ayrı worktree’ler; zincirli maddeler öncekinin worktree’sinde' },
     { title: 'İnceleme', detail: 'SRE/BA kabul ölçütlerine göre diff ve testler' },
