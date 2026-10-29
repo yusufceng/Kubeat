@@ -1607,7 +1607,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors
   bağlanır: API'yi çağıran Job'un namespace'ini oraya ekleyin (bkz.
   "Güvenlik", Ağ erişimi).
 - Pilotta haftalık ölçümün API'den nasıl toplandığı:
-  [docs/pilot.md](docs/pilot.md) "Pilot boyunca". Yükseltmeden önceki
+  [docs/pilot.md "Pilot boyunca"](docs/pilot.md#pilot-boyunca). Yükseltmeden önceki
   denetimlerin betikleri yükseltme notlarındadır (bkz. "Cluster'a
   kurulum", Yükseltme).
 
