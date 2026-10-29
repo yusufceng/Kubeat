@@ -51,7 +51,7 @@ ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
 cluster'a kurulum:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.43.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0 \
   -n kubeat --create-namespace
 ```
 
@@ -260,6 +260,54 @@ Varsayılan davranış üç yerde değişir:
   `kubeat_notification_attempts_total` metriğindedir (bkz. "Aracın kendi
   sağlığı").
 
+### 0.44'e yükseltme
+
+0.44 Kubeat'in kendi arızalarını sessiz bırakmaz ve kayıp yaratmaz. Şema
+değişmez; 0.43.0'a `helm rollback` ile dönülebilir. Varsayılan davranış şu
+yerlerde değişir:
+
+- **Kaldırmada PVC'ler kalır.** `helm uninstall`, Argo CD 2.7 ve sonrasında
+  uygulamayı silmek de, veri ve yedek PVC'lerini bırakır; eski davranış için
+  `backend.persistence.keepOnUninstall=false` ve
+  `backup.persistence.keepOnUninstall=false`. 0.43'ten gelirken yedeği
+  kapatmayı (`backup.enabled=false`) ya da `existingClaim`'e geçişi
+  yükseltmeyle aynı adımda yapmayın: Helm canlı nesneye baktığından 0.43'ün
+  yedek PVC'si o adımda yine silinir. Önce aynı values ile 0.44'e yükseltin
+  (bkz. "GitOps ile kurulum" ve "Yedekleme ve geri yükleme").
+- **Öz-sağlık alarmları sorun sürdükçe açık kalır.** `KubeatDown` backend
+  pod'u hiç yokken de yanar; `up{job="<release>-backend",
+  namespace="<namespace>"}` serisine bakar, ServiceMonitor kapalıyken bu
+  etiketlerle toplayan başka bir scrape yoksa sürekli yanar.
+  `KubeatMonitorDown` ve `KubeatCertificateExpiring` 10 dakikaya kadar süren
+  scrape boşluğunda açık kalır; `KubeatBackupFailing` yeni
+  `kubeat_backup_last_failure_timestamp_seconds` metriğine bakar ve bir kopya
+  başarılı olana kadar açık kalır. Bu dört alarmın etiketleri değiştiği için
+  yükseltmede (ve 0.43'e dönüşte) açık olanlar bir kez "resolved" olur ve yeni
+  etiketlerle yeniden yanar. Kubeat 10 dakikadan uzun düşükken alarmların
+  "resolved" gitmemesi için alarmları alan Alertmanager'a `KubeatDown`
+  susturma kuralını ekleyin (bkz. "Aracın kendi sağlığı").
+- **Heartbeat yazılamayan sonuçta kesilir.** `UPTIME_HEARTBEAT_URL` açıksa
+  heartbeat, kontrol sonuçları veritabanına yazılamazken de kesilir;
+  yükseltme anında veri volume'u zaten doluysa dış switch hemen alarm verir.
+  Reddedilen toplu yazım artık satır başına `check result dropped` yerine
+  yazım başına tek `batch insert failed` satırı loglar; bu satıra bakan log
+  alarmlarını taşıyın. Veri PVC'sinin boyut kuralı "Geçmiş verisi"nde.
+- **Bildirim yeniden başlatmada ve ölü makine kanalında kaybolmaz.**
+  Yeniden başlatmada kuyrukta ya da grup beklemesinde kalmış açık
+  kesintiler, kesintiden önce var olan kanallara gönderilir. 0.44'ün ilk
+  açılışında bildirim kaydında hiç denemesi olmayan açık kesintiler de (0.43'te
+  kuyrukta kaybolmuş ya da kanal kapalı veya kapsam dışıyken açılmış olanlar)
+  bir kez gider; yükseltmeden önce açık kesintilere bakın. Bildirim almayan
+  bir webhook ya da PagerDuty kanalına yeni bildirim denenmez, kanalın
+  yeniden deneme zamanında gider; bir bildirimi sürekli reddeden (ör. 409)
+  kanalda diğer bildirimler en çok `UPTIME_NOTIFY_RETRY_MAX` (bir bildirimin
+  ilk reddedildiği geçişte bir geçiş daha) gecikir ve bu sürede aynı monitor
+  için bekleyen hatırlatmanın ve yavaşlık bildiriminin yerini yenisi alır.
+  Kapanışta insan kanallarının bekleyen grupları kuyruktan önce gider ve
+  kapanış `UPTIME_SHUTDOWN_TIMEOUT` ile sınırlıdır; yeni chart değeri
+  `backend.terminationGracePeriodSeconds` (varsayılan 30) bu süreden en az 5
+  sn uzun tutulmalıdır (bkz. "Alarm").
+
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
 Chart dört Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde
@@ -312,7 +360,7 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.43.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
