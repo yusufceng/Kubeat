@@ -219,6 +219,19 @@ func (s *schedule) hasRetry(channelID int64, event Event, incidentID int64) bool
 	return false
 }
 
+// undelivered counts, by channel, the outages still to be sent to it
+// again: those it did not take, and those held back for it while it is
+// paused. A grouped message counts each of its outages.
+func (s *schedule) undelivered() map[int64]int {
+	counts := make(map[int64]int)
+	for _, r := range s.retries {
+		if r.note.Event == EventDown && !r.once {
+			counts[r.channel.ID] += len(members(r.note))
+		}
+	}
+	return counts
+}
+
 // retriesDue returns the retries due by now, in the order they came up.
 func (s *schedule) retriesDue(now time.Time) []*retry {
 	var out []*retry

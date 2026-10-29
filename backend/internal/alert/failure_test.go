@@ -585,6 +585,46 @@ func TestARefusedChatMessageDoesNotHoldBackTheOthers(t *testing.T) {
 	}
 }
 
+// The metrics follow the channel: its last delivery from its row, and the
+// outages it has not taken from the engine's list. A webhook that refuses
+// one monitor's outage and takes the next reads as delivering, and still
+// has the outage it did not take, until the outage is over.
+func TestTheChannelMetricsFollowTheEngine(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.retrying(15*time.Minute, time.Hour)
+	f.engine.opts.Metrics.WatchMonitors(f.db, 5*time.Second, f.engine.opts.Logger)
+	receiver := f.answer()
+	receiver.set("ops/bad", http.StatusUnprocessableEntity, "")
+	bad, good := f.monitorIn("bad", ""), f.monitorIn("good", "")
+	const ok, undelivered = "kubeat_channel_last_delivery_ok{channel=ops}{channel_type=webhook}", "kubeat_channel_undelivered_outages{channel=ops}{channel_type=webhook}"
+	reads := func(when string, wantOK, wantUndelivered float64) {
+		t.Helper()
+		values, err := f.engine.opts.Metrics.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotOK, okThere := values[ok]
+		gotUndelivered, undeliveredThere := values[undelivered]
+		if !okThere || !undeliveredThere || gotOK != wantOK || gotUndelivered != wantUndelivered {
+			t.Errorf("%s: last delivery ok %v (there: %v), undelivered outages %v (there: %v); want %v and %v",
+				when, gotOK, okThere, gotUndelivered, undeliveredThere, wantOK, wantUndelivered)
+		}
+	}
+
+	f.clock = f.clock.Add(30 * time.Second)
+	f.result(bad, false)
+	f.flush()
+	reads("bad's outage refused", 0, 1)
+	f.clock = f.clock.Add(30 * time.Second)
+	f.result(good, false)
+	f.flush()
+	reads("good's outage taken", 1, 1)
+	f.clock = f.clock.Add(30 * time.Second)
+	f.result(bad, true) // its outage is over; its end is refused too
+	f.flush()
+	reads("bad's end refused", 0, 0)
+}
+
 // rateLimited stands for PagerDuty's Events API under its rate limit: of
 // the sends to one channel it takes limit a window and answers the rest
 // 429, with a Retry-After that says when the next window opens. A window

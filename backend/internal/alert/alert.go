@@ -505,8 +505,10 @@ func takeDue(groups map[groupKey]*pendingGroup, now time.Time, everything bool) 
 // deliverOwed), with what else is owed; a channel software reads that an
 // attempt did not reach, or that was busy, is sent nothing until then
 // (paused), so that one that is down holds up the loop once per wait
-// rather than once per notification.
+// rather than once per notification. After every turn the metrics get
+// what the channels have not taken of the outages (publish).
 func (e *Engine) Run(ctx context.Context) {
+	defer e.publish()
 	if e.opts.DrainTimeout > 0 {
 		halt, stop := context.WithCancel(context.Background())
 		defer stop()
@@ -529,6 +531,7 @@ func (e *Engine) Run(ctx context.Context) {
 	// channel is owed. Since Go 1.23 a stopped timer is reset without
 	// draining its channel.
 	rearm := func() {
+		e.publish()
 		timer.Stop()
 		next := e.owed.next()
 		for _, g := range groups {
@@ -610,6 +613,15 @@ func (e *Engine) Run(ctx context.Context) {
 	if left > 0 {
 		e.opts.Logger.Warn("shutting down: notifications not sent within UPTIME_SHUTDOWN_TIMEOUT; the outages among them are sent at the next start",
 			"count", left)
+	}
+}
+
+// publish hands the metrics, for KubeatNotificationsFailing, how many
+// outages each channel has not taken and is still to be sent again
+// (schedule.undelivered). Only the loop's goroutine calls it.
+func (e *Engine) publish() {
+	if e.opts.Metrics != nil {
+		e.opts.Metrics.UndeliveredOutages(e.owed.undelivered())
 	}
 }
 
