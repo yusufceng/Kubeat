@@ -35,7 +35,8 @@ import (
 // it was sent is paused until its next retry (Engine.paused): what comes
 // up for it meanwhile is not attempted but held back for that retry's
 // pass, where it goes with what else waits for the channel, once only if
-// it is not attempted again otherwise (retry.once). These too are in
+// it is not attempted again otherwise (retry.once), and what the channel
+// refused fewer times goes first (outbound.order). These too are in
 // memory: at a start the delivery log says which open outages a channel
 // was sent and did not take, and they are sent again, and which a channel
 // without a delay was never sent, having been queued or waiting for its
@@ -74,18 +75,21 @@ type owedKey struct{ channel, monitor int64 }
 type retry struct {
 	channel store.Channel
 	note    Notification
-	// since is when the first attempt failed; the end of an outage is
-	// attempted again for Options.RetryFor from then.
+	// since is when the first attempt failed, or was to be made for a note
+	// held back (retryLater); the end of an outage is attempted again for
+	// Options.RetryFor from then.
 	since time.Time
 	due   time.Time
 	// wait is how long the attempt after the next waits: twice the last
 	// wait, Options.RetryMax at most.
-	wait     time.Duration
-	attempts int // attempts that failed so far, for the log
+	wait time.Duration
+	// attempts are the attempts that failed so far: for the log, and for
+	// the order a channel that pauses is sent its notes in (outbound.order).
+	attempts int
 	// once marks a notification held back for a paused channel that is
 	// not attempted again otherwise (Engine.retries): a reminder, a
 	// certificate or slowness notification. It goes in the pass it was
-	// held back for, and is given up if the channel takes nothing then.
+	// held back for, and is given up if the channel does not take it then.
 	once bool
 }
 
@@ -336,9 +340,11 @@ func (e *Engine) paused(ch store.Channel, now time.Time) *retry {
 // others (deliver) waits the same way, with no attempt counted against
 // it. A first note held back for a channel software reads (deliver,
 // paused) waits for the channel's next pass and goes in it, once only if
-// it is not attempted again otherwise; the channel taking nothing in it
-// gives that one up. Everything else, and everything with the attempts
-// off, has failed for good.
+// it is not attempted again otherwise, and its RetryFor counts from that
+// pass, its first attempt: not from when it was held back, which a wait
+// longer than RetryFor would end before any attempt. The channel not
+// taking a note that goes once gives it up. Everything else, and
+// everything with the attempts off, has failed for good.
 func (e *Engine) retryLater(failures []failed) {
 	now := e.now()
 	held := make(map[string]int)
@@ -347,7 +353,7 @@ func (e *Engine) retryLater(failures []failed) {
 		switch {
 		case r != nil && r.once:
 			e.owed.dropRetry(r)
-			e.gaveUp(f.channel, f.note, "the channel took nothing in the pass it was held back for")
+			e.gaveUp(f.channel, f.note, "not taken in the pass it was held back for")
 			continue
 		case r != nil:
 			r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
@@ -362,7 +368,7 @@ func (e *Engine) retryLater(failures []failed) {
 			if f.note.Event == EventReminder {
 				e.owed.supersede(f.channel.ID, f.note)
 			}
-			r = e.owed.addRetry(f.channel, f.note, now, due, next)
+			r = e.owed.addRetry(f.channel, f.note, due, due, next)
 			r.once = !e.retries(f.note)
 		case e.retries(f.note):
 			wait := min(retryBase, e.opts.RetryMax)
@@ -702,10 +708,11 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 // queue or for its group: the log has no attempt then, and the outage is
 // told now the same way, but not to a channel created after it opened,
 // which was not there to hear of it, nor about an outage that opened after
-// the engine started, which the engine sends itself. Whichever channel was
-// sent the outage, at once or after its delay, and did not take it is
-// sent it again now (retryUndelivered): the retry the loop had in hand
-// before the restart.
+// the engine started, which the engine sends itself, nor about one opened
+// before the log was kept (no OpenedAt), of which the log says nothing.
+// Whichever channel was sent the outage, at once or after its delay, and
+// did not take it is sent it again now (retryUndelivered): the retry the
+// loop had in hand before the restart.
 func (e *Engine) restore(ctx context.Context) {
 	ctx = context.WithoutCancel(ctx)
 	open := true
@@ -746,10 +753,12 @@ func (e *Engine) restore(ctx context.Context) {
 				switch {
 				case told:
 					e.retryUndelivered(ctx, ch, note, now)
-				case ch.CreatedAt.Before(opened) && opened.Before(e.started) &&
+				case !incident.OpenedAt.IsZero() && ch.CreatedAt.Before(opened) && opened.Before(e.started) &&
 					e.owed.get(key) == nil && !e.owed.hasRetry(ch.ID, EventDown, incident.ID):
 					// Never attempted: it is told now (deliverOwed), and if
-					// the channel does not take it, sent again.
+					// the channel does not take it, sent again. An outage
+					// without OpenedAt is older than the log: no attempt
+					// there says nothing.
 					e.owed.put(key, &owed{channel: ch, note: note, kind: owedOutage, due: now})
 				}
 				continue

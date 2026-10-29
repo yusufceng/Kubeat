@@ -717,12 +717,56 @@ func (e *Engine) deliverTo(ctx context.Context, n Notification, include func(sto
 }
 
 // outbound is a channel's share of one pass through the channels: what it
-// is sent, in the order it is sent. A note sent again has its retry under
-// its index in retries.
+// is sent, in the order it came up (see order for the order it is sent
+// in). A note sent again has its retry under its index in retries.
 type outbound struct {
 	channel store.Channel
 	notes   []Notification
 	retries map[int]*retry
+}
+
+// order returns the indexes of the share's notes in the order they are
+// sent: as they came up, or, when the pass stops at the first note the
+// channel does not take (deliver, a channel that pauses), the notes the
+// channel refused fewer times first, and as they came up among equals. A
+// note the channel keeps refusing while it takes the others (a webhook
+// answering 409 to the end of an outage whose ticket was closed by hand)
+// is then sent after them rather than ahead of them in every pass, and a
+// channel that is down is still attempted once a pass, each time with a
+// note it refused least. A reminder counts as its outage when that is in
+// the share too, and goes after it.
+func (s outbound) order(stopsAtFirst bool) []int {
+	order := make([]int, len(s.notes))
+	for i := range order {
+		order[i] = i
+	}
+	if !stopsAtFirst {
+		return order
+	}
+	refused := make([]int, len(s.notes))
+	outages := make(map[int64]int)
+	for i, n := range s.notes {
+		if r := s.retries[i]; r != nil {
+			refused[i] = r.attempts
+		}
+		if n.Event == EventDown {
+			outages[n.Incident.ID] = refused[i]
+		}
+	}
+	reminds := make([]bool, len(s.notes))
+	for i, n := range s.notes {
+		if o, ok := outages[n.Incident.ID]; ok && n.Event == EventReminder {
+			refused[i], reminds[i] = max(refused[i], o), true
+		}
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		i, j := order[a], order[b]
+		if refused[i] != refused[j] {
+			return refused[i] < refused[j]
+		}
+		return !reminds[i] && reminds[j]
+	})
+	return order
 }
 
 // failed is a send that a channel did not take: what was sent, and the
@@ -746,7 +790,8 @@ type failed struct {
 // it, and they wait again (retryLater). A note sent for the first time
 // still goes to a channel people read: it is news, which the channel may
 // yet take. A channel software reads (with the attempts again on) is held
-// back all the rest, and paused until it takes one (paused). Only the
+// back all the rest, and paused until it takes one (paused); it is sent
+// the notes it refused fewer times first (outbound.order). Only the
 // sends leave the loop's goroutine; what a channel is owed (route,
 // retryLater, outagesOver, paused) is settled in the loop, before and
 // after, and the store and the metrics take calls from several goroutines.
@@ -758,10 +803,11 @@ func (e *Engine) deliver(ctx context.Context, shares []outbound) []failed {
 	)
 	for _, s := range shares {
 		pauses := e.pauses(s.channel)
+		order := s.order(pauses)
 		wg.Go(func() {
 			tripped := false
-			for i, n := range s.notes {
-				r := s.retries[i]
+			for _, i := range order {
+				n, r := s.notes[i], s.retries[i]
 				var err error
 				if tripped && (r != nil || pauses) {
 					err = errNotTaken

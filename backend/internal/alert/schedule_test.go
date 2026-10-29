@@ -550,6 +550,31 @@ func TestARestartWithTheAttemptsOffTellsAQueuedOutageOnce(t *testing.T) {
 	}
 }
 
+// An outage open since before the delivery log was kept (opened before
+// 0.39, with no OpenedAt) has no attempt there whether or not it was
+// told: a restart does not tell it again. An outage the log covers, with
+// no attempt there, is told.
+func TestARestartDoesNotTellAnOutageOlderThanTheLog(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.addChannel(store.Channel{Name: "mail", Type: store.ChannelEmail, Target: "ops@example.com"})
+	older, queued := f.monitorIn("older", ""), f.monitorIn("queued", "")
+	f.liveClock()
+	opened := f.clock.Add(30 * time.Second) // after the channels were made
+	ctx := context.Background()
+	if _, err := f.db.OpenIncident(ctx, store.Incident{MonitorID: older.ID, StartedAt: opened, Cause: "refused"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.OpenIncident(ctx, store.Incident{MonitorID: queued.ID, StartedAt: opened, OpenedAt: opened, Cause: "refused"}); err != nil {
+		t.Fatal(err)
+	}
+	f.clock = opened.Add(time.Minute)
+	f.restart()
+	f.flush()
+	if got := f.sentTo("ops") + " " + f.sentTo("mail"); got != "down:queued down:queued" {
+		t.Errorf("after the restart: ops and mail were sent %q, want queued's outage alone", got)
+	}
+}
+
 // outage keeps the monitor failing for the given number of minutes, a
 // check and a pass through the loop every 30 seconds.
 func (f *fixture) outage(minutes float64) {
