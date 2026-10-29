@@ -45,6 +45,14 @@ sonunda bakar ve yön verir.
    Prometheus) sprint dosyasında "Kullanıcıda kalanlar" listesine yazılır;
    sonraki sprintin keşfi bu listenin sonucuyla başlar.
 
+Ret alan bir madde en çok üç düzeltme turu görür. Dördüncü inceleme
+sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
+
+Adımlar `.claude/workflows/` altındaki iş akışlarıyla koşar:
+`kubeat-sprint-planning` (1–4), `kubeat-sprint-delivery` (5–6),
+`kubeat-sprint-fix-round` (ret alan madde için ek tur) ve
+`kubeat-sprint-review` (7). Argümanları her dosyanın `whenToUse` alanında.
+
 ## Ürün ilkeleri: karar ölçütleri
 
 - **Cluster-native fark.** Cluster'ın içinden görülen ve dışarıdan bakan
