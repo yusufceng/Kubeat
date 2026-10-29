@@ -4,6 +4,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"sort"
@@ -90,13 +91,52 @@ type Scheduler struct {
 	peers, charged map[int64]charge
 
 	lastTick atomic.Int64 // Unix nanoseconds of the last completed tick
+	// What Healthy judges the result writes by, in Unix nanoseconds: when
+	// a write last stored some of its results, when one last stored none of
+	// them, and when the writer began the batch it is still busy with,
+	// storing it and handing it on to OnResults (0 while it is not busy).
+	lastStored, lastLost, writing atomic.Int64
+
+	// now is the clock of the result writes and of Healthy; tests set their
+	// own.
+	now func() time.Time
 }
 
 // LastTick returns when the scheduler last completed a tick, that is, read
 // the monitors from the store and queued the due ones. It is the zero time
 // before the first tick.
 func (s *Scheduler) LastTick() time.Time {
-	ns := s.lastTick.Load()
+	return unixTime(s.lastTick.Load())
+}
+
+// Healthy reports why the scheduler has not been doing its job over the
+// last window, or nil. It has not if it completed no tick in that time, or
+// if checks ran but their results went nowhere: results came and none of
+// them could be stored (a full or read-only volume), or the writer has been
+// busy with one batch for longer than the window (a hung volume). A result
+// that is not stored opens no incident and sends no notification. A window
+// in which no result came, because no check was due, is healthy, and so is
+// one in which some results were lost and others stored.
+func (s *Scheduler) Healthy(window time.Duration) error {
+	now := s.now()
+	if age := now.Sub(s.LastTick()); age > window {
+		return fmt.Errorf("the scheduler has not completed a tick for %s", age.Round(time.Second))
+	}
+	if began := s.writing.Load(); began != 0 {
+		if age := now.Sub(unixTime(began)); age > window {
+			return fmt.Errorf("the writer has been busy with one batch of check results for %s", age.Round(time.Second))
+		}
+	}
+	since := now.Add(-window)
+	if !unixTime(s.lastLost.Load()).Before(since) && unixTime(s.lastStored.Load()).Before(since) {
+		return fmt.Errorf("check results came in the last %s and none of them could be stored", window)
+	}
+	return nil
+}
+
+// unixTime returns the time kept as Unix nanoseconds, or the zero time for
+// 0, which stands for never.
+func unixTime(ns int64) time.Time {
 	if ns == 0 {
 		return time.Time{}
 	}
@@ -113,6 +153,7 @@ func New(st Store, checker Checker, opts Options) *Scheduler {
 		addrs:     newHostLimiter(opts.AddressMaxRate),
 		peers:     make(map[int64]charge),
 		charged:   make(map[int64]charge),
+		now:       time.Now,
 	}
 }
 
@@ -422,21 +463,30 @@ func (s *Scheduler) write(ctx context.Context, results <-chan store.CheckResult)
 }
 
 func (s *Scheduler) flush(ctx context.Context, batch []store.CheckResult) {
+	s.writing.Store(s.now().UnixNano())
+	defer s.writing.Store(0)
+
 	stored := batch
 	if err := s.store.InsertCheckResults(ctx, batch); err != nil {
 		// One bad row (for example a monitor deleted while its check was
 		// running) fails the whole transaction; retry row by row so the rest
-		// is kept.
+		// is kept. A store that cannot write at all, such as one on a full
+		// volume, fails every row the same way: one line tells of the
+		// batch, not one for each of its rows.
 		stored = make([]store.CheckResult, 0, len(batch))
 		for _, r := range batch {
-			if err := s.store.InsertCheckResults(ctx, []store.CheckResult{r}); err != nil {
-				s.opts.Logger.Warn("check result dropped", "monitor_id", r.MonitorID, "error", err)
-				continue
+			if s.store.InsertCheckResults(ctx, []store.CheckResult{r}) == nil {
+				stored = append(stored, r)
 			}
-			stored = append(stored, r)
 		}
 		s.opts.Logger.Warn("batch insert failed, retried row by row",
 			"error", err, "rows", len(batch), "dropped", len(batch)-len(stored))
+	}
+	switch at := s.now().UnixNano(); {
+	case len(stored) > 0:
+		s.lastStored.Store(at)
+	case len(batch) > 0:
+		s.lastLost.Store(at)
 	}
 	s.opts.Metrics.Results(len(stored), len(batch)-len(stored))
 	if s.opts.OnResults != nil && len(stored) > 0 {

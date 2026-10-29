@@ -1844,6 +1844,40 @@ Yanıt süresi yalnızca başarılı kontrollerden hesaplanır; başarısız bir
 kontrolün süresi çoğunlukla zaman aşımıdır ve yanıt süresi hakkında bir şey
 söylemez.
 
+**Veri volume'unun boyutu.** Veritabanı monitor sayısı, kontrol aralığı ve
+saklama süreleriyle büyür. Satır boyutları
+[docs/yuk-testi.md](docs/yuk-testi.md)'de ölçüldü; kabaca:
+
+- Ham sonuçlar: ≈ 65 B × monitor × (`UPTIME_RETENTION` / aralık); varsayılan
+  saklama 7 gün = 604800 sn. 30 sn aralıklı 500 monitor 500 × 20160 × 65 B
+  ≈ 655 MB eder (yük testinde 10,08 milyon sonuç 648 MB tuttu). Sertifika
+  bitişini saklayan HTTPS kontrolü ≈ 70 B, ayrıntılarıyla (bkz. "Başarısız
+  kontrolün ayrıntıları") başarısız bir kontrol ≈ 550 B tutar: saklama
+  süresi boyunca düşük kalan bir monitor sekiz kat kadar yer kaplar.
+- Saatlik özetler: ≈ 41 B × monitor × (`UPTIME_ROLLUP_RETENTION` / 1 saat);
+  varsayılan 1 yılda monitor başına ≈ 0,36 MB.
+- Bildirim kaydı: kanala her teslimat denemesi için ≈ 100 B,
+  `UPTIME_DELIVERY_RETENTION` (varsayılan 1 yıl) boyunca; günde 1000
+  denemede yılda ≈ 35 MB.
+- Pay: bunların toplamı kadar daha. Veritabanını sıkıştırmak (`VACUUM`:
+  anahtarsız oluşturulmuş bir veritabanına `UPTIME_SECRET_KEY` ilk
+  verildiğinde ya da elle) yazma günlüğünü (WAL) bir süre veritabanı kadar
+  büyütür; günlük normalde birkaç MB'tır.
+
+Yani volume ≈ 2 × (ham sonuçlar + özetler + bildirim kaydı). Chart'ın
+varsayılanı `backend.persistence.size=2Gi`, varsayılan saklama süreleri ve
+bu payla yaklaşık 1000 monitor'u 60 sn, 600'ünü 30 sn ya da 350'sini 15 sn
+aralıkla taşır; proje planındaki ölçek (500 monitor, 30 sn) ≈ 835 MB'lık
+veritabanıyla sığar. `UPTIME_MAX_MONITORS` kotası (1000) 15 sn aralıkla
+dolarsa yalnızca ham sonuçlar ≈ 2,6 GB tutar: volume'u büyütün
+(StorageClass `allowVolumeExpansion: true` ise `backend.persistence.size`
+artırılıp yükseltilir) ya da `UPTIME_RETENTION`'ı kısaltın. Volume dolunca
+sonuçlar yazılamaz ve kaybolur, olay açılmaz, bildirim gitmez; bunu
+dışarıdaki heartbeat ve `KubeatResultsDropped` alarmı söyler (bkz. "Aracın
+kendi sağlığı"). Yedek açıksa yedek volume'u da büyür: (keep + 1) ×
+veritabanı boyutu kadar yer ister ve varsayılan 5Gi yaklaşık 640 MiB'lık bir
+veritabanına yeter (bkz. "Yedekleme ve geri yükleme").
+
 ### Kesinti anına gitmek
 
 Grafikte **sürükleyerek** bir aralık işaretlenir. İşaretin üstünde saat
@@ -2242,9 +2276,26 @@ OpenShift'te user workload monitoring açık olmalıdır (`enableUserWorkload: t
 **Heartbeat (dead man's switch).** `UPTIME_HEARTBEAT_URL` ayarlanırsa backend
 bu adrese her `UPTIME_HEARTBEAT_INTERVAL` sürede bir `GET` atar. Karşı taraf
 (healthchecks.io, Uptime Kuma push monitor vb.) istekler kesilince alarm
-verir. Heartbeat yalnızca scheduler son aralıkta çalıştıysa gönderilir; süreç
-ayakta ama kontrol yapmıyorsa da istekler kesilir. Bu servisin izlenen
-cluster'ın dışında olması gerekir, yoksa ikisi birlikte düşer.
+verir. Heartbeat yalnızca scheduler son aralıkta çalıştıysa ve o aralıkta
+gelen kontrol sonuçlarından en az birini veritabanına yazabildiyse
+gönderilir: süreç ayakta ama kontrol yapmıyorsa da, kontroller sürüyor ama
+sonuçları yazılamıyorsa da (veri volume'u doldu ya da salt okunur oldu, bir
+yazım aralıktan uzun sürdü) istekler kesilir. Yazılamayan sonuçtan olay
+açılmaz, bildirim gitmez; Kubeat bunu kendisi duyuramaz. Hiç sonuç gelmeyen
+bir aralık (sırası gelen kontrol yoktu) sağlıklı sayılır; bazı satırların
+düşmesi de, örneğin kontrolü sürerken silinen bir monitor'un sonucu, aynı
+aralıkta başka sonuçlar yazıldıkça heartbeat'i kesmez; aralığın tek sonucuysa
+o aralığın heartbeat'i bir kez tutulur (`kubeat_results_dropped_total`
+sayar). Gönderilmeyen her
+heartbeat `kubeat_heartbeats_total{result="withheld"}` sayacını artırır;
+nedeni backend log'undaki `heartbeat withheld` satırında, yazım hatası
+`batch insert failed` satırındadır (yazım başına tek satır, düşen sonuç
+sayısıyla). Sessiz aralık sağlıklı sayıldığından, kontrol aralıkları
+`UPTIME_HEARTBEAT_INTERVAL`'dan uzun birkaç monitor'u olan bir kurulumda
+yazılamayan sonuçlar heartbeat'i yalnızca sonuç gelen aralıklarda keser;
+böyle bir kurulumda heartbeat aralığını en kısa kontrol aralığından kısa
+tutmayın. Bu servisin izlenen cluster'ın dışında olması gerekir, yoksa ikisi
+birlikte düşer.
 
 ## Yedekleme ve geri yükleme
 

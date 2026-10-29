@@ -265,13 +265,10 @@ func main() {
 				Interval: cfg.HeartbeatInterval,
 				Timeout:  cfg.HeartbeatTimeout,
 				// Alive means the scheduler read its monitors and queued the
-				// due ones at least once since the previous heartbeat.
-				Healthy: func() error {
-					if age := time.Since(sched.LastTick()); age > cfg.HeartbeatInterval {
-						return fmt.Errorf("the scheduler has not completed a tick for %s", age.Round(time.Second))
-					}
-					return nil
-				},
+				// due ones at least once since the previous heartbeat, and
+				// stored some of the results that came in that time, if any
+				// came.
+				Healthy: func() error { return sched.Healthy(cfg.HeartbeatInterval) },
 				Client:  &http.Client{},
 				Metrics: meter,
 				Logger:  logger,

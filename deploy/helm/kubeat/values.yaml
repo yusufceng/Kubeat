@@ -32,6 +32,15 @@ backend:
     limits:
       memory: 256Mi
   persistence:
+    # The database grows with the monitors, their intervals and the
+    # retentions: about 65 B × monitors × UPTIME_RETENTION / interval for
+    # the raw results (604800 s, 7 days, by default), 41 B × monitors × the
+    # hours of UPTIME_ROLLUP_RETENTION (8760, a year) for the hourly
+    # summaries and about 100 B for each notification attempt kept, and as
+    # much again for compacting it (VACUUM) and its write-ahead log. At the
+    # default retentions, 2Gi holds about 1000 monitors checked every 60s,
+    # 600 every 30s or 350 every 15s (README, "Geçmiş verisi"). Once the
+    # volume is full, results are lost and the heartbeat stops.
     size: 2Gi
     storageClass: ""   # empty uses the cluster default
     # Leaves this PVC, <release>-data with the database, in place when the
@@ -360,9 +369,10 @@ metrics:
     certWarningDays: 14
 
 # Dead man's switch: the backend requests this URL at every interval while
-# it is scheduling checks. Point it at a service that alerts when the
-# requests stop (healthchecks.io, an Uptime Kuma push monitor, ...), ideally
-# one that runs outside this cluster.
+# it is scheduling checks and storing their results (an interval in which
+# no check was due counts as working). Point it at a service that alerts
+# when the requests stop (healthchecks.io, an Uptime Kuma push monitor,
+# ...), ideally one that runs outside this cluster.
 heartbeat:
   interval: 1m
   # The URL usually embeds a secret key, so it is read from a Secret.

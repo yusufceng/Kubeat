@@ -1,15 +1,20 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/heartbeat"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -655,5 +660,275 @@ func TestRetryInterval(t *testing.T) {
 	s.tick(context.Background(), t0.Add(time.Hour), false, schedules, jobs)
 	if len(s.failures) != 0 || len(s.retryAt) != 0 {
 		t.Errorf("state kept for a removed monitor: failures=%v retryAt=%v", s.failures, s.retryAt)
+	}
+}
+
+// clock is a time a test sets, for the scheduler's result writes and
+// Healthy.
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *clock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *clock) set(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = t
+}
+
+// fullStore stores no result, as a database on a full volume does.
+type fullStore struct{ fakeStore }
+
+func (f *fullStore) InsertCheckResults(context.Context, []store.CheckResult) error {
+	return errors.New("database or disk is full")
+}
+
+// stuckStore holds every write until released, as a hung volume does.
+type stuckStore struct {
+	fakeStore
+	release chan struct{}
+}
+
+func (f *stuckStore) InsertCheckResults(ctx context.Context, batch []store.CheckResult) error {
+	<-f.release
+	return f.fakeStore.InsertCheckResults(ctx, batch)
+}
+
+// resultsOf returns a successful result for each monitor.
+func resultsOf(ids ...int64) []store.CheckResult {
+	var rs []store.CheckResult
+	for _, id := range ids {
+		rs = append(rs, store.CheckResult{MonitorID: id, Up: true})
+	}
+	return rs
+}
+
+// onClock returns a scheduler on st that completed a tick at t0, and the
+// clock its writes and Healthy read, set to t0.
+func onClock(st Store, t0 time.Time) (*Scheduler, *clock) {
+	c := &clock{t: t0}
+	s := New(st, nil, testOptions())
+	s.now = c.now
+	tickAt(s, t0)
+	return s, c
+}
+
+// tickAt runs one tick of s at t, of no monitors unless its store has some.
+func tickAt(s *Scheduler, t time.Time) {
+	s.tick(context.Background(), t, false, make(map[int64]*schedule), make(chan store.Monitor, 10))
+}
+
+// Healthy, which the heartbeat asks, holds the scheduler to a tick in the
+// window and, if results came in it, to storing some of them. A window in
+// which no result came is quiet, not broken.
+func TestHealthy(t *testing.T) {
+	ctx := context.Background()
+	const window = time.Minute
+	t0 := time.Unix(1_700_000_000, 0)
+	unhealthy := func(t *testing.T, s *Scheduler, why string) {
+		t.Helper()
+		if err := s.Healthy(window); err == nil || !strings.Contains(err.Error(), why) {
+			t.Errorf("Healthy = %v, want an error saying %q", err, why)
+		}
+	}
+	healthy := func(t *testing.T, s *Scheduler) {
+		t.Helper()
+		if err := s.Healthy(window); err != nil {
+			t.Errorf("Healthy = %v, want nil", err)
+		}
+	}
+
+	t.Run("no result came", func(t *testing.T) {
+		s, c := onClock(&fakeStore{}, t0)
+		healthy(t, s)
+		c.set(t0.Add(10 * window))
+		tickAt(s, c.now())
+		healthy(t, s)
+	})
+
+	t.Run("no tick in the window", func(t *testing.T) {
+		s, c := onClock(&fakeStore{}, t0)
+		c.set(t0.Add(window + time.Second))
+		unhealthy(t, s, "has not completed a tick for 1m1s")
+	})
+
+	t.Run("no result could be stored", func(t *testing.T) {
+		s, c := onClock(&fullStore{}, t0)
+		s.flush(ctx, resultsOf(1, 2, 3))
+		unhealthy(t, s, "none of them could be stored")
+
+		// The next window brings no result: quiet again.
+		c.set(t0.Add(window + time.Second))
+		tickAt(s, c.now())
+		healthy(t, s)
+	})
+
+	t.Run("one row of a batch dropped", func(t *testing.T) {
+		st := &fakeStore{rejectID: 2}
+		s, _ := onClock(st, t0)
+		s.flush(ctx, resultsOf(1, 2, 3))
+		if st.countFor(1) != 1 || st.countFor(2) != 0 || st.countFor(3) != 1 {
+			t.Fatalf("stored %d, %d, %d results of monitors 1, 2, 3, want 1, 0, 1", st.countFor(1), st.countFor(2), st.countFor(3))
+		}
+		healthy(t, s)
+	})
+
+	t.Run("stored before the window, lost in it", func(t *testing.T) {
+		s, c := onClock(&fakeStore{rejectID: 2}, t0)
+		s.flush(ctx, resultsOf(1))
+		c.set(t0.Add(90 * time.Second))
+		tickAt(s, c.now())
+		s.flush(ctx, resultsOf(2))
+		unhealthy(t, s, "none of them could be stored")
+
+		// A batch stored later in the window makes up for it.
+		c.set(t0.Add(100 * time.Second))
+		s.flush(ctx, resultsOf(1))
+		healthy(t, s)
+	})
+
+	t.Run("a write that does not end", func(t *testing.T) {
+		st := &stuckStore{release: make(chan struct{})}
+		s, c := onClock(st, t0)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.flush(ctx, resultsOf(1))
+		}()
+		waitFor(t, "the write to begin", func() bool { return s.writing.Load() != 0 })
+
+		c.set(t0.Add(30 * time.Second))
+		tickAt(s, c.now())
+		healthy(t, s) // busy, but for less than the window
+
+		c.set(t0.Add(window + time.Second))
+		tickAt(s, c.now())
+		unhealthy(t, s, "busy with one batch of check results for 1m1s")
+
+		close(st.release)
+		<-done
+		healthy(t, s)
+	})
+}
+
+// heartbeats runs the heartbeat against a dead man's switch, with Healthy
+// asking s about the window, until five heartbeats were sent or withheld.
+// It returns how many requests reached the switch, and how many heartbeats
+// were sent and how many withheld.
+func heartbeats(t *testing.T, s *Scheduler, window time.Duration) (hits int64, sent, withheld float64) {
+	t.Helper()
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
+	defer srv.Close()
+
+	m := metrics.New("test")
+	count := func(result string) float64 {
+		got, err := m.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got["kubeat_heartbeats_total{result="+result+"}"]
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		heartbeat.Run(ctx, heartbeat.Options{
+			URL: srv.URL, Interval: 5 * time.Millisecond, Timeout: time.Second,
+			Healthy: func() error { return s.Healthy(window) },
+			Client:  srv.Client(), Metrics: m, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		})
+	}()
+	waitFor(t, "five heartbeats", func() bool {
+		return count(metrics.HeartbeatSent)+count(metrics.HeartbeatWithheld) >= 5
+	})
+	cancel()
+	<-done
+	return requests.Load(), count(metrics.HeartbeatSent), count(metrics.HeartbeatWithheld)
+}
+
+// The dead man's switch hears nothing while results come and none of them
+// can be stored, and keeps hearing from a scheduler that drops a row now
+// and then or has no result to store.
+func TestHeartbeatStopsWhileNoResultCanBeStored(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		st    Store
+		batch []store.CheckResult // written in the window; none for a quiet one
+		sent  bool
+	}{
+		{"no result can be stored", &fullStore{}, resultsOf(1, 2, 3), false},
+		{"one row of the batch is dropped", &fakeStore{rejectID: 2}, resultsOf(1, 2, 3), true},
+		{"no result came", &fakeStore{}, nil, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _ := onClock(tt.st, time.Unix(1_700_000_000, 0))
+			if tt.batch != nil {
+				s.flush(context.Background(), tt.batch)
+			}
+			hits, sent, withheld := heartbeats(t, s, time.Minute)
+			switch {
+			case tt.sent && (withheld != 0 || sent < 5 || hits < 5):
+				t.Errorf("sent %v, withheld %v, %d requests reached the switch; want every heartbeat sent", sent, withheld, hits)
+			case !tt.sent && (sent != 0 || withheld < 5 || hits != 0):
+				t.Errorf("sent %v, withheld %v, %d requests reached the switch; want every heartbeat withheld", sent, withheld, hits)
+			}
+		})
+	}
+}
+
+// What Healthy judges is what Run's writes leave: a store that cannot
+// write makes the scheduler unhealthy, one that drops a row now and then
+// does not.
+func TestHealthyFollowsTheWritesOfRun(t *testing.T) {
+	full := &fullStore{}
+	full.setMonitors(monitor(1, 5*time.Millisecond), monitor(2, 5*time.Millisecond))
+	s, stop := startScheduler(full, &fakeChecker{}, testOptions())
+	waitFor(t, "Healthy to tell that no result is stored", func() bool {
+		err := s.Healthy(time.Second)
+		return err != nil && strings.Contains(err.Error(), "none of them could be stored")
+	})
+	stop()
+
+	st := &fakeStore{rejectID: 2}
+	st.setMonitors(monitor(1, 5*time.Millisecond), monitor(2, 5*time.Millisecond))
+	s, stop = startScheduler(st, &fakeChecker{}, testOptions())
+	defer stop()
+	waitFor(t, "stored results", func() bool { return st.countFor(1) >= 5 })
+	if err := s.Healthy(time.Second); err != nil {
+		t.Errorf("Healthy = %v while most results are stored", err)
+	}
+}
+
+// A batch that could not be written is one line in the log, with how many
+// of its rows were lost, not a line for each row: a full volume would
+// otherwise log every result.
+func TestFailedBatchIsOneLogLine(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		st      Store
+		dropped string
+	}{
+		{"no row can be stored", &fullStore{}, "dropped=5"},
+		{"one bad row", &fakeStore{rejectID: 2}, "dropped=1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			opts := testOptions()
+			opts.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+			New(tt.st, nil, opts).flush(context.Background(), resultsOf(1, 2, 3, 4, 5))
+
+			lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+			if len(lines) != 1 || !strings.Contains(lines[0], "level=WARN") || !strings.Contains(lines[0], "batch insert failed") ||
+				!strings.Contains(lines[0], "rows=5") || !strings.Contains(lines[0], tt.dropped) {
+				t.Errorf("log of a batch of 5 that failed:\n%s\nwant one WARN line with rows=5 and %s", logs.String(), tt.dropped)
+			}
+		})
 	}
 }
