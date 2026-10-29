@@ -848,3 +848,16 @@ panolarında görüyor; şişirme riski var. Tetikleyici: operator'süz ilk
 gerçek kurulum. Karar taslağı: `prometheus.url` boşken anlık değerler
 PodMetrics'ten okunur, ek ayar yok, geçmiş grafiği yok. Sınır paragrafı S30
 ile (sprint 4 doküman paketi).
+
+## Helm 3 desteğini bırakmak
+
+2026-10-29'da ertelendi (#47'nin yan konusu). 0.45'ten beri CI chart işi
+Helm 4 (v4.3.1) ve Helm 3'ün son yamasıyla (v3.22.1) iki kez koşuyor; README
+kurulumda Helm 3'ü de destekliyor (`--reset-then-reuse-values` için 3.14+).
+Bugün Helm 3 ile kuranlar var: GitOps araçlarının ve kurumsal kurulum
+hatlarının çoğu hâlâ Helm 3 kullanıyor. Bırakmak, kullanıcıya kurulum aracını
+değiştirtmek demek; README, CONTRIBUTING ("Sabit araç sürümleri") ve ci.yml
+matrisi birlikte değişir. Tetikleyici: Helm projesinin Helm 3'e güvenlik
+yamalarını bitirmesi, `chart (Helm 3)` koşusunun chart düzeltilerek
+onarılamayan bir nedenle kalıcı kırılması ya da yalnızca Helm 4'te olan bir
+chart özelliğine ihtiyaç.
