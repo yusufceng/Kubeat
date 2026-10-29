@@ -225,7 +225,7 @@ tests:
               cluster: a
             exp_annotations:
               summary: "Kubeat's checks are not running, or their results are not stored"
-              description: "For 5 minutes Kubeat has not been doing its job (kubeat_self_healthy, what the heartbeat sends on): in the last heartbeat interval its scheduler completed no tick, or check results came and none of them could be stored (a full or read-only data volume), or one write of them outlasted the interval (a hung volume). No outage is opened and no notification sent meanwhile; the backend's log says why (list monitors failed, batch insert failed)."
+              description: "For 5 minutes Kubeat has not been doing its job (kubeat_self_healthy, what the heartbeat sends on): in the last heartbeat interval its scheduler completed no tick, or check results came and none of them could be stored (a full or read-only data volume), or one write of them outlasted the interval (a hung volume). No outage is opened and no notification sent meanwhile; the backend's log says why (self-health failing, with the reason; list monitors failed, batch insert failed)."
 
   - name: KubeatBackupFailing fires for the cluster whose backup fails, once for an HA pair
     interval: 1m

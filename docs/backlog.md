@@ -768,7 +768,10 @@ Heartbeat'in kararı (`scheduler.Healthy`) `kubeat_self_healthy` gauge'unda
 her scrape'te, heartbeat kapalıyken de yayınlanır; chart'ın
 `KubeatUnhealthy` kuralı gauge 5 dakika 0 kalınca `critical` yanar.
 `KubeatResultsDropped` warning olarak kaldı; liveness ve readiness bu
-karara bağlanmadı. Bu maddenin kalanları değişmedi: PVC'nin kendiliğinden
+karara bağlanmadı. Karar değişince backend, heartbeat olmadan da, bir kez
+loglar (`self-health failing` nedeniyle, düzelince `self-health restored`);
+tetikleyicideki `heartbeat withheld`'in heartbeat'siz kurulumdaki karşılığı
+bu satırdır. Bu maddenin kalanları değişmedi: PVC'nin kendiliğinden
 büyümesi, saklamanın kotaya göre ayarlanması, yazılamayan sonuçların
 bellekte tutulması, toplu log satırına `monitor_id`'ler ve dakikada bir
 özet satırı.

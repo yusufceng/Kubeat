@@ -2546,6 +2546,15 @@ kurmadan, Kubeat'in körleştiği cluster'ın kendi Alertmanager'ından
   sürüyor ya da scheduler ilerlemiyor. Yalnızca bazı sonuçların düşmesi
   `KubeatResultsDropped` (`warning`) olarak kalır. Backend pod'u yokken seri
   de olmadığından yanmaz; onu `KubeatDown` söyler.
+- **Log.** Karar değişince backend, heartbeat olmadan da, bir kez log yazar:
+  Kubeat işini yapmayı bırakınca `self-health failing` (`ERROR`; nedeni
+  `reason` alanında: scheduler tick tamamlamıyor, sonuçların hiçbiri
+  yazılamıyor ya da bir yazım pencereden uzun sürüyor), yeniden yapınca
+  `self-health restored` (`INFO`). Backend kararı pencere uzunluğunda
+  aralıklarla sorar; karar sürdükçe yeni satır yazmaz. Takılan bir yazım ya
+  da monitor okuması başka satır yazmaz, `KubeatUnhealthy` yandığında nedeni
+  bu satırdadır. Heartbeat açıksa `heartbeat withheld` satırı her aralıkta
+  yazılmaya devam eder.
 - **Hangi arızayı ne duyurur.** Kurallı bir kurulumda
   (`metrics.prometheusRule.enabled=true`) Kubeat'in kendi arızası heartbeat
   olmadan da cluster içinden duyulur: pod yoksa `KubeatDown`, volume doluysa
