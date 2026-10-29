@@ -883,6 +883,125 @@ func TestHeartbeatStopsWhileNoResultCanBeStored(t *testing.T) {
 	}
 }
 
+// kubeat_self_healthy reads, at every scrape, what Healthy tells the
+// heartbeat, so that a cluster without a dead man's switch hears it too: 0
+// while results come and none of them can be stored, while one write
+// outlasts the window and while no tick completes; 1 while some are stored,
+// none came, or the write ends.
+func TestSelfHealthyGaugeFollowsHealthy(t *testing.T) {
+	ctx := context.Background()
+	const window = time.Minute
+	t0 := time.Unix(1_700_000_000, 0)
+	// watch registers the gauge for s, as main does, and returns what a
+	// scrape reads from it.
+	watch := func(t *testing.T, s *Scheduler) func() float64 {
+		m := metrics.New("test")
+		m.WatchHealth(func() error { return s.Healthy(window) })
+		return func() float64 {
+			t.Helper()
+			got, err := m.Gather()
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, ok := got["kubeat_self_healthy"]
+			if !ok {
+				t.Fatal("kubeat_self_healthy is missing")
+			}
+			return value
+		}
+	}
+	want := func(t *testing.T, scrape func() float64, value float64) {
+		t.Helper()
+		if got := scrape(); got != value {
+			t.Errorf("kubeat_self_healthy = %v, want %v", got, value)
+		}
+	}
+
+	t.Run("results stored, then a quiet window", func(t *testing.T) {
+		s, c := onClock(&fakeStore{}, t0)
+		scrape := watch(t, s)
+		s.flush(ctx, resultsOf(1, 2, 3))
+		want(t, scrape, 1)
+		c.set(t0.Add(10 * window))
+		tickAt(s, c.now())
+		want(t, scrape, 1)
+	})
+
+	t.Run("no result could be stored", func(t *testing.T) {
+		s, c := onClock(&fullStore{}, t0)
+		scrape := watch(t, s)
+		s.flush(ctx, resultsOf(1, 2, 3))
+		want(t, scrape, 0)
+		// A quiet window after it is healthy again.
+		c.set(t0.Add(window + time.Second))
+		tickAt(s, c.now())
+		want(t, scrape, 1)
+	})
+
+	t.Run("one row of a batch dropped", func(t *testing.T) {
+		s, _ := onClock(&fakeStore{rejectID: 2}, t0)
+		scrape := watch(t, s)
+		s.flush(ctx, resultsOf(1, 2, 3))
+		want(t, scrape, 1)
+	})
+
+	t.Run("a write that does not end", func(t *testing.T) {
+		st := &stuckStore{release: make(chan struct{})}
+		s, c := onClock(st, t0)
+		scrape := watch(t, s)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.flush(ctx, resultsOf(1))
+		}()
+		waitFor(t, "the write to begin", func() bool { return s.writing.Load() != 0 })
+
+		c.set(t0.Add(30 * time.Second))
+		tickAt(s, c.now())
+		want(t, scrape, 1) // busy, but for less than the window
+
+		c.set(t0.Add(window + time.Second))
+		tickAt(s, c.now())
+		want(t, scrape, 0)
+
+		close(st.release)
+		<-done
+		want(t, scrape, 1)
+	})
+
+	t.Run("no tick in the window", func(t *testing.T) {
+		s, c := onClock(&fakeStore{}, t0)
+		scrape := watch(t, s)
+		c.set(t0.Add(window + time.Second))
+		want(t, scrape, 0)
+	})
+}
+
+// OnTick hears, after every tick, how many monitors are enabled: what main
+// holds the notification queue's size to.
+func TestOnTickCountsEnabledMonitors(t *testing.T) {
+	st := &fakeStore{}
+	paused := monitor(3, time.Minute)
+	paused.Enabled = false
+	st.setMonitors(monitor(1, time.Minute), monitor(2, time.Minute), paused)
+
+	var counts []int
+	opts := testOptions()
+	opts.OnTick = func(enabled int) { counts = append(counts, enabled) }
+	s := New(st, nil, opts)
+	schedules := make(map[int64]*schedule)
+	jobs := make(chan store.Monitor, 10)
+	t0 := time.Unix(1_700_000_000, 0)
+	s.tick(context.Background(), t0, true, schedules, jobs)
+
+	st.setMonitors(monitor(1, time.Minute), monitor(2, time.Minute), monitor(4, time.Minute), monitor(5, time.Minute))
+	s.tick(context.Background(), t0.Add(time.Second), false, schedules, jobs)
+
+	if len(counts) != 2 || counts[0] != 2 || counts[1] != 4 {
+		t.Errorf("OnTick heard %v, want [2 4]", counts)
+	}
+}
+
 // What Healthy judges is what Run's writes leave: a store that cannot
 // write makes the scheduler unhealthy, one that drops a row now and then
 // does not.

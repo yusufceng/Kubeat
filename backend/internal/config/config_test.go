@@ -71,7 +71,7 @@ func TestLoadDefaults(t *testing.T) {
 		DefaultFailureThreshold: 3,
 		RecoveryThreshold:       1,
 		CertWarning:             14 * 24 * time.Hour,
-		NotifyQueueSize:         100,
+		NotifyQueueSize:         1000,
 		NotifyAttempts:          3,
 		NotifyRetryDelay:        5 * time.Second,
 		NotifyTimeout:           5 * time.Second,
@@ -546,11 +546,53 @@ func TestHeartbeatIntervalMustAllowATick(t *testing.T) {
 	if _, err := Load(); err != nil {
 		t.Errorf("interval of exactly two ticks rejected: %v", err)
 	}
-	// Without a URL the interval is not used, so it is not checked.
+	// Without a URL nothing is sent at that interval, so it is not refused:
+	// kubeat_self_healthy, which judges over it, takes it as two ticks.
 	t.Setenv("UPTIME_HEARTBEAT_URL", "")
 	t.Setenv("UPTIME_HEARTBEAT_INTERVAL", "1s")
-	if _, err := Load(); err != nil {
-		t.Errorf("unused heartbeat interval rejected: %v", err)
+	if cfg, err := Load(); err != nil {
+		t.Errorf("heartbeat interval without a URL rejected: %v", err)
+	} else if got := cfg.HealthWindow(); got != 20*time.Second {
+		t.Errorf("HealthWindow = %s with a 1s interval and a 10s tick, want two ticks, 20s", got)
+	}
+}
+
+// The heartbeat and kubeat_self_healthy judge over the same window: the
+// heartbeat interval, which a heartbeat URL holds to two ticks already.
+func TestHealthWindow(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.HealthWindow(); got != time.Minute {
+		t.Errorf("HealthWindow = %s by default, want UPTIME_HEARTBEAT_INTERVAL's 1m", got)
+	}
+	t.Setenv("UPTIME_HEARTBEAT_URL", "https://hc.example.com/ping/x")
+	t.Setenv("UPTIME_HEARTBEAT_INTERVAL", "5m")
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.HealthWindow(); got != 5*time.Minute {
+		t.Errorf("HealthWindow = %s with a heartbeat every 5m, want 5m", got)
+	}
+}
+
+// The notification queue holds, by default, an outage of every monitor the
+// default quota lets in; neither setting moves the other.
+func TestNotifyQueueSizeDefaultsToTheMonitorQuota(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NotifyQueueSize != 1000 || cfg.NotifyQueueSize != cfg.MaxMonitors {
+		t.Errorf("UPTIME_NOTIFY_QUEUE_SIZE = %d and UPTIME_MAX_MONITORS = %d by default, want both 1000", cfg.NotifyQueueSize, cfg.MaxMonitors)
+	}
+	t.Setenv("UPTIME_MAX_MONITORS", "5000")
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NotifyQueueSize != 1000 {
+		t.Errorf("UPTIME_NOTIFY_QUEUE_SIZE = %d with UPTIME_MAX_MONITORS=5000, want the default 1000: the queue is not derived", cfg.NotifyQueueSize)
 	}
 }
 

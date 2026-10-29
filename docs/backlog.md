@@ -50,6 +50,21 @@ sprintte çıkarılırsa S30 "kuralları cluster başına değerlendirin"
 uyarısıyla yayımlanır. 2026-10-12 kararı (PrometheusRule) korunur
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
 
+Güncelleme (2026-10-29, S37, #50): kural düzeltmesi geldi.
+`metrics.prometheusRule.clusterLabel` verilince `KubeatDown`,
+`KubeatUnhealthy`, `KubeatBackupFailing`, `KubeatMonitorDown` ve
+`KubeatCertificateExpiring` bu etiketle cluster başına toplanır, depo
+etiketlerinden yalnızca onu taşır (tekilleştirilmeyen HA çiftinin kopya
+etiketi toplanır) ve `KubeatDown` son 24 saatte görülüp kaybolan cluster
+için de yanar; boşken kurallar 0.44'teki gibi render edilir. İki cluster'lı
+senaryolar `deploy/helm/prometheusrule-cluster-test.yaml`'da (promtool). Belge
+(S30) sprint 4'te: kuralları bu değerle render ettirir ve README "Aracın
+kendi sağlığı"ndaki `clusterLabel` alt başlığına bağlanır. Kalan: toplama
+yapmayan, her seriye ayrı bakan öteki öz-sağlık kuralları (ör.
+`KubeatSchedulerStalled`, `KubeatResultsDropped`) cluster başınadır, ama
+tekilleştirilmeyen bir HA çiftinde kopya başına bir kez yanar; tetikleyici:
+böyle bir depoda çift alarm şikâyeti.
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
@@ -481,6 +496,13 @@ gelmesi, `KubeatBackupStale`'in bir Recreate'te "resolved" göndermesi ya da
 ServiceMonitor'süz kurulumda sürekli yanan `KubeatDown` için ilk kullanıcı
 şikâyeti.
 
+Güncelleme (2026-10-29, S38, #50): yeni `KubeatUnhealthy` de bu gruptadır.
+Scrape etiketleri dışında toplandığı için Recreate'te tek alarmdır, ama
+boşlukta durumunu tutmaz: volume dolu kalırken backend yeniden başlarsa
+alarm boşlukta çözülür ve yeni pod'un ilk penceresinden 5 dakika sonra
+yeniden yanar. Tetikleyici aynı; ek olarak bu alarmın bir yeniden başlatmada
+"resolved" göndermesi.
+
 ## Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı yeniden deneme kuyruğu
 
 2026-10-28'de ertelendi (S17, #27). Kanalın almadığı kesinti bildirimi
@@ -587,6 +609,13 @@ S26 (#49): 4xx dönen makine kanalı canlı sayılır ve duraklamaz; yalnızca
 (`UPTIME_MAX_MONITORS` ile aynı), etkin monitor sayısı kuyruğun üstüne
 çıkınca WARN verilir. "Otomatik türetme yok" kararı korunur
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
+
+Güncelleme (2026-10-29, S38, #50): ikinci bulgu karşılandı.
+`UPTIME_NOTIFY_QUEUE_SIZE` varsayılanı 1000 (`UPTIME_MAX_MONITORS`'ın
+varsayılanı; ondan türetilmez). Etkin monitor sayısı kuyruğu aşınca backend
+bunu bir kez, iki sayıyla WARN olarak loglar: açılışta ya da sonradan sınır
+ilk geçildiğinde. Bellek bedeli README "Alarm"da: 1000'lik kuyruk ≈ 1 MiB,
+doluyken ≈ 1,7 MiB.
 
 ## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
 
@@ -733,6 +762,19 @@ warning olarak kalır. Log taşkını notu (sprint 2 provası 4a): volume
 doluyken backend her toplu yazımda bir WARN yazıyor; öneri dakikada bir
 özet satırı, tetikleyici log hacmi şikâyeti. Dolu volume'dan dönüş runbook'u
 S41'de (sprint 4 kuyruğu, 3. sıra).
+
+Güncelleme (2026-10-29, S38, #50): Müşteri A'nın önerisi geldi.
+Heartbeat'in kararı (`scheduler.Healthy`) `kubeat_self_healthy` gauge'unda
+her scrape'te, heartbeat kapalıyken de yayınlanır; chart'ın
+`KubeatUnhealthy` kuralı gauge 5 dakika 0 kalınca `critical` yanar.
+`KubeatResultsDropped` warning olarak kaldı; liveness ve readiness bu
+karara bağlanmadı. Karar değişince backend, heartbeat olmadan da, bir kez
+loglar (`self-health failing` nedeniyle, düzelince `self-health restored`);
+tetikleyicideki `heartbeat withheld`'in heartbeat'siz kurulumdaki karşılığı
+bu satırdır. Bu maddenin kalanları değişmedi: PVC'nin kendiliğinden
+büyümesi, saklamanın kotaya göre ayarlanması, yazılamayan sonuçların
+bellekte tutulması, toplu log satırına `monitor_id`'ler ve dakikada bir
+özet satırı.
 
 ## Kaldırmaya karşı korumanın kalanları: Argo CD prune, PV düzeyi, prova kaydı
 

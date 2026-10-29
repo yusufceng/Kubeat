@@ -34,6 +34,33 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.Backup(false, time.Now())
 	m.LastBackup(time.Now())
 	m.License(time.Now())
+	m.WatchHealth(func() error { return nil })
+}
+
+// kubeat_self_healthy is read from the judgement at every scrape: it follows
+// a change at once, without anything recording it, and has no labels.
+func TestSelfHealthyIsReadAtScrape(t *testing.T) {
+	m := New("test")
+	var problem error
+	m.WatchHealth(func() error { return problem })
+
+	for _, tt := range []struct {
+		problem error
+		want    float64
+	}{
+		{nil, 1},
+		{errors.New("check results came in the last 1m0s and none of them could be stored"), 0},
+		{nil, 1},
+	} {
+		problem = tt.problem
+		got, err := m.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value, ok := got["kubeat_self_healthy"]; !ok || value != tt.want {
+			t.Errorf("with problem %v: kubeat_self_healthy = %v (present: %v), want %v", tt.problem, value, ok, tt.want)
+		}
+	}
 }
 
 // The labelled counters the alert rules read with increase() have their

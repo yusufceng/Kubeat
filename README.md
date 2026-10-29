@@ -2092,10 +2092,11 @@ dolarsa yalnızca ham sonuçlar ≈ 2,6 GB tutar: volume'u büyütün
 (StorageClass `allowVolumeExpansion: true` ise `backend.persistence.size`
 artırılıp yükseltilir) ya da `UPTIME_RETENTION`'ı kısaltın. Volume dolunca
 sonuçlar yazılamaz ve kaybolur, olay açılmaz, bildirim gitmez; bunu
-dışarıdaki heartbeat ve `KubeatResultsDropped` alarmı söyler (bkz. "Aracın
-kendi sağlığı"). Yedek açıksa yedek volume'u da büyür: (keep + 1) ×
-veritabanı boyutu kadar yer ister ve varsayılan 5Gi yaklaşık 640 MiB'lık bir
-veritabanına yeter (bkz. "Yedekleme ve geri yükleme").
+dışarıdaki heartbeat, chart'ın `critical` `KubeatUnhealthy` alarmı ve
+`KubeatResultsDropped` söyler (bkz. "Aracın kendi sağlığı"). Yedek açıksa
+yedek volume'u da büyür: (keep + 1) × veritabanı boyutu kadar yer ister ve
+varsayılan 5Gi yaklaşık 640 MiB'lık bir veritabanına yeter (bkz. "Yedekleme
+ve geri yükleme").
 
 ### Kesinti anına gitmek
 
@@ -2382,6 +2383,7 @@ yayınlar. Başlıcaları:
 | `kubeat_monitor_slow` | Monitor yanıt veriyor ama `slow_above_ms` eşiğinden yavaşsa 1 (bkz. "Yavaş yanıt") |
 | `kubeat_monitor_cert_expiry_timestamp_seconds` | Sertifikanın bitiş zamanı |
 | `kubeat_scheduler_last_tick_timestamp_seconds` | Scheduler'ın son çalıştığı an; ilerlemiyorsa kontrol yapılmıyordur |
+| `kubeat_self_healthy` | Kubeat işini yapıyorsa 1, yapmıyorsa 0: heartbeat'in kararı, her scrape'te ve heartbeat kapalıyken de hesaplanır. Son `UPTIME_HEARTBEAT_INTERVAL` içinde scheduler hiç tick tamamlamadıysa, o sürede gelen kontrol sonuçlarının hiçbiri yazılamadıysa ya da bir yazım aralıktan uzun sürdüyse 0; hiç sonuç gelmeyen aralık da, bazı sonuçların düşmesi de sağlıklıdır (bkz. aşağıda "Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`") |
 | `kubeat_scheduler_dispatch_skipped_total` | Boş worker olmadığı için bekleyen kontroller; artıyorsa `UPTIME_WORKERS` düşüktür |
 | `kubeat_target_throttled_total{host}` | Hedef host, son kontrolün yönlendirildiği bir host ya da ulaştığı bir adres dakikalık kontrol tavanına (`UPTIME_TARGET_MAX_RATE`, `UPTIME_CLUSTER_TARGET_MAX_RATE`, `UPTIME_TARGET_ADDRESS_MAX_RATE`) takıldığı için beklemeye başlayan kontroller, monitor'un kendi host'u etiketiyle; her bekleme kaç tick sürerse sürsün bir kez sayılır; ilk 100 host kendi etiketiyle, sonrakiler `other` olarak sayılır (bkz. "Hedef yükü") |
 | `kubeat_results_dropped_total` | Veritabanına yazılamayan sonuçlar |
@@ -2416,6 +2418,7 @@ yapılır. Kurallar:
 | `KubeatCertificateExpiring` | Sertifikanın bitişine `metrics.prometheusRule.certWarningDays` (14) günden az kaldı; scrape boşluğunda açık kalır |
 | `KubeatDown` | Backend 5 dakikadır scrape edilemiyor ya da hiç backend pod'u yok: pod bekliyor, silindi ya da uyutuldu (`critical`). `up{job="<release>-backend", namespace="<namespace>"}` serisine bakar; ServiceMonitor kapalıyken bu etiketlerle toplayan başka bir scrape yoksa sürekli yanar. Bu sırada kesinti, sertifika ve yedek alarmları 10 dakika açık kalır, sonra çözülür (bkz. aşağıda susturma kuralları) |
 | `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |
+| `KubeatUnhealthy` | `kubeat_self_healthy` 5 dakikadır 0: kontroller zamanlanmıyor ya da sonuçlarının hiçbiri yazılamıyor (dolu ya da salt okunur veri volume'u, takılı bir yazım) (`critical`). Heartbeat olmadan da yanar; yalnızca bazı sonuçların düşmesi `KubeatResultsDropped`'ın uyarısıdır. Backend pod'u yokken yanmaz, o `KubeatDown`'ın işidir; scheduler durunca `KubeatSchedulerStalled` ile birlikte yanar |
 | `KubeatMetricsIncomplete` | Monitor metrikleri veritabanından okunamıyor |
 | `KubeatResultsDropped` | Son 10 dakikada veritabanına yazılamayan kontrol sonucu var; uptime geçmişinde boşluk oluşur |
 | `KubeatNotificationsFailing` | Son 15 dakikada bir kanala teslimat denemesi başarısız oldu (`kubeat_notification_attempts_total{result="failed"}`) ya da kuyruk dolu olduğu için bildirim düşürüldü; bir kesinti duyurulmamış olabilir. Kesinti bildirimi olay sürdükçe yeniden denenir (bkz. "Alarm"); alarm kanal almadığı sürece yanar, motorun vazgeçmesini beklemez |
@@ -2458,8 +2461,10 @@ Kubeat'in 10 dakikayı aşan bir kesintisinde yukarıdaki üç alarmın
 OpenShift'in ve kube-prometheus-stack'in varsayılan yapılandırmasında yoktur:
 alarmları hangi Alertmanager alıyorsa, OpenShift'te platformun
 `alertmanager-main`'i de olsa, ona eklenir; eklenmezse Kubeat 10 dakikadan
-uzun düşükken bu üç alarm "resolved" gider. İkisi için `alertmanager.yaml`
-örneği:
+uzun düşükken bu üç alarm "resolved" gider. Üçüncü kural isteğe bağlıdır:
+scheduler durunca `KubeatSchedulerStalled` ile `KubeatUnhealthy` aynı
+arızayı söyler ve ikisi de `critical` yanar; kural yalnızca ilkini bırakır.
+Üçü için `alertmanager.yaml` örneği:
 
 ```yaml
 inhibit_rules:
@@ -2476,6 +2481,12 @@ inhibit_rules:
       - 'alertname = "KubeatDown"'
     target_matchers:
       - 'alertname =~ "KubeatMonitorDown|KubeatCertificateExpiring|KubeatBackupFailing"'
+    equal: [namespace]
+  # Scheduler dururken aynı kurulumun KubeatUnhealthy alarmı susar.
+  - source_matchers:
+      - 'alertname = "KubeatSchedulerStalled"'
+    target_matchers:
+      - 'alertname = "KubeatUnhealthy"'
     equal: [namespace]
 ```
 
@@ -2500,8 +2511,10 @@ gelen kontrol sonuçlarından en az birini veritabanına yazabildiyse
 gönderilir: süreç ayakta ama kontrol yapmıyorsa da, kontroller sürüyor ama
 sonuçları yazılamıyorsa da (veri volume'u doldu ya da salt okunur oldu, bir
 yazım aralıktan uzun sürdü) istekler kesilir. Yazılamayan sonuçtan olay
-açılmaz, bildirim gitmez; Kubeat bunu kendisi duyuramaz. Hiç sonuç gelmeyen
-bir aralık (sırası gelen kontrol yoktu) sağlıklı sayılır; bazı satırların
+açılmaz, bildirim gitmez; Kubeat bunu kendi kanallarından duyuramaz,
+cluster'ın Prometheus'u ise heartbeat olmadan da `KubeatUnhealthy` ile duyar
+(bkz. aşağıda). Hiç sonuç gelmeyen bir aralık (sırası gelen kontrol yoktu)
+sağlıklı sayılır; bazı satırların
 düşmesi de, örneğin kontrolü sürerken silinen bir monitor'un sonucu, aynı
 aralıkta başka sonuçlar yazıldıkça heartbeat'i kesmez; aralığın tek sonucuysa
 o aralığın heartbeat'i bir kez tutulur (`kubeat_results_dropped_total`
@@ -2515,6 +2528,84 @@ yazılamayan sonuçlar heartbeat'i yalnızca sonuç gelen aralıklarda keser;
 böyle bir kurulumda heartbeat aralığını en kısa kontrol aralığından kısa
 tutmayın. Bu servisin izlenen cluster'ın dışında olması gerekir, yoksa ikisi
 birlikte düşer.
+
+### Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`
+
+Heartbeat'in kararı backend'in metriklerinde de yayınlanır. Dış alıcı
+kurmadan, Kubeat'in körleştiği cluster'ın kendi Alertmanager'ından
+`critical` olarak duyulur.
+
+- **Gauge.** `kubeat_self_healthy`, heartbeat'in kullandığı denetimi her
+  scrape'te çalıştırır, `UPTIME_HEARTBEAT_URL` boşken de. Pencere
+  `UPTIME_HEARTBEAT_INTERVAL`'dır (varsayılan 1 dk); heartbeat kapalıyken
+  `UPTIME_SCHEDULER_TICK`'in iki katından kısa verilmişse iki tick sayılır.
+  Anlamı heartbeat'inkiyle aynıdır: hiç sonuç gelmeyen aralık da, bazı
+  sonuçların düşmesi de sağlıklıdır.
+- **Kural.** `KubeatUnhealthy` gauge 5 dakika 0 kalınca `critical` yanar:
+  veri volume'u doldu ya da salt okunur oldu, bir yazım aralıktan uzun
+  sürüyor ya da scheduler ilerlemiyor. Yalnızca bazı sonuçların düşmesi
+  `KubeatResultsDropped` (`warning`) olarak kalır. Backend pod'u yokken seri
+  de olmadığından yanmaz; onu `KubeatDown` söyler.
+- **Log.** Karar değişince backend, heartbeat olmadan da, bir kez log yazar:
+  Kubeat işini yapmayı bırakınca `self-health failing` (`ERROR`; nedeni
+  `reason` alanında: scheduler tick tamamlamıyor, sonuçların hiçbiri
+  yazılamıyor ya da bir yazım pencereden uzun sürüyor), yeniden yapınca
+  `self-health restored` (`INFO`). Backend kararı pencere uzunluğunda
+  aralıklarla sorar; karar sürdükçe yeni satır yazmaz. Takılan bir yazım ya
+  da monitor okuması başka satır yazmaz, `KubeatUnhealthy` yandığında nedeni
+  bu satırdadır. Heartbeat açıksa `heartbeat withheld` satırı her aralıkta
+  yazılmaya devam eder.
+- **Hangi arızayı ne duyurur.** Kurallı bir kurulumda
+  (`metrics.prometheusRule.enabled=true`) Kubeat'in kendi arızası heartbeat
+  olmadan da cluster içinden duyulur: pod yoksa `KubeatDown`, volume doluysa
+  ya da yazım takıldıysa `KubeatUnhealthy`. Cluster'ın tamamı ya da
+  Prometheus'u düşerse bunları söyleyecek kimse kalmaz; o durumu yalnızca
+  cluster dışındaki heartbeat duyurur. Heartbeat de kurallar da kapalıysa
+  kurulum notu (`NOTES.txt`) bunu uyarır.
+- **Probe'lar bağlanmaz.** Liveness ve readiness probe'ları bu karara bağlı
+  değildir (`/api/v1/health` süreç ayakta oldukça yanıt verir), çünkü dolu
+  bir volume'da yeniden başlatmak sorunu çözmez, pod'u yeniden başlatma
+  döngüsüne sokar ve bellekteki bildirim deneme listesini de siler.
+
+### Kuralları birden çok cluster'ın tek deposunda değerlendirmek: `clusterLabel`
+
+Kurallar her cluster'ın kendi Prometheus'unda değerlendirildiğinde
+(OpenShift'in user workload monitoring'i, kube-prometheus-stack) bir
+cluster'ın serileri öbürününkilere karışmaz: `metrics.prometheusRule.clusterLabel`
+boş kalır ve kurallar 0.44'teki gibi render edilir. Kurallar birden çok
+cluster'ın serilerini tutan tek bir depoda değerlendiriliyorsa (Grafana
+Cloud ya da Mimir, global Thanos Ruler), cluster'ları ayıran etiketin adı
+verilir (ör. `--set metrics.prometheusRule.clusterLabel=cluster`) ve o depoya
+bu değerle render edilen kurallar taşınır.
+
+- **Neden.** Boşken `KubeatDown` `up` serisini `namespace` ve `job`'a göre
+  toplar; `KubeatMonitorDown` ile `KubeatCertificateExpiring` de scrape
+  boşluğunda tuttukları değeri `namespace` ve `job` eşleşmesiyle bırakır.
+  Tek depoda, aynı release adı ve namespace'le kurulu bir cluster ayaktayken
+  öbürünün `KubeatDown`'ı yanmaz, açık kesinti alarmı da öbürünün başarılı
+  scrape'iyle erken çözülür.
+- **Ne değişir.** `KubeatDown`, `KubeatUnhealthy`, `KubeatBackupFailing`,
+  `KubeatMonitorDown` ve `KubeatCertificateExpiring` bu etiketle,
+  `namespace` ve `job`'un yanında, cluster başına toplanır ve dış
+  etiketlerden yalnızca onu taşır. Depo bir HA çiftinin kopyalarını
+  tekilleştirmiyorsa kopyanın etiketi (ör. `prometheus_replica`) de
+  toplanır: bir kopyanın serisi kesilince yanlış `KubeatDown` yanmaz, açık
+  kesinti tek alarm kalır. Recreate'te de alarm tektir. Öteki kurallar her
+  seriye ayrı baktığından zaten cluster başınadır ve etiketlerinin tümünü
+  taşır.
+- **Yokluk penceresi.** Hiç backend pod'u kalmayan bir cluster'ın
+  `KubeatDown`'ı, o cluster'ın `up` serisi son 24 saatte görüldüyse 5
+  dakikada yanar ve pencere boyunca açık kalır. 24 saatten uzun yokluğu bu
+  ifade görmez, onu heartbeat duyurur; hiçbir cluster'da seri kalmadıysa
+  `absent(...)` yine yanar. Kubeat'i bir cluster'dan bilerek kaldırınca o
+  cluster'ın `KubeatDown`'ı 24 saat yanar; bu sürede susturun.
+- **Susturma kuralları.** Yukarıdaki `alertmanager.yaml` örneğinde `equal`
+  listesine bu etiketi de ekleyin (`equal: [namespace, cluster]`); yoksa bir
+  cluster'ın `KubeatDown`'ı öbür cluster'daki aynı namespace'in alarmlarını
+  da susturur.
+- **Etiket adı.** Prometheus etiket adı olmalı ve kuralların kendi
+  kullandığı etiketlerden (`namespace`, `job`, `pod`, `monitor`…) biri
+  olmamalıdır; chart aksini reddeder.
 
 ## Yedekleme ve geri yükleme
 
@@ -2842,6 +2933,14 @@ birikir. Kuyruk doluyken gelen bildirim düşer ve
 `kubeat_notifications_dropped_total` artar; bu yüzden
 `UPTIME_NOTIFY_QUEUE_SIZE` en az monitor sayısı kadar olmalıdır: tüm
 monitor'ların birlikte düştüğü bir kesinti (DNS, Ingress) kuyruğa sığar.
+Varsayılanı, `UPTIME_MAX_MONITORS`'ınki gibi, 1000'dir. Etkin monitor sayısı
+kuyruğu aşarsa backend bunu bir kez, iki sayıyla `WARN` olarak loglar:
+açılışta ya da sonradan bir monitor eklenip (arayüz, API, annotation) ya da
+duraklatılmış biri sürdürülüp sınır ilk geçildiğinde. Kuyruk kendiliğinden
+büyümez. Bellek bedeli ölçüldü: kuyruk açılışta yer başına ≈ 1 KB ayırır
+(1000'de ≈ 1 MiB) ve dolu bir kuyruk, bildirimlerin monitor ve olay
+metinleriyle birlikte ≈ 1,7 MiB tutar; varsayılan 256Mi bellek limitinin
+%1'inden az.
 
 Teslim edilemeyen kesinti bildirimi kaybolmaz. Bir deneme, kanala
 `UPTIME_NOTIFY_ATTEMPTS` kısa tekrar (aralarında `UPTIME_NOTIFY_RETRY_DELAY`)
@@ -3432,7 +3531,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_ATTEMPTS` | `3` | Bir bildirim denemesinin kanal başına kısa tekrar sayısı; hepsi başarısız olursa deneme başarısızdır (kesinti bildirimi için bkz. `UPTIME_NOTIFY_RETRY_MAX`) |
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bir denemenin kısa tekrarları arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir kısa tekrarın zaman aşımı |
-| `UPTIME_NOTIFY_QUEUE_SIZE` | `100` | Teslimat döngüsünün önünde bekleyebilecek en fazla bildirim sayısı. Döngü bir bildirimi tüm kanallara aynı anda gönderir ve yalnızca en yavaş kanalın denemeleri kadar bekler; bu sırada gelenler burada birikir, kuyruk doluysa düşer ve `kubeat_notifications_dropped_total` artar. En az monitor sayısı kadar olmalıdır: tüm monitor'ların birlikte düştüğü bir kesintinin bildirimleri sığar |
+| `UPTIME_NOTIFY_QUEUE_SIZE` | `1000` | Teslimat döngüsünün önünde bekleyebilecek en fazla bildirim sayısı. Döngü bir bildirimi tüm kanallara aynı anda gönderir ve yalnızca en yavaş kanalın denemeleri kadar bekler; bu sırada gelenler burada birikir, kuyruk doluysa düşer ve `kubeat_notifications_dropped_total` artar. En az monitor sayısı kadar olmalıdır: tüm monitor'ların birlikte düştüğü bir kesintinin bildirimleri sığar. Varsayılanı `UPTIME_MAX_MONITORS`'ınki kadardır ve ondan türetilmez; etkin monitor sayısı kuyruğu aşınca backend bir kez `WARN` loglar. 1000'lik kuyruk ≈ 1 MiB, doluyken ≈ 1,7 MiB bellek tutar |
 | `UPTIME_NOTIFY_RETRY_MAX` | `15m` | Kanalın almadığı kesinti (`down`, `up`) bildiriminin yeniden denenme aralığının üst sınırı: aralık 1 dakikadan başlar, her başarısız denemede ikiye katlanır; `down` olay kapanana kadar denenir (bkz. "Alarm"). `0` yeniden denemeyi kapatır; aksi halde en az `1m` ve bir denemenin süresi (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`), daha kısası reddedilir |
 | `UPTIME_NOTIFY_RETRY_FOR` | `1h` | Düzelme (`up`) bildiriminin ilk başarısız denemeden itibaren en çok ne kadar süre yeniden deneneceği (almıyor sayılan bir kanal için bekletilen düzelmede süre ilk denemeyle başlar); `0` düzelmeyi yeniden denemez |
 | `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz. `UPTIME_OIDC_REDIRECT_URL` boşsa SSO dönüş adresi de bundan türetilir |
@@ -3464,7 +3563,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_LICENSE_FILE` | – | Kubeat Enterprise lisans dosyasının yolu, örneğin bağlanmış bir Secret; boşsa topluluk sürümü (bkz. "Kubeat Enterprise lisansı") |
 | `UPTIME_LICENSE_RELOAD_INTERVAL` | `1m` | Lisans dosyasının değişip değişmediğine bakma aralığı; yenilenen lisans yeniden başlatmadan etkinleşir |
 | `UPTIME_HEARTBEAT_URL` | – | Dead man's switch adresi; boşsa heartbeat gönderilmez |
-| `UPTIME_HEARTBEAT_INTERVAL` | `1m` | Heartbeat aralığı; `UPTIME_SCHEDULER_TICK`'in en az iki katı |
+| `UPTIME_HEARTBEAT_INTERVAL` | `1m` | Heartbeat aralığı; `UPTIME_SCHEDULER_TICK`'in en az iki katı. `kubeat_self_healthy`'nin baktığı pencere de budur, heartbeat kapalıyken de (iki tick'ten kısaysa iki tick) |
 | `UPTIME_HEARTBEAT_TIMEOUT` | `10s` | Heartbeat isteğinin zaman aşımı |
 | `UPTIME_METRICS_TIMEOUT` | `5s` | `/metrics` için veritabanı okumasının zaman aşımı |
 | `UPTIME_SMTP_HOST` | – | E-posta kanalları için SMTP sunucusu |

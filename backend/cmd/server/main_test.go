@@ -10,11 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
+	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
 	"github.com/yusufceng/Kubeat/backend/internal/secretbox"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -386,6 +389,216 @@ func TestSetUpOIDC(t *testing.T) {
 		if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "SSO is off") {
 			t.Errorf("%s: not logged as an error: %q", name, logs.String())
 		}
+	}
+}
+
+// More enabled monitors than the delivery queue holds is said once, with
+// both numbers: at start if there are already, else the first time a tick
+// finds them past it. Ticks at or under the size say nothing.
+func TestQueueWarning(t *testing.T) {
+	warnings := func(counts ...int) []string {
+		var logs bytes.Buffer
+		check := queueWarning(1000, slog.New(slog.NewTextHandler(&logs, nil)))
+		for _, n := range counts {
+			check(n)
+		}
+		return strings.Split(strings.TrimSpace(logs.String()), "\n")
+	}
+	for _, tt := range []struct {
+		name    string
+		counts  []int
+		enabled string // in the one warning; empty for none
+	}{
+		{"never past the queue", []int{3, 999, 1000, 1000}, ""},
+		{"past it at start", []int{1200, 1200, 1300, 900, 1250}, "enabled_monitors=1200"},
+		{"past it later", []int{998, 1000, 1001, 1002, 1000, 1003}, "enabled_monitors=1001"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := warnings(tt.counts...)
+			if tt.enabled == "" {
+				if lines[0] != "" {
+					t.Errorf("logged %q, want nothing", lines)
+				}
+				return
+			}
+			if len(lines) != 1 || !strings.Contains(lines[0], "level=WARN") || !strings.Contains(lines[0], tt.enabled) ||
+				!strings.Contains(lines[0], "notify_queue_size=1000") || !strings.Contains(lines[0], "UPTIME_NOTIFY_QUEUE_SIZE") {
+				t.Errorf("logged %q, want one WARN with %s and notify_queue_size=1000", lines, tt.enabled)
+			}
+		})
+	}
+}
+
+// selfHealthFailing is how the log starts the line saying Kubeat stopped
+// doing its job, up to the reason.
+const selfHealthFailing = `level=ERROR msg="self-health failing: checks are not running, or their results are not stored" reason="`
+
+// Whether Kubeat is doing its job is logged when the answer changes, and
+// only then: an error with the reason when it stops, a line when it does
+// its job again, nothing for an answer that stays. A hang, which logs
+// nothing else, is said once, not at every look.
+func TestWatchHealth(t *testing.T) {
+	hung := errors.New("the writer has been busy with one batch of check results for 1m5s")
+	stalled := errors.New("the scheduler has not completed a tick for 1m10s")
+	failing := func(problem error) string { return selfHealthFailing + problem.Error() + `"` }
+	const restored = `level=INFO msg="self-health restored"`
+	for _, tt := range []struct {
+		name    string
+		answers []error // one a look, in order
+		want    []string
+	}{
+		{"healthy throughout", []error{nil, nil, nil}, nil},
+		{"a write that hangs, then ends", []error{nil, hung, hung, hung, nil, nil}, []string{failing(hung), restored}},
+		{"failing from the first look, and again later", []error{stalled, stalled, nil, nil, hung, hung, nil},
+			[]string{failing(stalled), restored, failing(hung), restored}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// healthy gives the answers one look at a time, then keeps
+			// giving the last one; only the watch calls it.
+			looked := make(chan struct{})
+			n := 0
+			healthy := func() error {
+				answer := tt.answers[min(n, len(tt.answers)-1)]
+				if n++; n == len(tt.answers) {
+					close(looked)
+				}
+				return answer
+			}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				watchHealth(ctx, healthy, time.Millisecond, slog.New(slog.NewTextHandler(&logs, nil)))
+			}()
+			select {
+			case <-looked:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the watch did not look often enough")
+			}
+			cancel()
+			<-done
+
+			var got []string
+			if out := strings.TrimSpace(logs.String()); out != "" {
+				got = strings.Split(out, "\n")
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("logged %d lines, want %d:\n%s", len(got), len(tt.want), logs.String())
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(got[i], want) {
+					t.Errorf("line %d = %q, want it to hold %q", i+1, got[i], want)
+				}
+			}
+		})
+	}
+}
+
+// hungStore holds the scheduler until release is closed, as a hung volume
+// does: in its reads of the monitors from the second tick on (list), or in
+// its writes of results (write).
+type hungStore struct {
+	list, write bool
+	release     chan struct{}
+	reads       atomic.Int32
+}
+
+func (h *hungStore) ListMonitors(context.Context) ([]store.Monitor, error) {
+	if h.list && h.reads.Add(1) > 1 {
+		<-h.release
+	}
+	return []store.Monitor{{ID: 1, Type: store.MonitorHTTP, Interval: 5 * time.Millisecond, Timeout: time.Second, Enabled: true}}, nil
+}
+
+func (h *hungStore) InsertCheckResults(context.Context, []store.CheckResult) error {
+	if h.write {
+		<-h.release
+	}
+	return nil
+}
+
+// upChecker finds every monitor up, at once.
+type upChecker struct{}
+
+func (upChecker) Check(_ context.Context, m store.Monitor) store.CheckResult {
+	return store.CheckResult{MonitorID: m.ID, Up: true}
+}
+
+// syncBuffer is a log one goroutine writes while a test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// Without a heartbeat, a hang reaches the log from the scheduler's own
+// judgement, with its reason, and so does its end: a read of the monitors
+// or a write of results that does not return logs nothing else.
+func TestWatchHealthLogsAHangWithoutAHeartbeat(t *testing.T) {
+	const window = 400 * time.Millisecond
+	for _, tt := range []struct {
+		name   string
+		st     *hungStore
+		reason string
+	}{
+		{"a read of the monitors hangs", &hungStore{list: true, release: make(chan struct{})}, "the scheduler has not completed a tick for "},
+		{"a write of results hangs", &hungStore{write: true, release: make(chan struct{})}, "the writer has been busy with one batch of check results for "},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sched := scheduler.New(tt.st, upChecker{}, scheduler.Options{
+				Tick: 5 * time.Millisecond, Workers: 1, BatchSize: 1, FlushInterval: 5 * time.Millisecond, Logger: quiet(),
+			})
+			logs := &syncBuffer{}
+			ctx, cancel := context.WithCancel(context.Background())
+			var running sync.WaitGroup
+			running.Add(2)
+			go func() {
+				defer running.Done()
+				sched.Run(ctx)
+			}()
+			go func() {
+				defer running.Done()
+				watchHealth(ctx, func() error { return sched.Healthy(window) }, window/4, slog.New(slog.NewTextHandler(logs, nil)))
+			}()
+			release := sync.OnceFunc(func() { close(tt.st.release) })
+			defer func() {
+				release()
+				cancel()
+				running.Wait()
+			}()
+
+			failing := selfHealthFailing + tt.reason
+			waitFor(t, "the hang to be logged", func() bool { return strings.Contains(logs.String(), failing) })
+			release()
+			waitFor(t, "its end to be logged", func() bool {
+				out := logs.String()
+				return strings.Contains(out[strings.Index(out, failing):], `level=INFO msg="self-health restored"`)
+			})
+		})
 	}
 }
 

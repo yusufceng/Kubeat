@@ -133,3 +133,18 @@ prometheus.tokenFile: the service account token goes to
 without its certificate being checked, so whoever answers there gets it.
 Set prometheus.caFile instead.
 {{- end }}
+{{- if not (or .Values.heartbeat.urlSecret.name (dig "extraEnv" "UPTIME_HEARTBEAT_URL" "" .Values.backend) .Values.metrics.prometheusRule.enabled) }}
+
+WARNING: neither a heartbeat (heartbeat.urlSecret, or UPTIME_HEARTBEAT_URL
+in backend.extraEnv) nor the alert rules (metrics.prometheusRule.enabled)
+are on, so nobody hears when Kubeat itself fails: with no backend pod
+nothing is checked, with a full data volume every check result is lost,
+and either way no notification is sent. Turn on either; the README says
+how, under "Aracın kendi sağlığı".
+{{- end }}
+{{- if not .Values.backup.enabled }}
+
+No backups of the database are taken (backup.enabled=false): losing the
+data volume loses the monitors, channels and history. Ignore this if you
+back the volume up yourself (Velero, OADP).
+{{- end }}

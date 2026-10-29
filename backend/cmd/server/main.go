@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	// Time zones for repeating maintenance windows, for images without them.
@@ -225,6 +226,7 @@ func main() {
 		BatchSize:            cfg.ResultBatchSize,
 		FlushInterval:        cfg.ResultFlushInterval,
 		OnResults:            alerts.Evaluate,
+		OnTick:               queueWarning(cfg.NotifyQueueSize, logger),
 		TargetMaxRate:        cfg.TargetMaxRate,
 		ClusterTargetMaxRate: cfg.ClusterTargetMaxRate,
 		AddressMaxRate:       cfg.TargetAddressMaxRate,
@@ -260,6 +262,19 @@ func main() {
 		}()
 		logger.Info("backups enabled", "dir", cfg.BackupDir, "interval", cfg.BackupInterval.String(), "keep", cfg.BackupKeep)
 	}
+	// Alive means the scheduler read its monitors and queued the due ones at
+	// least once in the last heartbeat interval, and stored some of the
+	// results that came in that time, if any came. The heartbeat sends on
+	// it, and kubeat_self_healthy reports it at every scrape, also without
+	// a heartbeat, so that the cluster's own Prometheus hears it too; the
+	// log says when it changes, and why, heartbeat or not.
+	healthy := func() error { return sched.Healthy(cfg.HealthWindow()) }
+	meter.WatchHealth(healthy)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		watchHealth(ctx, healthy, cfg.HealthWindow(), logger)
+	}()
 	if cfg.HeartbeatURL != "" {
 		background.Add(1)
 		go func() {
@@ -268,14 +283,10 @@ func main() {
 				URL:      cfg.HeartbeatURL,
 				Interval: cfg.HeartbeatInterval,
 				Timeout:  cfg.HeartbeatTimeout,
-				// Alive means the scheduler read its monitors and queued the
-				// due ones at least once since the previous heartbeat, and
-				// stored some of the results that came in that time, if any
-				// came.
-				Healthy: func() error { return sched.Healthy(cfg.HeartbeatInterval) },
-				Client:  &http.Client{},
-				Metrics: meter,
-				Logger:  logger,
+				Healthy:  healthy,
+				Client:   &http.Client{},
+				Metrics:  meter,
+				Logger:   logger,
 			})
 		}()
 		logger.Info("heartbeat enabled", "interval", cfg.HeartbeatInterval.String())
@@ -735,6 +746,33 @@ func watchLicense(ctx context.Context, lic *license.Manager, interval time.Durat
 	}
 }
 
+// watchHealth asks healthy every interval, as the heartbeat does, whether
+// Kubeat is doing its job, and logs when the answer changes: an error with
+// the reason when it stops, a line when it does its job again, nothing while
+// the answer stays. It runs heartbeat or not, so that the log says why
+// kubeat_self_healthy is 0 and KubeatUnhealthy fires: a write of results or
+// a read of the monitors that hangs logs nothing else.
+func watchHealth(ctx context.Context, healthy func() error, interval time.Duration, logger *slog.Logger) {
+	failing := false
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		problem := healthy()
+		switch {
+		case problem != nil && !failing:
+			logger.Error("self-health failing: checks are not running, or their results are not stored", "reason", problem)
+		case problem == nil && failing:
+			logger.Info("self-health restored")
+		}
+		failing = problem != nil
+	}
+}
+
 // runSessionCleanup drops expired sessions and old audit entries, hourly.
 func runSessionCleanup(ctx context.Context, db *store.SQLite, auditRetention time.Duration, logger *slog.Logger) {
 	ticker := time.NewTicker(time.Hour)
@@ -786,6 +824,25 @@ func sweepThrottle(ctx context.Context, throttle *auth.Throttle) {
 			return
 		case now := <-ticker.C:
 			throttle.Sweep(now.UTC())
+		}
+	}
+}
+
+// queueWarning returns what the scheduler calls after every tick with the
+// number of enabled monitors. It warns once, the first time more monitors
+// are enabled than notifications fit in the delivery queue
+// (UPTIME_NOTIFY_QUEUE_SIZE): at start if there are already, else when a
+// monitor added or resumed later (in the UI, through the API or by an
+// annotation) takes them past it. An outage of all of them would overflow
+// the queue, and a notification that finds it full is dropped. The queue is
+// not sized to fit: its size stays the operator's.
+func queueWarning(size int, logger *slog.Logger) func(enabled int) {
+	var warned atomic.Bool
+	return func(enabled int) {
+		if enabled > size && warned.CompareAndSwap(false, true) {
+			logger.Warn("more monitors are enabled than notifications fit in the delivery queue: in an outage of them all, the notifications "+
+				"that do not fit are dropped; raise UPTIME_NOTIFY_QUEUE_SIZE to at least the number of monitors",
+				"enabled_monitors", enabled, "notify_queue_size", size)
 		}
 	}
 }

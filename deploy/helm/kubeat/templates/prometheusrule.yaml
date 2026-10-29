@@ -8,6 +8,28 @@ raising them a second time.
 */}}
 {{- $scrape := "instance, pod, endpoint, container, service" }}
 {{- $up := printf "up{job=%q, namespace=%q}" (printf "%s-backend" .Release.Name) .Release.Namespace }}
+{{- /*
+What tells one installation's series from another's, and what the alerts of
+an installation and of one of its monitors are aggregated by. By default
+namespace and job, and everything but the scrape labels: each cluster's own
+Prometheus evaluates the rules, and the rules render as in 0.44. With
+metrics.prometheusRule.clusterLabel the rules are evaluated over the series
+of several clusters in one store (Grafana Cloud or Mimir, a global Thanos
+Ruler): they then group by that label beside namespace and job, so that one
+cluster's backend does not hide another's, and drop every other label the
+store adds, such as the replica label of an HA pair it does not
+deduplicate, by which one replica's gone series would raise a false alert or
+a second one.
+*/}}
+{{- $cluster := include "kubeat.clusterLabel" . }}
+{{- $installation := "namespace, job" }}
+{{- $byInstallation := printf "without (%s)" $scrape }}
+{{- $byMonitor := printf "without (%s)" $scrape }}
+{{- if $cluster }}
+{{- $installation = printf "namespace, job, %s" $cluster }}
+{{- $byInstallation = printf "by (%s)" $installation }}
+{{- $byMonitor = printf "by (%s, monitor, monitor_namespace, type)" $installation }}
+{{- end }}
 # Alerts the cluster's own Prometheus raises from Kubeat's metrics, so that
 # outages reach the Alertmanager and receivers the platform already has.
 # Needs the ServiceMonitor (or another scrape of /metrics, which then sends
@@ -38,10 +60,10 @@ spec:
         # fires.
         - alert: KubeatMonitorDown
           expr: |-
-            max without ({{ $scrape }}) (kubeat_monitor_incident_open) == 1
+            max {{ $byMonitor }} (kubeat_monitor_incident_open) == 1
             or (
-              max without ({{ $scrape }}) (last_over_time(kubeat_monitor_incident_open[10m])) == 1
-              unless on (namespace, job) (kubeat_monitor_scrape_success == 1)
+              max {{ $byMonitor }} (last_over_time(kubeat_monitor_incident_open[10m])) == 1
+              unless on ({{ $installation }}) (kubeat_monitor_scrape_success == 1)
             )
           labels:
             severity: {{ .Values.metrics.prometheusRule.severity | quote }}
@@ -53,10 +75,10 @@ spec:
         - alert: KubeatCertificateExpiring
           expr: |-
             (
-              max without ({{ $scrape }}) (kubeat_monitor_cert_expiry_timestamp_seconds)
+              max {{ $byMonitor }} (kubeat_monitor_cert_expiry_timestamp_seconds)
               or (
-                max without ({{ $scrape }}) (last_over_time(kubeat_monitor_cert_expiry_timestamp_seconds[10m]))
-                unless on (namespace, job) (kubeat_monitor_scrape_success == 1)
+                max {{ $byMonitor }} (last_over_time(kubeat_monitor_cert_expiry_timestamp_seconds[10m]))
+                unless on ({{ $installation }}) (kubeat_monitor_scrape_success == 1)
               )
             ) - time() < {{ .Values.metrics.prometheusRule.certWarningDays }} * 86400
           for: 10m
@@ -72,9 +94,21 @@ spec:
         # only job and namespace, so it stays one alert from a failing scrape
         # to a pod that is gone. absent() of "up == 1" would be the same
         # test, but takes no labels from a comparison.
+        {{- if $cluster }}
+        # Over the series of several clusters, absent() fires only once no
+        # cluster has a backend left: a cluster whose up series was seen in
+        # the last 24 hours and is gone fires on its own, with its {{ $cluster }}
+        # label. An absence longer than that is the heartbeat's to tell.
+        {{- end }}
         - alert: KubeatDown
           expr: |-
-            max by (namespace, job) ({{ $up }}) == 0
+            max by ({{ $installation }}) ({{ $up }}) == 0
+            {{- if $cluster }}
+            or (
+              group by ({{ $installation }}) (max_over_time({{ $up }}[24h]))
+              unless group by ({{ $installation }}) ({{ $up }})
+            )
+            {{- end }}
             or absent({{ $up }})
           for: 5m
           labels:
@@ -89,6 +123,19 @@ spec:
             severity: critical
           annotations:
             summary: "Kubeat's scheduler has stopped ticking"
+        # What the heartbeat judges, read from the backend at every scrape,
+        # so that it is heard without a dead man's switch too. A loss of
+        # some results only is KubeatResultsDropped's warning, and no
+        # backend at all KubeatDown's: without the series this stays silent.
+        # A stalled scheduler fires this and KubeatSchedulerStalled both.
+        - alert: KubeatUnhealthy
+          expr: max {{ $byInstallation }} (kubeat_self_healthy) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kubeat's checks are not running, or their results are not stored"
+            description: "For 5 minutes Kubeat has not been doing its job (kubeat_self_healthy, what the heartbeat sends on): in the last heartbeat interval its scheduler completed no tick, or check results came and none of them could be stored (a full or read-only data volume), or one write of them outlasted the interval (a hung volume). No outage is opened and no notification sent meanwhile; the backend's log says why (self-health failing, with the reason; list monitors failed, batch insert failed)."
         - alert: KubeatMetricsIncomplete
           expr: kubeat_monitor_scrape_success == 0
           for: 10m
@@ -131,8 +178,8 @@ spec:
         # last value would resolve the alert meanwhile.
         - alert: KubeatBackupFailing
           expr: |-
-            max without ({{ $scrape }}) (max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m]))
-            > max without ({{ $scrape }}) (max_over_time(kubeat_backup_last_success_timestamp_seconds[10m]))
+            max {{ $byInstallation }} (max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m]))
+            > max {{ $byInstallation }} (max_over_time(kubeat_backup_last_success_timestamp_seconds[10m]))
           labels:
             severity: warning
           annotations:

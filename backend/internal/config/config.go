@@ -238,7 +238,9 @@ type Config struct {
 	LicenseReloadInterval time.Duration // UPTIME_LICENSE_RELOAD_INTERVAL
 
 	// Heartbeats go to an external dead man's switch; off while the URL is
-	// empty. MetricsTimeout bounds the database read done for a scrape.
+	// empty. The interval is also the window kubeat_self_healthy judges the
+	// scheduler over, heartbeat or not (see HealthWindow). MetricsTimeout
+	// bounds the database read done for a scrape.
 	HeartbeatURL      string        // UPTIME_HEARTBEAT_URL
 	HeartbeatInterval time.Duration // UPTIME_HEARTBEAT_INTERVAL
 	HeartbeatTimeout  time.Duration // UPTIME_HEARTBEAT_TIMEOUT
@@ -448,7 +450,10 @@ func Load() (Config, error) {
 		{&cfg.EventLimit, "UPTIME_EVENT_LIMIT", 20},
 		{&cfg.IncidentTimelineLimit, "UPTIME_INCIDENT_TIMELINE_LIMIT", 100},
 		{&cfg.RecoveryThreshold, "UPTIME_RECOVERY_THRESHOLD", 1},
-		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 100},
+		// The default of UPTIME_MAX_MONITORS: an outage of every monitor the
+		// quota lets in fits. A setting of either does not move the other;
+		// the server warns when more monitors are enabled than this.
+		{&cfg.NotifyQueueSize, "UPTIME_NOTIFY_QUEUE_SIZE", 1000},
 		{&cfg.NotifyAttempts, "UPTIME_NOTIFY_ATTEMPTS", 3},
 		{&cfg.SMTPPort, "UPTIME_SMTP_PORT", 587},
 		{&cfg.BackupKeep, "UPTIME_BACKUP_KEEP", 7},
@@ -779,6 +784,16 @@ func (c Config) UserAgentFor(version string) string {
 		return c.UserAgent
 	}
 	return DefaultUserAgent(version, c.PublicURL)
+}
+
+// HealthWindow is the interval over which the heartbeat and
+// kubeat_self_healthy judge whether the scheduler did its job:
+// UPTIME_HEARTBEAT_INTERVAL. Load holds the interval to two scheduler ticks
+// only while a heartbeat URL is set; without one, a shorter interval is
+// taken as two ticks, as a window with no tick in it would read as a
+// stalled scheduler between every two ticks.
+func (c Config) HealthWindow() time.Duration {
+	return max(c.HeartbeatInterval, 2*c.SchedulerTick)
 }
 
 // loopback reports whether host names this machine.
