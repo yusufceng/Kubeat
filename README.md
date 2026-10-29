@@ -47,9 +47,9 @@ uyarıyla atlar, CI'da ise atlamaz.
 Her sürüm etiketi (`vX.Y.Z`) imajları `ghcr.io/yusufceng/kubeat-backend`
 ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
 `oci://ghcr.io/yusufceng/charts/kubeat` olarak yayımlar
-([.github/workflows/release.yml](.github/workflows/release.yml)). İmajlar ve
-chart imzalıdır; sürümün GitHub Release'i digest'leri ve SBOM'ları taşır (bkz.
-"Tedarik zinciri"). Herhangi bir cluster'a kurulum:
+([.github/workflows/release.yml](.github/workflows/release.yml)). 0.45.0'dan
+beri imajlar ve chart imzalıdır; sürümün GitHub Release'i digest'leri ve
+SBOM'ları taşır (bkz. "Tedarik zinciri"). 0.44.0 ve öncesi imzasızdır. Herhangi bir cluster'a kurulum:
 
 ```
 helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0 \
@@ -1292,8 +1292,9 @@ CA); ikisi birlikte verilirse kurulum notları uyarır.
 
 ### Tedarik zinciri
 
-Her sürüm etiketi iki imajı ve chart'ı imzalı yayımlar; imajlar SBOM ve
-provenance taşır. Açık bildirmek, hangi sürümün düzeltme aldığı ve kritik ya
+0.45.0'dan beri her sürüm etiketi iki imajı ve chart'ı imzalı yayımlar;
+imajlar SBOM ve provenance taşır. 0.44.0 ve öncesi imzasızdır ve GitHub
+Release'leri yoktur. Açık bildirmek, hangi sürümün düzeltme aldığı ve kritik ya
 da yüksek açıklar için hedef süre: [SECURITY.md](SECURITY.md).
 
 #### Derleme ve bağımlılıklar

@@ -40,7 +40,9 @@ Trunk-based, kısa ömürlü branch'ler (GitHub Flow).
   SBOM'lu yayımlar ve etiketin GitHub Release'ini açar ("Yayım iş akışı").
 - Yayınlanmış bir sürüme düzeltme gerekirse o etiketten `release/vX.Y` açılır,
   `hotfix/` branch'i oraya merge edilir ve düzeltme `main`'e de taşınır.
-  `make release` bu daldan da etiketler. Bu bir yetenektir, destek sözü
+  `make release` bu daldan da etiketler; bu yalnızca v0.45.0 ve sonrasından
+  açılan dallarda geçerlidir, çünkü etiket push'u etiketlenen commit'teki
+  release.yml'i koşar ve öncekiler imzalamaz. Bu bir yetenektir, destek sözü
   değildir: güvenlik düzeltmesini yalnızca son minor alır
   ([SECURITY.md](SECURITY.md)); eski bir minor'a yama ayrı bir kararla çıkar.
   Böyle bir yamanın GitHub Release'i deponun "Latest"i olmaz.

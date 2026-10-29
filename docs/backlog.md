@@ -884,3 +884,15 @@ matrisi birlikte değişir. Tetikleyici: Helm projesinin Helm 3'e güvenlik
 yamalarını bitirmesi, `chart (Helm 3)` koşusunun chart düzeltilerek
 onarılamayan bir nedenle kalıcı kırılması ya da yalnızca Helm 4'te olan bir
 chart özelliğine ihtiyaç.
+
+## Yayımlanan imajları işletim sistemi paketleri için taramak
+
+2026-10-29'da ertelendi (#48'in kapsam dışı parçası). Haftalık güvenlik
+taraması (`security.yml`) Go modüllerini ve frontend'in npm çalışma zamanı
+bağımlılıklarını tarar; taban imajların (UBI) işletim sistemi paketleri ve
+frontend imajındaki Node.js çalışma zamanı taranmaz. SECURITY.md taban imaj
+açıkları için 7 günlük hedef verir, ama bu açıkların fark edilmesi bugün Red
+Hat ve Node.js duyurularına ve Dependabot'un taban imaj PR'larına bağlıdır.
+Çözüm: yayımlanan imajlara haftalık bir imaj tarayıcısı (Trivy ya da Grype;
+SBOM'dan da çalışabilir). Tetikleyici: bir taban imaj açığının 7 günlük
+hedefi kaçırması ya da bir müşterinin tarama raporu istemesi.

@@ -38,7 +38,11 @@ düzeyi değildir.
 
 Bağımlılıklardaki bilinen açıklar her hafta taranır: backend için
 `govulncheck`, frontend'in çalışma zamanı bağımlılıkları için `npm audit`
-([security.yml](.github/workflows/security.yml)).
+([security.yml](.github/workflows/security.yml)). Taban imajların işletim
+sistemi paketleri (UBI) ve frontend imajındaki Node.js çalışma zamanı bu
+taramaya girmez; onların açıkları Red Hat'in ve Node.js'in duyurularından ve
+Dependabot'un haftalık taban imaj PR'larından izlenir. Yayımlanan imajları
+bir imaj tarayıcısıyla taramak backlog'dadır.
 
 ## Taban imajlar
 
@@ -50,6 +54,7 @@ hedef süre 7 gündür.
 
 ## Yayımı doğrulamak
 
-İmajlar ve chart imzalıdır; imajlar SBOM ve provenance taşır. İmzanın nasıl
+0.45.0'dan beri imajlar ve chart imzalıdır; imajlar SBOM ve provenance
+taşır. 0.44.0 ve öncesi imzasızdır. İmzanın nasıl
 doğrulanacağı, imzalarla aynalama ve hava boşluklu ortamda doğrulama:
 [README, "Tedarik zinciri"](README.md#tedarik-zinciri).

@@ -271,6 +271,9 @@ jobs:
           name: release-${{ needs.versions.outputs.version }}
           path: release
       - name: GitHub Release
+        # bash, not the default sh: with pipefail a failing tag listing stops
+        # the step instead of leaving "newest" empty and the release not latest.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.versions.outputs.version }}
