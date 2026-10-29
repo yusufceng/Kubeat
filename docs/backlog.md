@@ -420,7 +420,11 @@ boşluğu `KubeatDown` bildirdiği için zararları küçük. İkinci parça:
 ise ve aynı `job`/`namespace` etiketlerini veren başka bir scrape yoksa
 `KubeatDown` sürekli yanar. Bu README'de ("Aracın kendi sağlığı") ve
 values.yaml yorumunda yazılı, kurulum notu (`NOTES.txt`) söylemiyor.
-Ertelendi, çünkü S29'un kapsamı dört alarmdı ve `NOTES.txt` bu sprintte
+Üçüncü parça: veritabanı 10 dakikadan uzun okunamazken `/metrics` yanıt
+verdiği için `up` 1 kalır ve `KubeatDown` yanmaz; `KubeatMonitorDown` ile
+`KubeatCertificateExpiring` 10 dakika sonra çözülür, yerlerine
+`KubeatMetricsIncomplete` yanar ve README'deki susturma kuralı bu durumu
+kapsamaz. Ertelendi, çünkü S29'un kapsamı dört alarmdı ve `NOTES.txt` bu sprintte
 #38'in dosyası. Tetikleyici: pilotta lisans alarmının bir yükseltmede gidip
 gelmesi, `KubeatBackupStale`'in bir Recreate'te "resolved" göndermesi ya da
 ServiceMonitor'süz kurulumda sürekli yanan `KubeatDown` için ilk kullanıcı

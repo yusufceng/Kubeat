@@ -32,8 +32,10 @@ spec:
         # resolves on the next scrape. While they are not (a failed scrape,
         # the minutes a Recreate takes to move the volume, a scrape in which
         # the database could not be read), the last value of the past 10
-        # minutes holds the alert instead of resolving it. A longer gap is
-        # KubeatDown's, which fires after 5 minutes.
+        # minutes holds the alert instead of resolving it. A longer failed
+        # scrape is KubeatDown's, which fires after 5 minutes; a longer
+        # database read failure resolves them while KubeatMetricsIncomplete
+        # fires.
         - alert: KubeatMonitorDown
           expr: |-
             max without ({{ $scrape }}) (kubeat_monitor_incident_open) == 1
