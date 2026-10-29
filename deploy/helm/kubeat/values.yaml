@@ -338,13 +338,20 @@ metrics:
     labels: {}
   # Creates a PrometheusRule so the cluster's Prometheus raises alerts from
   # the metrics: KubeatMonitorDown per open outage, KubeatCertificateExpiring,
-  # and for Kubeat itself KubeatDown, KubeatSchedulerStalled,
-  # KubeatMetricsIncomplete, KubeatResultsDropped, KubeatNotificationsFailing,
-  # KubeatWorkersSaturated, KubeatBackupFailing, KubeatBackupStale (with
+  # and for Kubeat itself KubeatDown (also when there is no backend pod at
+  # all), KubeatSchedulerStalled, KubeatMetricsIncomplete,
+  # KubeatResultsDropped, KubeatNotificationsFailing, KubeatWorkersSaturated,
+  # KubeatBackupFailing (until a backup succeeds), KubeatBackupStale (with
   # backup.enabled: no good copy for twice backup.interval) and
   # KubeatLicenseExpiring (30 days before the license ends, critical at 7
-  # days and after it ends). They reach the Alertmanager and receivers the
-  # platform already has; the README's "Aracın kendi sağlığı" lists them.
+  # days and after it ends). The outage, certificate and backup alerts hold
+  # their state over a scrape gap of up to 10 minutes, such as a Recreate.
+  # KubeatDown reads the up series of job <release>-backend in the release's
+  # namespace, as the ServiceMonitor above scrapes it: another scrape needs
+  # the same labels, or KubeatDown keeps firing. They reach the Alertmanager
+  # and receivers the platform already has; the README's "Aracın kendi
+  # sağlığı" lists them, with inhibit rules for whichever Alertmanager
+  # receives them.
   prometheusRule:
     enabled: false
     labels: {}

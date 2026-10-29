@@ -1,8 +1,18 @@
 {{- if .Values.metrics.prometheusRule.enabled }}
+{{- /*
+The labels a scrape gives a series that change with every backend pod, or
+say only how it was scraped. The alerts that hold their state over a scrape
+gap are aggregated without them, so that the pod a Recreate brings, under a
+new name and address, carries on the alerts of the pod before it instead of
+raising them a second time.
+*/}}
+{{- $scrape := "instance, pod, endpoint, container, service" }}
+{{- $up := printf "up{job=%q, namespace=%q}" (printf "%s-backend" .Release.Name) .Release.Namespace }}
 # Alerts the cluster's own Prometheus raises from Kubeat's metrics, so that
 # outages reach the Alertmanager and receivers the platform already has.
 # Needs the ServiceMonitor (or another scrape of /metrics, which then sends
-# the metrics token) to be in place.
+# the metrics token and gives the series the job and namespace labels the
+# ServiceMonitor gives them) to be in place.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -17,16 +27,38 @@ spec:
     - name: kubeat.monitors
       rules:
         # Kubeat has already applied the monitor's failure threshold, so the
-        # incident itself is the signal; no extra "for" is needed.
+        # incident itself is the signal; no extra "for" is needed. While the
+        # per-monitor metrics are scraped they decide, so a closed outage
+        # resolves on the next scrape. While they are not (a failed scrape,
+        # the minutes a Recreate takes to move the volume, a scrape in which
+        # the database could not be read), the last value of the past 10
+        # minutes holds the alert instead of resolving it. A longer failed
+        # scrape is KubeatDown's, which fires after 5 minutes; a longer
+        # database read failure resolves them while KubeatMetricsIncomplete
+        # fires.
         - alert: KubeatMonitorDown
-          expr: kubeat_monitor_incident_open == 1
+          expr: |-
+            max without ({{ $scrape }}) (kubeat_monitor_incident_open) == 1
+            or (
+              max without ({{ $scrape }}) (last_over_time(kubeat_monitor_incident_open[10m])) == 1
+              unless on (namespace, job) (kubeat_monitor_scrape_success == 1)
+            )
           labels:
             severity: {{ .Values.metrics.prometheusRule.severity | quote }}
           annotations:
             summary: {{ `"{{ $labels.monitor }} is down"` }}
             description: {{ `"Kubeat monitor {{ $labels.monitor }} ({{ $labels.type }}{{ if $labels.monitor_namespace }}, namespace {{ $labels.monitor_namespace }}{{ end }}) has an open outage."` }}
+        # The expiry is held over a scrape gap the same way, so that the gap
+        # neither resolves the alert nor starts its 10 minutes over.
         - alert: KubeatCertificateExpiring
-          expr: (kubeat_monitor_cert_expiry_timestamp_seconds - time()) < {{ .Values.metrics.prometheusRule.certWarningDays }} * 86400
+          expr: |-
+            (
+              max without ({{ $scrape }}) (kubeat_monitor_cert_expiry_timestamp_seconds)
+              or (
+                max without ({{ $scrape }}) (last_over_time(kubeat_monitor_cert_expiry_timestamp_seconds[10m]))
+                unless on (namespace, job) (kubeat_monitor_scrape_success == 1)
+              )
+            ) - time() < {{ .Values.metrics.prometheusRule.certWarningDays }} * 86400
           for: 10m
           labels:
             severity: {{ .Values.metrics.prometheusRule.severity | quote }}
@@ -34,14 +66,22 @@ spec:
             summary: {{ `"certificate of {{ $labels.monitor }} expires in {{ $value | humanizeDuration }}"` }}
     - name: kubeat.self
       rules:
+        # Also with no backend target at all: a pod that is pending, deleted
+        # or put to sleep, or never got an address, leaves no up series, and
+        # "up == 0" alone stays silent then. Either way the alert carries
+        # only job and namespace, so it stays one alert from a failing scrape
+        # to a pod that is gone. absent() of "up == 1" would be the same
+        # test, but takes no labels from a comparison.
         - alert: KubeatDown
-          expr: up{job={{ printf "%s-backend" .Release.Name | quote }}} == 0
+          expr: |-
+            max by (namespace, job) ({{ $up }}) == 0
+            or absent({{ $up }})
           for: 5m
           labels:
             severity: critical
           annotations:
             summary: "Kubeat's metrics cannot be scraped"
-            description: "Nothing is checking the monitors while Kubeat is down; the KubeatMonitorDown alerts are silent, not resolved."
+            description: "Kubeat's backend has not answered Prometheus for 5 minutes, or it has no pod at all (pending, deleted, put to sleep): nothing checks the monitors meanwhile. Its per-monitor and backup alerts keep their last state for 10 minutes and then resolve, unless an inhibit rule in the Alertmanager mutes them while this alert fires."
         - alert: KubeatSchedulerStalled
           expr: time() - kubeat_scheduler_last_tick_timestamp_seconds > 60
           for: 5m
@@ -81,13 +121,23 @@ spec:
           annotations:
             summary: "Kubeat's workers cannot keep up with the checks"
             description: "For 15 minutes due checks have been left for the next tick because every worker stayed busy, so checks run late: raise UPTIME_WORKERS, or look for targets that hold checks until their timeout."
+        # The newest attempt failed: the last failure is newer than the last
+        # good copy. Unlike a count of failures over a window, it stays until
+        # a backup succeeds: over the whole interval a full volume waits, and
+        # with no copy at all. Both are times, which only grow within a
+        # process, so each is read as its largest value of the past 10
+        # minutes across pods: a restarted backend, in the same pod or in a
+        # new one, reports no failure until its first attempt ends, and its
+        # last value would resolve the alert meanwhile.
         - alert: KubeatBackupFailing
-          expr: increase(kubeat_backups_total{result="failed"}[1h]) > 0
+          expr: |-
+            max without ({{ $scrape }}) (max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m]))
+            > max without ({{ $scrape }}) (max_over_time(kubeat_backup_last_success_timestamp_seconds[10m]))
           labels:
             severity: warning
           annotations:
             summary: "Kubeat's database backup is failing"
-            description: "A backup attempt failed in the last hour, and the newest good copy is getting older meanwhile; the backend's log says why (a full backup volume, a copy that did not verify)."
+            description: "The newest backup attempt failed and none has succeeded since, so the newest good copy keeps getting older; the backend's log says why (a full backup volume, a copy that did not verify, a backup directory it cannot use). A full volume is tried again only after backup.interval, and the alert stays meanwhile."
         {{- if .Values.backup.enabled }}
         - alert: KubeatBackupStale
           expr: (time() - kubeat_backup_last_success_timestamp_seconds) > 2 * {{ include "kubeat.durationSeconds" (list .Values.backup.interval "backup.interval") }} and kubeat_backup_last_success_timestamp_seconds > 0

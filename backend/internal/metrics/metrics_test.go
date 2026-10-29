@@ -26,12 +26,76 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.DispatchSkipped(3)
 	m.Results(5, 1)
 	m.Notification("slack", "down", true)
+	m.NotificationAttempt("slack", false)
 	m.NotificationDropped()
 	m.Heartbeat(HeartbeatSent, time.Now())
 	m.TargetThrottled("example.com")
 	m.Backup(true, time.Now())
+	m.Backup(false, time.Now())
 	m.LastBackup(time.Now())
 	m.License(time.Now())
+}
+
+// The labelled counters the alert rules read with increase() have their
+// series from the start, at 0: a series that first appears holding 1 is no
+// increase to increase(), so the first failure would go unseen.
+func TestAlertedCountersStartAtZero(t *testing.T) {
+	got, err := New("test").Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"kubeat_backups_total{result=ok}":     true,
+		"kubeat_backups_total{result=failed}": true,
+	}
+	for _, channelType := range store.ChannelTypes {
+		for _, result := range []string{"sent", "failed"} {
+			want[fmt.Sprintf("kubeat_notification_attempts_total{channel_type=%s}{result=%s}", channelType, result)] = true
+		}
+	}
+	for key := range want {
+		if value, ok := got[key]; !ok || value != 0 {
+			t.Errorf("%s = %v (present: %v), want 0", key, value, ok)
+		}
+	}
+	for key := range got {
+		if (strings.HasPrefix(key, "kubeat_notification_attempts_total") || strings.HasPrefix(key, "kubeat_backups_total")) && !want[key] {
+			t.Errorf("unexpected series %s", key)
+		}
+	}
+}
+
+// A failed backup stays the newest backup event until one succeeds, which is
+// what KubeatBackupFailing compares; a copy found at start is no attempt and
+// leaves the failure time alone.
+func TestBackupFailureTime(t *testing.T) {
+	m := New("test")
+	start := time.Unix(1_800_000_000, 0)
+	m.LastBackup(start.Add(-24 * time.Hour))
+	m.Backup(false, start)
+	m.Backup(false, start.Add(time.Minute))
+
+	got, err := m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_backup_last_failure_timestamp_seconds"] != 1_800_000_060 ||
+		got["kubeat_backup_last_success_timestamp_seconds"] != 1_800_000_000-86400 ||
+		got["kubeat_backups_total{result=failed}"] != 2 || got["kubeat_backups_total{result=ok}"] != 0 {
+		t.Errorf("after two failures: failure = %v, success = %v, failed = %v, ok = %v",
+			got["kubeat_backup_last_failure_timestamp_seconds"], got["kubeat_backup_last_success_timestamp_seconds"],
+			got["kubeat_backups_total{result=failed}"], got["kubeat_backups_total{result=ok}"])
+	}
+
+	m.Backup(true, start.Add(2*time.Minute))
+	got, err = m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_backup_last_success_timestamp_seconds"] <= got["kubeat_backup_last_failure_timestamp_seconds"] {
+		t.Errorf("after a success: success = %v is not newer than failure = %v",
+			got["kubeat_backup_last_success_timestamp_seconds"], got["kubeat_backup_last_failure_timestamp_seconds"])
+	}
 }
 
 // The host label is bounded: past MaxThrottledHosts hosts, new ones are
@@ -108,11 +172,14 @@ func TestEventCounters(t *testing.T) {
 			t.Errorf("%s = %v, want %v", key, got[key], value)
 		}
 	}
-	// A backup found at start is not a backup attempt.
+	// A backup found at start is not a backup attempt, nor a failed one.
 	for key := range got {
-		if strings.HasPrefix(key, "kubeat_backups_total") {
+		if strings.HasPrefix(key, "kubeat_backups_total") && got[key] != 0 {
 			t.Errorf("LastBackup counted an attempt: %s = %v", key, got[key])
 		}
+	}
+	if got["kubeat_backup_last_failure_timestamp_seconds"] != 0 {
+		t.Errorf("LastBackup recorded a failure at %v", got["kubeat_backup_last_failure_timestamp_seconds"])
 	}
 	if _, ok := got["go_goroutines"]; !ok {
 		t.Error("Go runtime metrics are missing")

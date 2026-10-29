@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Renders the chart with values it must take and values it must refuse, and
-# checks what the install notes say for some of them. Needs only helm; it
-# never talks to a cluster. Usage: deploy/helm/test-chart.sh
+# checks what the install notes say for some of them. Needs helm; it never
+# talks to a cluster. With promtool (PROMTOOL, or promtool on the PATH) it
+# also checks the alert rules and runs prometheusrule-test.yaml against them;
+# without it that part is skipped, except under CI, where it fails.
+# Usage: deploy/helm/test-chart.sh, or PROMTOOL=/path/to/promtool deploy/helm/test-chart.sh
 set -u
 
 CHART="$(cd "$(dirname "$0")/kubeat" && pwd)"
@@ -223,6 +226,45 @@ for interval in 1d 24 1.5 h 24H 24h30 ""; do
   refuses "backup.interval $interval" "backup.interval is \"$interval\", not a duration" \
     "${RULES[@]}" --set backup.enabled=true --set backup.interval="$interval"
 done
+# KubeatDown looks for the backend's up series in the release's namespace,
+# where an absent one fires it too; the outage and backup alerts hold their
+# state over a scrape gap. promtool below shows how they behave.
+rules "KubeatDown without a backend target" has 'absent(up{job="kubeat-backend", namespace="default"})'
+rules "KubeatMonitorDown over a scrape gap" has 'last_over_time(kubeat_monitor_incident_open[10m])'
+rules "KubeatBackupFailing until a backup succeeds" has 'max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m])'
+
+# The rules as Prometheus reads them: promtool checks the rule groups and
+# runs the scenarios of prometheusrule-test.yaml (no backend target, a failed
+# scrape, a Recreate, an outage that closes, a failing backup) against the
+# rules rendered for release "kubeat" in namespace "kubeat".
+PROMTOOL="${PROMTOOL:-promtool}"
+# rulefile FILE VALUES...: writes the rule groups of the PrometheusRule
+# rendered with these values (and the rules on) to FILE.
+rulefile() {
+  local file="$1"
+  shift
+  if ! helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" "$@" >"$WORK/rendered" 2>"$WORK/err"; then
+    failed "rule file: refused: $(cat "$WORK/err")"
+    return 1
+  fi
+  # A rule file is the PrometheusRule's spec, which is indented under spec:.
+  awk 'found { sub(/^  /, ""); print } /^spec:$/ { found = 1 }' "$WORK/rendered" >"$file"
+}
+if command -v "$PROMTOOL" >/dev/null 2>&1; then
+  mkdir -p "$WORK/promtool"
+  cp "$CHART/../prometheusrule-test.yaml" "$WORK/promtool/"
+  if rulefile "$WORK/promtool/rules.yaml" --set backup.enabled=true &&
+    rulefile "$WORK/promtool/rules-without-backups.yaml"; then
+    "$PROMTOOL" check rules --lint-fatal "$WORK/promtool/rules.yaml" "$WORK/promtool/rules-without-backups.yaml" >"$WORK/out" 2>&1 ||
+      failed "promtool check rules: $(cat "$WORK/out")"
+    "$PROMTOOL" test rules "$WORK/promtool/prometheusrule-test.yaml" >"$WORK/out" 2>&1 ||
+      failed "promtool test rules: $(cat "$WORK/out")"
+  fi
+elif [ -n "${CI:-}" ]; then
+  failed "promtool not found: under CI the alert rules must be checked with it"
+else
+  echo "WARN: promtool not found, the alert rules were not checked with it (set PROMTOOL or put promtool on the PATH)"
+fi
 
 if [ "$FAILED" -gt 0 ]; then
   echo "$FAILED chart check(s) failed"

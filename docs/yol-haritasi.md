@@ -27,7 +27,7 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 15b | Ayarlar ekranı, kişi başına API anahtarları | Planlandı |
 | 17 | Annotation ile sürekli keşif: `kubeat.io/monitor` taşıyan nesneler kendiliğinden izlenir | Tamamlandı |
 | 18 | Pod bazında kontrol: Service'in arkasındaki her hazır pod'a aynı kontrol (`each_pod`) | Tamamlandı |
-| 19 | Cluster Alertmanager'ı ile alarm: chart'ta PrometheusRule | Tamamlandı; sprint 1 (S9) öz-sağlık kurallarını ekledi: `KubeatResultsDropped`, `KubeatNotificationsFailing`, `KubeatWorkersSaturated`, `KubeatBackupFailing`, `KubeatBackupStale`, `KubeatLicenseExpiring` |
+| 19 | Cluster Alertmanager'ı ile alarm: chart'ta PrometheusRule | Tamamlandı; sprint 1 (S9) öz-sağlık kurallarını ekledi: `KubeatResultsDropped`, `KubeatNotificationsFailing`, `KubeatWorkersSaturated`, `KubeatBackupFailing`, `KubeatBackupStale`, `KubeatLicenseExpiring`; sprint 2 (S29): `KubeatDown` backend pod'u hiç yokken de yanar, `KubeatMonitorDown` ve `KubeatCertificateExpiring` 10 dakikaya kadar süren scrape boşluğunda çözülmez ve Recreate'te tek alarm kalır, `KubeatBackupFailing` yedek düzelene kadar açık kalır; kurallar promtool ile sınanır (`test-chart.sh`, CI) |
 | 20 | Olay bağlamı: monitor sayfasında pod'ların ve workload'un cluster olayları | Tamamlandı |
 | 21 | Ekip raporları: namespace başına uptime ve kesinti özeti, CSV | Tamamlandı |
 | 22 | Alarm yönlendirme: kanalda etiket ve olay süzgeci, namespace başına gruplama, monitor sayfasında "alarm nereye gider"; workload monitor'da rollout toleransı | Tamamlandı |
@@ -171,6 +171,15 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   cluster'ın kesintisi diğerinin açık alarmına eklenir ve ilk düzelme
   ikisini de kapatır. Her kuruluma ayrı bir PagerDuty servisi verin (S28,
   sprint 3 adayı; [sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)).
+- Chart'ın alarmları backend'i cluster'ın Prometheus'u scrape edebildiği
+  sürece görür: Kubeat 10 dakikadan uzun düşerse kesinti, sertifika ve yedek
+  alarmları çözülür. README'deki susturma kuralı, alarmları alan
+  Alertmanager'a eklenirse (OpenShift'in ve kube-prometheus-stack'in
+  varsayılanında yoktur), bunları `KubeatDown` yanarken susturur; bedeli,
+  Kubeat 25 dakikadan uzun düşükken biten bir kesintinin düzelmesinin
+  Alertmanager'dan gitmeyebilmesidir (Kubeat'in kendi kanalları bildirir).
+  Cluster'ın tamamı düşerse yalnızca dışarıdaki heartbeat haber verir
+  (README, "Aracın kendi sağlığı").
 - Ping, çekirdeğin yetkisiz ICMP soketine izin vermesine bağlıdır; minikube'da
   ve gerçek RHCOS'ta ek ayar gerektirmeden çalıştı. Bir Service adına ping
   atılamaz: ClusterIP sanal bir adrestir ve ICMP'ye yanıt vermez; pod IP'si

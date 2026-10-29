@@ -1,0 +1,367 @@
+# Scenarios for the alert rules of kubeat/templates/prometheusrule.yaml, for
+# "promtool test rules". Not part of the chart: deploy/helm/test-chart.sh
+# renders the rules for release "kubeat" in namespace "kubeat" with
+# metrics.prometheusRule.enabled=true and backup.enabled=true, writes their
+# groups to rules.yaml next to a copy of this file and runs it.
+#
+# The series are what the ServiceMonitor scrapes. A failed scrape is a
+# "stale" sample: Prometheus marks every series of the target stale then, as
+# it does for a target that goes away. The pod a Recreate brings is scraped
+# under a new pod and instance label; a backend container restarted in its
+# pod keeps them.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: KubeatDown fires with no backend target at all
+    interval: 1m
+    input_series:
+      # Neither another job in the namespace nor the backend of an
+      # installation in another namespace is this backend.
+      - series: 'up{job="other", namespace="kubeat", instance="10.128.2.99:9090"}'
+        values: '1x10'
+      - series: 'up{job="kubeat-backend", namespace="elsewhere", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-5f6d8c7b9-q2w3e", instance="10.128.4.7:8080"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: KubeatDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: KubeatDown
+        exp_alerts:
+          - exp_labels: &kubeat-down-labels
+              severity: critical
+              job: kubeat-backend
+              namespace: kubeat
+            exp_annotations: &kubeat-down-annotations
+              summary: "Kubeat's metrics cannot be scraped"
+              description: "Kubeat's backend has not answered Prometheus for 5 minutes, or it has no pod at all (pending, deleted, put to sleep): nothing checks the monitors meanwhile. Its per-monitor and backup alerts keep their last state for 10 minutes and then resolve, unless an inhibit rule in the Alertmanager mutes them while this alert fires."
+
+  - name: KubeatDown stays one alert from a failing scrape to a pod that is gone
+    interval: 1m
+    input_series:
+      # Scrapes fail from 3m, the pod is gone at 5m.
+      - series: 'up{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 1 0 0 stale'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: KubeatDown
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: KubeatDown
+        exp_alerts: []
+      # 5 minutes after the first failed scrape: the pod going away did not
+      # start the wait over.
+      - eval_time: 9m
+        alertname: KubeatDown
+        exp_alerts:
+          - exp_labels: *kubeat-down-labels
+            exp_annotations: *kubeat-down-annotations
+
+  - name: KubeatMonitorDown holds over a failed scrape and resolves when the outage closes
+    interval: 1m
+    input_series:
+      # The scrape at 3m fails; the outage closes at 6m.
+      - series: 'kubeat_monitor_incident_open{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", monitor="shop/api", monitor_namespace="shop", type="http"}'
+        values: '1 1 1 stale 1 1 0 0'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 1 stale 1 1 1 1'
+      - series: 'up{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 1 0 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: KubeatMonitorDown
+        exp_alerts:
+          - exp_labels: &shop-api-down-labels
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              monitor: shop/api
+              monitor_namespace: shop
+              type: http
+            exp_annotations: &shop-api-down-annotations
+              summary: "shop/api is down"
+              description: "Kubeat monitor shop/api (http, namespace shop) has an open outage."
+      - eval_time: 3m
+        alertname: KubeatMonitorDown
+        exp_alerts:
+          - exp_labels: *shop-api-down-labels
+            exp_annotations: *shop-api-down-annotations
+      - eval_time: 6m
+        alertname: KubeatMonitorDown
+        exp_alerts: []
+
+  - name: KubeatMonitorDown is one alert across a Recreate and resolves at once after it
+    interval: 1m
+    input_series:
+      # The old pod is scraped until 3m and gone at 4m; the new one, under
+      # another pod and instance label, is scraped from 7m. The outage
+      # closes at 9m, while the old pod's 1 from 3m is still within 10
+      # minutes.
+      - series: 'kubeat_monitor_incident_open{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", monitor="shop/api", monitor_namespace="shop", type="http"}'
+        values: '1 1 1 1 stale'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 1 1 stale'
+      - series: 'kubeat_monitor_incident_open{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-x9y8z", instance="10.128.3.20:8080", monitor="shop/api", monitor_namespace="shop", type="http"}'
+        values: '_x7 1 1 0 0'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-x9y8z", instance="10.128.3.20:8080"}'
+        values: '_x7 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KubeatMonitorDown
+        exp_alerts:
+          - exp_labels: *shop-api-down-labels
+            exp_annotations: *shop-api-down-annotations
+      - eval_time: 8m
+        alertname: KubeatMonitorDown
+        exp_alerts:
+          - exp_labels: *shop-api-down-labels
+            exp_annotations: *shop-api-down-annotations
+      - eval_time: 9m
+        alertname: KubeatMonitorDown
+        exp_alerts: []
+
+  - name: KubeatMonitorDown resolves at once for a monitor deleted while Kubeat is scraped
+    interval: 1m
+    input_series:
+      # The monitor is deleted at 3m; the scrapes go on.
+      - series: 'kubeat_monitor_incident_open{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", monitor="shop/api", monitor_namespace="shop", type="http"}'
+        values: '1 1 1 stale'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1x6'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: KubeatMonitorDown
+        exp_alerts:
+          - exp_labels: *shop-api-down-labels
+            exp_annotations: *shop-api-down-annotations
+      - eval_time: 3m
+        alertname: KubeatMonitorDown
+        exp_alerts: []
+
+  - name: KubeatMonitorDown holds while the backend cannot read its monitors
+    interval: 1m
+    input_series:
+      # At 3m and 4m the database cannot be read: the scrape succeeds, but
+      # without the per-monitor series. A monitor without a namespace has no
+      # monitor_namespace label.
+      - series: 'kubeat_monitor_incident_open{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", monitor="db", type="tcp"}'
+        values: '1 1 1 stale _ 1'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 1 0 0 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: KubeatMonitorDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              monitor: db
+              type: tcp
+            exp_annotations:
+              summary: "db is down"
+              description: "Kubeat monitor db (tcp) has an open outage."
+
+  - name: Kubeat down for longer than 10 minutes, KubeatDown fires before KubeatMonitorDown resolves
+    interval: 1m
+    input_series:
+      # The backend is gone at 3m and does not come back.
+      - series: 'kubeat_monitor_incident_open{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", monitor="shop/api", monitor_namespace="shop", type="http"}'
+        values: '1 1 1 stale'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 1 stale'
+      - series: 'up{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1 1 1 stale'
+    alert_rule_test:
+      # KubeatDown from 8m, while the outage alert still holds: an inhibit
+      # rule in the Alertmanager is in place before it resolves.
+      - eval_time: 9m
+        alertname: KubeatDown
+        exp_alerts:
+          - exp_labels: *kubeat-down-labels
+            exp_annotations: *kubeat-down-annotations
+      - eval_time: 11m
+        alertname: KubeatMonitorDown
+        exp_alerts:
+          - exp_labels: *shop-api-down-labels
+            exp_annotations: *shop-api-down-annotations
+      - eval_time: 13m
+        alertname: KubeatMonitorDown
+        exp_alerts: []
+
+  - name: KubeatCertificateExpiring keeps firing over a failed scrape
+    interval: 1m
+    input_series:
+      # The certificate expires 7 days after the start; the scrape at 12m
+      # fails.
+      - series: 'kubeat_monitor_cert_expiry_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", monitor="shop/api", monitor_namespace="shop", type="http"}'
+        values: '604800x11 stale 604800x7'
+      - series: 'kubeat_monitor_scrape_success{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '1x11 stale 1x7'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: KubeatCertificateExpiring
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: KubeatCertificateExpiring
+        exp_alerts:
+          - exp_labels: &shop-api-certificate-labels
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              monitor: shop/api
+              monitor_namespace: shop
+              type: http
+            exp_annotations:
+              summary: "certificate of shop/api expires in 6d 23h 48m 0s"
+      # Still firing: the failed scrape did not start its 10 minutes over.
+      - eval_time: 15m
+        alertname: KubeatCertificateExpiring
+        exp_alerts:
+          - exp_labels: *shop-api-certificate-labels
+            exp_annotations:
+              summary: "certificate of shop/api expires in 6d 23h 45m 0s"
+
+  - name: KubeatBackupFailing fires at the first failed attempt and stays while there is no copy
+    interval: 1m
+    input_series:
+      # A new installation without a copy; the first attempt fails at 2m
+      # and is not tried again here, as a full volume waits a whole interval
+      # and a backup directory that cannot be made is not tried again until
+      # a restart. Every series is there from the start, at 0.
+      - series: 'kubeat_backups_total{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", result="ok"}'
+        values: '0x30'
+      - series: 'kubeat_backups_total{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", result="failed"}'
+        values: '0 0 1x28'
+      - series: 'kubeat_backup_last_success_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0x30'
+      - series: 'kubeat_backup_last_failure_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 120x28'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: KubeatBackupFailing
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: &backup-failing-labels
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+            exp_annotations: &backup-failing-annotations
+              summary: "Kubeat's database backup is failing"
+              description: "The newest backup attempt failed and none has succeeded since, so the newest good copy keeps getting older; the backend's log says why (a full backup volume, a copy that did not verify, a backup directory it cannot use). A full volume is tried again only after backup.interval, and the alert stays meanwhile."
+      - eval_time: 30m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+
+  - name: KubeatBackupFailing stays open over the interval a full volume waits
+    interval: 10m
+    input_series:
+      # A copy at 10m; the next attempt, a day later at 1450m, finds the
+      # volume full and waits a whole interval (24h), as does the one at
+      # 2890m; the volume is grown and the attempt at 4330m succeeds.
+      - series: 'kubeat_backup_last_success_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 600x431 259800x2'
+      - series: 'kubeat_backup_last_failure_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0x144 87000x143 173400x146'
+    alert_rule_test:
+      - eval_time: 1440m
+        alertname: KubeatBackupFailing
+        exp_alerts: []
+      - eval_time: 1450m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      # An hour on, where a count of failures over the last hour ends.
+      - eval_time: 1510m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 2880m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 2890m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 4330m
+        alertname: KubeatBackupFailing
+        exp_alerts: []
+
+  - name: KubeatBackupFailing stays open over a restart until a backup succeeds
+    interval: 1m
+    input_series:
+      # The old pod: its newest copy is from 30s, the attempt at 2m failed.
+      # It is gone at 10m. The new pod is scraped from 12m: it found the
+      # copy on disk and has no failure of its own; its first attempt
+      # succeeds at 14m.
+      - series: 'kubeat_backup_last_success_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '30x9 stale'
+      - series: 'kubeat_backup_last_failure_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 120x7 stale'
+      - series: 'kubeat_backup_last_success_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-x9y8z", instance="10.128.3.20:8080"}'
+        values: '_x12 30 30 840 840'
+      - series: 'kubeat_backup_last_failure_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-x9y8z", instance="10.128.3.20:8080"}'
+        values: '_x12 0x3'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 11m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 13m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 14m
+        alertname: KubeatBackupFailing
+        exp_alerts: []
+
+  - name: KubeatBackupFailing stays open while a backend restarted in its pod makes its first attempt
+    interval: 1m
+    input_series:
+      # The backend container restarts in its pod (OOMKill, a failed
+      # liveness probe), so the series keep their labels. Before: the newest
+      # copy is from 30s, the attempt at 2m failed. The scrape at 10m fails.
+      # After: the new process reports the copy on disk at once, but no
+      # failure until its first attempt, begun at 10m50s, ends; the scrape
+      # at 13m reads that failure.
+      - series: 'kubeat_backup_last_success_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '30x9 stale 30x5'
+      - series: 'kubeat_backup_last_failure_timestamp_seconds{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 120x7 stale 0 0 650x2'
+    alert_rule_test:
+      # The restarted backend reports 0 as its last failure: the largest
+      # value of the past 10 minutes is still the failure from 2m.
+      - eval_time: 11m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 12m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations
+      - eval_time: 13m
+        alertname: KubeatBackupFailing
+        exp_alerts:
+          - exp_labels: *backup-failing-labels
+            exp_annotations: *backup-failing-annotations

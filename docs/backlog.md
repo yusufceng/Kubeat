@@ -388,6 +388,48 @@ Güncelleme (2026-10-28, sprint 2 planı): yalnızca `inhibit_rules` örneği
 geliyor. Kalan yönlendirme örnekleri ve pano backlog'da kalıyor,
 tetikleyici aynı.
 
+Güncelleme (2026-10-29, S29 #36): `inhibit_rules` örneği README "Aracın
+kendi sağlığı"nda ("Alertmanager'da susturma kuralları"): lisansın
+critical'i aynı kurulumun warning'ini, `KubeatDown` aynı namespace'teki
+`KubeatMonitorDown`, `KubeatCertificateExpiring` ve `KubeatBackupFailing`'i
+susturur; üçü de scrape boşluğunda durumunu 10 dakika tutar. İkinci kural
+OpenShift'in ve kube-prometheus-stack'in varsayılanında yoktur, alarmları
+alan Alertmanager'a (OpenShift'te `alertmanager-main` dahil) eklenir.
+Bedeli README'de: Kubeat 25 dakikadan uzun düşükken biten bir kesintinin
+düzelmesi Alertmanager'dan gitmeyebilir. Kurallar artık promtool ile
+sınanıyor (`deploy/helm/test-chart.sh`, CI chart işi). `AlertmanagerConfig`
+nesnesiyle yazılmış örnek, kalan yönlendirme örnekleri ve pano backlog'da,
+tetikleyici aynı.
+
+## Öteki öz-sağlık alarmları scrape boşluğunda; ServiceMonitor'süz kural uyarısı
+
+2026-10-29'da ertelendi (S29'un kapsam dışı parçaları, #36). S29 dört alarmı
+scrape boşluğuna karşı düzeltti: `KubeatDown` backend pod'u hiç yokken de
+yanar; `KubeatMonitorDown`, `KubeatCertificateExpiring` ve
+`KubeatBackupFailing` durumlarını 10 dakika tutar. Kalan öz-sağlık
+alarmlarından dördü boşlukta eskisi gibi çözülür, ikisi gürültüyle:
+`KubeatLicenseExpiring` (`for: 1h`) her Recreate'te, yükseltmede ve node
+drain'de "resolved" gider, yeni pod scrape edilince 1 saat bekleyip yeniden
+yanar; `KubeatBackupStale` boşluğun ilk değerlendirmesinde çözülür, yeni
+pod'un ilk scrape'inde yeniden yanar. README'deki susturma kuralı bu ikisini
+kapsamaz: ikisi de boşluğun başında, `KubeatDown`'ın 5 dakikası dolmadan
+çözülür, bu yüzden uzun bir Kubeat kesintisinde de "resolved" gönderirler.
+`KubeatSchedulerStalled` ve `KubeatMetricsIncomplete` de boşlukta çözülür;
+boşluğu `KubeatDown` bildirdiği için zararları küçük. İkinci parça:
+`metrics.prometheusRule.enabled=true` iken `metrics.serviceMonitor.enabled=false`
+ise ve aynı `job`/`namespace` etiketlerini veren başka bir scrape yoksa
+`KubeatDown` sürekli yanar. Bu README'de ("Aracın kendi sağlığı") ve
+values.yaml yorumunda yazılı, kurulum notu (`NOTES.txt`) söylemiyor.
+Üçüncü parça: veritabanı 10 dakikadan uzun okunamazken `/metrics` yanıt
+verdiği için `up` 1 kalır ve `KubeatDown` yanmaz; `KubeatMonitorDown` ile
+`KubeatCertificateExpiring` 10 dakika sonra çözülür, yerlerine
+`KubeatMetricsIncomplete` yanar ve README'deki susturma kuralı bu durumu
+kapsamaz. Ertelendi, çünkü S29'un kapsamı dört alarmdı ve `NOTES.txt` bu sprintte
+#38'in dosyası. Tetikleyici: pilotta lisans alarmının bir yükseltmede gidip
+gelmesi, `KubeatBackupStale`'in bir Recreate'te "resolved" göndermesi ya da
+ServiceMonitor'süz kurulumda sürekli yanan `KubeatDown` için ilk kullanıcı
+şikâyeti.
+
 ## Teslim edilemeyen bildirimler için dead-letter görünümü ve kalıcı yeniden deneme kuyruğu
 
 2026-10-28'de ertelendi (S17, #27). Kanalın almadığı kesinti bildirimi
