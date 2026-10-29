@@ -92,21 +92,32 @@ fresh
 line="$(change Makefile "VERSION ?= $V" "VERSION ?= $OTHER")"
 fails "the Makefile's VERSION" "Makefile:$line: VERSION $OTHER, not $V"
 
-# Each kind of command, where it first appears in docs/pilot.md.
+# Each kind of command, where it first appears in docs/pilot.md: the signed
+# mirroring (oras cp -r and cosign verify with the release's signing
+# identity) and the unsigned one (skopeo, helm pull).
 for spec in "docs/pilot.md|--version $V|--version $OTHER" \
   "docs/pilot.md|kubeat-backend:$V|kubeat-backend:$OTHER" \
   "docs/pilot.md|kubeat-frontend:$V|kubeat-frontend:$OTHER" \
-  "docs/pilot.md|kubeat-$V.tgz|kubeat-$OTHER.tgz"; do
+  "docs/pilot.md|kubeat-$V.tgz|kubeat-$OTHER.tgz" \
+  "docs/pilot.md|charts/kubeat:$V|charts/kubeat:$OTHER" \
+  "docs/pilot.md|release.yml@refs/tags/v$V|release.yml@refs/tags/v$OTHER"; do
   IFS='|' read -r file old new <<<"$spec"
   fresh
   line="$(change "$file" "$old" "$new")"
   fails "$file, $new" "$file:$line: $new, not $V"
 done
-# A line can name a version twice: the mirror's copy of an image is checked
-# as well as the image it copies.
+# A line can name a version twice: the mirror's copy of an image or of the
+# chart is checked as well as what it copies.
 fresh
 line="$(change docs/pilot.md "\$R/kubeat-backend:$V" "\$R/kubeat-backend:$OTHER")"
 fails "the mirror's copy" "docs/pilot.md:$line: kubeat-backend:$OTHER, not $V"
+fresh
+line="$(change docs/pilot.md "registry.sirket.local/charts/kubeat:$V" "registry.sirket.local/charts/kubeat:$OTHER")"
+fails "the mirror's copy of the chart" "docs/pilot.md:$line: charts/kubeat:$OTHER, not $V"
+# The commands that verify the mirror name the mirrored copies, each checked.
+fresh
+line="$(change docs/pilot.md "\$R/kubeat-frontend:$V registry" "\$R/kubeat-frontend:$OTHER registry")"
+fails "the verified copy" "docs/pilot.md:$line: kubeat-frontend:$OTHER, not $V"
 
 # Every command in the README is checked, the quick start's install and
 # heartbeat lines among them: each line that names the version, changed

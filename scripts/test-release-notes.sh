@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Runs scripts/release-notes.sh with the values release.yml gives it and
-# checks that the notes name each artifact with its digest, carry a verify
-# command the shell can parse and list the SBOM files; and that a missing or
-# malformed value fails before any notes are written.
+# checks that the notes link the version's upgrade notes, name each artifact
+# with its digest, carry a verify command the shell can parse and list the
+# SBOM files; that the link's anchor is the one GitHub makes from each
+# upgrade notes heading in the repository; and that a missing or malformed
+# value fails before any notes are written.
 # Usage: scripts/test-release-notes.sh
 set -u
 
@@ -45,6 +47,7 @@ notes() {
   fi
   env -u DRY_RUN VERSION=0.45.0 REGISTRY_PATH=ghcr.io/yusufceng \
     BACKEND_DIGEST="$B" FRONTEND_DIGEST="$F" CHART_DIGEST="$C" IDENTITY="$IDENTITY" \
+    GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=yusufceng/Kubeat GITHUB_REF_NAME=v0.45.0 \
     ${assignments[@]+"${assignments[@]}"} \
     "$ROOT/scripts/release-notes.sh" ${sboms[@]+"${sboms[@]}"} >"$WORK/out" 2>"$WORK/err"
 }
@@ -80,6 +83,8 @@ refuses() {
 if notes; then
   has "a tag" \
     "Kubeat 0.45.0." \
+    "[0.45'e yükseltme](https://github.com/yusufceng/Kubeat/blob/v0.45.0/docs/yukseltme.md#045e-yükseltme)." \
+    "aynalanan kopyalarda" \
     "| Backend imajı | \`ghcr.io/yusufceng/kubeat-backend:0.45.0\` | \`$B\` |" \
     "| Frontend imajı | \`ghcr.io/yusufceng/kubeat-frontend:0.45.0\` | \`$F\` |" \
     "| Helm chart | \`oci://ghcr.io/yusufceng/charts/kubeat\`, \`--version 0.45.0\` | \`$C\` |" \
@@ -93,6 +98,7 @@ if notes; then
     'README "Tedarik zinciri"' \
     "SECURITY.md"
   lacks "a tag" "Kuru deneme"
+  lacks "a tag" "README'deki"
   # The verify command, as a reader copies it out of its code block.
   awk '/^```sh$/ { inside = 1; next } /^```$/ { inside = 0 } inside' "$WORK/out" >"$WORK/verify.sh"
   if [ "$(head -n 1 "$WORK/verify.sh")" != 'cosign verify \' ]; then
@@ -110,20 +116,58 @@ else
 fi
 
 if notes DRY_RUN=true REGISTRY_PATH=ghcr.io/yusufceng/kubeat-dry-run \
-  IDENTITY=https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/heads/chore/x; then
+  IDENTITY=https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/heads/chore/x \
+  GITHUB_REF_NAME=chore/x; then
   has "a dry run" \
     "**Kuru deneme**" \
     "\`ghcr.io/yusufceng/kubeat-dry-run\`" \
     "ghcr.io/yusufceng/kubeat-dry-run/kubeat-backend@$B" \
     "ghcr.io/yusufceng/kubeat-dry-run/charts/kubeat@$C" \
-    "release.yml@refs/heads/chore/x'"
+    "release.yml@refs/heads/chore/x'" \
+    "(https://github.com/yusufceng/Kubeat/blob/chore/x/docs/yukseltme.md#045e-yükseltme)"
 else
   failed "a dry run: failed: $(cat "$WORK/err")"
 fi
 
+# The link names the minor's section as Turkish reads the number aloud, and
+# its anchor is the one GitHub makes from that heading.
+for spec in "0.38.0|0.38'e|038e" "0.40.1|0.40'a|040a" "0.42.2|0.42'ye|042ye" \
+  "0.46.0|0.46'ya|046ya" "0.47.0|0.47'ye|047ye" "0.49.0|0.49'a|049a" "0.50.0|0.50'ye|050ye" \
+  "0.60.0|0.60'a|060a" "0.70.0|0.70'e|070e" "0.90.0|0.90'a|090a" "0.100.0|0.100'e|0100e" \
+  "1.0.0|1.0'a|10a" "1.8.0-rc.1|1.8'e|18e"; do
+  IFS='|' read -r version section anchor <<<"$spec"
+  if notes VERSION="$version" GITHUB_REF_NAME="v$version"; then
+    has "$version" "[$section yükseltme](https://github.com/yusufceng/Kubeat/blob/v$version/docs/yukseltme.md#$anchor-yükseltme)."
+  else
+    failed "$version: failed: $(cat "$WORK/err")"
+  fi
+done
+
+# Each upgrade notes heading in the repository, in docs/yukseltme.md (and in
+# README.md, where they were until 0.46): the link for its version reaches
+# it. GitHub's anchor drops the heading's dots and apostrophes and joins its
+# words with a hyphen. With no such heading there is nothing to check, which
+# fails too.
+headings="$(cat "$ROOT/README.md" "$ROOT/docs/yukseltme.md" 2>/dev/null |
+  sed -n -E "s/^#+[[:space:]]+([0-9]+\.[0-9]+('|’)[a-z]+ yükseltme)[[:space:]]*$/\1/p")"
+if [ -z "$headings" ]; then
+  failed "no \"<sürüm>'e yükseltme\" heading in docs/yukseltme.md or README.md"
+fi
+while IFS= read -r heading; do
+  [ -n "$heading" ] || continue
+  version="$(printf '%s\n' "$heading" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/').0"
+  anchor="$(printf '%s\n' "$heading" | sed -e 's/[.]//g' -e "s/'//g" -e 's/’//g' -e 's/ /-/g')"
+  if notes VERSION="$version" GITHUB_REF_NAME="v$version"; then
+    has "the heading \"$heading\"" "/docs/yukseltme.md#$anchor)."
+  else
+    failed "the heading \"$heading\": failed: $(cat "$WORK/err")"
+  fi
+done <<<"$headings"
+
 refuses "no SBOM" "usage:" --
 refuses "no chart digest" "CHART_DIGEST is not set" CHART_DIGEST=
 refuses "no identity" "IDENTITY is not set" IDENTITY=
+refuses "no ref" "GITHUB_REF_NAME is not set" GITHUB_REF_NAME=
 refuses "a short digest" "BACKEND_DIGEST sha256:abc is not a sha256 digest" BACKEND_DIGEST=sha256:abc
 refuses "an upper-case digest" "is not a sha256 digest" FRONTEND_DIGEST="$(digest B)"
 refuses "a tag for a version" "VERSION v0.45.0 is not a version" VERSION=v0.45.0

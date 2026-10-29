@@ -4,13 +4,15 @@
 # Makefile's VERSION (the tag make release pushes) and the install and
 # mirroring commands in README.md and docs/pilot.md, the quick start's among
 # them. In those two files only commands count: helm's --version X.Y.Z, the
-# images kubeat-backend:X.Y.Z and kubeat-frontend:X.Y.Z and the chart archive
-# kubeat-X.Y.Z.tgz; versions in prose, placeholders such as <sürüm> and a
-# Service's host:port are not commands of a release and pass. The upgrade
-# notes, docs/yukseltme.md, are not read: they name the versions they were
-# written for. The README's quick start must hold a command that names a
-# version, as each file must: the check would otherwise pass there while
-# checking nothing.
+# images kubeat-backend:X.Y.Z and kubeat-frontend:X.Y.Z, the chart archive
+# kubeat-X.Y.Z.tgz, the chart's OCI reference charts/kubeat:X.Y.Z (oras cp)
+# and the signing identity release.yml@refs/tags/vX.Y.Z (cosign verify);
+# versions in prose, placeholders such as <sürüm> and a Service's host:port
+# are not commands of a release and pass. The upgrade notes,
+# docs/yukseltme.md, are not read: they name the versions they were written
+# for. The README's quick start must hold a command that names a version,
+# as each file must: the check would otherwise pass there while checking
+# nothing.
 # Given a tag, as release.yml gives the one it publishes, Chart.yaml's
 # version must be the tag's, which is the tag without its leading v.
 # Prints file:line for each place that differs and exits 1.
@@ -74,6 +76,8 @@ docs="$(awk -v want="$version" -v qfile="$QUICK_FILE" -v qheading="$QUICK_HEADIN
     pat[++n] = "--version[ =]+" v; pre[n] = "^--version[ =]+"; post[n] = ""
     pat[++n] = "kubeat-(backend|frontend):" v; pre[n] = "^kubeat-(backend|frontend):"; post[n] = ""
     pat[++n] = "kubeat-" v "\\.tgz"; pre[n] = "^kubeat-"; post[n] = "\\.tgz$"
+    pat[++n] = "charts/kubeat:" v; pre[n] = "^charts/kubeat:"; post[n] = ""
+    pat[++n] = "release\\.yml@refs/tags/v" v; pre[n] = "^release\\.yml@refs/tags/v"; post[n] = ""
   }
   FNR == 1 { code = 0; quick = 0 }
   /^[ \t]*(```|~~~)/ { code = !code; next }

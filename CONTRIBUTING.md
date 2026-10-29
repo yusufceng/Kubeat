@@ -48,6 +48,8 @@ sonradan taşınamaz ve silinemez (deponun etiket kural seti).
   `make release` etiketi `Makefile`'daki `VERSION` ile atar ve iter,
   [release.yml](.github/workflows/release.yml) imajları ve chart'ı imzalı ve
   SBOM'lu yayımlar ve etiketin GitHub Release'ini açar ("Yayım iş akışı").
+  Etiket, CI'ın o commit'teki push koşusu bitince atılır: yayımın kapısı
+  CI'ı yeşil olmayan commit'i yayımlamaz.
 - Yayınlanmış bir sürüme düzeltme gerekirse o etiketten `release/vX.Y` açılır,
   `hotfix/` branch'i oraya merge edilir ve düzeltme `main`'e de taşınır.
   `make release` bu daldan da etiketler; bu yalnızca v0.45.0 ve sonrasından
@@ -69,8 +71,10 @@ Sürüm PR'ı sürümü şu yerlerin hepsinde birlikte yükseltir:
 - `README.md`: "Hızlı başlangıç"taki kurulum ve heartbeat komutlarının,
   "Cluster'a kurulum", "OpenShift" ve "Aracın kendi sağlığı"ndaki (heartbeat)
   komutların `--version`'ı.
-- `docs/pilot.md`: "İmajları aynalamak" (iki imaj etiketi, `helm pull`
-  `--version`'ı, `kubeat-<sürüm>.tgz`) ve "Kurulum" komutu.
+- `docs/pilot.md`: "İmajları aynalamak" (imzalı yolda `oras cp -r`'ın iki
+  imaj ve chart etiketi, `cosign verify` kimliğindeki `refs/tags/v<sürüm>`;
+  imzasız yolun notunda iki imaj etiketi, `helm pull` `--version`'ı,
+  `kubeat-<sürüm>.tgz`) ve "Kurulum" komutu.
 
 Yükseltme notları [docs/yukseltme.md](docs/yukseltme.md)'dedir; README'de
 yalnızca ona bağlantı vardır. Sürüm PR'ı sprint dosyasının "Yükseltme
@@ -91,7 +95,8 @@ notu" tablosundan yeni sürümün bölümünü yazar:
 `dosya:satır` ile yazar:
 
 - Yalnızca komut kalıplarına bakar (`--version X.Y.Z`,
-  `kubeat-backend:X.Y.Z`, `kubeat-frontend:X.Y.Z`, `kubeat-X.Y.Z.tgz`).
+  `kubeat-backend:X.Y.Z`, `kubeat-frontend:X.Y.Z`, `kubeat-X.Y.Z.tgz`,
+  `charts/kubeat:X.Y.Z`, `release.yml@refs/tags/vX.Y.Z`).
   Düzyazıdaki sürüm anışları ve `<sürüm>` gibi yer tutucular denetlenmez;
   README'de bir başlık hiçbir şeyi denetimden çıkarmaz. Komutlardan biri
   başka bir dosyaya taşınırsa betikteki dosya listesi de güncellenir; hiç
@@ -111,7 +116,25 @@ notu" tablosundan yeni sürümün bölümünü yazar:
 Etiket itilince [release.yml](.github/workflows/release.yml) şu işleri sırayla
 koşar:
 
-1. `versions`: sürüm denetimi (yukarıda); geçmezse hiçbir şey itilmez.
+1. `versions`: önce sürüm denetimi (yukarıda), sonra yayım kapısı
+   ([scripts/release-gate.sh](scripts/release-gate.sh)); biri geçmezse
+   sonraki işler koşmaz ve hiçbir şey itilmez. Kapı iki şeye bakar:
+   - Etiketlenen commit `main`'den ya da bir `release/v*` dalından
+     erişilebilir.
+   - CI'ın o commit'teki **push** koşusunda beş zorunlu check ("Merge")
+     başarılıdır; commit'te birden çok push koşusu varsa her biri. PR koşusu
+     sayılmaz: `main` kural setinde "strict" kapalı olduğundan squash commit'i
+     PR'ın sınadığı ağaç değildir. Bu yüzden ci.yml `release/v*` dallarına
+     push'ta da koşar.
+   - CI sürüyorsa ya da koşu henüz başlamadıysa kapı 30 saniyede bir sorar,
+     en çok 30 dakika bekler, sonra düşer. Başarısız bir check kapıyı hemen
+     düşürür.
+   - Kapı GitHub API'sini `gh api` ile okur; `actions: read` (CI'ın
+     koşularını ve işlerini okumak için) yalnızca bu iştedir. Zorunlu
+     check'lerin listesi betiktedir: kural seti değişirse betik ve bu
+     dosya da değişir.
+   - Kararı `scripts/test-release-gate.sh` sahte bir API'yle sınar (yeşil,
+     kırmızı, sürüyor, PR koşusu, dalda değil; `make test`, CI'ın chart işi).
 2. `images`: iki imajı yalnızca sürüm etiketiyle iter, `latest` itilmez.
    Index BuildKit'in SPDX SBOM'unu ve SLSA provenance'ını (`mode=max`)
    taşır; platform başına SBOM'lar iş akışı artefaktı olarak saklanır.
@@ -121,15 +144,35 @@ koşar:
    cosign'dan başka bir şey koşmaz: üçüncü taraf action yoktur, cosign sabit
    sürümüyle indirilir ve sağlama toplamı denetlenir.
 5. `verify`: imzaları README "Tedarik zinciri"ndeki komutlarla ve yalnızca
-   okuma izniyle doğrular: önce çevrimiçi, sonra `cosign save` ile diske
-   yazılanı ağ kesikken `--trusted-root` ile. Ardından Release notunu
-   `scripts/release-notes.sh` ile yazar; betiğin testi
-   `scripts/test-release-notes.sh` (`make test`, CI'ın chart işi).
-6. `release`: etiketin GitHub Release'ini açar: üç digest, doğrulama komutu
-   ve backend ile frontend için SPDX SBOM'lar. `contents: write` yalnızca bu
-   iştedir.
+   okuma izniyle doğrular; müşterinin hava boşluklu yolunu
+   ([docs/pilot.md](docs/pilot.md) "İmajları aynalamak") her sürümde koşar:
+   - Önce çevrimiçi.
+   - İşin kendi registry servis konteynerine (`registry:2.8.3`,
+     `localhost:5000`) iki imajı ve chart'ı digest'lerinden `oras cp -r`
+     ile, sürüm etiketiyle aynalar; etiketin digest'i imzalanan digest
+     olmalıdır.
+   - Ağ kesikken `--trusted-root` ile: aynalanan referansları (etiket ve
+     digest'le), sonra `cosign save` ile diske yazılan iki imajı ve chart'ı
+     (`--local-image`). Ağ kesintisini bütün bağlantıları reddeden bir vekil
+     sağlar; Go vekili localhost'a uygulamadığından yalnızca aynaya
+     ulaşılır.
+   - Ardından Release notunu `scripts/release-notes.sh` ile yazar; betiğin
+     testi `scripts/test-release-notes.sh` (`make test`, CI'ın chart işi).
+6. `release`: etiketin GitHub Release'ini açar: sürümün yükseltme notuna
+   bağlantı (etiketteki `docs/yukseltme.md`'de sürümün bölümü), üç digest,
+   doğrulama komutu ve backend ile frontend için SPDX SBOM'lar.
+   `contents: write` yalnızca bu iştedir.
 
 İş akışı düzeyindeki izinler `contents: read` ve `packages: write`'tır.
+
+Kapı düşerse hiçbir şey itilmemiştir:
+
+- CI 30 dakikada bitmediyse CI bitince yayım koşusunda "Re-run failed jobs".
+- CI kırmızıysa o commit yayımlanmaz. Etiket taşınmaz: düzeltme yeni bir
+  commit'le ve yeni bir yama sürümüyle gelir.
+- Commit `main`'de ya da `release/v*`'ta değilse etiket yanlış commit'e
+  atılmıştır; doğru commit yeni bir sürüm numarasıyla etiketlenir.
+- GitHub API'sine ulaşılamadıysa "Re-run failed jobs".
 
 İmajlar ya da chart itildikten sonra bir iş kırılırsa etiket yeniden
 yazılmaz. Geçici bir hatada kırılan iş "Re-run failed jobs" ile yeniden
@@ -140,6 +183,8 @@ düzeltme yeni bir yama sürümüyle çıkar.
 Kuru deneme (`gh workflow run release.yml --ref <dal>`) aynı adımları yayım
 paketlerine dokunmadan dener:
 
+- Kapı dalı denetlemez; CI'ın dalın HEAD'indeki koşusuna bakar. Bu, dalın
+  PR koşusudur: kuru denemeden önce PR açılır, CI sürüyorsa kapı bekler.
 - İmajlar ve chart kendi paketlerine itilir: `ghcr.io/yusufceng/kubeat-dry-run/`
   altında `kubeat-backend`, `kubeat-frontend` ve `charts/kubeat`; etiketleri
   `Chart.yaml`'daki sürümdür. Yayım paketlerine, sürüm etiketlerine ve
@@ -161,6 +206,8 @@ paketlerine dokunmadan dener:
 | Helm | v4.3.1 | ci.yml chart işi ("chart") ve release.yml chart işi; `azure/setup-helm`'in `version`'ı |
 | Helm 3 | v3.22.1 | ci.yml chart işinin ikinci koşusu ("chart (Helm 3)") |
 | cosign | v3.1.4 | release.yml `sign` ve `verify` işleri; `COSIGN_VERSION` ve `COSIGN_SHA256` |
+| ORAS | v1.3.6 | release.yml `verify` işi; `ORAS_VERSION` ve `ORAS_SHA256` |
+| registry (Distribution) | 2.8.3 | release.yml `verify` işinin servis konteyneri, `registry:2.8.3`; etiketle sabit |
 | govulncheck | v1.9.0 | ci.yml `govulncheck` işi ve security.yml; `golang.org/x/vuln/cmd/govulncheck@<sürüm>` |
 
 Helm'i yükseltmek:
@@ -179,10 +226,12 @@ Helm'i yükseltmek:
   chart düzeltilir ya da README'deki Helm 3 desteği aynı PR'da daraltılır.
   Helm 3'ü bırakmak ayrı bir karardır.
 
-cosign ve govulncheck'i yükseltmek (Dependabot ikisini de görmez; yeni
-sürümlere [cosign sürümlerinden](https://github.com/sigstore/cosign/releases)
-ve [pkg.go.dev](https://pkg.go.dev/golang.org/x/vuln?tab=versions)'den elle
-bakılır):
+cosign, ORAS, registry ve govulncheck'i yükseltmek (yeni sürümlere
+[cosign sürümlerinden](https://github.com/sigstore/cosign/releases),
+[ORAS sürümlerinden](https://github.com/oras-project/oras/releases),
+[Docker Hub'daki `registry` imajından](https://hub.docker.com/_/registry) ve
+[pkg.go.dev](https://pkg.go.dev/golang.org/x/vuln?tab=versions)'den elle
+bakılır; Dependabot cosign'ı, ORAS'ı ve govulncheck'i görmez):
 
 - **cosign.** `COSIGN_VERSION` ile `COSIGN_SHA256` birlikte değişir; sağlama
   toplamı o sürümün `cosign_checksums.txt` dosyasındaki `cosign-linux-amd64`
@@ -190,6 +239,13 @@ bakılır):
   karşı okunur (cosign v4 kullanımdan kalkan bayrakları kaldıracak) ve
   değişiklik etiketten önce bir kuru denemeyle sınanır. Sürüm PR'ından ayrı
   bir `chore(ci)` PR'ıdır.
+- **ORAS ve registry.** `ORAS_VERSION` ile `ORAS_SHA256` birlikte değişir;
+  sağlama toplamı o sürümün `oras_<sürüm>_checksums.txt` dosyasındaki
+  `oras_<sürüm>_linux_amd64.tar.gz` satırıdır. `oras cp -r` ORAS'ta hâlâ
+  önizleme (Preview) olarak işaretli; ORAS'ın ya da registry imajının yeni
+  sürümü, cosign gibi, sürüm PR'ından ayrı bir `chore(ci)` PR'ında bir kuru
+  denemeyle sınanır. README "İmzalarla aynalamak" ve docs/pilot.md'deki
+  `oras` komutları yeni sürümün bayraklarına karşı okunur.
 - **govulncheck.** ci.yml'daki ve security.yml'daki `@vX.Y.Z` aynı PR'da
   yükseltilir. Yeni sürüm daha yeni bir Go isteyebilir (`go.mod`'undaki `go`
   satırı); CI Go'yu `backend/go.mod`'dan aldığı için gerekirse önce toolchain

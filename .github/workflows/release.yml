@@ -4,10 +4,12 @@ name: Release
 #   ghcr.io/yusufceng/kubeat-backend:<version>, kubeat-frontend:<version>
 #     (amd64, arm64; BuildKit's SPDX SBOM and SLSA provenance in the index)
 #   oci://ghcr.io/yusufceng/charts/kubeat --version <version>
-# cosign signs the three digests keyless (GitHub OIDC, Sigstore), the
-# signatures are verified as README "Tedarik zinciri" tells users to, and the
-# tag's GitHub Release lists the digests and carries the SBOMs. Nothing pushes
-# `latest`.
+# Only a commit on main or a release/v* branch whose CI push run passed is
+# released; the first job checks that before anything is built. cosign signs
+# the three digests keyless (GitHub OIDC, Sigstore), the signatures are
+# verified as README "Tedarik zinciri" tells users to, on a mirror and with
+# no network too, and the tag's GitHub Release links the version's upgrade
+# notes, lists the digests and carries the SBOMs. Nothing pushes `latest`.
 # Run by hand (workflow_dispatch, e.g. gh workflow run release.yml --ref
 # <branch>) it is a dry run of all of that under packages of its own,
 # ghcr.io/yusufceng/kubeat-dry-run/..., never the release packages: no release
@@ -31,17 +33,29 @@ env:
   # cosign-linux-amd64 in the release's cosign_checksums.txt.
   COSIGN_VERSION: v3.1.4
   COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+  # Pinned the same way: the checksum is that of
+  # oras_<version>_linux_amd64.tar.gz in the release's checksums.txt.
+  ORAS_VERSION: v1.3.6
+  ORAS_SHA256: 66fb0ad7206f3f6fa77ed5b552049d364ccf4b50b1684554f731f76302b52ca0
 
 jobs:
-  # Before anything is pushed: the tag must be Chart.yaml's version, and the
-  # install and mirroring commands in README.md and docs/pilot.md, the
-  # Makefile and appVersion must name it too (scripts/check-versions.sh).
-  # If not, the jobs below do not run. A dry run has no tag to check; its
-  # version is Chart.yaml's.
+  # Before anything is built or pushed. The tag must be Chart.yaml's version,
+  # and the install and mirroring commands in README.md and docs/pilot.md,
+  # the Makefile and appVersion must name it too (scripts/check-versions.sh).
+  # Then the gate (scripts/release-gate.sh): the tagged commit is on main or
+  # a release/v* branch, and CI's push run on it passed the five checks
+  # main's ruleset requires; while CI still runs, the gate waits for it, 30
+  # minutes at most. If either fails, the jobs below do not run. A dry run
+  # has no tag: its version is Chart.yaml's, and its gate takes CI's run on
+  # the branch's head, the pull request's, and does not ask about branches.
   versions:
     runs-on: ubuntu-latest
+    # The gate's 30 minutes and the rest; a hung call to GitHub ends here.
+    timeout-minutes: 40
     permissions:
       contents: read
+      # The gate reads CI's runs and their jobs; no other job may.
+      actions: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -52,6 +66,17 @@ jobs:
             scripts/check-versions.sh "$GITHUB_REF_NAME"
           else
             scripts/check-versions.sh
+          fi
+      # The gate takes the commit checked out, the one the jobs below build;
+      # for an annotated tag too, that is the tagged commit.
+      - name: The commit is on main or a release branch, and CI passed on it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            scripts/release-gate.sh tag "$(git rev-parse HEAD)"
+          else
+            scripts/release-gate.sh dry-run "$(git rev-parse HEAD)"
           fi
       - id: version
         run: echo "version=$(awk '/^version:/ { v = $2; gsub(/["\047]/, "", v); print v; exit }' deploy/helm/kubeat/Chart.yaml)" >> "$GITHUB_OUTPUT"
@@ -184,8 +209,9 @@ jobs:
 
   # Checks the signatures as README "Tedarik zinciri" tells users to, with
   # read-only access like theirs and the identity README names (release.yml
-  # at this run's ref): online, then from disk with no network, as in an
-  # air-gapped cluster. Then writes the Release notes
+  # at this run's ref): online; then as an air-gapped site does, with no
+  # network, on copies mirrored with their signatures into a registry of the
+  # job's own and on copies saved to disk. Then writes the Release notes
   # (scripts/release-notes.sh) and keeps them with the SBOMs.
   verify:
     runs-on: ubuntu-latest
@@ -193,6 +219,18 @@ jobs:
     permissions:
       contents: read
       packages: read
+    # The air-gapped site's internal registry: Distribution's, plain HTTP on
+    # the runner's localhost:5000. Like ghcr.io it has no referrers API, so
+    # the signatures travel under the referrers tag (sha256-<digest>).
+    services:
+      registry:
+        image: registry:2.8.3
+        ports:
+          - 5000:5000
+        # The steps start once it answers.
+        options: >-
+          --health-cmd "wget -q -O /dev/null http://localhost:5000/v2/"
+          --health-interval 2s --health-timeout 5s --health-retries 15
     env:
       VERSION: ${{ needs.versions.outputs.version }}
       BACKEND_DIGEST: ${{ needs.images.outputs.backend }}
@@ -201,6 +239,7 @@ jobs:
       IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
       ISSUER: https://token.actions.githubusercontent.com
       DRY_RUN: ${{ github.event_name != 'push' }}
+      MIRROR: localhost:5000
     steps:
       - uses: actions/checkout@v7
       - name: Install cosign
@@ -210,11 +249,20 @@ jobs:
           echo "$COSIGN_SHA256  $RUNNER_TEMP/bin/cosign" | sha256sum --check --strict
           chmod +x "$RUNNER_TEMP/bin/cosign"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Install oras
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/oras.tar.gz" "https://github.com/oras-project/oras/releases/download/$ORAS_VERSION/oras_${ORAS_VERSION#v}_linux_amd64.tar.gz"
+          echo "$ORAS_SHA256  $RUNNER_TEMP/oras.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/oras.tar.gz" -C "$RUNNER_TEMP/bin" oras
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       # A dry run's packages may be private.
       - name: Log in to ghcr.io
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: printf '%s' "$TOKEN" | cosign login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        run: |
+          printf '%s' "$TOKEN" | cosign login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - name: Verify the signatures
         run: |
           cosign verify \
@@ -223,18 +271,49 @@ jobs:
             "$REGISTRY_PATH/kubeat-backend@$BACKEND_DIGEST" \
             "$REGISTRY_PATH/kubeat-frontend@$FRONTEND_DIGEST" \
             "$REGISTRY_PATH/charts/kubeat@$CHART_DIGEST"
-      # README's air-gapped steps: the trusted root from Sigstore's TUF
-      # repository, an image and the chart saved to disk with their
-      # signatures, and the check with --trusted-root while a proxy that
-      # refuses every connection stands in for the air gap.
+      # README "İmzalarla aynalamak" and docs/pilot.md, from the digests: each
+      # artifact goes to the mirror with its signature (oras cp -r) under the
+      # version's tag, and that tag must name the digest that was signed.
+      - name: Mirror with the signatures
+        run: |
+          mirror() {
+            oras cp -r --to-plain-http "$1@$3" "$MIRROR/$2:$VERSION"
+            got="$(oras resolve --plain-http "$MIRROR/$2:$VERSION")"
+            if [ "$got" != "$3" ]; then
+              echo "$MIRROR/$2:$VERSION is $got, not $3: the copy has another digest"
+              exit 1
+            fi
+          }
+          mirror "$REGISTRY_PATH/kubeat-backend" kubeat/kubeat-backend "$BACKEND_DIGEST"
+          mirror "$REGISTRY_PATH/kubeat-frontend" kubeat/kubeat-frontend "$FRONTEND_DIGEST"
+          mirror "$REGISTRY_PATH/charts/kubeat" charts/kubeat "$CHART_DIGEST"
+      # README "Hava boşluklu ortamda doğrulamak": the trusted root from
+      # Sigstore's TUF repository, then the checks with --trusted-root while
+      # a proxy that refuses every connection stands in for the air gap. Go
+      # never sends a request for localhost through a proxy, so the mirror
+      # stays reachable; Sigstore and ghcr.io do not. First the mirrored
+      # copies, by the tags docs/pilot.md uses and by digest as README does;
+      # then the three saved to disk with their signatures (cosign save), as
+      # for carrying them in.
       - name: Verify offline
         run: |
           cosign initialize
           root="$HOME/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json"
           test -s "$root" || { echo "no trusted root at $root"; exit 1; }
+          HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 NO_PROXY= \
+            cosign verify --trusted-root "$root" \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "$MIRROR/kubeat/kubeat-backend:$VERSION" \
+              "$MIRROR/kubeat/kubeat-frontend:$VERSION" \
+              "$MIRROR/charts/kubeat:$VERSION" \
+              "$MIRROR/kubeat/kubeat-backend@$BACKEND_DIGEST" \
+              "$MIRROR/kubeat/kubeat-frontend@$FRONTEND_DIGEST" \
+              "$MIRROR/charts/kubeat@$CHART_DIGEST"
           cosign save --dir "$RUNNER_TEMP/offline/backend" "$REGISTRY_PATH/kubeat-backend@$BACKEND_DIGEST"
+          cosign save --dir "$RUNNER_TEMP/offline/frontend" "$REGISTRY_PATH/kubeat-frontend@$FRONTEND_DIGEST"
           cosign save --dir "$RUNNER_TEMP/offline/chart" "$REGISTRY_PATH/charts/kubeat@$CHART_DIGEST"
-          for artifact in backend chart; do
+          for artifact in backend frontend chart; do
             HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 NO_PROXY= \
               cosign verify --trusted-root "$root" --local-image \
                 --certificate-identity "$IDENTITY" \
