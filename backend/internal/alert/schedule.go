@@ -93,6 +93,8 @@ type retry struct {
 	// RetryFor zero. It goes in the pass it was held back for, or, held
 	// back again there behind a note the channel refused, in a later one;
 	// it is given up if the channel does not take it when it is attempted.
+	// A reminder or slowness notification gives way meanwhile to a newer
+	// one about the same monitor (supersede).
 	once bool
 }
 
@@ -160,18 +162,33 @@ func (s *schedule) dropRetry(r *retry) {
 	}
 }
 
-// supersede drops the reminder about the notification's monitor still
-// held back for the channel: n, newer, takes its place, as a newer
-// reminder does in a group (dropStaleReminders).
+// supersede drops the note about the notification's monitor still held
+// back for the channel that n, newer, takes the place of (supersedes): a
+// reminder, as a newer reminder does in a group (dropStaleReminders), or
+// a slowness notification, the monitor's latest state being all there is
+// to tell (PagerDuty keeps one alert of a monitor's slowness anyway).
+// However long a channel is down, one of each about a monitor waits for
+// it at most.
 func (s *schedule) supersede(channelID int64, n Notification) {
 	kept := s.retries[:0]
 	for _, r := range s.retries {
-		if !r.once || r.channel.ID != channelID || r.note.Event != EventReminder || r.note.Monitor.ID != n.Monitor.ID {
+		if !r.once || r.channel.ID != channelID || r.note.Monitor.ID != n.Monitor.ID || !supersedes(n.Event, r.note.Event) {
 			kept = append(kept, r)
 		}
 	}
 	s.retries = kept
 }
+
+// supersedes says whether a note of the event takes the place of one of
+// old about the same monitor held back for a channel: a reminder of a
+// reminder, a slowness notification of either kind of one.
+func supersedes(event, old Event) bool {
+	return event == EventReminder && old == EventReminder || slowness(event) && slowness(old)
+}
+
+// slowness says whether the event is a monitor turning slow or responding
+// in time again.
+func slowness(e Event) bool { return e == EventSlow || e == EventSlowResolved }
 
 // hasRetry says whether the channel is to be sent the event about the
 // incident again, on its own or in a group.
@@ -358,7 +375,7 @@ func (e *Engine) retryLater(failures []failed) {
 		switch {
 		case r != nil && r.once && !f.held:
 			e.owed.dropRetry(r)
-			e.gaveUp(f.channel, f.note, "not taken in the pass it was held back for")
+			e.gaveUp(f.channel, f.note, "not taken when attempted")
 			continue
 		case r != nil:
 			r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
@@ -373,7 +390,7 @@ func (e *Engine) retryLater(failures []failed) {
 			if p := e.paused(f.channel, now); p != nil {
 				due, next = p.due, p.wait
 			}
-			if f.note.Event == EventReminder {
+			if f.note.Event == EventReminder || slowness(f.note.Event) {
 				e.owed.supersede(f.channel.ID, f.note)
 			}
 			r = e.owed.addRetry(f.channel, f.note, due, due, next)

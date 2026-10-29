@@ -1093,3 +1093,63 @@ func TestAHeldBackEndCountsRetryForFromItsFirstAttempt(t *testing.T) {
 		})
 	})
 }
+
+// A slowness notification held back for a webhook that took none gives
+// way to a newer one about the same monitor, as a reminder does: a monitor
+// turning slow and back for hours while the webhook is down leaves one note
+// about it waiting for the webhook, not one a turn, and the webhook back is
+// sent the monitor's latest state with the outage that kept it waiting.
+func TestAHeldBackSlownessNotificationGivesWayToANewerOne(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.retrying(15*time.Minute, time.Hour)
+	x, s := f.monitorIn("x", ""), f.monitorIn("s", "")
+	s.SlowAbove = 500 * time.Millisecond
+	s, err := f.db.UpdateMonitor(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := f.clock
+	// took evaluates a result of s that took d, at the fixture's clock,
+	// and checks what waits for the webhook after it.
+	took := func(d time.Duration) {
+		t.Helper()
+		r := store.CheckResult{MonitorID: s.ID, CheckedAt: f.clock, Up: true, Latency: d}
+		if err := f.db.InsertCheckResults(context.Background(), []store.CheckResult{r}); err != nil {
+			t.Fatal(err)
+		}
+		f.engine.Evaluate(context.Background(), []store.CheckResult{r})
+		f.flush()
+		if n := len(f.engine.owed.retries); n > 2 {
+			t.Fatalf("at %s: %d notes wait for the webhook, want x's outage and s's latest state at most", f.clock.Sub(start), n)
+		}
+	}
+	f.sender.fail("ops", 1_000_000) // the webhook goes away
+	f.clock = start.Add(30 * time.Second)
+	f.result(x, false) // 0:30: not taken; the webhook is tried once a pass from then on
+	f.flush()
+	// s turns slow a minute into every ten and back five minutes later,
+	// for twelve hours; passes sees one failed attempt a pass at most.
+	for at := time.Minute; at < 12*time.Hour; at += 10 * time.Minute {
+		f.passes(start, at)
+		took(900 * time.Millisecond)
+		f.passes(start, at+5*time.Minute)
+		took(100 * time.Millisecond)
+	}
+
+	// Back, the webhook is sent in its next pass, at 12:00:30, that s has
+	// responded in time again since 11:56, then x's outage.
+	f.sender.fail("ops", 0)
+	f.passes(start, 12*time.Hour+30*time.Second)
+	if got := f.sentTo("ops"); got != "slow_resolved:s,down:x" {
+		t.Fatalf("the webhook back was sent %q, want s's latest state and x's outage", got)
+	}
+	f.sender.mu.Lock()
+	latest := f.sender.sent[0]
+	f.sender.mu.Unlock()
+	if want := start.Add(11*time.Hour + 56*time.Minute); !latest.At.Equal(want) {
+		t.Errorf("s's state sent is of %s, want the latest, of %s", latest.At.Sub(start), want.Sub(start))
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d notes left waiting, want none", n)
+	}
+}
