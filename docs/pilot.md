@@ -78,10 +78,10 @@ mimariyi birden taşır:
 
 ```sh
 R=registry.sirket.local/kubeat
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.44.0  docker://$R/kubeat-backend:0.44.0
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.44.0 docker://$R/kubeat-frontend:0.44.0
-helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0        # kubeat-0.44.0.tgz
-helm push kubeat-0.44.0.tgz oci://registry.sirket.local/charts
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.45.0  docker://$R/kubeat-backend:0.45.0
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.45.0 docker://$R/kubeat-frontend:0.45.0
+helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0        # kubeat-0.45.0.tgz
+helm push kubeat-0.45.0.tgz oci://registry.sirket.local/charts
 ```
 
 Values'ta `backend.image.repository`, `frontend.image.repository` ve
@@ -172,7 +172,7 @@ aralıklar olmalıdır, yoksa kontroller de vekile gider.
 ### 3. Kurulum
 
 ```sh
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.44.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0 \
   -n kubeat -f values-pilot.yaml
 oc -n kubeat rollout status deploy/kubeat-backend
 oc -n kubeat rollout status deploy/kubeat-frontend
