@@ -506,8 +506,13 @@ yavaşlık bildirimi o geçişte bir kez). Ölü makine kanalıyla 100
 bildirimlik patlamada kuyruk dolmaz, `kubeat_notifications_dropped_total`
 artmaz, insan kanallarının grubu `UPTIME_NOTIFY_GROUP_WAIT` içinde gider
 (`go test -race`). Kuyruk kuralı README "Alarm" ve "Yapılandırma"da.
-Kalan: `UPTIME_NOTIFY_GROUP_WAIT=0` iken yanıt vermeyen bir insan kanalı
-her bildirimde yine denenir (README'de sınır olarak).
+Geçişte kanalın daha az reddettiği bildirim önce denenir: ölü kanal geçiş
+başına bir kez denenir, sürekli reddedilen bir bildirim (409, 422)
+diğerlerini bekletmez. Kalan: `UPTIME_NOTIFY_GROUP_WAIT=0` iken yanıt
+vermeyen bir insan kanalı her bildirimde yine denenir (README'de sınır
+olarak); sürekli reddedilen bir bildirim kanalı her geçişten sonra yeniden
+duraklatır, yeni bildirimler en çok `UPTIME_NOTIFY_RETRY_MAX` gecikir
+(4xx'i kalıcı hata sayan S26'ya girdi: 4xx dönen kanal canlıdır).
 
 ## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
 

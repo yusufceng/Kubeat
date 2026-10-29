@@ -63,8 +63,8 @@ backend:
   # How long Kubernetes waits for the backend to stop before it kills it.
   # Stopping, the backend ends its checks, writes their last results and
   # sends the notifications still waiting within UPTIME_SHUTDOWN_TIMEOUT
-  # (10s by default): keep this at least 5 seconds longer than that. What
-  # is not sent in time goes at the next start.
+  # (10s by default): keep this at least 5 seconds longer than that. The
+  # outages among what is not sent in time go at the next start.
   terminationGracePeriodSeconds: 30
   # Any UPTIME_* setting the chart has no value for, as environment variables
   # (the README lists them all). Do not repeat variables the chart itself

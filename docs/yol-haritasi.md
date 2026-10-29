@@ -162,11 +162,16 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   `UPTIME_NOTIFY_RETRY_MAX`), düzelme (`up`) bildirimi için en çok
   `UPTIME_NOTIFY_RETRY_FOR`. Almayan bir makine kanalı (webhook,
   PagerDuty) yeni bildirimleri kendi yeniden deneme zamanına bekletir;
-  insan kanalları ise gruplama kapalıyken (`UPTIME_NOTIFY_GROUP_WAIT=0`)
+  sürekli reddettiği bir bildirim (409, 422) diğerlerini bekletmez ama
+  kanalı her geçişten sonra yeniden duraklatır, yeni bildirimler en çok
+  `UPTIME_NOTIFY_RETRY_MAX` gecikir (4xx'i kalıcı hata sayan S26'ya kadar).
+  İnsan kanalları ise gruplama kapalıyken (`UPTIME_NOTIFY_GROUP_WAIT=0`)
   her bildirimde yine denenir. Deneme listesi bellektedir: yeniden
   başlatmada açık kesintininki, hiç denenmemiş olanlar (kuyrukta ya da grup
-  beklemesinde kalanlar) dahil, bildirim kaydından kurulur; bekleyen düzelme
-  bildirimi düşer, kanal almadan yeni bir kesinti açılırsa da düşer.
+  beklemesinde kalanlar) dahil, bildirim kaydından kurulur (kaydı
+  `UPTIME_DELIVERY_RETENTION` ile silinmiş açık kesinti bir kez daha
+  gider); bekleyen düzelme bildirimi düşer, kanal almadan yeni bir kesinti
+  açılırsa da düşer.
   Kapanışta insan kanallarının grupları kuyruktan önce gider ve kapanışın
   tümü `UPTIME_SHUTDOWN_TIMEOUT` ile sınırlıdır; yetişmeyen düzelme
   bildirimi kaybolur. Teslim edilemeyen bildirimlerin ayrı bir görünümü
