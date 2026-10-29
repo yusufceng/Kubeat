@@ -83,6 +83,34 @@ yeniden kurulum bir dakikadan kısa sürüyor. Açık kalan: yeniden kurulumda
 kurulum notları geçmeyen bir parola gösteriyor (backlog, "Aynı adla yeniden
 kurulumda yeniden üretilen Secret'lar"; tetikleyicisi bu provaydı).
 
+## Prova: 2026-10-29, minikube CSI (fsGroupPolicy: File), 0.45.0
+
+Senaryo: fsGroup'u gerçekten uygulayan bir depolama sürücüsünde (minikube
+`csi-hostpath-driver`, `hostpath.csi.k8s.io`, `fsGroupPolicy: File`) README
+"Cluster'a kurulum" komutuyla kurulum ve README'deki yardımcı pod'la geri
+yükleme. Varsayılan minikube hostpath sağlayıcısı fsGroup uygulamadığı için
+önceki provalar bunu sınamıyordu. Yayımlanan 0.45.0 chart'ı ve imajları,
+`backup.interval=1m`.
+
+1. Kurulum `--set podSecurityContext.fsGroup=1001` ile: kurulum notlarında
+   fsGroup uyarısı yok. Backend UID 1001, ek grup 1001; `/data` ve `/backup`
+   `root:1001` sahipliğinde ve setgid'li geldi, veritabanı yazıldı.
+2. Bir monitor eklendi, dakikalık yedek alındı; yedekten sonra bir monitor
+   daha eklendi.
+3. Negatif: pod düzeyinde `securityContext` olmayan yardımcı pod
+   kopyalayamadı (`cp: cannot create regular file '/data/uptime.db.restore':
+   Permission denied`).
+4. README'deki yardımcı pod (`securityContext: { fsGroup: 1001 }`) ile
+   adımlar: backend sıfıra, kopya `/data/uptime.db`'ye, `-wal`/`-shm`
+   silindi, backend bire. Geri yüklemeden sonra yalnızca yedekteki monitor
+   vardı; yedekten sonra eklenen gitti.
+5. Negatif: aynı sürücüde fsGroup'suz kurulum. Kurulum notları fsGroup
+   uyarısını gösterdi; backend uyarının söylediği `open database failed`
+   (`unable to open database file (14)`) ile CrashLoopBackOff'a düştü.
+
+Görülenler: README'deki fsGroup satırı hem kurulum hem geri yükleme için
+gerekli ve yeterli; kurulum notlarının uyarısı doğru durumda çıkıyor.
+
 ## Yeniden prova
 
 Sürüm şemayı değiştirdiğinde ya da yedekleme kodu değiştiğinde prova

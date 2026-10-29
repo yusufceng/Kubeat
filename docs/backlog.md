@@ -74,6 +74,25 @@ düşen bildirim ifadesi "Kalan"daki kurallar gibi her seriye ayrı bakar ve
 tekilleştirilmeyen HA çiftinde kopya başına bir kez yanar; tetikleyici
 aynı.
 
+Güncelleme (2026-10-29, sprint 3 kapanışı): Müşteri B (önemli) 0.45'in
+kurulum notlarını eleştiriyor. Notlar heartbeat de kurallar da kapalıyken
+uyarıyor, ama gösterdikleri README bölümünde chart'ın `heartbeat.urlSecret`
+değeri geçmiyor. Öteki seçenek (`metrics.prometheusRule.enabled=true`)
+CRD'siz bir GKE'de `helm upgrade`'i düşürüyor. Önerisi:
+
+- NOTES'ta kopyalanabilir iki satır: Secret'ı oluşturan `kubectl` komutu
+  ve `--set heartbeat.urlSecret.name`.
+- `monitoring.coreos.com/v1` yoksa NOTES kural seçeneğini önermesin
+  (Capabilities). Yalnızca metin olduğu için "chart CRD yokken fail etmez"
+  kararına uyar.
+- Aynı iki satır README "Aracın kendi sağlığı"nda ve S12'nin hızlı
+  başlangıcında olsun.
+
+S30 gelene kadar operator'süz kurulumun tek öz-koruması heartbeat. PMO
+önerisi: sprint 4 doküman paketine
+([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)
+"Müşterilerin yeni bulguları" 4).
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
@@ -701,6 +720,17 @@ düzeyi değil) ve taban imaj düzeltmesinde yeniden derleme. `make release`
 sözü olmayan bir yetenek olarak yazar ve böyle bir yamanın GitHub Release'i
 "Latest" olmaz. Karar ve tetikleyici değişmedi.
 
+Güncelleme (2026-10-29, sprint 3 kapanışı): iki müşteri de andı. Müşteri
+A'ya göre "yalnızca son minor" kuralı, aynı gün iki minor (0.44.0, 0.45.0)
+çıkaran bir üründe 3 yıllık destek sorusunu açık bırakıyor; satın alma ve
+filoya yaygınlaştırma için açık üç konudan biri. Müşteri B minor'lar
+neredeyse her gün çıktığı için sık yükseltmek zorunda; Release metninin
+yükseltme notuna bağlanmasını istiyor ("Yayım hattının kalanları"). Karar
+ve tetikleyici (ilk satın alma görüşmesi) değişmedi; Müşteri A da bunu
+backlog kararı olarak anıyor
+([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)
+"Müşteri puanları").
+
 ## containers/image'ın okuduğu biçimde ikinci imza
 
 2026-10-29'da ertelendi (S1'in geliştirmesinde çıktı, #48). 0.45'ten beri
@@ -1040,3 +1070,97 @@ Tetikleyici: pilotta ya da bir kurulumda bunlardan birinin görülmesi
 sağlayıcı, düzeltildikten sonra bekleyen sayfa, tek monitor'a 5xx dönen
 ITSM, her şeyi reddeden kanalın geçişinde geç kalan grup ya da düşen
 bildirim).
+
+Güncelleme (2026-10-29, sprint 3 kapanışı): Müşteri A (#49'a 4 puan)
+bedelleri kendi ortamında somut buluyor: geçici bir 4xx sayfayı 15 dk
+geciktirir, süresi dolmuş token'lı paylaşılan kanal toplu kesintide
+teslimat döngüsünü tutar. Tetikleyici tek ekipli sandbox pilotunda
+yanamaz; A, (a) seçeneğinin filoya yaygınlaştırmanın ön koşulu olmasını
+istiyor. PMO önerisi: tetikleyiciye "pilot 'devam' kararıyla filoya
+yaygınlaştırma" eklenir; kararı PO verir
+([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)
+"Müşteri puanları").
+
+## Yayım hattının kalanları: sürüm sabitleri, kuru deneme, imza kapsamı
+
+2026-10-29'da ertelendi (#47 ve #48'in kapsam dışı parçaları; developer
+raporları). 0.45'ten beri yayım imzalı ve SBOM'lu; kurulum komutlarının
+sürümünü `scripts/check-versions.sh` CI'da ve yayımın ilk işinde denetler.
+Dışarıda kalanlar:
+
+- **`make bump`.** Sürüm sabitleri (Chart.yaml'ın `version` ve
+  `appVersion`'ı, Makefile, README ve docs/pilot.md'deki komutlar) elle
+  yükseltiliyor; eksik kalanı denetim yakalıyor. Tetikleyici: bir sürüm
+  PR'ının bu denetime takılması.
+- **`--version`'sız kurulum.** README komutu sürümlü kalır. Sürümsüz "en
+  son" kurulum önerilmez, çünkü OCI'da kayan bir chart etiketi yok; `latest`
+  imaj etiketi de 0.45'ten beri itilmiyor. Tetikleyici: sürümsüz kurulum
+  isteyen ilk kullanıcı.
+- **Kuru denemede etiket denetimi.** `workflow_dispatch` koşusunda etiket
+  olmadığı için `versions` işi etiket karşılaştırmasını atlar; kuru deneme,
+  atılacak etiketin Chart.yaml ile uyuştuğunu sınamaz. Denenecek sürüm bir
+  girdiyle verilebilir. Tetikleyici: kuru denemesi geçen bir etiket
+  koşusunun `versions`'ta düşmesi.
+- **Ayrı `image.digest` değeri.** PO kararıyla kapsam dışı; README
+  `tag: "<sürüm>@<digest>"` örneğini veriyor. Tetikleyici: etiketi ve
+  digest'i ayrı yöneten bir politika motoru ya da GitOps hattı.
+- **Tarama bulgusu için otomatik issue.** Haftalık `security.yml` bulguyu
+  yalnızca başarısız koşu olarak bildirir; bildirim iş akışını main'e
+  getiren hesaba gider. Tetikleyici: bir bulgunun, bildirim gözden kaçtığı
+  için SECURITY.md'deki 7 günlük hedefi kaçırması.
+- **Platform manifest'lerini ayrıca imzalamak (`cosign sign
+  --recursive`).** Yalnızca index digest'i imzalanıyor. Bu, etiketle ya da
+  index digest'iyle verilen referanslara yetiyor; platform manifest'inin
+  digest'iyle verilen referans imzasız görünür. Tetikleyici: ilk politika
+  motoru isteği.
+
+Güncelleme (2026-10-29, sprint 3 kapanışı): Müşteri A'nın iki yeni bulgusu
+bu hatta, ikisi de önemli:
+
+- **Yayım yeşil CI'a bağlı değil.** Yayım, etiketlenen commit'in CI
+  sonucuna ve main'den erişilebilir olduğuna bakmıyor. main'de zorunlu
+  durum kontrolü yok; bu sprintte #55 kırmızı check'le merge edildi.
+- **Aynalama yolu hiç koşulmadı.** İç registry'ye `oras cp -r` ile
+  aynalayıp orada `cosign verify --trusted-root` ile doğrulama yolu
+  denenmedi. Verify işi yalnızca diskteki backend imajını ve chart'ı
+  doğruluyor; docs/pilot.md imzayı taşımayan komutları veriyor.
+
+Müşteri B (hoş olur): Release metni yükseltme notuna bağlanmıyor,
+Chart.yaml'da `home` ve `sources` yok. PMO önerisi: depo ayarları hemen,
+kod kısmı sprint 4'ün 4. maddesi
+([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)
+"Müşterilerin yeni bulguları" 1, 2 ve 6).
+
+## Öz-sağlık kurallarının ve kuyruk uyarısının kalanları
+
+2026-10-29'da ertelendi (#50; SRE incelemesinin düşük bulguları ve
+developer raporu). 0.45'ten beri `KubeatUnhealthy` heartbeat olmadan da
+yanar, `metrics.prometheusRule.clusterLabel` kuralları tek depoda cluster
+başına değerlendirir ve etkin monitor sayısı bildirim kuyruğunu aşınca
+backend WARN yazar. Dışarıda kalanlar:
+
+- **Seyrek kurulumda pencere.** Kontrol aralıkları
+  `UPTIME_HEARTBEAT_INTERVAL`'dan uzun monitor'leri olan bir kurulumda
+  `kubeat_self_healthy` yalnızca sonuç gelen pencerelerde 0 olur; README
+  bunu yalnızca heartbeat için söylüyor. Heartbeat Secret'ı yokken pencere
+  `backend.extraEnv` ile `UPTIME_HEARTBEAT_INTERVAL` verilerek ayarlanır.
+  README "Heartbeat olmadan" bölümüne ve values.yaml'a birer cümle gerekir;
+  inceleyici S30 belgesiyle (sprint 4 doküman paketi) önerdi.
+- **Bütün cluster'lar birlikte kaybolunca ek `KubeatDown`.** `clusterLabel`
+  verilmiş bir kurulumda bütün cluster'ların serileri birlikte kaybolursa
+  `absent` cluster etiketsiz bir `KubeatDown` daha açar. S30 belgesinde
+  sınır cümlesi olarak yazılabilir.
+- **HA çiftinde kopya başına alarm.** Toplama yapmayan kurallar
+  tekilleştirilmeyen bir HA deposunda kopya başına yanar. "Alertmanager'a
+  doğrudan kanal" maddesinin S37 notunda; değişmedi.
+- **Kuyruk uyarısının tekrarı ve doluluk metriği.** WARN süreç başına bir
+  kez yazılır; sayı düşüp yeniden aşınca tekrarlanmaz. Kuyruk doluluğu için
+  metrik yok ("S25'in incelemesinde kalan bildirim köşeleri" 3. köşe).
+- **`clusterLabel`'ı kendiliğinden bulmak.** Etiket adı elle verilir;
+  cluster'dan kendiliğinden bulunmaz.
+- **`Healthy` ve takılı worker'lar** S22 ile birlikte değerlendirilir (o
+  maddenin tetikleyicisi).
+
+Tetikleyici: ilk iki parça için S30'un belgesi. Ötekiler için tek depoda bu
+durumlardan birini gören ilk kurulum ya da kuyrukta düşen bildirim
+(`kubeat_notifications_dropped_total`).
