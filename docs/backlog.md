@@ -29,6 +29,17 @@ yokken fail etmez (`helm template` ile çalışan GitOps hatlarını kırar),
 `docs/` altında statik kural dosyası yok; Grafana Cloud ve GMP adları
 resmî belgeden doğrulanır.
 
+Güncelleme (2026-10-29, sprint 2 kapanışı): Müşteri B'ye göre (önemli)
+S29'un `max by (namespace, job)` ve `unless on (namespace, job)` ifadeleri
+sorunlu. İki cluster tek depoda (ör. Grafana Cloud) değerlendirilince
+`cluster` gibi dış etiketleri atıyorlar; bir cluster'ın düşüşü
+diğerininkiyle örtülüyor. Önerisi üç parça: scrape etiketlerini `without
+(...)` ile atmak, iki `cluster` değerli bir promtool senaryosu eklemek, S30
+belgesine cluster başına değerlendirme notu yazmak. PMO önerisi: kural
+düzeltmesi S26 ile birlikte ve S30'dan önce yapılır
+([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
+"Müşterilerin yeni bulguları" 4).
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
@@ -517,6 +528,18 @@ duraklatır, yeni bildirimler en çok `UPTIME_NOTIFY_RETRY_MAX` (bir
 bildirimin ilk reddedildiği geçişte bir geçiş daha) gecikir (4xx'i kalıcı
 hata sayan S26'ya girdi: 4xx dönen kanal canlıdır).
 
+Güncelleme (2026-10-29, sprint 2 kapanışı): Müşteri A iki önemli bulgu
+yazdı. Birincisi: 4xx alan tek bir bildirim paylaşılan makine kanalını her
+geçişten sonra yeniden duraklatıyor ve diğer ekiplerin sayfaları 15
+dakikaya kadar gecikiyor. Önerisi, S26'nın kabul ölçütüne şunun yazılması:
+"4xx alan kanal canlıdır ve duraklamaz; yalnızca bağlantı hatası, zaman
+aşımı ve 5xx duraklatır." İkincisi: varsayılan kuyruk (100), README'deki
+"en az monitor sayısı kadar" kuralıyla ve 1000'lik monitor kotasıyla
+çelişiyor. Önerisi varsayılanı 1000'e çekmek ve sınır aşılınca WARN
+vermek; otomatik türetme gerekmiyor. İkisi de sprint 3 PO turunda
+değerlendirilir ([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
+"Müşterilerin yeni bulguları" 2 ve 3).
+
 ## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
 
 2026-10-28'de ertelendi (S33,
@@ -585,6 +608,15 @@ onları da saymalı). Tetikleyici: kullanıcının minikube provası (sprint 2
 "Kullanıcıda kalanlar" 3) yeni Secret'taki parolanın geçmediğini doğrularsa
 ya da gerçek bir yeniden kurulumda yönetici bu yüzden takılırsa.
 
+Güncelleme (2026-10-29, sprint 2 kapanışı): Müşteri B (önemli), tetikleyicinin
+özellikle birlikte geldiğini yazdı. 0.44 README'si takılı bir release'i
+kaldırıp yeniden kurmayı öneriyor, NOTES ise parolayı yeni Secret'tan
+okutuyor. İstediği, ilk seçenek (NOTES uyarısı) ve README "Cluster'a
+kurulum"a bir cümle. PMO bunu sprint 3 doküman paketine öneriyor
+([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
+"Müşterilerin yeni bulguları" 5). Minikube provası henüz yapılmadı; kararı
+PO verir.
+
 ## Dolan veri volume'u: büyütme, kotaya göre saklama, yazılamayan sonuçlar
 
 2026-10-29'da ertelendi (S32'nin kapsam dışı parçaları, #39). 0.44'ten
@@ -601,3 +633,63 @@ eklenmesi (bugün yalnızca sayı loglanır; bir monitor'un sonucu kalıcı
 reddedilirse hangisi olduğu görünmez). Tetikleyici:
 boyut kuralını aşan bir kurulum ya da loglarda `dropped` değeri `rows`'a eşit
 `batch insert failed` satırları ve `heartbeat withheld`.
+
+Güncelleme (2026-10-29, sprint 2 kapanışı): `KubeatResultsDropped` PO
+kararıyla warning kaldı (#36 ve #39'un kapsamı dışında). Müşteri A
+(önemli) şunu yazdı: S32'nin denetimi (`scheduler.Healthy`) yalnızca
+`UPTIME_HEARTBEAT_URL` verilince çalışıyor. Dış alıcısı olmayan bir
+kurulumda dolan volume cluster içinde yalnızca bu warning'i üretiyor;
+takılı bir yazımda o sayaç da artmıyor. Önerisi, `Healthy()` sonucunu
+heartbeat'ten bağımsız bir gauge olarak yayınlamak ve `critical` bir
+"Kubeat sonuç yazamıyor" kuralı eklemek (`for: 5m`). Kısmi düşüşte warning
+kalır, böylece PO kararı bozulmaz. Kararı sprint 3 PO turu verir
+([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
+"Müşterilerin yeni bulguları" 1; PMO önerisi kuyruğun 5. sırası).
+
+## Kaldırmaya karşı korumanın kalanları: Argo CD prune, PV düzeyi, prova kaydı
+
+2026-10-29'da ertelendi (S31'in kapsam dışı parçaları, #38). 0.44'ten beri
+`helm uninstall` veri ve yedek PVC'lerini bırakır; Argo CD 2.7 ve sonrası
+cascade silmede de öyle. Kalanlar:
+
+- **Argo CD'de prune'a karşı koruma (`Prune=false`)** bilerek eklenmedi.
+  Kabul ölçütü yalnızca `Delete=false` istiyordu. `Prune=false`, values'tan
+  çıkan bir PVC'de (ör. `backup.enabled=false`) uygulamayı sürekli
+  OutOfSync bırakır. Sınır README "GitOps ile kurulum"da yazılı.
+  Tetikleyici: GitOps kurulumunda values değişikliğiyle prune edilen bir
+  PVC.
+- **VolumeSnapshot, PV `reclaimPolicy` ve namespace silmeye karşı koruma**
+  issue'nun kapsamı dışındaydı. Namespace silmek PVC'leri de siler (README
+  "Yedekleme ve geri yükleme"). Kopyaları cluster dışına almak S7'nin işi
+  (yukarıda); tetikleyici onunla aynı.
+- **Prova kaydı.** `docs/yedek-geri-yukleme.md`'ye "kazayla kaldırma" hedef
+  satırı ve prova kaydı, kullanıcının minikube provasından sonra yazılır
+  ([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
+  "Kullanıcıda kalanlar" 3).
+
+## S25'in incelemesinde kalan bildirim köşeleri
+
+2026-10-29'da ertelendi (S25, #37; SRE incelemesi ve developer raporu).
+İlk ikisi 0.44'ten önce de vardı, yani gerileme değiller. S26 ya da S27
+`alert` paketine ve `schedule.go`'ya dokunurken BA bunları kapsama alıp
+almayacağına bakar.
+
+- **İnsan kanalında sürekli reddedilen yeniden deneme.** İnsan kanalının
+  sürekli reddettiği bir yeniden deneme mesajı, o kanalın diğer yeniden
+  denemelerini bekletebilir.
+- **Kesintiden sonra oluşturulan gecikmeli ya da tekrarlı kanal.** Böyle
+  bir kanal yeniden başlatmada eski kesintiyi yine alır. "Kesintiden önce
+  var olan kanal" kuralı (`CreatedAt`), kabul ölçütü gereği yalnızca
+  gecikmesiz kanallarda uygulanıyor.
+- **Bekleyen listenin büyüklüğü için metrik yok.** Duraklatılmış makine
+  kanalında bekleyen bildirimler yalnızca `notifications held back ...
+  count` log satırında görünür. S26'nın kanal gauge'u eklenirken bu da
+  düşünülür; Müşteri A'nın kuyruk doluluğu gauge'u önerisi de aynı yerde
+  ([sprints/2026-10-28-sprint-02.md](sprints/2026-10-28-sprint-02.md)
+  "Müşterilerin yeni bulguları" 3).
+- **S27 girdisi.** Kesinti açıldıktan sonra başlayan bir bakım penceresinde
+  yeniden başlatma olursa gecikmesiz kanal kesintiyi almaz, yalnızca
+  düzelmeyi alır. 0.43'te bu bildirim tümden kayboluyordu, yani gerileme
+  değil. S27 ile birlikte alınır.
+
+Tetikleyici: S26 ya da S27 sprint'e girdiğinde, ya da pilotta görülürse.

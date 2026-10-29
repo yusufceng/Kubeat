@@ -308,6 +308,15 @@ yerlerde değişir:
   `backend.terminationGracePeriodSeconds` (varsayılan 30) bu süreden en az 5
   sn uzun tutulmalıdır (bkz. "Alarm").
 
+0.42'den doğrudan geçiyorsanız "0.43'e yükseltme"yi de okuyun. Özellikle
+`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`
+15 dakikayı aşan özel bir bildirim ayarınız varsa backend açılmaz:
+`UPTIME_NOTIFY_RETRY_MAX`'ı bu süreden uzun verin, kısaltın ya da `0` ile
+yeniden denemeyi kapatın. Birden çok kurulumu aynı PagerDuty servisine
+bağlamayın: olay numaraları her kurulumda 1'den başlar, iki kurulumun aynı
+numaralı olayları tek alarmda birleşir ve birinin düzelmesi ötekini de
+kapatır. Her kuruluma ayrı bir servis verin.
+
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
 Chart dört Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde
