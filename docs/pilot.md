@@ -273,7 +273,7 @@ sonuna not edilir. Ölçülen şey ürünün bugünkü hali olmalı.
 | Kim ne eklemiş, ne silmiş | Denetim kaydı |
 | Bildirim teslim oranı | Bildirimler → "Son gönderim"; Prometheus varsa `kubeat_notifications_total` |
 
-API, Route'tan değil cluster içinden erişilir; betikle toplamak için
+API, Route'tan değil cluster içinden erişilir (README "API"); betikle toplamak için
 `oc -n kubeat port-forward svc/kubeat-backend 18080:8080` ve
 `Authorization: Bearer $(oc -n kubeat get secret kubeat-api-token -o jsonpath='{.data.token}' | base64 -d)`
 ile `GET /api/v1/reports?days=7&format=csv`, `/api/v1/users`,
@@ -318,7 +318,9 @@ ekibi engelleyen bir hata için yapılır (yukarıda "Dokunmayın"). İkisinde d
 yükseltmeden önce en yeni yedek kopyası ve şifreleme anahtarı cluster
 dışına alınır ve kopyanın sağlama toplamı pod'daki dosyanınkiyle
 karşılaştırılır. Blok "yedek doğrulandı" demiyorsa yükseltme yapılmaz.
-Backend imajında `tar` olmadığından `kubectl cp` yerine `exec ... cat`
+Sürüme özgü adımlar, geri dönüş ve alarm kurallarının değişip değişmediği
+[yukseltme.md](yukseltme.md)'dedir; o dosya her yükseltmeden önce bu bloğu
+ister. Backend imajında `tar` olmadığından `kubectl cp` yerine `exec ... cat`
 kullanılır:
 
 ```sh
