@@ -50,6 +50,21 @@ sprintte çıkarılırsa S30 "kuralları cluster başına değerlendirin"
 uyarısıyla yayımlanır. 2026-10-12 kararı (PrometheusRule) korunur
 ([sprints/2026-10-29-sprint-03.md](sprints/2026-10-29-sprint-03.md)).
 
+Güncelleme (2026-10-29, S37, #50): kural düzeltmesi geldi.
+`metrics.prometheusRule.clusterLabel` verilince `KubeatDown`,
+`KubeatUnhealthy`, `KubeatBackupFailing`, `KubeatMonitorDown` ve
+`KubeatCertificateExpiring` bu etiketle cluster başına toplanır, depo
+etiketlerinden yalnızca onu taşır (tekilleştirilmeyen HA çiftinin kopya
+etiketi toplanır) ve `KubeatDown` son 24 saatte görülüp kaybolan cluster
+için de yanar; boşken kurallar 0.44'teki gibi render edilir. İki cluster'lı
+senaryolar `deploy/helm/prometheusrule-cluster-test.yaml`'da (promtool). Belge
+(S30) sprint 4'te: kuralları bu değerle render ettirir ve README "Aracın
+kendi sağlığı"ndaki `clusterLabel` alt başlığına bağlanır. Kalan: toplama
+yapmayan, her seriye ayrı bakan öteki öz-sağlık kuralları (ör.
+`KubeatSchedulerStalled`, `KubeatResultsDropped`) cluster başınadır, ama
+tekilleştirilmeyen bir HA çiftinde kopya başına bir kez yanar; tetikleyici:
+böyle bir depoda çift alarm şikâyeti.
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla

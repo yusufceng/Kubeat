@@ -278,11 +278,81 @@ rules "KubeatBackupFailing until a backup succeeds" has 'max_over_time(kubeat_ba
 # Recreate; a loss of some results stays KubeatResultsDropped's warning.
 rules "KubeatUnhealthy reads the self-health gauge" has 'expr: max without (instance, pod, endpoint, container, service) (kubeat_self_healthy) == 0'
 
+# metrics.prometheusRule.clusterLabel, for rules evaluated over the series of
+# several clusters in one store. Empty, the rules it changes render as 0.44
+# rendered them; given, they group by it beside namespace and job and keep no
+# other label a store adds, and every other rule renders the same either way.
+# promtool below shows how they behave over two clusters' series.
+CLUSTER=(--set metrics.prometheusRule.clusterLabel=cluster)
+BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing): '
+# exprs FILE: the expression of every rule in a rendered PrometheusRule, each
+# of its lines after the rule's alert name.
+exprs() {
+  awk '
+    /^        - alert: / { alert = $3; inexpr = 0; next }
+    /^          expr: \|-$/ { inexpr = 1; next }
+    /^          expr: / { sub(/^          expr: /, ""); print alert ": " $0; next }
+    inexpr && /^            / { sub(/^            /, ""); print alert ": " $0; next }
+    { inexpr = 0 }
+  ' "$1"
+}
+# What 0.44 rendered for release "kubeat" in namespace "kubeat", with backups.
+cat >"$WORK/exprs-0.44" <<'EOF'
+KubeatMonitorDown: max without (instance, pod, endpoint, container, service) (kubeat_monitor_incident_open) == 1
+KubeatMonitorDown: or (
+KubeatMonitorDown:   max without (instance, pod, endpoint, container, service) (last_over_time(kubeat_monitor_incident_open[10m])) == 1
+KubeatMonitorDown:   unless on (namespace, job) (kubeat_monitor_scrape_success == 1)
+KubeatMonitorDown: )
+KubeatCertificateExpiring: (
+KubeatCertificateExpiring:   max without (instance, pod, endpoint, container, service) (kubeat_monitor_cert_expiry_timestamp_seconds)
+KubeatCertificateExpiring:   or (
+KubeatCertificateExpiring:     max without (instance, pod, endpoint, container, service) (last_over_time(kubeat_monitor_cert_expiry_timestamp_seconds[10m]))
+KubeatCertificateExpiring:     unless on (namespace, job) (kubeat_monitor_scrape_success == 1)
+KubeatCertificateExpiring:   )
+KubeatCertificateExpiring: ) - time() < 14 * 86400
+KubeatDown: max by (namespace, job) (up{job="kubeat-backend", namespace="kubeat"}) == 0
+KubeatDown: or absent(up{job="kubeat-backend", namespace="kubeat"})
+KubeatBackupFailing: max without (instance, pod, endpoint, container, service) (max_over_time(kubeat_backup_last_failure_timestamp_seconds[10m]))
+KubeatBackupFailing: > max without (instance, pod, endpoint, container, service) (max_over_time(kubeat_backup_last_success_timestamp_seconds[10m]))
+EOF
+if helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" \
+  --set backup.enabled=true >"$WORK/rules-plain" 2>"$WORK/err" &&
+  helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" \
+    --set backup.enabled=true "${CLUSTER[@]}" >"$WORK/rules-cluster" 2>"$WORK/err"; then
+  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -v '^KubeatUnhealthy: ' | diff "$WORK/exprs-0.44" - >"$WORK/diff" ||
+    failed "clusterLabel empty: the rules differ from 0.44's: $(cat "$WORK/diff")"
+  exprs "$WORK/rules-plain" | grep -vE "$BY_CLUSTER" >"$WORK/others-plain"
+  exprs "$WORK/rules-cluster" | grep -vE "$BY_CLUSTER" >"$WORK/others-cluster"
+  [ -s "$WORK/others-plain" ] || failed "clusterLabel: no other rule found in the render"
+  diff "$WORK/others-plain" "$WORK/others-cluster" >"$WORK/diff" ||
+    failed "clusterLabel changes rules that need no cluster: $(cat "$WORK/diff")"
+else
+  failed "clusterLabel: refused: $(cat "$WORK/err")"
+fi
+rules "clusterLabel missing from older values" lacks '[24h]' --set metrics.prometheusRule.clusterLabel=null
+rules "KubeatDown per cluster" has 'max by (namespace, job, cluster) (up{job="kubeat-backend", namespace="default"}) == 0' "${CLUSTER[@]}"
+rules "KubeatDown for a cluster whose backend is gone" has 'group by (namespace, job, cluster) (max_over_time(up{job="kubeat-backend", namespace="default"}[24h]))' "${CLUSTER[@]}"
+rules "KubeatDown for a cluster whose backend is gone" has 'unless group by (namespace, job, cluster) (up{job="kubeat-backend", namespace="default"})' "${CLUSTER[@]}"
+rules "KubeatDown without a backend in any cluster" has 'or absent(up{job="kubeat-backend", namespace="default"})' "${CLUSTER[@]}"
+rules "outages held per cluster" has 'unless on (namespace, job, cluster) (kubeat_monitor_scrape_success == 1)' "${CLUSTER[@]}"
+rules "outages per cluster and monitor" has 'max by (namespace, job, cluster, monitor, monitor_namespace, type) (kubeat_monitor_incident_open) == 1' "${CLUSTER[@]}"
+rules "KubeatUnhealthy per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_self_healthy) == 0' "${CLUSTER[@]}"
+rules "no store label kept but the cluster's" lacks 'without (' "${CLUSTER[@]}"
+for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace severity; do
+  refuses "clusterLabel $label" "metrics.prometheusRule.clusterLabel is \"$label\"" "${RULES[@]}" --set-string metrics.prometheusRule.clusterLabel="$label"
+done
+for label in cluster k8s_cluster _cluster Cluster1; do
+  renders "clusterLabel $label" "${RULES[@]}" --set-string metrics.prometheusRule.clusterLabel="$label"
+done
+
 # The rules as Prometheus reads them: promtool checks the rule groups and
 # runs the scenarios of prometheusrule-test.yaml (no backend target, a failed
 # scrape, a Recreate, an outage that closes, a failing backup, a backend that
 # stores no result) against the rules rendered for release "kubeat" in
-# namespace "kubeat".
+# namespace "kubeat", and those of prometheusrule-cluster-test.yaml (two
+# clusters, one of them failing, gone, in a scrape gap or recreated, and an
+# HA pair the store does not deduplicate) against the rules rendered with
+# clusterLabel=cluster.
 PROMTOOL="${PROMTOOL:-promtool}"
 # rulefile FILE VALUES...: writes the rule groups of the PrometheusRule
 # rendered with these values (and the rules on) to FILE.
@@ -298,12 +368,14 @@ rulefile() {
 }
 if command -v "$PROMTOOL" >/dev/null 2>&1; then
   mkdir -p "$WORK/promtool"
-  cp "$CHART/../prometheusrule-test.yaml" "$WORK/promtool/"
+  cp "$CHART/../prometheusrule-test.yaml" "$CHART/../prometheusrule-cluster-test.yaml" "$WORK/promtool/"
   if rulefile "$WORK/promtool/rules.yaml" --set backup.enabled=true &&
-    rulefile "$WORK/promtool/rules-without-backups.yaml"; then
-    "$PROMTOOL" check rules --lint-fatal "$WORK/promtool/rules.yaml" "$WORK/promtool/rules-without-backups.yaml" >"$WORK/out" 2>&1 ||
+    rulefile "$WORK/promtool/rules-without-backups.yaml" &&
+    rulefile "$WORK/promtool/rules-cluster.yaml" --set backup.enabled=true "${CLUSTER[@]}"; then
+    "$PROMTOOL" check rules --lint-fatal "$WORK/promtool/rules.yaml" "$WORK/promtool/rules-without-backups.yaml" \
+      "$WORK/promtool/rules-cluster.yaml" >"$WORK/out" 2>&1 ||
       failed "promtool check rules: $(cat "$WORK/out")"
-    "$PROMTOOL" test rules "$WORK/promtool/prometheusrule-test.yaml" >"$WORK/out" 2>&1 ||
+    "$PROMTOOL" test rules "$WORK/promtool/prometheusrule-test.yaml" "$WORK/promtool/prometheusrule-cluster-test.yaml" >"$WORK/out" 2>&1 ||
       failed "promtool test rules: $(cat "$WORK/out")"
   fi
 elif [ -n "${CI:-}" ]; then

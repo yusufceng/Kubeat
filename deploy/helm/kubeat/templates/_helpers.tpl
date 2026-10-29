@@ -84,6 +84,24 @@ place.
 {{- end -}}
 {{- end -}}
 
+{{/*
+The label that tells clusters apart where the alert rules are evaluated over
+the series of several clusters in one store (metrics.prometheusRule.
+clusterLabel), or nothing. Read with dig: it came after 0.44. A name the
+rules cannot group by fails the render, rather than a PrometheusRule the
+operator refuses or Prometheus does not load, which would take every alert
+of the group with it: one that is not a Prometheus label name, or one the
+rules use themselves.
+*/}}
+{{- define "kubeat.clusterLabel" -}}
+{{- $label := dig "prometheusRule" "clusterLabel" "" .Values.metrics | default "" | toString -}}
+{{- $taken := list "namespace" "job" "instance" "pod" "endpoint" "container" "service" "monitor" "monitor_namespace" "type" "severity" "alertname" -}}
+{{- if and $label (or (not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" $label)) (hasPrefix "__" $label) (has $label $taken)) -}}
+{{- fail (printf "metrics.prometheusRule.clusterLabel is %q: give the name of the label that tells the clusters apart, such as cluster: a Prometheus label name (letters, digits and _), none of %s" $label (join ", " $taken)) -}}
+{{- end -}}
+{{- $label -}}
+{{- end -}}
+
 {{/* The kubernetes.io/tls Secret with the Ingress's certificate. */}}
 {{- define "kubeat.ingressTLSSecret" -}}
 {{ dig "tls" "secretName" "" .Values.ingress | default (printf "%s-tls" .Release.Name) }}

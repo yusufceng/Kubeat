@@ -2558,6 +2558,46 @@ kurmadan, Kubeat'in körleştiği cluster'ın kendi Alertmanager'ından
   bir volume'da yeniden başlatmak sorunu çözmez, pod'u yeniden başlatma
   döngüsüne sokar ve bellekteki bildirim deneme listesini de siler.
 
+### Kuralları birden çok cluster'ın tek deposunda değerlendirmek: `clusterLabel`
+
+Kurallar her cluster'ın kendi Prometheus'unda değerlendirildiğinde
+(OpenShift'in user workload monitoring'i, kube-prometheus-stack) bir
+cluster'ın serileri öbürününkilere karışmaz: `metrics.prometheusRule.clusterLabel`
+boş kalır ve kurallar 0.44'teki gibi render edilir. Kurallar birden çok
+cluster'ın serilerini tutan tek bir depoda değerlendiriliyorsa (Grafana
+Cloud ya da Mimir, global Thanos Ruler), cluster'ları ayıran etiketin adı
+verilir (ör. `--set metrics.prometheusRule.clusterLabel=cluster`) ve o depoya
+bu değerle render edilen kurallar taşınır.
+
+- **Neden.** Boşken `KubeatDown` `up` serisini `namespace` ve `job`'a göre
+  toplar; `KubeatMonitorDown` ile `KubeatCertificateExpiring` de scrape
+  boşluğunda tuttukları değeri `namespace` ve `job` eşleşmesiyle bırakır.
+  Tek depoda, aynı release adı ve namespace'le kurulu bir cluster ayaktayken
+  öbürünün `KubeatDown`'ı yanmaz, açık kesinti alarmı da öbürünün başarılı
+  scrape'iyle erken çözülür.
+- **Ne değişir.** `KubeatDown`, `KubeatUnhealthy`, `KubeatBackupFailing`,
+  `KubeatMonitorDown` ve `KubeatCertificateExpiring` bu etiketle,
+  `namespace` ve `job`'un yanında, cluster başına toplanır ve dış
+  etiketlerden yalnızca onu taşır. Depo bir HA çiftinin kopyalarını
+  tekilleştirmiyorsa kopyanın etiketi (ör. `prometheus_replica`) de
+  toplanır: bir kopyanın serisi kesilince yanlış `KubeatDown` yanmaz, açık
+  kesinti tek alarm kalır. Recreate'te de alarm tektir. Öteki kurallar her
+  seriye ayrı baktığından zaten cluster başınadır ve etiketlerinin tümünü
+  taşır.
+- **Yokluk penceresi.** Hiç backend pod'u kalmayan bir cluster'ın
+  `KubeatDown`'ı, o cluster'ın `up` serisi son 24 saatte görüldüyse 5
+  dakikada yanar ve pencere boyunca açık kalır. 24 saatten uzun yokluğu bu
+  ifade görmez, onu heartbeat duyurur; hiçbir cluster'da seri kalmadıysa
+  `absent(...)` yine yanar. Kubeat'i bir cluster'dan bilerek kaldırınca o
+  cluster'ın `KubeatDown`'ı 24 saat yanar; bu sürede susturun.
+- **Susturma kuralları.** Yukarıdaki `alertmanager.yaml` örneğinde `equal`
+  listesine bu etiketi de ekleyin (`equal: [namespace, cluster]`); yoksa bir
+  cluster'ın `KubeatDown`'ı öbür cluster'daki aynı namespace'in alarmlarını
+  da susturur.
+- **Etiket adı.** Prometheus etiket adı olmalı ve kuralların kendi
+  kullandığı etiketlerden (`namespace`, `job`, `pod`, `monitor`…) biri
+  olmamalıdır; chart aksini reddeder.
+
 ## Yedekleme ve geri yükleme
 
 `UPTIME_BACKUP_DIR` ayarlanırsa backend veritabanının tutarlı bir kopyasını
