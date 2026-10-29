@@ -1,7 +1,7 @@
 export const meta = {
   name: 'kubeat-sprint-planning',
   description: 'Sprint planlaması: müşteri ve SRE delta keşfi, BA hikâyeleri, PO önceliği, PMO planı, süreç güncellemesi ve GitHub issue’ları',
-  whenToUse: 'Sprint başında. args: number, date, branch (planlama dalı), sprintFile, prevSprintFile, prevDate, prevStoriesFile (önceki sprintin hikâyeleri JSON), prevTag, tag, upgradeSection, candidates, productState. Döner: findings, stories, decision, plan.',
+  whenToUse: 'Sprint başında. args: number, date, branch (planlama dalı), sprintFile, prevSprintFile, prevDate, prevStoriesFile (önceki sprintin hikâyeleri JSON), prevTag, tag, upgradeSection, candidates, nextStoryId, productState. Döner: findings, stories, decision, plan.',
   phases: [
     { title: 'Keşif', detail: 'Müşteri A, Müşteri B ve SRE: önceki sprintin adayları, son sürümün değişiklikleri, yeni bulgular' },
     { title: 'Analiz', detail: 'BA hikâyeleri' },
@@ -65,7 +65,7 @@ const STORIES = {
       items: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Önceki hikâyeler kendi ID’siyle (S1...S24), yeniler S25’ten başlar' },
+          id: { type: 'string', description: 'Önceki hikâyeler kendi ID’siyle, yeniler args.nextStoryId’den başlar' },
           title: { type: 'string' },
           why: { type: 'string', description: 'Hangi bulgu (kimden, alıntı), hangi işe yarar' },
           acceptance: { type: 'array', items: { type: 'string' } },
@@ -132,7 +132,7 @@ const discovery = [
 ]
 const findings = (await parallel(discovery.map(d => () =>
   agent(`${common}
-Görev: Sprint ${S.number} keşfi. Önceki keşif ${S.prevDate}'de yapıldı ve 24 hikâye çıktı; aynı bulguları yeniden üretme.
+Görev: Sprint ${S.number} keşfi. Önceki keşif ${S.prevDate}'de yapıldı; hikâyeleri ${S.prevStoriesFile} içinde. Aynı bulguları yeniden üretme.
 1. ${S.prevSprintFile} dosyasını ve docs/backlog.md'nin ${S.prevDate} ve sonrası girdilerini oku.
 2. Son sürümün değişikliklerini incele: \`git log --oneline ${S.prevTag}..${S.tag}\`, ilgili diff'ler ve README "${S.upgradeSection}".
 3. candidates: "Sonraki sprint" adaylarını (${S.candidates}) ve önceki sprint sonunun yeni müşteri bulgularını kendi işin açısından değerlendir; seni ilgilendirmeyeni "beni ilgilendirmiyor" diye işaretle.
@@ -144,10 +144,10 @@ log(`Keşif: ${findings.map(f => `${f.role} ${f.candidates.length} aday, ${f.fin
 phase('Analiz')
 const stories = await agent(`${common}
 Görev: Sprint ${S.number} hikâyeleri. Girdiler:
-(a) Önceki sprintin hikâyeleri ${S.prevStoriesFile} içinde: "sprint1_status" alanı teslim edilenleri, "sonraki sprint" ve "backlog" kararlarını gösterir.
+(a) Önceki sprintlerin hikâyeleri ${S.prevStoriesFile} içinde: "status" alanı teslim edilenleri, "sonraki sprint" ve "backlog" kararlarını gösterir.
 (b) ${S.prevSprintFile} "Sprint sonu" bölümündeki yeni müşteri bulguları ve "Retro"daki ürün işi olan öneriler (ör. kuralların promtool ile denetimi).
 (c) Bu turun keşif çıktısı (aşağıda).
-Önceki hikâyelerin ID'sini koru; metinlerini ve kabul ölçütlerini son sürüme göre depoda doğrulayıp güncelle ("changed_since_last_sprint"). Yeni hikâyelere S25'ten başlayarak ID ver. Rol dosyandaki adımlarla birleştir, doğrula, kararlarla karşılaştır. Backlog'da tetikleyicisi gelmemiş bir hikâyeyi yeni kanıt yoksa yeniden açma; yalnızca bu sprint için aday olabilecekleri yaz.
+Önceki hikâyelerin ID'sini koru; metinlerini ve kabul ölçütlerini son sürüme göre depoda doğrulayıp güncelle ("changed_since_last_sprint"). Yeni hikâyelere ${S.nextStoryId}'den başlayarak ID ver. Rol dosyandaki adımlarla birleştir, doğrula, kararlarla karşılaştır. Backlog'da tetikleyicisi gelmemiş bir hikâyeyi yeni kanıt yoksa yeniden açma; yalnızca bu sprint için aday olabilecekleri yaz.
 
 Keşif çıktısı (JSON):
 ${JSON.stringify(findings, null, 1)}`,

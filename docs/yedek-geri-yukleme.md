@@ -55,6 +55,34 @@ Provada görülenler, README'ye işlendi:
   `restricted-v2` SCC altında kullanıcıyı namespace aralığından alır ve aynı
   namespace'teki backend ile aynı UID'yi kullanır.
 
+## Prova: 2026-10-29, minikube, 0.44.0 (kazayla kaldırma)
+
+Senaryo: yanlış release'i kaldırmak ya da takılı bir release'i
+"kaldır ve yeniden kur" ile düzeltmek. Kurulum yayımlanan 0.44.0 chart'ı ve
+imajlarıyla yapıldı, `backup.enabled=true`, varsayılan
+`keepOnUninstall=true`.
+
+1. Kurulum, iki kanal ve üç monitor. Kurulum Secret'ındaki yönetici
+   parolasıyla giriş: 200.
+2. `helm uninstall`: Helm "These resources were kept due to the resource
+   policy" altında `kubeat-data`, `kubeat-backup` ve `kubeat-secret-key`'i
+   saydı; üçü de kaldı.
+3. Aynı ad ve namespace'le `helm install`: hatasız bitti, iki PVC aynı
+   volume'larla yeni release'e bağlandı. Kanallar ve monitor'lar geri geldi.
+   Bir döngü daha aynı sonucu verdi.
+4. Giriş: **eski** yönetici parolası geçti (200). Yeniden üretilen
+   `kubeat-admin` Secret'ındaki, yani kurulum notlarının gösterdiği parola
+   geçmedi (401). API ve metrik anahtarları da yeniden üretildi; backend
+   bunları ortamdan okuduğu için yenileri geçerli.
+5. Notlardaki `kubectl -n <namespace> delete pvc kubeat-data kubeat-backup`
+   yalnızca bu iki PVC'yi sildi. Release kaldırıldıktan sonra notlar
+   `helm get notes` ile okunamıyor; komut README'de de yazılı.
+
+Görülenler: veri ve yedek kaldırmadan sağ çıkıyor (RPO etkilenmiyor),
+yeniden kurulum bir dakikadan kısa sürüyor. Açık kalan: yeniden kurulumda
+kurulum notları geçmeyen bir parola gösteriyor (backlog, "Aynı adla yeniden
+kurulumda yeniden üretilen Secret'lar"; tetikleyicisi bu provaydı).
+
 ## Yeniden prova
 
 Sürüm şemayı değiştirdiğinde ya da yedekleme kodu değiştiğinde prova
