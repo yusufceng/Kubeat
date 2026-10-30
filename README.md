@@ -127,9 +127,11 @@ monitor'leri durumu bu API'den okuduğundan o sırada yanlış kesinti açıp
 bildirim gönderebilir ([yol haritası, "Bilinen sınırlar"](docs/yol-haritasi.md#bilinen-sınırlar),
 S20 satırı). Regional ve Autopilot (her zaman regional) cluster'larda
 control plane yükseltmede de erişilebilir kalır. Zonal cluster'da GKE'nin
-bakım penceresini tanımlayın (otomatik yükseltmeler o saatlerde yapılır)
-ve aynı saatlere Kubeat'te bir bakım penceresi koyun (bkz. "Bakım
-pencereleri ve susturma"). GKE'nin kendi Ingress controller'ı
+bakım penceresini tanımlayın (otomatik yükseltmeler çoğunlukla o saatlerde
+yapılır) ve aynı saatlere Kubeat'te bir bakım penceresi koyun (bkz. "Bakım
+pencereleri ve susturma"). GKE acil ve zorunlu yükseltmeleri pencere
+dışında da yapabilir, elle başlatılan yükseltme pencereye bakmaz; kalıcı
+önlem regional bir cluster'dır. GKE'nin kendi Ingress controller'ı
 `ingressClassName`'e bakmaz, `kubernetes.io/ingress.class` annotation'ını
 okur: hızlı başlangıç komutunda `--set ingress.className=…` yerine
 `--set 'ingress.annotations.kubernetes\.io/ingress\.class=gce'` verin.

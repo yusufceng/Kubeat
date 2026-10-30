@@ -27,7 +27,7 @@ karşılaştırın: [pilot.md "Yükseltmeden önce yedek"](pilot.md#yükseltmede
 Blok `exec … cat` ve sağlama toplamıyla çalışır, backend imajında `tar`
 gerekmez; "yedek doğrulandı" demiyorsa yükseltmeyin.
 
-- Veritabanı şemasını yükselten bir sürümden (0.38, 0.40) dönüşün tek
+- Veritabanı şemasını yükselten bir sürümden (0.38, 0.39, 0.40) dönüşün tek
   yolu bu kopyadır; 0.40'tan beri şema 26'dır ve sonraki sürümler
   `helm rollback` ile geri alınır.
 - Yedekleme kapalıysa (`backup.enabled=false`, varsayılan) volume'u kendi
@@ -84,7 +84,7 @@ geri dönüş başladığınız sürüme olur.
 
 0.43 ya da 0.44'ten gelirken başladığınız sürümden sonraki bölümleri
 eskiden yeniye okuyun. 0.40 ya da öncesinden gelirken de öyle; şemayı
-yükselten 0.38 ve 0.40'tan dönüş yalnızca yedekle olur.
+yükselten 0.38, 0.39 ve 0.40'tan dönüş yalnızca yedekle olur.
 
 ## Ön kontrolleri betiklemek
 
@@ -120,17 +120,21 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 - **Bildirim ayarları** (0.43). Çıktı boşsa varsayılanlar geçerlidir ve
-  açılış doğrulamasından geçer:
+  açılış doğrulamasından geçer. Ayarlar backend Deployment'ından okunur,
+  böylece kurulumu Helm de yapmış olsa Argo CD ya da OpenShift GitOps da
+  (onlarda Helm release'i yoktur) aynı komut çalışır:
 
   ```sh
-  helm -n "$NS" get values "$REL" -o yaml | grep -E 'UPTIME_NOTIFY_(RETRY_MAX|ATTEMPTS|TIMEOUT|RETRY_DELAY)'
+  kubectl -n "$NS" get deploy "$REL-backend" -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' \
+    | grep -E '^UPTIME_NOTIFY_(RETRY_MAX|ATTEMPTS|TIMEOUT|RETRY_DELAY)='
   ```
 
 - **Lisans isteyen özellikler** (0.42). LDAP ya da OIDC adresi, namespace'le
   sınırlı kullanıcılar ve dizin grupları, durum sayfası sayısı:
 
   ```sh
-  helm -n "$NS" get values "$REL" -o json | jq '{ldap: .ldap.url, oidc: .oidc.issuer}'
+  kubectl -n "$NS" get deploy "$REL-backend" -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' \
+    | grep -E '^UPTIME_(LDAP_URL|OIDC_ISSUER)='
   api users | jq -r '.[] | select(.role != "admin" and ((.namespaces // []) | index("*") | not)) | .username'
   api ldap/groups | jq -r '.[] | select(.role != "admin" and ((.namespaces // []) | index("*") | not)) | .group_dn'
   api status-pages | jq length
