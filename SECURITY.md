@@ -24,7 +24,7 @@ Güvenlik düzeltmesini yalnızca son minor sürüm alır: en son yayımlanan
 `0.Y` hattının son yaması. Düzeltme o hatta yeni bir yama sürümü olarak
 çıkar ve eski minor'lara geri taşınmaz. Daha eski bir minor'daysanız
 düzeltmeyi almak için son minor'a yükseltin
-([README](README.md)'deki yükseltme notları).
+([docs/yukseltme.md](docs/yukseltme.md)'deki yükseltme notları).
 
 ## Hedef süre
 
