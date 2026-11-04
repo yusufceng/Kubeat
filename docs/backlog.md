@@ -1536,3 +1536,27 @@ ister (go.mod'da yalnız dolaylı). Test bildiriminin `kubeat-test`
 anahtarı kimlik taşımaz (kabul ölçütünde yoktu). Tetikleyici: Latin dışı
 bir kurulum adı ya da ortak PagerDuty servisinde test bildirimlerinin
 kurulumlar arasında çakışması.
+
+## Kullanıcı başına hedef kısıtı (SSRF/keşif)
+
+2026-11-04'te ertelendi ([adr/0003-hedef-erisilebilirligi.md](adr/0003-hedef-erisilebilirligi.md), karar c; yetkili güvenlik değerlendirmesi). Giriş yapmış bir
+kullanıcı bugün politikanın izin verdiği her adrese monitor ya da kanal
+webhook'u kurabiliyor; a (deny-CIDR belgesi) ve b (`UPTIME_CHECK_SHOW_VALUE`)
+yapıldı. Kalan: bir kullanıcının yalnızca rolüne ya da namespace'lerine uygun
+adreslere hedef kurabilmesi. Yetki modelinin her okuyucusuna dokunur, L
+boyutlu; cluster-native izlemenin meşru kullanımını bozmamalı. Tetikleyici:
+aynı cluster'da birbirine güvenmeyen kullanıcılar ya da çok kiracılı bir
+kurulum. Ara önlem: `UPTIME_TARGET_DENY_CIDRS`.
+
+## Giriş kilitlemesinin hizmet reddi riski (CWE-307)
+
+2026-11-04'te ertelendi (yetkili güvenlik değerlendirmesi). Giriş kilitlemesi
+kullanıcı başına (10 deneme / 15 dk); bir saldırgan geçerli bir kullanıcı adını
+bildiği hesabı ~15 istekle kilitleyerek meşru sahibini (yönetici dahil) dışarıda
+bırakabiliyor; tam da izlemeye en çok ihtiyaç duyulan anda. Düzeltme kaynak IP
+başına kademeli throttle'a geçmek ve hesabı sert kilitlememektir; bu, auth'ta
+güvenlik tavizi olan bir tasarım değişikliğidir (IP throttle dağıtık tahmine
+daha zayıf, ama meşru kullanıcıyı kilitlemez) ve aceleye getirilmemeli. Bugünkü
+risk sınırlı ve kendiliğinden geçen 15 dakikalık bir kilit. Tetikleyici: sprint
+5 güvenlik teması; bir ADR ile karar verilir. Ara önlem: güçlü parolalar ve
+`login_failed` denetim kaydının izlenmesi.
