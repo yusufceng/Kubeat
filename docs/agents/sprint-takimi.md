@@ -37,17 +37,32 @@ sonunda bakar ve yön verir.
    sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
    olarak planlanır.
 4. **Plan**: PMO `docs/sprints/<tarih>-sprint-<n>.md` dosyasını yazar ve
-   her madde için `ready-for-agent` etiketli bir GitHub issue açar.
+   her madde için `ready-for-agent` etiketli bir GitHub issue açar. Aynı
+   sprintte aynı dosyaya yazan maddeler komşu satıra değil kendi alt
+   başlığına ya da satırına yazar (git'in üç satırlık bağlamı bitişik
+   değişiklikleri çakıştırır); PMO planda bu riski dosya ve bölüm adıyla
+   işaretler.
 5. **Geliştirme** (paralel, ayrı worktree): her developer bir issue'yu kendi
    dalında yapar, test eder, commit'ler; push etmez. Release manager
    teslimatın başında sandbox oturumunu denetler; düşmüşse kullanıcıdan
-   sürümden önce giriş ister.
+   sürümden önce giriş ister. Teslimat başlamadan önce sprint dosyasının
+   "Sprint başında, slot almadan" maddeleri yapılır ve `gh api` çıktısı o
+   başlığa yazılır; çıktı yoksa teslimat başlamaz. Kesilen bir teslimat
+   scratchpad'deki durum dosyasından değil GitHub'dan devam eder (dalın son
+   commit'i, `gh pr list`, PR inceleme yorumu): incelemesi kabul almış madde
+   yeniden incelenmez, developer'ı bitmiş madde yeniden koşmaz; teslimat iş
+   akışı bir madde bitince bu üçünü (son commit, PR, inceleme özeti yorumu)
+   yazdığını garanti eder.
 6. **İnceleme**: SRE ya da BA diff'i kabul ölçütlerine göre doğrular;
    release manager CI'yı bekler, squash-merge eder, issue kapanır. Kırmızı
    check'le merge edilmez (main kural seti de zorlar); kararsız bir testin
-   kırmızısı da kırmızıdır: yeniden koşturup geçirilmez, düzeltilir.
-   Merge'de developer'ın yükseltme notu cümlesini sprint dosyasının
-   "Yükseltme notu" tablosuna işler.
+   kırmızısı da kırmızıdır: yeniden koşturup geçirilmez, düzeltilir. Yalnız
+   bağlamsal (komşu satır) bir çakışmayı release manager rebase ile kendi
+   çözer ve developer turu açmaz; rebase turu tam inceleme değildir, reviewer
+   `git range-diff` ve patch-id ile yalnız çakışma çözümünü okur. Davranış
+   değiştiren maddelerin yükseltme notu cümleleri her merge'de değil, sürüm
+   PR'ında developer raporlarından "Yükseltme notu" tablosuna işlenir; BA
+   tabloyu okur ve okumasını sürüm PR'ına yorum olarak yazar.
 7. **Sprint sonu**: release manager sürümü çıkarır. Sandbox'ı yükseltmeden
    önce en yeni yedeği ve şifreleme anahtarını dışarı alıp kopyayı pod'daki
    dosyayla karşılaştırır ([pilot.md](../pilot.md) "Yükseltmeden önce
@@ -71,7 +86,9 @@ Adımlar `.claude/workflows/` altındaki iş akışlarıyla koşar:
 `kubeat-sprint-planning` (1–4), `kubeat-sprint-delivery` (5–6),
 `kubeat-sprint-fix-round` (ret alan madde için ek tur),
 `kubeat-sprint-review-items` (kesilen bir koşunun incelemelerini tamamlamak
-için) ve `kubeat-sprint-review` (7). Argümanları her dosyanın `whenToUse` alanında.
+için) ve `kubeat-sprint-review` (7). Argümanları her dosyanın `whenToUse`
+alanında. Bir maddenin `extra` notu bir turun bağlamını taşır (ör. "rebase
+turu, kod değişmedi") ki kesilen koşu yeniden başlarken o tur doğru okunsun.
 
 ## Ürün ilkeleri: karar ölçütleri
 

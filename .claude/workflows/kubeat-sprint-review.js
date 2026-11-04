@@ -50,7 +50,7 @@ phase('Retro')
 const retro = await agent(`${rules}
 Görev (sprint sonu modu): sprint dosyasında
 1. "Maddeler" tablosunun Durum sütununu güncelle;
-2. "Yükseltme notu" bölümünü teslimat özetindeki upgrade_note cümleleriyle doldur (docs/yukseltme.md'deki, 0.45 ve öncesi için README'deki sürüm bölümüyle tutarlı);
+2. "Yükseltme notu" bölümünü teslimat özetindeki upgrade_note cümleleriyle doldur (docs/yukseltme.md'deki sürüm bölümüyle tutarlı);
 3. "Kullanıcıda kalanlar" bölümünü teslimat özetindeki user_checks maddeleriyle doldur (yinelenenleri birleştir);
 4. "Sprint sonu" (ne bitti: PR, merge commit, sürüm; ne kaldı ve neden; inceleme sonuçları; müşteri puanları ve yorumları; yeni müşteri bulguları) ve "Retro" (üç "iyi gitti", üç "değişecek", sonraki sprint önerisi; sprint dosyasındaki sonraki sprint sırasını ve yeni bulguları dikkate al) bölümlerini doldur.
 Developer'ların "ertelendi" dediği parçaları docs/backlog.md'ye kısa birer madde olarak ekle (yoksa). Yol haritası 29. satırı güncelle. Kapanmamış issue varsa gh issue comment ile durum yaz. git commit ve push yapma.
