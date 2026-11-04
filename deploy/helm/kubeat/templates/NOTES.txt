@@ -55,6 +55,12 @@ turn SSO off (leave oidc.issuer empty).
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-frontend 3000:3000
   then http://localhost:3000
 {{- end }}
+
+The API is on the backend Service, not on the Route or Ingress; scripts
+reach it with a port-forward and the API token (README, "API"):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-backend 8090:8080
+  TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ include "kubeat.apiTokenSecret" . }} -o jsonpath='{.data.token}' | base64 -d)
+  curl -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors
 {{- if and (or .Values.oidc.issuer .Values.ldap.url) (not .Values.license.existingSecret) }}
 
 Signing in through LDAP or OIDC needs a Kubeat Enterprise license
@@ -133,14 +139,51 @@ prometheus.tokenFile: the service account token goes to
 without its certificate being checked, so whoever answers there gets it.
 Set prometheus.caFile instead.
 {{- end }}
-{{- if not (or .Values.heartbeat.urlSecret.name (dig "extraEnv" "UPTIME_HEARTBEAT_URL" "" .Values.backend) .Values.metrics.prometheusRule.enabled) }}
+{{- /*
+Kubeat's own failures. The rules are offered only where the PrometheusRule
+CRD is: the cluster's API shows it to helm install and upgrade, helm
+template only with --api-versions. Text alone; the chart never fails on it.
+*/}}
+{{- $heartbeat := or .Values.heartbeat.urlSecret.name (dig "extraEnv" "UPTIME_HEARTBEAT_URL" "" .Values.backend) }}
+{{- $ruleCRD := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+{{- if not (or $heartbeat .Values.metrics.prometheusRule.enabled) }}
 
 WARNING: neither a heartbeat (heartbeat.urlSecret, or UPTIME_HEARTBEAT_URL
 in backend.extraEnv) nor the alert rules (metrics.prometheusRule.enabled)
 are on, so nobody hears when Kubeat itself fails: with no backend pod
 nothing is checked, with a full data volume every check result is lost,
-and either way no notification is sent. Turn on either; the README says
-how, under "Aracın kendi sağlığı".
+and either way no notification is sent. A heartbeat to a receiver outside
+the cluster (healthchecks.io, an Uptime Kuma push monitor, ...):
+  kubectl -n {{ .Release.Namespace }} create secret generic {{ .Release.Name }}-heartbeat --from-literal=url=https://<heartbeat-address>
+  helm upgrade {{ .Release.Name }} oci://ghcr.io/yusufceng/charts/kubeat --version {{ .Chart.Version }} -n {{ .Release.Namespace }} --reset-then-reuse-values --set heartbeat.urlSecret.name={{ .Release.Name }}-heartbeat
+The heartbeat does not hear a channel that takes no notifications; the
+alert rules do, per channel (KubeatNotificationsFailing), and only the
+heartbeat is heard when the whole cluster is down. Best both.
+{{- if $ruleCRD }}
+The rules, which this cluster's Prometheus evaluates (the PrometheusRule
+CRD is there):
+  --set metrics.prometheusRule.enabled=true
+{{- else }}
+The rules need the PrometheusRule CRD, which this cluster does not have (or
+this render did not see it: helm template without --api-versions); the
+README says how to run them without the operator, under "Aracın kendi
+sağlığı", "Operator'süz cluster".
+{{- end }}
+The README says more under "Aracın kendi sağlığı".
+{{- else if not .Values.metrics.prometheusRule.enabled }}
+
+The heartbeat does not hear a channel that takes no notifications: with
+one channel, outages go unannounced while the heartbeat goes on. Add a
+second channel of another type, or the alert rules, which fire per channel
+(KubeatNotificationsFailing){{ if $ruleCRD }}:
+  --set metrics.prometheusRule.enabled=true
+{{- else }}.
+The rules need the PrometheusRule CRD, which this cluster does not have (or
+this render did not see it: helm template without --api-versions); the
+README says how to run them without the operator, under "Aracın kendi
+sağlığı", "Operator'süz cluster".
+{{- end }}
+The README says more under "Aracın kendi sağlığı".
 {{- end }}
 {{- if not .Values.backup.enabled }}
 

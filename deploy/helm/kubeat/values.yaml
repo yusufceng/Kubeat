@@ -204,6 +204,14 @@ ldap:
     # UPTIME_LDAP_CA_FILE: /etc/kubeat/ldap-ca/ca.crt   (mount it with backend.extraVolumes)
     # UPTIME_LDAP_DEFAULT_ROLE: viewer
     # UPTIME_LDAP_DEFAULT_NAMESPACES: "*"
+    # Nested Active Directory groups: memberOf holds direct memberships
+    # only, so a user in a group that is in the mapped group is denied
+    # (login_denied in the audit log). The chain filter (Active Directory's
+    # LDAP_MATCHING_RULE_IN_CHAIN) finds the groups a user is in through
+    # other groups; the groups found are added to memberOf's. Keep its base
+    # narrow, the search walks every chain (README, "LDAP").
+    # UPTIME_LDAP_GROUP_FILTER: "(member:1.2.840.113556.1.4.1941:={dn})"
+    # UPTIME_LDAP_GROUP_BASE_DN: "OU=Groups,DC=example,DC=com"
 
 # Sign-in through an OpenID Connect provider (Keycloak, Azure AD, Okta,
 # Dex...). Register Kubeat there with the redirect URL the install notes
@@ -278,6 +286,10 @@ backup:
 # as a Secret with the key "license":
 #   kubectl create secret generic kubeat-license --from-file=license=acme.license
 # A renewed Secret takes effect within a few minutes, without a restart.
+# Free for evaluations and pilots: open an issue labelled "license" in the
+# repository, without your organisation's name if it cannot be public. The
+# same file is valid on every cluster; the number of installations is the
+# contract's (README, "Kubeat Enterprise lisansı", "Nasıl alınır").
 license:
   existingSecret: ""
 
@@ -361,7 +373,11 @@ metrics:
     # Needed under GitOps (see "Secrets under GitOps" above auth).
     existingSecret: ""
   # Creates a ServiceMonitor so the cluster's Prometheus scrapes them. Needs
-  # the prometheus-operator CRDs; on OpenShift, user workload monitoring.
+  # the prometheus-operator CRDs (monitoring.coreos.com/v1); on OpenShift,
+  # user workload monitoring. Without the CRDs the install fails ("no
+  # matches for kind ServiceMonitor"): scrape by hand then, with the job
+  # name <release>-backend and the namespace label, as the README says
+  # under "Aracın kendi sağlığı", "Operator'süz cluster".
   serviceMonitor:
     enabled: false
     interval: 30s
@@ -386,6 +402,12 @@ metrics:
   # and receivers the platform already has; the README's "Aracın kendi
   # sağlığı" lists them, with inhibit rules for whichever Alertmanager
   # receives them.
+  # Needs the PrometheusRule CRD; without it the install fails. Where the
+  # CRD is there but no operator (Grafana Alloy sending to Grafana Cloud or
+  # Mimir), Alloy's mimir.rules.kubernetes loads the rendered rules and
+  # they rise with the chart. Rules copied elsewhere instead (mimirtool
+  # rules sync, GMP Rules) do not, and they changed in 0.43, 0.44 and 0.45:
+  # README "Aracın kendi sağlığı", "Operator'süz cluster".
   prometheusRule:
     enabled: false
     labels: {}
@@ -394,7 +416,8 @@ metrics:
     certWarningDays: 14
     # The label that tells clusters apart, e.g. "cluster", for rules evaluated
     # over the series of several clusters in one store (Grafana Cloud or
-    # Mimir, a global Thanos Ruler): copy the rules rendered with it there.
+    # Mimir, a global Thanos Ruler): let Grafana Alloy load the rules
+    # rendered with it, or copy them there (README, "Operator'süz cluster").
     # KubeatDown, KubeatUnhealthy, KubeatBackupFailing and the outage,
     # certificate and channel alerts (KubeatNotificationsFailing) then group
     # by it beside namespace and job (and the monitor or the channel), so that
@@ -402,9 +425,11 @@ metrics:
     # the store adds (the replica label of an HA pair it does not
     # deduplicate). KubeatDown also fires for a cluster whose backend was seen
     # in the last 24 hours and is gone; a longer absence is the heartbeat's to
-    # tell. Leave it empty where each cluster's own Prometheus evaluates the
-    # rules (OpenShift's user workload monitoring, kube-prometheus-stack): the
-    # rules then render as up to 0.44.
+    # tell. When every cluster's series are gone together, absent() raises
+    # one more KubeatDown, without the cluster label. Leave it empty where
+    # each cluster's own Prometheus evaluates the rules (OpenShift's user
+    # workload monitoring, kube-prometheus-stack): the rules then render as
+    # up to 0.44.
     clusterLabel: ""
 
 # Dead man's switch: the backend requests this URL at every interval while
@@ -414,7 +439,14 @@ metrics:
 # ...), ideally one that runs outside this cluster. The same judgement is
 # the metric kubeat_self_healthy, with or without a heartbeat, which the
 # PrometheusRule's KubeatUnhealthy alerts on; only the heartbeat is heard
-# when the whole cluster is down.
+# when the whole cluster is down. Neither hears a channel that takes no
+# notifications: with one channel add a second one of another type, or the
+# rules, whose KubeatNotificationsFailing fires per channel. The judgement
+# looks at the last interval: where every check interval is longer than
+# it, it says 0 only in intervals that got results, so keep the interval
+# at least the shortest check interval. Without a Secret the chart does
+# not set the interval; UPTIME_HEARTBEAT_INTERVAL in backend.extraEnv sets
+# the gauge's window then.
 heartbeat:
   interval: 1m
   # The URL usually embeds a secret key, so it is read from a Secret.

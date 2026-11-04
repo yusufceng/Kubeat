@@ -963,6 +963,7 @@ değişmez; ayrı `maintenance_seconds` sütunu eklenir, eski sütunların yeri
 değişmez; yalnızca duyurulan bakım penceresi ayrılır, susturma ayrılmaz.
 Ara önlem: yol haritası "Bilinen sınırlar" iki sayının uyuşmazlığını ve
 SLA için `downtime_seconds`'ı yazar (bu plan), README cümlesi S12 ile.
+README cümlesi #60 ile "Raporlar"a girdi ("Bakım ve uptime").
 
 ## Kapsamlarda namespace önek deseni, ör. `odeme-*`
 
@@ -1013,7 +1014,8 @@ dil, belge). Tetikleyici: Gateway API kullanan ilk kurulum ya da
 Ingress'ten HTTPRoute'a ilk gerçek geçiş. Kararlar: CRD ya da okuma izni
 yoksa sessizce atlanır (Route gibi); geçişte monitor geçmişi taşınmaz. Ara
 önlem: yol haritası "Bilinen sınırlar" satırı (bu plan; geçişten önce elle
-monitor oluşturun), README cümlesi S12 ile.
+monitor oluşturun), README cümlesi S12 ile. README cümlesi #60 ile
+"Annotation ile sürekli keşif"e girdi.
 
 ## Prometheus yokken pod CPU ve belleğini metrics.k8s.io'dan okumak
 
@@ -1025,7 +1027,8 @@ başka araç yapıyor: Müşteri B aynı veriyi Grafana Cloud'un Kubernetes
 panolarında görüyor; şişirme riski var. Tetikleyici: operator'süz ilk
 gerçek kurulum. Karar taslağı: `prometheus.url` boşken anlık değerler
 PodMetrics'ten okunur, ek ayar yok, geçmiş grafiği yok. Sınır paragrafı S30
-ile (sprint 4 doküman paketi).
+ile (sprint 4 doküman paketi); #60 ile README "Pod'lar ve kaynak
+kullanımı"na girdi ("GKE ve Grafana Cloud").
 
 ## Helm 3 desteğini bırakmak
 
@@ -1261,6 +1264,17 @@ sprint 4 doküman paketinde (#60) yazılır. Kuyruk doluluğu metriği S55 (#62)
 ile gelir; uyarının tekrarı bu maddede kalır. Kapandı notları merge'de
 yazılır ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
+Güncelleme (2026-11-04, #60): ilk iki parça kapandı. Seyrek kurulumda
+pencere cümlesi README "Heartbeat olmadan"ın gauge maddesinde (pencereyi en
+kısa kontrol aralığından kısa tutmayın; heartbeat Secret'ı yokken
+`heartbeat.interval` uygulanmaz, pencere `backend.extraEnv` ile
+`UPTIME_HEARTBEAT_INTERVAL`) ve values.yaml'ın heartbeat yorumunda; bütün
+cluster'lar birlikte kaybolunca cluster etiketsiz ek `KubeatDown` sınırı
+README "clusterLabel" bölümünün "Yokluk penceresi" maddesinde ve values.yaml
+`clusterLabel` yorumunda. Kalan parçalar (HA çiftinde kopya başına alarm,
+uyarının tekrarı, `clusterLabel`'ı kendiliğinden bulmak, `Healthy` ve takılı
+worker'lar) bu maddede.
+
 ## Hiçbir kanala ulaşamayan kesintide heartbeat'i kesmek
 
 2026-10-29'da ertelendi (S56'nın kod kısmı,
@@ -1284,6 +1298,13 @@ max(`UPTIME_HEARTBEAT_INTERVAL`, 5 dk), `KubeatNotificationsFailing`'in
 `for: 5m`'iyle aynı, ayar değil; kapsayan kanalı olmayan monitor, gecikmesi
 dolmamış gecikmeli kanal, bakımda susturulan kesinti ve kapalı kanal
 sayılmaz; kanallardan biri aldıysa sağlıklı.
+
+Güncelleme (2026-11-04, #60): belge kısmı girdi. README "Heartbeat" ve
+"Hangi arızayı ne duyurur" heartbeat'in bildirim alamayan kanalı
+duymadığını ve tek kanallı kurulumda farklı türde ikinci bir kanal ya da
+`KubeatNotificationsFailing` gerektiğini söyler; kurulum notu heartbeat'i
+kurallarla eşdeğer göstermez (kurallar kapalıyken aynı cümleyi yazar,
+`test-chart.sh` denetler). Kod kısmı bu maddede.
 
 ## Şifreleme anahtarını döndürmek ve anahtar sızınca izlenecek yol
 
@@ -1329,6 +1350,11 @@ CA sertifikasıyla TLS sunar, Route `destinationCACertificate`'i taşır,
 frontend backend'e https ile gider; edge'de render değişmez; pilot.md "Ön
 koşullar"a güvenlik satırı (IPsec var mı). Kapsam dışı: Ingress'te uçtan uca
 TLS, mTLS, cert-manager ile pod sertifikası.
+
+Güncelleme (2026-11-04, #60): sınır cümlesi README "Dışarıya açma"da (TLS
+router'da ya da Ingress controller'da biter, pod ağında düz HTTP, LDAP
+parolası bu yoldan geçer, OVN-Kubernetes IPsec node'lar arası pod trafiğini
+şifreler); docs/pilot.md güvenlik satırı ve kod bu maddede.
 
 ## E-posta konusunda kurulum kimliği
 

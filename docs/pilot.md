@@ -64,6 +64,7 @@ pilotun ilk işi budur:
 | Bildirim adresi | Ekip | Slack, Teams, Mattermost ya da Google Chat webhook URL'i; ya da SMTP |
 | Vekil (proxy) | Ağ ekibi | Cluster'dan Slack/Teams'e çıkış vekil üzerindense `HTTPS_PROXY` ve `NO_PROXY` |
 | User workload monitoring | Platform ekibi | Pod CPU/bellek ve Alertmanager alarmı için; isteğe bağlı |
+| İzlenen namespace'lerde Kubeat'e izin | Platform / güvenlik ekibi | Ekip namespace'leri proje şablonuyla varsayılan-ret NetworkPolicy alıyorsa `allow-from-kubeat` politikası (README "Ağ erişimi", İzlenen namespace'ler: şablona, var olan namespace'lere ya da AdminNetworkPolicy ile); yoksa Service ve pod kontrolleri `connect_timeout` ile ilk gün yanlış kesinti açar, Route'lar çalışır |
 | Lisans dosyası | Biz | İmzalama aracıyla, pilot süresi + 1 ay |
 
 Hedef politikası özel ağ aralıklarını (`10/8`, `172.16/12`, `192.168/16`)
@@ -222,6 +223,7 @@ eksik olduğunu yazar; saklayın.
 | Yedek | `oc -n kubeat exec deploy/kubeat-backend -- ls /backup` | İlk kopya açılışta alınır: `kubeat-<tarih>.db` |
 | Route | Tarayıcıda `https://kubeat.apps.<cluster-domain>` | Giriş sayfası; HTTP'den HTTPS'e yönlendirme |
 | Uyarı ve hata | `oc -n kubeat logs deploy/kubeat-backend \| grep -E '"level":"(WARN\|ERROR)"'` | Boş |
+| Ekip namespace'inde politika | Ekibin bir Service'ine monitor ekleyin (keşif ya da `kubeat.io/monitor` annotation'ı) | İlk kontrol yeşil; ekip namespace'indeki bir Service monitor'ü `connect_timeout` vermiyor. Veriyorsa namespace'in varsayılan-ret politikası Kubeat'i engelliyor: ön koşullardaki `allow-from-kubeat` (README "Ağ erişimi", İzlenen namespace'ler) |
 
 Bir şey eksikse `helm upgrade` aynı komutla tekrarlanır; backend 10–20
 saniye içinde yeniden kalkar.
@@ -242,12 +244,21 @@ dizin hesabınıza taşıyın, sonra ekibi ekleyin.
    görür ve orada monitor ekleyebilir. Gruba girmeyen biri giriş
    yapamaz (varsayılan rol boş); isteniyorsa `ldap.extraEnv` altında
    `UPTIME_LDAP_DEFAULT_ROLE: viewer` ve `UPTIME_LDAP_DEFAULT_NAMESPACES:
-   "*"` ile dizindeki herkese izleyici rolü verilir.
+   "*"` ile dizindeki herkese izleyici rolü verilir. AD'de gruplar iç
+   içedir ve `memberOf` yalnızca doğrudan üyelikleri verir: ya ekibin
+   doğrudan üye olduğu grubu eşleyin ya da `ldap.extraEnv` altında zincir
+   süzgecini açın (`UPTIME_LDAP_GROUP_FILTER:
+   "(member:1.2.840.113556.1.4.1941:={dn})"` ve grupların durduğu dar bir
+   `UPTIME_LDAP_GROUP_BASE_DN`; README "LDAP"). Eşleşen grubu olmayan üye
+   giremez ve denetim kaydında `login_denied` görünür.
 4. **Keşif.** Keşif → ekibin namespace'ini seçin → Tara. Kubeat her
    Service, Route, Ingress ve Deployment için bir kontrol önerir ve
    gerekçesini yazar (readiness probe'u, Route adresi...). Route'ları ve
    probe'u olan Service'leri seçip "izlemeye alın"; workload'lar (hazır
    pod sayısı) seçili gelmez, onları ekip isterse ikinci turda ekleyin.
+   Ekibin namespace'i varsayılan-ret politikalıysa Service kontrolleri
+   `connect_timeout` ile düşer, Route'lar çalışır: ön koşullardaki
+   `allow-from-kubeat` politikası önce uygulanmış olmalı.
 5. **Kanal.** Bildirimler → Yeni kanal: ekibin Slack/Teams webhook'u,
    kapsam ekibin namespace'leri. Kaydedince kanal satırındaki test
    düğmesiyle bir deneme gönderin; ekip kanalında görünmeli. Gelmiyorsa
