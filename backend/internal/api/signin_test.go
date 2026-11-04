@@ -226,8 +226,8 @@ func TestLoginAttemptsThatAreNotGuesses(t *testing.T) {
 
 	directory.down = true
 	for i := range 5 {
-		if _, code := signIn(t, base, "ayse", "s3cret"); code != http.StatusBadGateway {
-			t.Fatalf("directory down, attempt %d: status = %d, want 502", i+1, code)
+		if _, code := signIn(t, base, "ayse", "s3cret"); code != http.StatusUnauthorized {
+			t.Fatalf("directory down, attempt %d: status = %d, want 401", i+1, code)
 		}
 	}
 	directory.down = false
