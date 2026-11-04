@@ -49,13 +49,17 @@ geri dönüş başladığınız sürüme olur.
    bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
    0.46'ya geçen için uyarıya döner: 1 dakikadan ya da bir denemenin
    süresinden kısa bir değer 0.46'da backend'i durdurmaz, alt sınıra
-   yükseltilir ve her açılışta `WARN` yazılır; değeri yine de düzeltin,
-   0.45'e ya da öncesine dönüşte backend'i durdurur.
+   yükseltilir ve her açılışta `WARN` yazılır; değeri yine de düzeltin:
+   0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu ayarı
+   tanımaz).
 3. 0.44'ün adımları ("0.44'e yükseltme", Yapılacak): yedeği kapatmayı ya
    da `existingClaim`'e geçişi bu yükseltmeyle aynı adımda yapmayın; açık
    kesintilere bakın; `KubeatDown` susturma kuralını ekleyin;
    `backend.terminationGracePeriodSeconds`'ı `UPTIME_SHUTDOWN_TIMEOUT`'tan
-   en az 5 sn uzun tutun.
+   en az 5 sn uzun tutun; ServiceMonitor kapalıysa
+   `up{job="<release>-backend", namespace="<namespace>"}` serisini
+   toplayan bir scrape olsun; log alarmlarınız `check result dropped`
+   satırına bakıyorsa `batch insert failed`'a taşıyın.
 4. 0.45'in adımları ("0.45'e yükseltme", Yapılacak): `latest` etiketinden
    bir sürüm etiketine geçin; `KubeatNotificationsFailing`'in
    yönlendirmesini kanal etiketlerine göre ve `KubeatDown` susturma
@@ -119,15 +123,19 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
 
   Düzelttiğiniz kanalı test edin (`{"delivered": true}` dönmeli):
   `api channels/<id>/test -X POST`.
-- **Açık kesintiler** (0.44; 0.46'da PagerDuty kanalı varsa açık olaylar
-  bunlardır; keşif monitor'ünün adı namespace'i zaten taşır):
+- **Açık kesintiler** (0.44; 0.46'da PagerDuty kanalı varsa `&kind=down`
+  olmadan koşun: açık kesinti ve sertifika olayları PagerDuty'de açık
+  alarmlardır, yavaşlık alarmı olay değildir ve PagerDuty'de
+  `kubeat-…-slow-` anahtarıyla aranır; keşif monitor'ünün adı namespace'i
+  zaten taşır):
 
   ```sh
   api 'incidents?state=open&kind=down' | jq -r '.[] | "\(.id)\t\(.monitor_name)\t\(.started_at)"'
   ```
 
-- **Bildirim ayarları** (0.43). Çıktı boşsa varsayılanlar geçerlidir ve
-  açılış doğrulamasından geçer. Ayarlar backend Deployment'ından okunur,
+- **Bildirim ayarları** (0.43; 0.46'da kısa `UPTIME_NOTIFY_RETRY_MAX`
+  reddedilmez, alt sınıra yükseltilip `WARN` yazılır). Çıktı boşsa
+  varsayılanlar geçerlidir. Ayarlar backend Deployment'ından okunur,
   böylece kurulumu Helm de yapmış olsa Argo CD ya da OpenShift GitOps da
   (onlarda Helm release'i yoktur) aynı komut çalışır:
 
@@ -161,8 +169,8 @@ Bitince port-forward'u kapatın: `kill $PF`.
 
 0.46 bildirimlere kurulum kimliğini ekler, ulaşılamayan bir insan kanalının
 makine kanallarını geciktirmesini bitirir ve yayımı CI'ı yeşil bir main
-commit'ine bağlar. Yükseltme notları bu sürümden itibaren bu dosyadadır;
-README'de bağlantı kalır. Şema değişmez (26).
+commit'ine bağlar. Yükseltme notları, 0.38'den bu yana olanlar dahil,
+artık bu dosyadadır; README'de bağlantı kalır. Şema değişmez (26).
 
 ### Yapılacak
 
@@ -172,7 +180,10 @@ README'de bağlantı kalır. Şema değişmez (26).
   gönderilirse PagerDuty'de kimlikli ikinci bir alarm açılır; düzelme
   ikisini de kapatır. Betik: "Açık kesintiler".
 - Kuruluma bir kimlik verin: `instanceName` (`UPTIME_INSTANCE_NAME`). Boşsa
-  `publicURL`'ün host'u kullanılır; ikisi de yoksa kurulum kimliksizdir.
+  `publicURL`'ün host'u, chart'ta o da yoksa Route ya da Ingress host'u
+  kullanılır; hiçbiri yoksa kurulum kimliksizdir. Route ya da Ingress host'u
+  olan kurulum values'a dokunmadan da 0.46'da kimlik alır ve PagerDuty
+  anahtarı değişir: ilk madde ona da geçerlidir.
   Kimlik anahtara ASCII harf, rakam, nokta, tire ve alt çizgiyle girer;
   Türkçe ve öteki aksanlı Latin harfleri en yakın ASCII harfe çevrilir
   (`Üretim` → `Uretim`), öteki karakterlerin her dizisi tek tireye döner.
@@ -182,7 +193,7 @@ README'de bağlantı kalır. Şema değişmez (26).
 - Birden çok kurulumunuz aynı PagerDuty servisine bağlıysa ayrı servisleri
   filonun tamamı 0.46'ya geçip her kurulum kimlik alana kadar koruyun: 0.45
   ve öncesi de kimliksizdir, kimliksiz iki kurulumun aynı numaralı olayları
-  yine tek alarmda birleşir. Bu cümle 0.44 notundaki "aynı servise
+  yine tek alarmda birleşir. Bu cümle 0.43 notundaki "aynı servise
   bağlamayın" cümlesinin yerine geçer.
 - `UPTIME_NOTIFY_RETRY_MAX`'ı 1 dakikadan ya da bir denemenin süresinden
   kısa verdiyseniz değeri alt sınıra yükseltin ya da `0` yapın: 0.46 böyle
