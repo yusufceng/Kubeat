@@ -287,7 +287,8 @@ func TestRedirectToAnotherServerDropsTheMonitorsHeaders(t *testing.T) {
 		{"/post", posting, false, []request{
 			{"/post", frontHost, "KEY", "Bearer TOKEN", `{"password":"S3cr3t"}`},
 			{"/post-here", frontHost, "KEY", "Bearer TOKEN", `{"password":"S3cr3t"}`},
-		}, `Post "` + other.URL + `/post-away": the redirect would send the request body to another server`},
+			// The redirect target's resolved address is masked in the error.
+		}, `Post "http://[address hidden]/post-away": the redirect would send the request body to another server`},
 		{"/post-dropped", posting, true, []request{
 			{"/post-dropped", frontHost, "KEY", "Bearer TOKEN", `{"password":"S3cr3t"}`},
 			{"/post-away", otherHost, "", "", ""},

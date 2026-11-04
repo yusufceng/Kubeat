@@ -359,11 +359,20 @@ hata yanıtı ve `PING`'e verilen beklenmedik yanıt sonuçta yalnızca türüyl
 görünür (`the server did not answer with HTTP`, `the server answered with an
 error (WRONGPASS)`, `unexpected answer to PING`); kendisi backend
 logundadır. Böylece hedefi seçemeyen izleyiciler bir iç servisin
-karşılamasını sonuçlardan okuyamaz. Diğer hatalar hedefin söylediğini
-taşımaya devam eder: sertifikadaki adlar, JSON kontrolünün karşılaştırdığı
-değer, PostgreSQL ve MySQL'in hata mesajları ve yönlendirme adresleri. Bir
-sonucun hata metninin ilk 300 baytı saklanır; uzun bir hedef adresi hatada
-kısaltılır, ki hatanın nedeni kesilmesin.
+karşılamasını sonuçlardan okuyamaz. Ağ katmanının hataya yazdığı **çözülen IP
+adresleri** de gizlenir: `dial tcp 172.30.0.1:8080: connection refused` gibi
+bir hatada adres `[address hidden]` olur, ki hedefi seçemeyen izleyiciler bir
+iç cluster adresini öğrenmesin (kanal teslimat hatasıyla aynı maskeleme).
+Hatanın türü ve varsa host adı kalır; iki hata adresi bilerek saklar: hedef
+politikasının reddi yasakladığı adresi ve aralığı söyler (bkz. "Hedef
+politikası") ve DNS kontrolü doğası gereği adresleri raporlar (bulduğu
+kayıtlar). Diğer hatalar hedefin söylediğini taşımaya devam eder:
+sertifikadaki adlar, JSON kontrolünün karşılaştırdığı değer, PostgreSQL ve
+MySQL'in hata mesajları ve yönlendirme adreslerinin host adı. Başarısız bir
+kontrolün `diagnostics` ayrıntısındaki bağlanılan **adres** (`ip:port`) ise
+belgelenmiş bir tanı alanı olarak açık kalır (bkz. "Başarısız kontrolün
+ayrıntıları"). Bir sonucun hata metninin ilk 300 baytı saklanır; uzun bir
+hedef adresi hatada kısaltılır, ki hatanın nedeni kesilmesin.
 
 Helm chart API anahtarını ilk kurulumda rastgele üretir, bir Secret'ta
 saklar ve güncellemelerde korur; Argo CD gibi araçlarla kurarken bkz.
@@ -636,7 +645,9 @@ Kontrollerin sonuçları da hedefin yanıtını taşımaz: başarısız bir kont
 nedenini anlatırken yanıt gövdesini saklamaz, başlıklardan yalnızca
 birkaçını kısaltarak saklar (bkz. "Başarısız kontrolün ayrıntıları"); JSON
 değeri arayan kontrol de bulduğu değerin en fazla ilk 100 karakterini
-gösterir.
+gösterir. Başarısız bir kontrolün hata metnindeki çözülen iç cluster IP'leri
+de maskelenir (bkz. "Güvenlik"); yalnız politikanın reddi ve DNS kayıtları
+adresi bilerek gösterir.
 
 **Yöneticinin uç noktaları.** `HTTP_PROXY`/`HTTPS_PROXY` vekilleri, SMTP
 sunucusu (`UPTIME_SMTP_HOST` ve `UPTIME_SMTP_PORT`),
@@ -2293,7 +2304,10 @@ HTTP(S) ve WebSocket kontrolleri şunları saklar:
   el sıkışma, düz HTTP'de el sıkışma yoktur.
 - Bağlanılan **adres** (`ip:port`); bağlanılamadıysa son denenen adres.
   Her pod'u ayrı kontrol eden monitor'da ayrıntılar başarısız olan ilk
-  pod'undur ve pod'un adı da yazılır.
+  pod'undur ve pod'un adı da yazılır. Bu alan, tanı için gerektiği ve
+  belgelendiği için bilerek açıktır; buna karşılık sonucun **hata metninde**
+  görünen çözülen IP adresleri maskelenir (bkz. "Güvenlik"), ki adres yalnızca
+  bu alanda, bir tanı alanı olarak kalsın.
 - **TLS**: sürüm, sertifikanın adı (CN), vereninin adı, geçerli olduğu ilk
   beş ad ya da adres (kalanlar sayılır) ve bitiş tarihi. Doğrulamadan
   geçemeyen sertifika da böyle anlatılır: hangi adlar için verildiği,

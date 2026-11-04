@@ -50,6 +50,19 @@ sınırlayacağımızdır.
   namespace'teki bir Service'i bilerek izlemek) bozmadan yapılması tasarım
   ister.
 
+- **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
+  IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
+  monitor'ü okuyabilen herkese döner ve aksi hâlde bir iç cluster adresini
+  sızdırır (Go'nun ağ hataları bağlandıkları adresi yazar; #77/#79'un kanal
+  yolunda kapattığı sızıntının aynı sınıfı, farklı yüzeyde). Hata sınıfı ve
+  host adı kalır; maskeleme kanal yoluyla aynı ortak yardımcıdan gelir
+  (`backend/internal/addrmask`). İki durum adresi bilerek saklar: `netguard`'ın
+  reddi yasakladığı adresi ve aralığı söyler (operatör onu açabilsin) ve DNS
+  kontrolü doğası gereği adresleri raporlar (bulduğu kayıtlar). Başarısız bir
+  kontrolün `diagnostics` ayrıntısındaki bağlanılan **adres** (`ip:port`) ise
+  belgelenmiş bir tanı alanı olarak bilerek açık kalır (README "Başarısız
+  kontrolün ayrıntıları").
+
 ## Sonuçlar
 
 - **İzleme asla durmaz.** RFC1918 varsayılan açık kalır; cluster içi hedefler
@@ -60,5 +73,8 @@ sınırlayacağımızdır.
 - **Sızdırma sınırlı.** JSON değeri zaten en çok 100 karakterdir, bir
   kontrolde bir alan taşınır ve bir monitor hızında gider; (b) ile tümüyle
   kapatılabilir.
+- **Sonuç hatası adres taşımaz.** (d) ile başarısız bir kontrolün hatası iç
+  cluster adresini (çözülen IP) artık sızdırmaz; tanı için gereken bağlanılan
+  adres yalnızca belgelenmiş `diagnostics.address` alanında kalır.
 - **Kalan risk sprint 5'te.** (c) gelene kadar, aynı cluster'da birbirine
   güvenmeyen kullanıcılar varsa deny-CIDR tek savunma hattıdır.

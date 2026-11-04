@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/addrmask"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -188,7 +189,7 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 		}
 	}
 	if out.err != nil {
-		result.Error = truncate(out.err.Error(), maxDetail)
+		result.Error = truncate(maskResolved(m.Type, out.err), maxDetail)
 	} else {
 		result.Detail = truncate(out.detail, maxDetail)
 	}
@@ -306,6 +307,24 @@ func (c *Checker) targetSaid(m store.Monitor, kind, words string) error {
 	c.opts.Logger.Warn("a check's target answered outside the monitor's protocol", "monitor_id", m.ID, "monitor", m.Name,
 		"failure", kind, "answer", truncate(words, maxLoggedAnswer))
 	return errors.New(kind)
+}
+
+// maskResolved is a failed check's error with its resolved IP addresses
+// hidden, so that a monitor's viewers are not shown an internal cluster
+// address: Go's network errors print the address they dialed, which for an
+// in-cluster target is the resolved pod or service IP (the same leak that
+// the alert path hides in a channel's delivery error). The error class and
+// any host name around a masked address stay. Two kinds of error keep the
+// address on purpose: the target policy's own refusal names the blocked
+// address and the range so an operator can allow it, and a DNS check is
+// about addresses by its nature (its result, up or down, reports the records
+// it found; see store.Diagnostics and "Hedef politikası" in the README).
+func maskResolved(t store.MonitorType, err error) string {
+	msg := err.Error()
+	if t == store.MonitorDNS || errors.Is(err, netguard.ErrBlocked) {
+		return msg
+	}
+	return addrmask.Mask(msg)
 }
 
 // truncate cuts s to at most max bytes without splitting a character.

@@ -674,7 +674,9 @@ func TestTargetsWordsAreNotStored(t *testing.T) {
 	var logged bytes.Buffer
 	c := New(Options{Logger: slog.New(slog.NewTextHandler(&logged, nil))})
 	web := func(addr string) store.Monitor { return httpMonitor("http://" + addr + "/") }
-	notHTTP := func(addr string) string { return `Get "http://` + addr + `/": the server did not answer with HTTP` }
+	// The resolved loopback address the request reached is masked in the
+	// stored error, so every one of these reads the same.
+	const notHTTP = `Get "http://[address hidden]/": the server did not answer with HTTP`
 
 	ssh, smtp, admin := answering("SSH-2.0-OpenSSH_9.6p1 Ubuntu-internal\r\n"), answering("SMTP/1.0 220 mail.internal.example\r\n"), answering("INTERNAL-ADMIN-v3-token=abc123\r\n")
 	header, long := answering("HTTP/1.1 200 OK\r\ncache-prod-7 build=sekret\r\n\r\n"), answering("HELLO "+strings.Repeat("A", 5000)+"\r\n")
@@ -683,11 +685,11 @@ func TestTargetsWordsAreNotStored(t *testing.T) {
 		name, want, words string
 		m                 store.Monitor
 	}{
-		{"http, a status code", notHTTP(ssh), "Ubuntu-internal", web(ssh)},
-		{"http, a version", notHTTP(smtp), "SMTP/1.0", web(smtp)},
-		{"http, a line", notHTTP(admin), "token=abc123", web(admin)},
-		{"http, a header", notHTTP(header), "build=sekret", web(header)},
-		{"http, a long line", notHTTP(long), strings.Repeat("A", 100), web(long)},
+		{"http, a status code", notHTTP, "Ubuntu-internal", web(ssh)},
+		{"http, a version", notHTTP, "SMTP/1.0", web(smtp)},
+		{"http, a line", notHTTP, "token=abc123", web(admin)},
+		{"http, a header", notHTTP, "build=sekret", web(header)},
+		{"http, a long line", notHTTP, strings.Repeat("A", 100), web(long)},
 		{"websocket", "the server did not answer with HTTP", "Ubuntu-internal", store.Monitor{Type: store.MonitorWebSocket, Target: "ws://" + ssh + "/"}},
 		{"redis, an error", "the server answered with an error (ERR)", "build=sekret", store.Monitor{Type: store.MonitorRedis, Target: redisError}},
 		{"redis, a banner", "unexpected answer to PING", "Ubuntu-internal", store.Monitor{Type: store.MonitorRedis, Target: redisBanner}},
