@@ -928,7 +928,10 @@ func (e *Engine) send(ctx context.Context, ch store.Channel, n Notification) (fa
 	}
 	deliveryError := ""
 	if err != nil {
-		deliveryError = err.Error()
+		// Hide the channel's own address and secret and any resolved IP, so
+		// that neither the stored last error nor the delivery log discloses an
+		// internal cluster address or a credential to whoever reads them.
+		deliveryError = MaskAddrs(Redact(err.Error(), ch))
 		if class == refused {
 			deliveryError += refusedAdvice
 		}
