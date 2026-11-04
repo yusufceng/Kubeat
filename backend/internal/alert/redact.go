@@ -2,9 +2,9 @@ package alert
 
 import (
 	"net/url"
-	"regexp"
 	"strings"
 
+	"github.com/yusufceng/Kubeat/backend/internal/addrmask"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -38,15 +38,10 @@ func Redact(msg string, ch store.Channel) string {
 	return msg
 }
 
-// resolvedAddr matches an IPv4 address or a bracketed IPv6 address, each
-// with an optional port. Go's network errors print the address they dialed
-// (for example "dial tcp 10.0.0.1:8080: connect: connection refused"), which
-// for an in-cluster target is the resolved pod or service IP.
-var resolvedAddr = regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b|\[[0-9A-Fa-f:]+\](?::\d+)?`)
-
 // MaskAddrs hides resolved IP addresses in a message, so that an error shown
-// to a user does not disclose an internal cluster address. The error class
-// around it ("connection refused", "i/o timeout") is kept.
+// to a user does not disclose an internal cluster address. It is the shared
+// addrmask.Mask; the monitor-check path masks a failed check's error the same
+// way.
 func MaskAddrs(msg string) string {
-	return resolvedAddr.ReplaceAllString(msg, "[address hidden]")
+	return addrmask.Mask(msg)
 }
