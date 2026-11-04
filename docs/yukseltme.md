@@ -41,17 +41,17 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.46'ya
+### 0.42'den 0.47'ye
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
    başarısız kanalları düzeltin ya da kapatın; aynı PagerDuty servisine
    bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
-   0.46'ya geçen için uyarıya döner: 1 dakikadan ya da bir denemenin
-   süresinden kısa bir değer 0.46'da backend'i durdurmaz, alt sınıra
-   yükseltilir ve her açılışta `WARN` yazılır; değeri yine de düzeltin:
-   0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu ayarı
-   tanımaz).
+   0.46'dan beri uyarıya döner: 1 dakikadan ya da bir denemenin
+   süresinden kısa bir değer 0.46 ve 0.47'de backend'i durdurmaz, alt
+   sınıra yükseltilir ve her açılışta `WARN` yazılır; değeri yine de
+   düzeltin: 0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu
+   ayarı tanımaz).
 3. 0.44'ün adımları ("0.44'e yükseltme", Yapılacak): yedeği kapatmayı ya
    da `existingClaim`'e geçişi bu yükseltmeyle aynı adımda yapmayın; açık
    kesintilere bakın; `KubeatDown` susturma kuralını ekleyin;
@@ -67,29 +67,33 @@ geri dönüş başladığınız sürüme olur.
 5. 0.46'nın adımları ("0.46'ya yükseltme", Yapılacak): açık PagerDuty
    olaylarını kapatın; kuruluma `instanceName` verin; imajları
    aynalıyorsanız docs/pilot.md'deki imzalı yola geçin.
-6. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46'da değişmedi: yeni
-   `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi Alertmanager
-   yönlendirmesine ekleyin; kuralları kopyalıyorsanız 0.46'nınkileri
-   kopyalayın (0.45'inkilerle aynı).
-7. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
+6. 0.47'nin adımları ("0.47'ye yükseltme", Yapılacak): kapsamı sınırlı
+   kullanıcılarınızın kapsam dışı iç hedeflerini gözden geçirin; başarısız
+   kontrolün hata metnindeki çözülen IP'ye bakan alarm ya da panoyu
+   `diagnostics.address`'e taşıyın.
+7. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46 ve 0.47'de
+   değişmedi: yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi
+   Alertmanager yönlendirmesine ekleyin; kuralları kopyalıyorsanız
+   0.47'ninkileri kopyalayın (0.45'inkilerle aynı).
+8. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
    yerine `--reset-then-reuse-values`, Helm 3.14+):
 
    ```sh
-   helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.46.0 -f values.yaml
+   helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.47.0 -f values.yaml
    ```
 
-8. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
-   PagerDuty olaylarını kapatın. Dönüşte 0.43–0.46'nın yeniden denemesi,
+9. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
+   PagerDuty olaylarını kapatın. Dönüşte 0.43–0.47'nin yeniden denemesi,
    kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
    PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.46'ya
+### 0.41'den 0.47'ye
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.46'ya"daki adımlar.
+2. Sonra "0.42'den 0.47'ye"deki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
 0.43, 0.44 ya da 0.45'ten gelirken başladığınız sürümden sonraki bölümleri
@@ -155,6 +159,20 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   api status-pages | jq length
   ```
 
+- **Kapsam dışı iç hedefler** (0.47). Kapsamı sınırlı kullanıcılar ve
+  cluster içi görünen hedefli monitor'ler; 0.47'de bu kullanıcılar
+  kapsamları dışındaki iç hedefleri artık yeniden oluşturamaz ya da
+  değiştiremez. Var olanlar çalışmaya devam eder, bu yalnızca gözden
+  geçirmedir (hangi monitor'ün hangi kullanıcıya ait olduğunu birlikte
+  değerlendirin):
+
+  ```sh
+  api users | jq -r '.[] | select(.role != "admin" and ((.namespaces // []) | index("*") | not))
+    | "\(.username)\t\((.namespaces // []) | join(","))"'
+  api monitors | jq -r '.[] | select(.target | test("\\.svc(\\.|:|/|$)|\\.cluster\\.local"))
+    | "\(.id)\t\(.namespace)\t\(.target)"'
+  ```
+
 - **30 saniyeden sık monitor'lar ve kotalar** (0.41). Hedefi cluster
   dışında olanlar 30 saniye kuralına girer:
 
@@ -164,6 +182,85 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 0.47'ye yükseltme
+
+0.47 kaldırmada yönetici, API ve metrik Secret'larını veri PVC'siyle
+birlikte bırakır, başarısız bir kontrolün hatasındaki çözülen iç cluster
+adresini gizler ve kapsamı sınırlı bir kullanıcının monitor ya da kanal
+webhook'u kurabileceği iç hedefleri kendi namespace'leriyle sınırlar;
+yayım ve Release değişmez olur, derleme girdileri digest'e sabitlenir.
+Şema değişmez (26).
+
+### Yapılacak
+
+- Kapsamı sınırlı (yönetici olmayan, namespace listesi `*` olmayan)
+  kullanıcılarınız varsa: 0.47'de bir kullanıcı yalnızca adından okunan
+  namespace'i kapsamındaki iç cluster hedeflerine (ör.
+  `servis.namespace.svc`) monitor ya da kanal webhook'u kurabilir. Var
+  olan monitor'ler ve kanallar yeniden denetlenmez, çalışmaya devam eder;
+  kısıt yalnızca yeni hedef oluşturma, klonlama ve hedef değiştirmede
+  uygulanır. Bir kullanıcının kapsamı dışında, çıplak ClusterIP/pod IP'si
+  ya da Kubeat'in kendi namespace'indeki kısa adla kurulmuş hedefleri
+  varsa, o kullanıcı bunları artık yeniden oluşturamaz ya da hedeflerini
+  değiştiremez (yönetici ve kapsamı `*` olan kullanıcı etkilenmez). Betik:
+  "Kapsam dışı iç hedefler".
+- Başarısız bir kontrolün hata metnindeki çözülen IP'ye bakan log
+  alarmınız ya da panonuz varsa `diagnostics.address` alanına taşıyın:
+  0.47'de hata metnindeki çözülen iç adres `[address hidden]` ile
+  gizlenir (aşağıda "Davranış değişikliği"), ama başarısız kontrolün
+  `diagnostics` ayrıntısındaki bağlanılan **adres** (`ip:port`) belgelenmiş
+  bir tanı alanı olarak açık kalır.
+- Felaket kurtarma (geri yükleme, node kaybı, dolu volume) için
+  [docs/yedek-geri-yukleme.md](yedek-geri-yukleme.md) runbook'una bakın;
+  riskli bir değişiklikten önce `UPTIME_BACKUP_INTERVAL`'ı düşürüp
+  doğrulanmış bir kopya alın (RPO en kötü durumda bir aralık kadardır).
+
+### Davranış değişikliği
+
+- **Yönetici, API ve metrik Secret'ları kaldırmada kalır.**
+  `backend.persistence.keepOnUninstall` açıkken (varsayılan `true`)
+  `<release>-admin`, `<release>-api-token` ve `<release>-metrics-token`
+  Secret'ları artık `helm.sh/resource-policy: keep` taşır: veri ve yedek
+  PVC'leri gibi `helm uninstall`'da silinmez ve aynı adla yeniden
+  kurulumda eski değerler (yönetici parolası, API ve metrik anahtarları)
+  sahiplenilip korunur; kurulum notlarının silme komutu üçünü de sayar.
+  `keepOnUninstall=false` ile üçü de veri PVC'siyle gider ve yeniden
+  üretilir.
+- **Başarısız kontrolün hatasında iç adres gizlenir.** Bir monitor
+  kontrolünün sonucundaki hata metni (`result.Error`) çözülen IPv4/IPv6
+  adreslerini `[address hidden]` ile gizler; bu hata bir monitor'ü
+  okuyabilen herkese döner ve aksi hâlde bir iç cluster adresini
+  sızdırırdı (0.46'nın kanal yolunda kapattığı sızıntının aynı sınıfı,
+  farklı yüzeyde). Hata sınıfı ve host adı kalır; `netguard`'ın reddi
+  yasakladığı adresi ve aralığı, DNS kontrolü bulduğu kayıtları ve
+  başarısız kontrolün `diagnostics.address` tanı alanını bilerek açık
+  bırakır.
+- **Kapsamı sınırlı kullanıcının iç hedefleri kendi namespace'leriyle
+  sınırlı.** Yukarıda "Yapılacak"ta. Monitor API'si ve kanal webhook'u
+  yolunu (webhook, Slack, Teams, Discord, Mattermost, Google Chat, Gotify,
+  ntfy) kapsar; e-posta, Telegram ve PagerDuty operatör uçları olduğu için
+  kapsanmaz, cluster dışı hedefler de eskisi gibi yalnızca hedef
+  politikasına (`UPTIME_TARGET_DENY_CIDRS`) tabidir.
+- **Yayım ve Release değişmez, derleme girdileri sabit.** Ürün değişmez.
+  `v*` etiketleri ve GitHub Release'leri taşınmaz ve silinemez (ruleset ve
+  repo "Immutable releases" ayarı); iş akışlarındaki üçüncü taraf
+  action'lar, Dockerfile temel imajları ve registry servis imajı digest'e
+  pinlendi, iş akışı düzeyi `packages:write` yalnız iten işlere verildi.
+
+### Geri dönüş
+
+Şema 26: `helm rollback` ile 0.46.0'a dönülür. Dönüşte üç Secret'tan
+`keep` annotation'ı kalkar ama değerler lookup'la korunur (Secret
+silinmez); başarısız kontrolün hatasındaki iç adres yine görünür; kapsam
+kısıtı kalkar (her kullanıcı yine hedef politikasının izin verdiği her iç
+adrese monitor kurabilir). Yayımın değişmezliği ve digest pinleri repo ve
+iş akışı ayarıdır, sürümle inip çıkmaz.
+
+### Alarm kuralları: değişmedi
+
+Chart'ın PrometheusRule'u 0.46.0 ile aynıdır; kopyalanan kuralların
+yenilenmesi gerekmez.
 
 ## 0.46'ya yükseltme
 
