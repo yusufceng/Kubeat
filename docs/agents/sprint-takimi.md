@@ -69,8 +69,9 @@ sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
 
 Adımlar `.claude/workflows/` altındaki iş akışlarıyla koşar:
 `kubeat-sprint-planning` (1–4), `kubeat-sprint-delivery` (5–6),
-`kubeat-sprint-fix-round` (ret alan madde için ek tur) ve
-`kubeat-sprint-review` (7). Argümanları her dosyanın `whenToUse` alanında.
+`kubeat-sprint-fix-round` (ret alan madde için ek tur),
+`kubeat-sprint-review-items` (kesilen bir koşunun incelemelerini tamamlamak
+için) ve `kubeat-sprint-review` (7). Argümanları her dosyanın `whenToUse` alanında.
 
 ## Ürün ilkeleri: karar ölçütleri
 
