@@ -615,9 +615,10 @@ iç servis aralıklarını (API sunucusu, öteki ekiplerin Service'leri)
 **Kullanıcı başına kapsam.** Deny-CIDR kaba bir önlemdir: çok kiracılı bir
 cluster'da API sunucusu (OpenShift'te `172.30.0.1`) ve başka ekiplerin
 Service'leri meşru izlenenlerle aynı ClusterIP aralığını paylaştığı için,
-izlemeyi bozmayan bir deny-CIDR cross-tenant erişimi ayıramaz. Gerçek
-cross-tenant savunma, bir kullanıcının yalnızca **kapsamındaki**
-namespace'lere monitor ya da kanal webhook'u kurabilmesidir (ADR-0003 c):
+izlemeyi bozmayan bir deny-CIDR cross-tenant erişimi ayıramaz. Cross-tenant
+erişimi asıl sınırlayan önlem, bir kullanıcının yalnızca **kapsamındaki**
+namespace'lere monitor ya da kanal webhook'u kurabilmesidir (ADR-0003 c;
+aşağıda "Sınır" notuyla birlikte):
 
 - Her namespace'i görebilen bir kullanıcı — yönetici, API token'ı ya da
   kapsamı `*` olan bir editör — her hedefe ulaşır; tek kiracılı bir kurulum
@@ -634,6 +635,16 @@ namespace'lere monitor ya da kanal webhook'u kurabilmesidir (ADR-0003 c):
   (`api`) — sınırlı bir kullanıcı için reddedilir; kullanıcı Service'i
   `servis.namespace.svc` biçiminde adlandırmalı ya da bir yöneticiden
   istemelidir.
+- **Sınır (0.47).** Bir cluster son ekiyle (`.svc`, `.svc.cluster.local`,
+  `.cluster.local`) bitmeyen iki etiketli bir kısa ad (`api.odeme`,
+  `kubernetes.default`) adından namespace okunabilse de şimdilik cluster
+  **dışı** sayılır ve kapsam onu kısıtlamaz; oysa backend pod'unun DNS arama
+  alanı (`ndots`) böyle bir adı cluster içindeki bir Service'e ya da API
+  sunucusuna çözebilir. Bu yüzden kapsam bu sürümde tek başına tam cross-tenant
+  yalıtımını garanti etmez. Bu biçimi de kapsayan düzeltme izlenir (ADR-0003,
+  [docs/backlog.md](docs/backlog.md)); o zamana dek çok kiracılı bir cluster'da
+  sınırlı kullanıcılara Service'i `servis.namespace.svc` tam biçiminde
+  adlandırmayı öğretin.
 - Cluster dışı hedefler (genel internet, cluster dışındaki kurum ağı, bir
   OpenShift Route'unun genel adı) eskisi gibi yalnızca hedef politikasına
   tabidir; kapsam onları kısıtlamaz.
