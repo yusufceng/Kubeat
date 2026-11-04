@@ -1,7 +1,8 @@
-# Weekly update PRs for what the builds pull in. The base images are pinned
-# to exact tags in backend/Dockerfile and frontend/Dockerfile, so these PRs
-# are how they move; images are rebuilt only for a release tag, so a base
-# image fix reaches users with the next release.
+# Weekly update PRs for what the builds pull in. Third-party actions and the
+# base images are pinned to a digest (the tag is kept for readability) in the
+# workflows and in backend/Dockerfile and frontend/Dockerfile, so these PRs
+# are how the digests move; images are rebuilt only for a release tag, so a
+# base image fix reaches users with the next release.
 version: 2
 updates:
   - package-ecosystem: gomod

@@ -21,8 +21,10 @@ on:
   workflow_dispatch:
 
 permissions:
+  # Least privilege: the workflow's default grants only read. packages: write
+  # is declared on the jobs that push (images, chart) and on sign; no other
+  # job may write to packages. CONTRIBUTING.md, "Yayım iş akışı".
   contents: read
-  packages: write
 
 env:
   # Where this run pushes: the release packages for a tag, packages of their
@@ -59,7 +61,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: The tag, the chart and the docs name one version
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then
@@ -84,6 +86,10 @@ jobs:
   images:
     runs-on: ubuntu-latest
     needs: versions
+    # Pushes the images, so it is one of the jobs that write packages.
+    permissions:
+      contents: read
+      packages: write
     # GitHub merges the outputs of a matrix's jobs; each sets the one named
     # after its component.
     outputs:
@@ -93,10 +99,10 @@ jobs:
       matrix:
         component: [backend, frontend]
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -105,7 +111,7 @@ jobs:
       # build's parameters and sources) go into the image's index as
       # attestations, so the signature on the index's digest covers them.
       - id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.component }}
           platforms: ${{ env.PLATFORMS }}
@@ -136,7 +142,7 @@ jobs:
             docker buildx imagetools inspect "$IMAGE" --format "{{ json (index .SBOM \"$platform\").SPDX }}" > "$file"
             jq -e '.spdxVersion | startswith("SPDX-")' "$file" > /dev/null || { echo "$file: not an SPDX document"; exit 1; }
           done
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-${{ matrix.component }}
           path: sbom/
@@ -146,12 +152,16 @@ jobs:
   chart:
     runs-on: ubuntu-latest
     needs: [versions, images]
+    # Pushes the chart, so it is one of the jobs that write packages.
+    permissions:
+      contents: read
+      packages: write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The Helm CI tests the chart with (ci.yml); raise the two together.
-      - uses: azure/setup-helm@v5
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
       - run: helm lint deploy/helm/kubeat
@@ -224,7 +234,9 @@ jobs:
     # the signatures travel under the referrers tag (sha256-<digest>).
     services:
       registry:
-        image: registry:2.8.3
+        # Pinned by digest (the tag is kept for readability); raised with the
+        # registry row in CONTRIBUTING.md, "Sabit araç sürümleri".
+        image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
         ports:
           - 5000:5000
         # The steps start once it answers.
@@ -241,7 +253,7 @@ jobs:
       DRY_RUN: ${{ github.event_name != 'push' }}
       MIRROR: localhost:5000
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install cosign
         run: |
           mkdir -p "$RUNNER_TEMP/bin"
@@ -320,7 +332,7 @@ jobs:
                 --certificate-oidc-issuer "$ISSUER" \
                 "$RUNNER_TEMP/offline/$artifact"
           done
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: sbom-*
           path: release/sbom
@@ -329,7 +341,7 @@ jobs:
         run: |
           scripts/release-notes.sh release/sbom/*.spdx.json > release/notes.md
           cat release/notes.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ needs.versions.outputs.version }}
           path: release/
@@ -345,7 +357,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-${{ needs.versions.outputs.version }}
           path: release
