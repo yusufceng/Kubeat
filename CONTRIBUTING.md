@@ -41,8 +41,12 @@ Trunk-based, kısa ömürlü branch'ler (GitHub Flow).
 
 ### Sürümler
 
-`v*` etiketlerini yalnızca depo yöneticisi oluşturabilir; bir etiket
-sonradan taşınamaz ve silinemez (deponun etiket kural seti).
+`v*` etiketlerini yalnızca depo yöneticisi oluşturabilir (etiket kural seti
+"yalnız yönetici oluşturur", yönetici bypass'ıyla; push çıktısındaki
+"Cannot create ref due to creations being restricted" uyarısı normaldir,
+ref yine oluşur); bir etiket sonradan kimse tarafından taşınamaz ve
+silinemez (ikinci kural seti "taşınmaz ve silinemez", bypass'sız). Kural
+seti `main`'i ve `release/v*` dallarını aynı biçimde korur.
 
 - Sürümler `main` üzerinde `vMAJOR.MINOR.PATCH` etiketiyle (SemVer) çıkar:
   `make release` etiketi `Makefile`'daki `VERSION` ile atar ve iter,

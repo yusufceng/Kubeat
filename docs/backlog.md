@@ -102,6 +102,14 @@ yükselir; kopyalayan için her yükseltmede koşacak eşitleme komutu. 2026-10-
 kararı (PrometheusRule) korunur
 ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
+Güncelleme (2026-11-04, #60): operator'süz yol README "Aracın kendi
+sağlığı"nda (Alloy `mimir.rules.kubernetes`, mimirtool ve GMP kopya yolu,
+her yükseltmede koşan Actions adımı); NOTES CRD yokken kural önermiyor.
+Ertelenmeye devam edenler: chart'ta Capabilities ile `fail`, `docs/`
+altında statik kural dosyası, kopyalanan kuralların sürüm ayrışması için
+`kubeat_build_info`'ya bakan bir kural ve metrics.k8s.io yedeği (kendi
+maddesinde). Tetikleyici değişmedi ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+
 ## Pod bazında sağlık
 
 Service üzerinden tek kontrol, arkadaki pod'lardan birkaçı bozukken çoğunlukla
@@ -317,6 +325,11 @@ gerekmez). Müşteri B'nin istediği GKE yolu (VolumeSnapshot ya da Backup for
 GKE) ve NOTES'taki yedek notunun platformdan bağımsız yazılması, SRE'nin
 namespace ya da cluster kaybındaki RPO cümlesi S7'nin kabul ölçütünde
 ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+
+Güncelleme (2026-11-04, #59): `docs/yukseltme.md` "Yükseltmeden önce
+yedek" bölümü pilot.md'nin bloğuna bağlanıyor (`exec … cat` ve sağlama
+toplamı); tek komutluk blok ve imaja `tar` S7 ile sprint 5 kuyruğunda
+(sprint 4 kapanışı önerisinde 7. sıra, [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
 ## Yedek kopyalarını S3 uyumlu depoya yüklemek
 
@@ -880,6 +893,17 @@ büyümesi, saklamanın kotaya göre ayarlanması, yazılamayan sonuçların
 bellekte tutulması, toplu log satırına `monitor_id`'ler ve dakikada bir
 özet satırı.
 
+Güncelleme (2026-11-04, sprint 4 kapanışı): minikube provası (2) dolu
+diskte iki monitor'lük yükle beş dakika hiçbir sonucun kaybolmadığını
+gösterdi (SQLite WAL var olan alanını yeniden kullanır); `KubeatUnhealthy`
+disk doluluğunu değil kaybolan sonuçları ölçer, seyrek kurulumda dolu disk
+uzun süre sessiz kalabilir. Müşteri A (hoş olur): README "Hangi arızayı ne
+duyurur"daki "volume doluysa" cümlesi bu sınırı açıkça yazsın ve PVC
+doluluğu için platform alarmına yönlendirsin (OpenShift'te
+`KubePersistentVolumeFillingUp`, `kubelet_volume_stats_*` ile
+`<release>-data` PVC'si). S41'in runbook'uyla (sprint 5 korumalı 1. madde)
+yazılır ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md), "Müşterilerin yeni bulguları" 3).
+
 ## Kaldırmaya karşı korumanın kalanları: Argo CD prune, PV düzeyi, prova kaydı
 
 2026-10-29'da ertelendi (S31'in kapsam dışı parçaları, #38). 0.44'ten beri
@@ -1172,6 +1196,18 @@ kalan:
   geç kalan bir sayfa, ya da aynı insan kanalına art arda ulaşılamayan
   grupların `notification failed` satırları.
 
+Güncelleme (2026-11-04, sprint 4 kapanışı): S55 (#62) ulaşılamayan ya da
+meşgul insan kanalını da yeniden deneme zamanına kadar almıyor sayıyor.
+Müşteri A (önemli) ve B (hoş olur) bedelini yazdı: kanal dönünce ya da
+başarılı bir kanal testinden sonra duraklatma kalkmıyor (`SendOnce`
+kuyruğu ve duraklatmayı atlar), yalnız Teams/Slack'i olan ekip yeni mesajı
+15 dakikaya kadar geç alır ve nöbetçi test geçince kanalı bozuk sanır.
+İstenen: mekanizma kalsın, kanal testi ya da kanalı kaydetmek duraklatmayı
+kaldırsın ve bekleyenler o anda gitsin; isteğe bağlı insan kanalı için ayrı
+ve kısa üst sınır; README "Bedeli" ve values yorumuna RETRY_MAX ayar
+ipucu. Sprint 5 adayı, S27 ile `alert` paketinde ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md),
+"Müşterilerin yeni bulguları" 1 ve 6).
+
 ## Yayım hattının kalanları: sürüm sabitleri, kuru deneme, imza kapsamı
 
 2026-10-29'da ertelendi (#47 ve #48'in kapsam dışı parçaları; developer
@@ -1319,6 +1355,15 @@ Güncelleme (2026-10-30, S55, #62): doluluk metriği kapandı:
 bildirim sayısını her scrape'te verir. Kuyruk uyarısının tekrarı bu
 maddede kalır.
 
+Güncelleme (2026-11-04, sprint 4 kapanışı): Müşteri A (hoş olur) gauge'un
+anlık örnek olduğunu yazdı: 30 sn'lik scrape aralığında saniyeler süren
+doluluk görünmez, sandbox provasında üç kesinti ve iki ölü kanalla bile 0
+kaldı. İstenen: scrape'ler arası en yüksek doluluk (scrape'te sıfırlanan
+`kubeat_notification_queue_length_max`) ya da kuyruğun dolu kaldığı
+sürenin sayacı; mevcut gauge kalır, chart kuralı gerekmez (`metrics.go`
+`WatchQueue`). Sprint 5'te S27 paketine sığarsa onunla, PO kararı; yoksa
+bu maddede, tetikleyici aynı ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md), "Müşterilerin yeni bulguları" 2).
+
 ## Hiçbir kanala ulaşamayan kesintide heartbeat'i kesmek
 
 2026-10-29'da ertelendi (S56'nın kod kısmı,
@@ -1438,3 +1483,56 @@ Google Chat kart alanına girer; mesaj gövdeleri ile Telegram, Discord,
 ntfy ve Gotify mesajları değişmez. Tetikleyici: birden çok cluster'ı
 PagerDuty özetinden ya da bu dört kanaldan izleyen bir kullanıcının
 kurulumları ayırt etme isteği.
+
+## README'de kalan eski yükseltme notu paragrafları ve sürüm karşılaştırma cümleleri
+
+2026-11-04'te ertelendi (sprint 4 kapanışı; #59 ve #62 developer
+raporları, [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)). #59 0.38–0.45 sürüm bölümlerini
+`docs/yukseltme.md`'ye taşıdı; README'nin bölümleri içinde 0.37/0.38
+döneminden kalan "**Yükseltme notu:**" paragrafları (SSO, oturum çerezi,
+metrik anahtarı, Ingress TLS, header'lar, Thanos 9091) yerinde bırakıldı.
+#62'nin "Reddetti" maddesindeki iki "0.44'te …" cümlesi ve "Alarm"daki
+"0.45'te …" karşılaştırmaları da README'de; tamamlanma tanımına göre
+README bugünkü davranışı anlatır, karşılaştırma `docs/yukseltme.md`'nin
+işi. S boyut, yalnız belge. Tetikleyici: README'yi yeniden düzenleyen bir
+sonraki belge maddesi (S41'in runbook'u ya da S12'nin devamı) ya da bir
+okuyucunun eski sürüm cümlesine takılması.
+
+## İzlenen namespace'lerin NetworkPolicy'sini chart'tan yönetmek ve keşifte izin ipucu
+
+2026-11-04'te ertelendi (S51'in kapsam dışı parçaları, sprint 4 PO
+kararı; #60, [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)). #60 varsayılan-ret politikalı namespace için
+kopyalanabilir `allow-from-kubeat` politikasını, proje şablonunu ve
+AdminNetworkPolicy örneğini belgeledi. Dışarıda kalanlar: chart'ın izlenen
+namespace'lere NetworkPolicy basması (başka namespace'e yazmak chart'ın
+yetki modelini genişletir), hedef namespace'in politikalarını okuyup
+"Kubeat'e izin yok" diye uyarmak, chart'ın kendi egress politikasını
+üretmesi ve keşifte `connect_timeout` veren monitor için politika ipucu.
+Tetikleyici: belge yoluna rağmen pilotta ya da filoya yaygınlaştırmada
+varsayılan-ret namespace'te ilk gün yanlış kesinti, ya da "Kullanıcıda
+kalanlar" provasının (devredilen 3) belgeyi yetersiz bulması.
+
+## Alloy'un `prometheus.operator.servicemonitors` bileşeniyle chart'ın ServiceMonitor'ünü okutmak
+
+2026-11-04'te ertelendi (#60 developer raporu, backlog adayı; [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+README'nin operator'süz yolu kuralları `mimir.rules.kubernetes` ile
+taşıyor, metrikleri ise yalnız elle scrape'le (`job_name kubeat-backend`,
+metrik anahtarı, `backendIngressFrom`) anlatıyor; Alloy'un
+`prometheus.operator.servicemonitors` bileşeni chart'ın ServiceMonitor'ünü
+doğrudan okuyabilir ama `job` ve `namespace` etiket semantiği resmî
+belgeden doğrulanamadı ve kuralların beklediği etiketlerle eşleşmesi
+görülmedi. Tetikleyici: Alloy provası (devredilen 1) sırasında elle
+scrape'in etiketlerinin kurallarla tutmaması ya da Müşteri B'nin
+ServiceMonitor yolunu istemesi.
+
+## Kurulum kimliği anahtarının kalanları: Latin dışı harfler ve test bildirimi
+
+2026-11-04'te ertelendi (#61 developer raporu, küçük; [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+`dedupInstance` Latin-1 Supplement ve Latin Extended-A harflerini
+bağımlılıksız bir tabloyla ASCII'ye çevirir; Latin Extended-B (ör.
+Vietnamca Ơ/Ư), Kiril ve CJK harfleri anahtarda tireye döner ve açılışta
+WARN verir. Unicode normalizasyonuyla genişletme `golang.org/x/text`
+ister (go.mod'da yalnız dolaylı). Test bildiriminin `kubeat-test`
+anahtarı kimlik taşımaz (kabul ölçütünde yoktu). Tetikleyici: Latin dışı
+bir kurulum adı ya da ortak PagerDuty servisinde test bildirimlerinin
+kurulumlar arasında çakışması.
