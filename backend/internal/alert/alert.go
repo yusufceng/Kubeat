@@ -55,6 +55,10 @@ type Notification struct {
 	// it is about; empty leaves the links out.
 	Language  string
 	PublicURL string
+	// Instance names the installation the notification comes from
+	// (Options.Instance), which the engine sets as it sends; empty for
+	// none.
+	Instance string
 	// Group holds the notifications a grouped one stands for: several
 	// monitors of one namespace with the same event within GroupWait.
 	// Monitor and Incident are then those of the first. Empty for a
@@ -165,6 +169,12 @@ type Options struct {
 	// PublicURL is Kubeat's address as its users reach it, for the links
 	// in notifications; empty leaves them out.
 	PublicURL string
+	// Instance names this installation where receivers that several of
+	// them share can tell them apart: in PagerDuty's dedup key and custom
+	// details, in the webhook body, in the footer of Slack and Mattermost
+	// messages, on Teams and Google Chat cards and in the body of an
+	// e-mail. Empty leaves it out, and PagerDuty's keys as they were.
+	Instance string
 	// GroupWait is how long a notification waits for others of the same
 	// event in the same namespace, so that an outage of many monitors is
 	// one message to people rather than one per monitor; zero sends each
@@ -995,6 +1005,9 @@ func (e *Engine) sendWithin(ctx context.Context, ch store.Channel, n Notificatio
 	}
 	if n.PublicURL == "" {
 		n.PublicURL = e.opts.PublicURL
+	}
+	if n.Instance == "" {
+		n.Instance = e.opts.Instance
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, e.opts.SendTimeout)
 	defer cancel()

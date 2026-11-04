@@ -211,7 +211,8 @@ type Config struct {
 	// An outage notification a channel did not take is sent again while
 	// the outage lasts, at a doubling interval capped by NotifyRetryMax (0
 	// sends nothing again); the end of an outage for NotifyRetryFor at most
-	// (0 does not send it again).
+	// (0 does not send it again). A cap under its floor is raised to it,
+	// with a warning (see Load).
 	NotifyRetryMax time.Duration // UPTIME_NOTIFY_RETRY_MAX; 0 = off
 	NotifyRetryFor time.Duration // UPTIME_NOTIFY_RETRY_FOR; 0 = the end is not sent again
 
@@ -283,6 +284,11 @@ type Config struct {
 	// notifications: "https://kubeat.apps.example". Empty leaves them out.
 	// It also makes the OIDC redirect URL when that is not set.
 	PublicURL string // UPTIME_PUBLIC_URL
+	// InstanceName tells the receivers several installations share, a
+	// PagerDuty service or an ITSM webhook, which one a notification comes
+	// from (alert.Options.Instance). Left empty, it is PublicURL's host,
+	// with its port when it has one; without either there is none.
+	InstanceName string // UPTIME_INSTANCE_NAME
 	// WorkloadRolloutGrace is how long a workload monitor puts up with
 	// missing pods while a rollout is in progress; zero means not at all.
 	WorkloadRolloutGrace time.Duration // UPTIME_WORKLOAD_ROLLOUT_GRACE
@@ -307,6 +313,8 @@ func Load() (Config, error) {
 		Language:  envString("UPTIME_LANGUAGE", "en"),
 		PublicURL: strings.TrimSuffix(envString("UPTIME_PUBLIC_URL", ""), "/"),
 		DBPath:    envString("UPTIME_DB_PATH", "uptime.db"),
+
+		InstanceName: strings.TrimSpace(envString("UPTIME_INSTANCE_NAME", "")),
 
 		APIToken:      envString("UPTIME_API_TOKEN", ""),
 		SecretKey:     envString("UPTIME_SECRET_KEY", ""),
@@ -533,10 +541,16 @@ func Load() (Config, error) {
 	// The wait between the attempts starts at a minute and is capped by
 	// RETRY_MAX; a cap under a minute, or under the length of one attempt
 	// (its tries and the pauses between them), would send to a channel that
-	// is down without a pause.
-	if attempt := time.Duration(cfg.NotifyAttempts) * (cfg.NotifyTimeout + cfg.NotifyRetryDelay); cfg.NotifyRetryMax > 0 && cfg.NotifyRetryMax < max(time.Minute, attempt) {
-		return Config{}, fmt.Errorf("UPTIME_NOTIFY_RETRY_MAX: must be 0 or at least 1m and one attempt, UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY) = %s; got %s",
-			attempt, cfg.NotifyRetryMax)
+	// is down without a pause. A shorter cap is raised to that floor and
+	// said, not refused: a value an earlier version took, or one that
+	// longer attempts have since overtaken, must not keep the monitoring
+	// from starting. Only this setting is raised; the others are refused.
+	attempt := time.Duration(cfg.NotifyAttempts) * (cfg.NotifyTimeout + cfg.NotifyRetryDelay)
+	if floor := max(time.Minute, attempt); cfg.NotifyRetryMax > 0 && cfg.NotifyRetryMax < floor {
+		cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("UPTIME_NOTIFY_RETRY_MAX (%s) is shorter than 1m or one attempt, "+
+			"UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY) = %s: raised to %s; "+
+			"set it to that or longer, or to 0 to send nothing again", cfg.NotifyRetryMax, attempt, floor))
+		cfg.NotifyRetryMax = floor
 	}
 	if cfg.NotifyRetryFor, err = envDurationOrZero("UPTIME_NOTIFY_RETRY_FOR", time.Hour); err != nil {
 		return Config{}, err
@@ -599,6 +613,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Language != "en" && cfg.Language != "tr" {
 		return Config{}, fmt.Errorf("UPTIME_LANGUAGE: must be en or tr, got %q", cfg.Language)
+	}
+	if cfg.InstanceName == "" {
+		cfg.InstanceName = urlHost(cfg.PublicURL)
 	}
 	if cfg.OIDCIssuer != "" {
 		cfg.OIDCProblem = checkOIDC(&cfg)
@@ -784,6 +801,17 @@ func (c Config) UserAgentFor(version string) string {
 		return c.UserAgent
 	}
 	return DefaultUserAgent(version, c.PublicURL)
+}
+
+// urlHost is the host of an address, with its port when it has one:
+// "kubeat.apps.example" for https://kubeat.apps.example. Empty for one
+// without a host; never the user and password an address may carry.
+func urlHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
 
 // HealthWindow is the interval over which the heartbeat and

@@ -245,11 +245,16 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 - Bildirim sağlayıcıları gerçek servislere karşı değil, isteği kaydeden
   yerel sunuculara karşı denendi; gövdeler sağlayıcıların belgelerine göre
   yazıldı.
-- Aynı PagerDuty servisine bağlanan birden çok kurulumda olay numaraları
-  çakışır: `dedup_key` kurulum kimliği taşımaz (`kubeat-incident-<n>`), bir
-  cluster'ın kesintisi diğerinin açık alarmına eklenir ve ilk düzelme
-  ikisini de kapatır. Her kuruluma ayrı bir PagerDuty servisi verin (S28,
-  sprint 4, #61; [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+- PagerDuty'nin `dedup_key`'i kurulum kimliğini taşır (`UPTIME_INSTANCE_NAME`,
+  boşsa `UPTIME_PUBLIC_URL`'ün host'u) ama kayda yazılmaz, her gönderimde
+  kimlikten kurulur: kimliği ya da `publicURL`'ü değiştirmeden önce, kimliksiz
+  bir sürüme dönmeden önce de, açık PagerDuty olaylarını kapatın; eski
+  anahtarla açılmış alarm Kubeat'ten kapanmaz. Kimliği olmayan kurulumların
+  anahtarı eskisi gibidir (`kubeat-incident-<n>`): aynı servisi paylaşan
+  kimliksiz kurulumların aynı numaralı olayları yine tek alarmda birleşir;
+  0.45 ve öncesindeki kurulumlar da kimliksizdir, ortak servisteki filo
+  0.46'ya geçip her kurulum kimlik alana kadar ayrı servis kullanın
+  (S28, #61; README "Bildirim kanalları", **Kurulum kimliği**).
 - Chart'ın alarmları backend'i cluster'ın Prometheus'u scrape edebildiği
   sürece görür: Kubeat 10 dakikadan uzun düşerse kesinti, sertifika ve yedek
   alarmları çözülür. README'deki susturma kuralı, alarmları alan

@@ -596,6 +596,12 @@ Müşteri B'nin hıçkırık bulgusu kapandı. Dead-letter görünümü, kalıc�
 kuyruk ve kapanmış olayın teslim edilmemiş `up`'ı bu maddede kalır,
 tetikleyici değişmedi.
 
+Güncelleme (2026-10-30, S28, #61): Müşteri A'nın "en azı" yapıldı: README
+"Bildirim kanalları"nda PagerDuty ve webhook satırları, kanal uzun süre
+ulaşılmaz kalabiliyorsa `UPTIME_NOTIFY_RETRY_FOR`'un bakım penceresinden
+uzun tutulmasını söyler. Kapanmış olayın teslim edilmemiş `up`'ı, dead-letter
+görünümü ve kalıcı kuyruk bu maddede kalır, tetikleyici değişmedi.
+
 ## Patlamada ölü makine kanalının teslimat kuyruğuna maliyeti
 
 2026-10-28'de ertelendi (S18'in kapsam dışı parçası, #26; PO kararı "kanal
@@ -1310,3 +1316,29 @@ kartına ve e-posta gövdesine koyar. E-posta konusu (`Subject()`,
 posta kuralları kırılmasın. Bu, BA varsayılanından (konunun başında
 `[<kimlik>]`) bilinçli bir sapma. Tetikleyici: birden çok cluster'ı
 e-postayla izleyen bir kullanıcının kurulumları konudan ayırt etme isteği.
+
+## PagerDuty dedup anahtarını olay kaydında saklamak
+
+2026-10-29'da ertelendi (S28'in kapsam dışı parçası, SRE'nin 1. koşulu;
+sprint 4 PO kararı "anahtar kayda yazılmaz, migration yok",
+[sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md); #61'in
+incelemesiyle 2026-11-04'te kayda alındı). S28 (#61) `dedup_key`'i her
+gönderimde kimlikten kurar; kimlik ya da `publicURL` değişince ya da
+kimliksiz bir sürüme dönülünce eski anahtarla açık alarm Kubeat'ten
+kapanmaz, README **Kurulum kimliği** > "Kimliği değiştirmek" açık olayları
+önceden kapatmayı söyler. Anahtar olay kaydına (yavaşlık için monitor'e)
+yazılırsa düzelme alarm hangi anahtarla açıldıysa onunla gider; migration
+ister (S6). Tetikleyici: kimlik ya da `publicURL` değişikliğinden ya da
+geri dönüşten sonra Kubeat'ten kapanmayan bir PagerDuty alarmı.
+
+## PagerDuty özetinde ve öteki sohbet kanallarında kurulum kimliği
+
+2026-10-29'da ertelendi (S28'in kapsam dışı parçası, sprint 4 PO kararı,
+[sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md); #61'in
+incelemesiyle 2026-11-04'te kayda alındı). S28 (#61) kimliği PagerDuty'de
+yalnızca `dedup_key`'e ve `custom_details`'e koyar, `summary` değişmez;
+sohbet kanallarında yalnızca Slack ve Mattermost alt bilgisine, Teams ve
+Google Chat kart alanına girer; mesaj gövdeleri ile Telegram, Discord,
+ntfy ve Gotify mesajları değişmez. Tetikleyici: birden çok cluster'ı
+PagerDuty özetinden ya da bu dört kanaldan izleyen bir kullanıcının
+kurulumları ayırt etme isteği.

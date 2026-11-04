@@ -93,7 +93,9 @@ func buildMessage(from string, to []string, n Notification, now time.Time) []byt
 	var body strings.Builder
 	body.WriteString(Text(n))
 	body.WriteString("\r\n")
-	if facts := Facts(n); len(facts) > 0 {
+	// The installation goes in the body; the subject stays as it was, for
+	// the mail rules that filter on it.
+	if facts := withInstance(n, Facts(n)); len(facts) > 0 {
 		body.WriteString("\r\n")
 		for _, f := range facts {
 			fmt.Fprintf(&body, "%s: %s\r\n", f.Label, f.Value)

@@ -3100,10 +3100,13 @@ sıradaki yeniden deneme geçişinde, bekleyenlerle birlikte gider.
 `UPTIME_NOTIFY_RETRY_MAX=0` yeniden denemeyi ve almıyor saymayı
 tümüyle (meşgul ve reddedilen bildirim o zaman tek istekle bir kez
 denenir), `UPTIME_NOTIFY_RETRY_FOR=0` yalnızca düzelme için kapatır (yeniden
-başlatmada hiç denenmemiş kesinti yine bir kez gönderilir);
-`UPTIME_NOTIFY_RETRY_MAX` en az 1 dakika ve bir denemenin süresi
+başlatmada hiç denenmemiş kesinti yine bir kez gönderilir).
+`UPTIME_NOTIFY_RETRY_MAX`'ın alt sınırı 1 dakika ve bir denemenin süresidir
 (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`,
-varsayılanlarla 30 sn) olmalıdır; daha kısası reddedilir, backend başlamaz.
+varsayılanlarla 30 sn). Daha kısa bir değer backend'i durdurmaz: bu sınıra
+yükseltilir ve backend açılışta verilen ve kullanılan değeri bir `WARN`
+satırıyla loglar (0.45'e kadar reddediliyor, backend başlamıyordu).
+Ayrıştırılamayan ya da negatif bir değer yine reddedilir.
 
 #### Kapanış
 
@@ -3205,11 +3208,11 @@ da `monthly`. Verilen başlangıç ve süre ilk tekrarı tanımlar; sonrakiler
 | `teams` | Workflow webhook URL'i | – | Adaptive Card içeren mesaj |
 | `discord` | Webhook URL'i | – | `{"content": "..."}` |
 | `telegram` | Sohbet kimliği (`-100...` ya da `@kanal`) | Bot token | Bot üzerinden mesaj |
-| `pagerduty` | – | Events API v2 integration key | Kesintide alarm açar, düzelince aynı alarmı kapatır |
+| `pagerduty` | – | Events API v2 integration key | Kesintide alarm açar, düzelince aynı alarmı kapatır; alarmın anahtarı kurulum kimliğini taşır (bkz. **Kurulum kimliği**). Kanal uzun süre ulaşılmaz kalabiliyorsa `UPTIME_NOTIFY_RETRY_FOR`'u bakım pencerenizden uzun tutun: düzelme en çok o kadar denenir, sonra alarm açık kalır |
 | `ntfy` | Konu adresi (`https://ntfy.sh/konu`) | Erişim token'ı (isteğe bağlı) | Başlık, öncelik ve etiketle mesaj |
 | `gotify` | Sunucu adresi | Uygulama token'ı | Başlık ve öncelikle mesaj |
 | `email` | Virgülle ayrılmış adresler | – | Düz metin e-posta |
-| `webhook` | Herhangi bir URL | – | Aşağıdaki JSON gövdesi |
+| `webhook` | Herhangi bir URL | – | Aşağıdaki JSON gövdesi, kurulum kimliğiyle. Kanal uzun süre ulaşılmaz kalabiliyorsa `UPTIME_NOTIFY_RETRY_FOR`'u bakım pencerenizden uzun tutun: düzelme en çok o kadar denenir, sonra alıcıdaki kayıt (ITSM bileti) açık kalır |
 
 Her kanal durdurulabilir, düzenlenebilir ve test edilebilir (`PATCH
 /api/v1/channels/{id}`, `POST .../test`). Başarısız bir test yanıtın durum
@@ -3336,7 +3339,10 @@ olayın sayfasına (`/incidents/<id>`; bkz. "Olay sayfası"), gruplanmış
 mesajda namespace sayfasına gider ve `UPTIME_PUBLIC_URL` (chart'ta
 `publicURL`, Route/Ingress host'undan türetilir) ayarlı değilse hiç konmaz.
 Kesinti bildiriminin "Neden" alanı, tanınan bir başarısızlıkta hatanın ne
-anlama geldiğini de yazar (bkz. "Başarısız kontrolün ayrıntıları").
+anlama geldiğini de yazar (bkz. "Başarısız kontrolün ayrıntıları"). Kurulum
+kimliği Slack ve Mattermost'ta alt bilgide (`Kubeat · <kimlik>`), Teams ve
+Google Chat'te kartın son alanında ("Kurulum"), e-postada gövdede görünür;
+mesaj metinleri ve e-posta konusu değişmez (bkz. **Kurulum kimliği**).
 
 Monitor adları, hedefler ve hata metinleri (push raporunun mesajı dahil)
 yazıldığı gibi görünür. Slack, Mattermost ve Google Chat'te `&`, `<` ve `>`
@@ -3377,6 +3383,7 @@ okunabilir özettir.
 {
   "event": "down",
   "text": "🔴 odeme-api erişilemiyor (https://...). Art arda 3 kontrol başarısız. Son hata: ...",
+  "instance": "kubeat.apps.example",
   "monitor": { "id": 1, "name": "odeme-api", "type": "http", "target": "https://..." },
   "incident": { "id": 7, "kind": "down", "started_at": "...", "resolved_at": null, "cause": "..." }
 }
@@ -3387,6 +3394,60 @@ okunabilir özettir.
 `cert`. Yavaşlık olaylarında `incident` yoktur; yerine `slow` nesnesi
 gelir: `{"since": "...", "threshold_ms": 500, "latency_ms": 1200}`.
 Monitor'den gönderilen testte `monitor` nesnesi dolu, `incident` boştur.
+`instance` kurulum kimliğidir (testte de gelir); kimlik yoksa alan yoktur.
+Olay numaraları her kurulumda 1'den başlar: birden çok kurulumu dinleyen
+bir alıcı kaydı `instance` ile `incident.id`'ye bağlar.
+
+**Kurulum kimliği.** Birden çok kurulum aynı PagerDuty servisine ya da aynı
+ITSM webhook'una bağlanabilir; her bildirim hangi kurulumdan geldiğini
+söyler. Kimlik `UPTIME_INSTANCE_NAME`'dir (chart'ta `instanceName`); boşsa
+`UPTIME_PUBLIC_URL`'ün host'u (varsa portuyla; chart'ta `publicURL`, o da
+yoksa Route ya da Ingress host'u), ikisi de yoksa kimlik yoktur ve
+bildirimler kimliksiz, 0.45'teki gibi gider. Birden çok cluster'da her
+kuruluma kimliğini açıkça verin.
+
+- **PagerDuty anahtarı.** `dedup_key` `kubeat-<kimlik>-incident-<olay no>`,
+  yavaşlıkta `kubeat-<kimlik>-slow-<monitor no>` olur: iki kurulumun aynı
+  numaralı olayları ayrı alarmlardır, birinin düzelmesi ötekini kapatmaz.
+  Kimlik anahtara ASCII harf, rakam, nokta, tire ve alt çizgiyle girer:
+  Türkçe ve öteki aksanlı Latin harfleri en yakın ASCII harfe çevrilir
+  (`Üretim` → `Uretim`, `üç` → `uc`; `Test-Ç` ile `Test-Ş` ayrı kalır:
+  `Test-C`, `Test-S`), öteki karakterlerin (boşluk, portun `:`'sı, Latin
+  dışı harfler) her dizisi tek bir tireye döner, baştaki ve sondaki tireler
+  düşer, en çok 200 karakter kalır (`prod eu` → `prod-eu`, `:8443` →
+  `-8443`); hiçbiri kalmazsa anahtar kimliksizdir. Backend açılışta
+  kullanılan kimliği ve anahtardaki hâlini tek bir `INFO` satırıyla loglar;
+  anahtardaki hâl boşsa ya da kimlikten farklıysa satır `WARN`'dır.
+  `custom_details`'in `instance` alanında kimlik olduğu gibi durur. Kimlik
+  yoksa anahtar `kubeat-incident-<olay no>` ve `kubeat-slow-<monitor no>`
+  kalır; testin anahtarı her zaman `kubeat-test`.
+- **Geçiş.** Anahtar kayda yazılmaz, her gönderimde kimlikten kurulur.
+  Backend'in son açılışından önce açılmış bir olayın ya da başlamış bir
+  yavaşlığın düzelmesi iki istekle gider: önce kimlikli, sonra kimliksiz
+  anahtarla. Böylece kimliği bilmeyen bir sürümün açtığı alarm da kapanır;
+  o anahtarla açık bir alarm yoksa PagerDuty ikinci isteği düşürür. İki
+  istekten biri alınmazsa düzelme her zamanki gibi yeniden denenir, yine
+  iki istekle. Alarm açan istekler (kesinti, yeniden gönderilen kesinti,
+  hatırlatma) yalnızca kimlikli anahtarla gider: yükseltmeden önce açılmış
+  bir olay yükseltmeden sonra hatırlatılırsa ya da yeniden gönderilirse
+  PagerDuty'de kimlikli ikinci bir alarm açılır; düzelme ikisini de kapatır.
+- **Kimliği değiştirmek.** `instanceName`'i ya da kimlik ondan geliyorsa
+  `publicURL`'ü değiştirmeden önce, kimliksiz bir sürüme dönmeden önce de,
+  açık PagerDuty olaylarını kapatın: eski anahtarla açılmış alarm Kubeat'ten
+  kapanmaz.
+- **Kimliksiz kurulum.** Aynı servisi paylaşan kurulumların hepsine kimlik
+  verin. 0.45 ve öncesindeki kurulumlar da kimliksizdir; ortak servisteki
+  filo 0.46'ya geçip her kurulum kimlik alana kadar ayrı servis kullanın.
+  Kimliksiz kurulumların aynı numaralı olayları yine tek alarmda birleşir.
+  Kimlikli bir kurulumun son açılışından önce açılmış bir olayının
+  düzelmesi kimliksiz anahtarla da gittiği için (ölçü süreç başlangıcıdır:
+  yalnız yükseltmede değil, her yeniden başlatmada), kimliksiz bir
+  kurulumun aynı numaralı alarmını da kapatabilir.
+- **İnsanların okuduğu kanallar.** Slack ve Mattermost kimliği alt bilgide
+  (`Kubeat · <kimlik>`), Teams ve Google Chat kartın son alanında
+  ("Kurulum"), e-posta gövdede bir satırda gösterir. E-posta konusu
+  değişmez: konuya göre kurulmuş posta kuralları kırılmasın. Telegram,
+  Discord, ntfy ve Gotify mesajlarıyla bütün mesaj metinleri değişmez.
 
 ### Olay sayfası
 
@@ -3615,9 +3676,10 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_RETRY_DELAY` | `5s` | Bir denemenin kısa tekrarları arasındaki bekleme |
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir kısa tekrarın zaman aşımı |
 | `UPTIME_NOTIFY_QUEUE_SIZE` | `1000` | Teslimat döngüsünün önünde bekleyebilecek en fazla bildirim sayısı. Döngü bir bildirimi tüm kanallara aynı anda gönderir ve yalnızca en yavaş kanalın denemeleri kadar bekler; bu sırada gelenler burada birikir, kuyruk doluysa düşer ve `kubeat_notifications_dropped_total` artar. En az monitor sayısı kadar olmalıdır: tüm monitor'ların birlikte düştüğü bir kesintinin bildirimleri sığar. Varsayılanı `UPTIME_MAX_MONITORS`'ınki kadardır ve ondan türetilmez; etkin monitor sayısı kuyruğu aşınca backend bir kez `WARN` loglar. 1000'lik kuyruk ≈ 1 MiB, doluyken ≈ 1,7 MiB bellek tutar |
-| `UPTIME_NOTIFY_RETRY_MAX` | `15m` | Kanalın almadığı kesinti (`down`, `up`) bildiriminin yeniden denenme aralığının üst sınırı: alıcıya ulaşılamadığında aralık 1 dakikadan başlar, her başarısız denemede ikiye katlanır; reddedilen (4xx) bildirim doğrudan bu aralıkla, meşgul (429) alıcıya `Retry-After` kadar sonra (en çok bu kadar) denenir; `down` olay kapanana kadar denenir (bkz. "Alarm"). `0` yeniden denemeyi kapatır; aksi halde en az `1m` ve bir denemenin süresi (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`), daha kısası reddedilir |
+| `UPTIME_NOTIFY_RETRY_MAX` | `15m` | Kanalın almadığı kesinti (`down`, `up`) bildiriminin yeniden denenme aralığının üst sınırı: alıcıya ulaşılamadığında aralık 1 dakikadan başlar, her başarısız denemede ikiye katlanır; reddedilen (4xx) bildirim doğrudan bu aralıkla, meşgul (429) alıcıya `Retry-After` kadar sonra (en çok bu kadar) denenir; `down` olay kapanana kadar denenir (bkz. "Alarm"). `0` yeniden denemeyi kapatır. Alt sınırı `1m` ve bir denemenin süresidir (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`): daha kısası bu sınıra yükseltilir ve backend açılışta verilen ve kullanılan değeri `WARN` olarak loglar |
 | `UPTIME_NOTIFY_RETRY_FOR` | `1h` | Düzelme (`up`) bildiriminin ilk başarısız denemeden itibaren en çok ne kadar süre yeniden deneneceği (almıyor sayılan bir kanal için bekletilen düzelmede süre ilk denemeyle başlar); `0` düzelmeyi yeniden denemez |
 | `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz. `UPTIME_OIDC_REDIRECT_URL` boşsa SSO dönüş adresi de bundan türetilir |
+| `UPTIME_INSTANCE_NAME` | – | Kurulum kimliği: birden çok kurulumun paylaştığı alıcılar için bildirimlerde bu kurulumun adı. PagerDuty `dedup_key`'inde ve `custom_details`'inde, webhook gövdesinin `instance` alanında, Slack ve Mattermost alt bilgisinde, Teams ve Google Chat kartında ve e-posta gövdesinde görünür. Boşsa `UPTIME_PUBLIC_URL`'ün host'u (varsa portuyla), ikisi de yoksa kimlik yok. Chart'ta `instanceName`. Değiştirmeden önce açık PagerDuty olaylarını kapatın (bkz. "Bildirim kanalları", **Kurulum kimliği**) |
 | `UPTIME_LANGUAGE` | `en` | Bildirim metinlerinin ve ilk yönetici hesabının görünen adının dili: `en` ya da `tr` |
 | `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |
 | `UPTIME_DISCOVERY_ENABLED` | `true` | Cluster keşfini açar |

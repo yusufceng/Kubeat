@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/quotedprintable"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/mail"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -402,6 +404,159 @@ func TestRouterPicksSenderByType(t *testing.T) {
 	}
 	if err := router.Send(ctx, store.Channel{Type: "pagerduty"}, n); err == nil {
 		t.Error("unknown channel type reported success")
+	}
+}
+
+// The webhook body names the installation, a test's too; without one the
+// field is absent.
+func TestWebhookBodyNamesTheInstance(t *testing.T) {
+	srv, bodies := capture(t)
+	sender := &WebhookSender{Client: srv.Client()}
+	ch := store.Channel{Type: store.ChannelWebhook, Target: srv.URL}
+	named, test := sampleDown(), Notification{Event: EventTest, Instance: "prod-eu"}
+	named.Instance = "prod-eu"
+	for _, n := range []Notification{named, test, sampleDown()} {
+		if err := sender.Send(context.Background(), ch, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := bodies()
+	if got[0]["instance"] != "prod-eu" || got[0]["incident"] == nil || got[1]["instance"] != "prod-eu" {
+		t.Errorf("with an instance: %v and the test's %v", got[0], got[1])
+	}
+	if _, ok := got[2]["instance"]; ok {
+		t.Errorf("without an instance: %v", got[2])
+	}
+	// Nothing else in the body changes.
+	delete(got[0], "instance")
+	if !reflect.DeepEqual(got[0], got[2]) {
+		t.Errorf("the instance changed more than its field:\n%v\n%v", got[0], got[2])
+	}
+}
+
+// The installation shows where people look for where a message came from:
+// the footer of Slack and Mattermost, the last field of a Teams or Google
+// Chat card, a line in the body of an e-mail. The text of every message and
+// the e-mail's subject stay as they were, and so does everything sent to
+// Telegram, Discord, ntfy and Gotify.
+func TestHumanChannelsNameTheInstance(t *testing.T) {
+	plain := sampleDown()
+	plain.PublicURL = "https://kubeat.example"
+	named := plain
+	named.Instance = "prod-eu"
+	now := time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
+
+	for _, esc := range []func(string) string{chatEscaper.Replace, mattermostEscaper.Replace} {
+		with, without := newSlackBody(named, now, esc), newSlackBody(plain, now, esc)
+		if with.Attachments[0].Footer != "Kubeat · prod-eu" || without.Attachments[0].Footer != "Kubeat" {
+			t.Errorf("footers %q and %q", with.Attachments[0].Footer, without.Attachments[0].Footer)
+		}
+		with.Attachments[0].Footer = "Kubeat"
+		if !reflect.DeepEqual(with, without) {
+			t.Errorf("slack: the instance changed more than the footer:\n%+v\n%+v", with, without)
+		}
+	}
+	// What the instance says is escaped as the rest is.
+	sharp := named
+	sharp.Instance = "<!here> & @all"
+	if footer := newSlackBody(sharp, now, mattermostEscaper.Replace).Attachments[0].Footer; footer != "Kubeat · &lt;!here&gt; &amp; @\u200ball" {
+		t.Errorf("mattermost footer = %q", footer)
+	}
+
+	teams := newTeamsBody(named).Attachments[0].Content.Body
+	facts := teams[2].Facts
+	if last := facts[len(facts)-1]; last != (teamsFact{Title: "Kurulum", Value: "prod-eu"}) || len(facts) != len(Facts(plain))+1 {
+		t.Errorf("teams facts = %+v", facts)
+	}
+	if plainTeams := newTeamsBody(plain).Attachments[0].Content.Body; teams[1].Text != plainTeams[1].Text || len(plainTeams[2].Facts) != len(Facts(plain)) {
+		t.Errorf("teams text %q, facts without an instance %+v", teams[1].Text, plainTeams[2].Facts)
+	}
+
+	chat := newChatBody(named)
+	widgets := chat.CardsV2[0].Card.Sections[0].Widgets
+	if d := widgets[len(widgets)-2].DecoratedText; d == nil || d.TopLabel != "Kurulum" || d.Text != "prod-eu" || widgets[len(widgets)-1].ButtonList == nil {
+		t.Errorf("google chat widgets = %+v", widgets)
+	}
+	if plainChat := newChatBody(plain); chat.Text != plainChat.Text || len(plainChat.CardsV2[0].Card.Sections[0].Widgets) != len(widgets)-1 {
+		t.Errorf("google chat text %q, widgets without an instance %+v", chat.Text, plainChat.CardsV2[0].Card.Sections[0].Widgets)
+	}
+	// A test without details still gets a card for the instance.
+	if test := newChatBody(Notification{Event: EventTest, Instance: "prod-eu"}); len(test.CardsV2) != 1 {
+		t.Errorf("google chat test with an instance: %+v", test)
+	}
+
+	// E-mail: a line in the body, the same subject.
+	read := func(n Notification) (subject, body string) {
+		msg, err := mail.ReadMessage(strings.NewReader(string(buildMessage("kubeat@example.com", []string{"ops@example.com"}, n, now))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(quotedprintable.NewReader(msg.Body))
+		return msg.Header.Get("Subject"), string(raw)
+	}
+	subject, body := read(named)
+	plainSubject, plainBody := read(plain)
+	if subject != plainSubject || !strings.Contains(body, "\r\nKurulum: prod-eu\r\n") || strings.Contains(plainBody, "Kurulum") ||
+		!strings.HasPrefix(body, Text(plain)+"\r\n") {
+		t.Errorf("e-mail: subject %q (without %q), body:\n%s", subject, plainSubject, body)
+	}
+	english := named
+	english.Language = LanguageEnglish
+	if _, body := read(english); !strings.Contains(body, "\r\nInstance: prod-eu\r\n") {
+		t.Errorf("e-mail in English:\n%s", body)
+	}
+
+	// The other channels people read do not show it.
+	if a, b := newDiscordBody(named, now), newDiscordBody(plain, now); !reflect.DeepEqual(a, b) {
+		t.Errorf("discord: %v\n%v", a, b)
+	}
+	if telegramText(named) != telegramText(plain) || gotifyMarkdown(named) != gotifyMarkdown(plain) {
+		t.Error("telegram or gotify shows the instance")
+	}
+	srv, seen := provider(t, http.StatusOK, `{}`)
+	for _, sender := range []Sender{&NtfySender{Client: srv.Client()}, &GotifySender{Client: srv.Client()}, &TelegramSender{Client: srv.Client(), BaseURL: srv.URL}} {
+		before := len(seen())
+		for _, n := range []Notification{named, plain} {
+			if err := sender.Send(context.Background(), store.Channel{Target: srv.URL + "/topic", Secret: "s"}, n); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := seen()[before:]; !reflect.DeepEqual(got[0].Body, got[1].Body) {
+			t.Errorf("%T: %v\n%v", sender, got[0].Body, got[1].Body)
+		}
+	}
+}
+
+// The engine names the installation in every notification it sends:
+// alone, grouped, and a channel's test.
+func TestTheEngineNamesTheInstance(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops" is a webhook
+	f.engine.opts.GroupWait = 50 * time.Millisecond
+	f.engine.opts.Instance = "prod-eu"
+	ctx := context.Background()
+	if _, err := f.db.CreateChannel(ctx, store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	incident := store.Incident{ID: 1, StartedAt: f.clock, Cause: "refused"}
+	for _, name := range []string{"api", "db"} {
+		f.engine.enqueue(Notification{Event: EventDown, Monitor: store.Monitor{Name: name, Namespace: "shop"}, Incident: incident})
+	}
+	f.flush() // shutdown flushes the group at once
+	if err := f.engine.SendOnce(ctx, store.Channel{Name: "test", Type: store.ChannelWebhook}, Notification{Event: EventTest}); err != nil {
+		t.Fatal(err)
+	}
+
+	f.sender.mu.Lock()
+	defer f.sender.mu.Unlock()
+	var sent []string
+	for i, n := range f.sender.sent {
+		sent = append(sent, fmt.Sprintf("%s:%s:%d", f.sender.channels[i], n.Event, len(n.Group)))
+		if n.Instance != "prod-eu" {
+			t.Errorf("%s got %s without the instance: %q", f.sender.channels[i], n.Event, n.Instance)
+		}
+	}
+	if got := strings.Join(sent, " "); got != "ops:down:0 ops:down:0 chat:down:2 test:test:0" {
+		t.Errorf("sent %s", got)
 	}
 }
 

@@ -217,6 +217,29 @@ grace "grace period by default" 30
 grace "grace period given" 45 --set backend.terminationGracePeriodSeconds=45
 grace "grace period missing from older values" 30 --set backend.terminationGracePeriodSeconds=null
 
+# The installation's name in notifications: UPTIME_INSTANCE_NAME only when
+# instanceName is given; without it, as with older values that lack the
+# key, the backend takes publicURL's host (the Route's or Ingress's).
+# instance NAME WANT VALUES...: the backend renders with these values and
+# UPTIME_INSTANCE_NAME set to WANT, as quoted in the manifest, or without
+# it when WANT is empty.
+instance() {
+  local name="$1" want="$2" got
+  shift 2
+  if ! helm template kubeat "$CHART" --show-only templates/backend.yaml "$@" >"$WORK/backend.yaml" 2>"$WORK/err"; then
+    failed "$name: refused: $(cat "$WORK/err")"
+    return
+  fi
+  got="$(awk '/^ *- name: UPTIME_INSTANCE_NAME$/ { getline; sub(/^ *value: /, ""); print }' "$WORK/backend.yaml")"
+  [ "$got" = "$want" ] || failed "$name: want UPTIME_INSTANCE_NAME ${want:-unset}, got: ${got:-unset}"
+}
+instance "no instanceName" ""
+instance "no instanceName, a Route" "" "${ROUTE[@]}"
+instance "instanceName missing from older values" "" --set instanceName=null
+instance "instanceName given" '"prod-eu"' --set instanceName=prod-eu
+instance "instanceName with a Route" '"prod-eu"' "${ROUTE[@]}" --set instanceName=prod-eu
+instance "instanceName with a space" '"Prod EU"' --set-string 'instanceName=Prod EU'
+
 # Kubeat's own failures: the install notes warn while neither a heartbeat
 # nor the alert rules would tell of them, and say when no backups are taken.
 UNHEARD="nobody hears when Kubeat itself fails"
