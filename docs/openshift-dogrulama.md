@@ -13,7 +13,9 @@ Hepsi bir öğleden sonraya sığar.
 
 ## Ön koşullar
 
-- OpenShift 4.14 ya da üstü (ROSA, ARO, OCP on AWS/EKS fark etmez);
+**Desteklenen sürümler:** OpenShift 4.14 ve üstü; gerçek cluster'da doğrulanan OpenShift 4.21 (Kubernetes 1.34).
+
+- Bu sürümlerden biri (ROSA, ARO, OCP on AWS/EKS fark etmez);
   `cluster-admin` yetkisi. Kubeat'in kendisi cluster-admin istemez; kurulum
   için ClusterRole oluşturmak gerekir.
 - User workload monitoring açık olmalı; değilse:

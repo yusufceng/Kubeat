@@ -16,14 +16,15 @@ failed() {
   FAILED=$((FAILED + 1))
 }
 
-# fresh: a new copy of the check and of the files it reads.
+# fresh: a new copy of the check and of the files it reads, and of the
+# upgrade notes, which it must leave alone.
 fresh() {
   rm -rf "$COPY"
   mkdir -p "$COPY/scripts" "$COPY/deploy/helm/kubeat" "$COPY/docs"
   cp "$ROOT/scripts/check-versions.sh" "$COPY/scripts/"
   cp "$ROOT/deploy/helm/kubeat/Chart.yaml" "$COPY/deploy/helm/kubeat/"
   cp "$ROOT/Makefile" "$ROOT/README.md" "$COPY/"
-  cp "$ROOT/docs/pilot.md" "$COPY/docs/"
+  cp "$ROOT/docs/pilot.md" "$ROOT/docs/yukseltme.md" "$COPY/docs/"
 }
 
 # change FILE OLD NEW: replaces the first OLD in the copy of FILE with NEW
@@ -44,6 +45,16 @@ change() {
   else
     echo "change: \"$2\" is not in $1" >&2
   fi
+}
+
+# change_line FILE LINE OLD NEW: replaces OLD on line LINE of the copy of
+# FILE with NEW.
+change_line() {
+  local file="$COPY/$1"
+  awk -v at="$2" -v old="$3" -v new="$4" '
+    FNR == at + 0 && (i = index($0, old)) { $0 = substr($0, 1, i - 1) new substr($0, i + length(old)) }
+    { print }
+  ' "$file" >"$file.new" && mv "$file.new" "$file"
 }
 
 # passes NAME [TAG]: the check passes on the copy.
@@ -81,9 +92,8 @@ fresh
 line="$(change Makefile "VERSION ?= $V" "VERSION ?= $OTHER")"
 fails "the Makefile's VERSION" "Makefile:$line: VERSION $OTHER, not $V"
 
-# Each kind of command, where it first appears in each file.
-for spec in "README.md|--version $V|--version $OTHER" \
-  "docs/pilot.md|--version $V|--version $OTHER" \
+# Each kind of command, where it first appears in docs/pilot.md.
+for spec in "docs/pilot.md|--version $V|--version $OTHER" \
   "docs/pilot.md|kubeat-backend:$V|kubeat-backend:$OTHER" \
   "docs/pilot.md|kubeat-frontend:$V|kubeat-frontend:$OTHER" \
   "docs/pilot.md|kubeat-$V.tgz|kubeat-$OTHER.tgz"; do
@@ -98,35 +108,66 @@ fresh
 line="$(change docs/pilot.md "\$R/kubeat-backend:$V" "\$R/kubeat-backend:$OTHER")"
 fails "the mirror's copy" "docs/pilot.md:$line: kubeat-backend:$OTHER, not $V"
 
-# The upgrade notes name the versions they were written for: under a heading
-# ending in "yükseltme", down to the next heading of its level or above,
-# commands are not checked. Neither are versions in prose, placeholders or a
-# Service's host and port. A command after the notes is checked again.
+# Every command in the README is checked, the quick start's install and
+# heartbeat lines among them: each line that names the version, changed
+# alone, fails naming that line.
+readme_lines="$(grep -n -F -- "--version $V" "$ROOT/README.md" | cut -d: -f1)"
+quick_line="$(awk -v v="--version $V" '/^## / { quick = ($0 == "## Hızlı başlangıç") } quick && index($0, v) { print FNR; exit }' "$ROOT/README.md")"
+[ -n "$quick_line" ] || failed "README.md: the quick start names no --version $V"
+for line in $readme_lines; do
+  fresh
+  change_line README.md "$line" "--version $V" "--version $OTHER"
+  fails "README.md:$line" "README.md:$line: --version $OTHER, not $V"
+done
+
+# The quick start must keep a command that names the version: without one
+# the check fails, though the rest of the README still names it.
+fresh
+awk -v v=" --version $V" '
+  /^## / { quick = ($0 == "## Hızlı başlangıç") }
+  quick { while ((i = index($0, v))) $0 = substr($0, 1, i - 1) substr($0, i + length(v)) }
+  { print }
+' "$ROOT/README.md" >"$COPY/README.md"
+fails "a quick start without a versioned command" "README.md: no command in \"Hızlı başlangıç\" names a version"
+
+# Versions in prose, placeholders and a Service's host and port are not
+# commands of a release.
+fresh
+cat >>"$COPY/README.md" <<'EOF'
+
+0.43.0'a `helm rollback` ile dönülür. İmaj `kubeat-backend:<sürüm>`, chart
+`--version <sürüm>`, adres `http://kubeat-backend:8080/healthz`.
+EOF
+passes "prose, placeholders and a Service"
+
+# The upgrade notes, docs/yukseltme.md, name the versions they were written
+# for and are not checked.
+fresh
+cat >>"$COPY/docs/yukseltme.md" <<'EOF'
+
+## 0.1'e yükseltme
+
+```sh
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.0.9 --reset-then-reuse-values
+```
+
+`kubeat-backend:0.0.9` ve `kubeat-0.0.9.tgz` yalnızca 0.0.9 içindir.
+EOF
+passes "an old command in docs/yukseltme.md"
+
+# In the README a heading exempts nothing: a command under one that ends in
+# "yükseltme" is checked like any other.
 fresh
 cat >>"$COPY/README.md" <<'EOF'
 
 ### 0.1'e yükseltme
 
-Önce 0.0.9'a yükseltin:
-
-```sh
-# 0.0.9 ile
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.0.9 --reset-then-reuse-values
 ```
-
-#### Ayrıntı
-
-`kubeat-backend:0.0.9` ve `kubeat-0.0.9.tgz` yalnızca 0.0.9 içindir.
-
-### Sonraki bölüm
-
-0.43.0'a `helm rollback` ile dönülür. İmaj `kubeat-backend:<sürüm>`, chart
-`--version <sürüm>`, adres `http://kubeat-backend:8080/healthz`.
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.0.9
+```
 EOF
-passes "upgrade notes, prose, placeholders and a Service"
-printf '\n```\nhelm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.0.9\n```\n' >>"$COPY/README.md"
 line="$(awk 'END { print NR - 1 }' "$COPY/README.md")"
-fails "a command after the upgrade notes" "README.md:$line: --version 0.0.9, not $V"
+fails "a command under an upgrade heading in the README" "README.md:$line: --version 0.0.9, not $V"
 
 # A file in which no command names a version fails: the check would check
 # nothing there.

@@ -66,20 +66,37 @@ Sürüm PR'ı sürümü şu yerlerin hepsinde birlikte yükseltir:
 - `deploy/helm/kubeat/Chart.yaml`: `version` ve `appVersion` (imaj etiketinin
   varsayılanı `appVersion`'dır).
 - `Makefile`: `VERSION` (`make release` etiketi bundan atar).
-- `README.md`: "Cluster'a kurulum" ve "OpenShift"teki kurulum komutlarının
-  `--version`'ı.
+- `README.md`: "Hızlı başlangıç"taki kurulum ve heartbeat komutlarının,
+  "Cluster'a kurulum", "OpenShift" ve "Aracın kendi sağlığı"ndaki (heartbeat)
+  komutların `--version`'ı.
 - `docs/pilot.md`: "İmajları aynalamak" (iki imaj etiketi, `helm pull`
   `--version`'ı, `kubeat-<sürüm>.tgz`) ve "Kurulum" komutu.
 
-`scripts/check-versions.sh` bunları `Chart.yaml`'daki `version` ile
-karşılaştırır ve farklı olan her yeri `dosya:satır` ile yazar:
+Yükseltme notları [docs/yukseltme.md](docs/yukseltme.md)'dedir; README'de
+yalnızca ona bağlantı vardır. Sürüm PR'ı sprint dosyasının "Yükseltme
+notu" tablosundan yeni sürümün bölümünü yazar:
 
-- README ve docs/pilot.md'de yalnızca komut kalıplarına bakar
-  (`--version X.Y.Z`, `kubeat-backend:X.Y.Z`, `kubeat-frontend:X.Y.Z`,
-  `kubeat-X.Y.Z.tgz`). Yükseltme notları ("... yükseltme" başlıklı
-  bölümler), düzyazıdaki sürüm anışları ve `<sürüm>` gibi yer tutucular
-  denetlenmez. Komutlardan biri başka bir dosyaya taşınırsa betikteki dosya
-  listesi de güncellenir; hiç sürümlü komut kalmayan dosya denetimi düşürür.
+- Başlık `## <sürüm>'e yükseltme` biçimindedir, Türkçe ekiyle (`0.45'e`,
+  `0.46'ya`); bölüm atlamalı yolun altına, öteki sürümlerin üstüne girer.
+- Dört alt başlığı vardır: `### Yapılacak`, `### Davranış değişikliği`,
+  `### Geri dönüş` ve `### Alarm kuralları: değişti` ya da
+  `### Alarm kuralları: değişmedi` (chart'ın PrometheusRule'unun bir önceki
+  sürüme göre gerçek diff'i).
+- Başlangıçtaki "Atlamalı yol" yeni sürüme göre güncellenir.
+- Dosya sürüm denetiminin dışındadır: eski sürümlerin komutları bilerek
+  eskidir.
+
+`scripts/check-versions.sh` README ve docs/pilot.md'deki sürümleri
+`Chart.yaml`'daki `version` ile karşılaştırır ve farklı olan her yeri
+`dosya:satır` ile yazar:
+
+- Yalnızca komut kalıplarına bakar (`--version X.Y.Z`,
+  `kubeat-backend:X.Y.Z`, `kubeat-frontend:X.Y.Z`, `kubeat-X.Y.Z.tgz`).
+  Düzyazıdaki sürüm anışları ve `<sürüm>` gibi yer tutucular denetlenmez;
+  README'de bir başlık hiçbir şeyi denetimden çıkarmaz. Komutlardan biri
+  başka bir dosyaya taşınırsa betikteki dosya listesi de güncellenir; hiç
+  sürümlü komut kalmayan dosya da, sürümlü komutu kalmayan "Hızlı başlangıç"
+  da denetimi düşürür.
 - CI'ın chart işi her PR'da çalıştırır; sürüm PR'ında eksik kalan yer orada
   yakalanır. Yerelde `scripts/check-versions.sh` ya da `make lint`; betiğin
   kendi testi `scripts/test-check-versions.sh` (`make test`).

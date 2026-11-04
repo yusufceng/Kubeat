@@ -2,12 +2,15 @@
 # Checks that the places a release's version is written by hand name
 # Chart.yaml's version: its appVersion (the images' default tag), the
 # Makefile's VERSION (the tag make release pushes) and the install and
-# mirroring commands in README.md and docs/pilot.md. In those two files only
-# commands count: helm's --version X.Y.Z, the images kubeat-backend:X.Y.Z and
-# kubeat-frontend:X.Y.Z and the chart archive kubeat-X.Y.Z.tgz. The upgrade
-# notes (sections headed "... yükseltme") are left out, as they name the
-# versions they were written for; versions in prose, placeholders such as
-# <sürüm> and a Service's host:port are not commands of a release and pass.
+# mirroring commands in README.md and docs/pilot.md, the quick start's among
+# them. In those two files only commands count: helm's --version X.Y.Z, the
+# images kubeat-backend:X.Y.Z and kubeat-frontend:X.Y.Z and the chart archive
+# kubeat-X.Y.Z.tgz; versions in prose, placeholders such as <sürüm> and a
+# Service's host:port are not commands of a release and pass. The upgrade
+# notes, docs/yukseltme.md, are not read: they name the versions they were
+# written for. The README's quick start must hold a command that names a
+# version, as each file must: the check would otherwise pass there while
+# checking nothing.
 # Given a tag, as release.yml gives the one it publishes, Chart.yaml's
 # version must be the tag's, which is the tag without its leading v.
 # Prints file:line for each place that differs and exits 1.
@@ -22,6 +25,9 @@ cd "$(dirname "$0")/.." || exit 1
 
 CHART=deploy/helm/kubeat/Chart.yaml
 DOCS=(README.md docs/pilot.md)
+# The section whose install command is copied the most.
+QUICK_FILE=README.md
+QUICK_HEADING="Hızlı başlangıç"
 FAILED=0
 
 failed() {
@@ -59,8 +65,9 @@ fi
 
 # The commands in the docs. A file without any is a failure too: the check
 # would pass while checking nothing, for example once a command moved to
-# another file.
-docs="$(awk -v want="$version" '
+# another file. So is a quick start without any, down to the next heading of
+# its level or above.
+docs="$(awk -v want="$version" -v qfile="$QUICK_FILE" -v qheading="$QUICK_HEADING" '
   BEGIN {
     v = "[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?"
     n = 0
@@ -68,15 +75,18 @@ docs="$(awk -v want="$version" '
     pat[++n] = "kubeat-(backend|frontend):" v; pre[n] = "^kubeat-(backend|frontend):"; post[n] = ""
     pat[++n] = "kubeat-" v "\\.tgz"; pre[n] = "^kubeat-"; post[n] = "\\.tgz$"
   }
-  FNR == 1 { code = 0; notes = 0 }
+  FNR == 1 { code = 0; quick = 0 }
   /^[ \t]*(```|~~~)/ { code = !code; next }
   !code && /^#+[ \t]/ {
     match($0, /^#+/)
-    if (notes && RLENGTH <= level) notes = 0
-    if (!notes && $0 ~ /yükseltme[ \t]*$/) { notes = 1; level = RLENGTH }
+    depth = RLENGTH
+    if (quick && depth <= level) quick = 0
+    title = $0
+    sub(/^#+[ \t]+/, "", title)
+    sub(/[ \t]+$/, "", title)
+    if (FILENAME == qfile && title == qheading) { quick = 1; level = depth }
     next
   }
-  notes { next }
   {
     for (i = 1; i <= n; i++) {
       rest = $0
@@ -87,6 +97,7 @@ docs="$(awk -v want="$version" '
         sub(pre[i], "", got)
         if (post[i] != "") sub(post[i], "", got)
         seen[FILENAME]++
+        if (quick) quickseen++
         if (got != want) printf "%s:%d: %s, not %s\n", FILENAME, FNR, cmd, want
       }
     }
@@ -94,6 +105,7 @@ docs="$(awk -v want="$version" '
   END {
     for (i = 1; i < ARGC; i++)
       if (!seen[ARGV[i]]) printf "%s: no command names a version\n", ARGV[i]
+    if (!quickseen) printf "%s: no command in \"%s\" names a version\n", qfile, qheading
   }
 ' "${DOCS[@]}")"
 if [ -n "$docs" ]; then

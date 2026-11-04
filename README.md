@@ -10,39 +10,60 @@ Go + Next.js + SQLite.
 
 Proje planı: [docs/proje-plani.md](docs/proje-plani.md) · Yol haritası ve bilinen sınırlar: [docs/yol-haritasi.md](docs/yol-haritasi.md) · Şirket cluster'ında pilot: [docs/pilot.md](docs/pilot.md)
 
-## Yapı
+## Hızlı başlangıç
+
+Neden Kubeat:
+
+- **Annotation ile kendiliğinden izleme.** Service, Ingress, Route ya da
+  workload'a `kubeat.io/monitor: "true"` konunca monitor kendiliğinden
+  açılır, annotation kalkınca monitor da kalkar.
+- **Her pod'u ayrı yoklama.** `kubeat.io/each-pod: "true"` ile kontrol
+  Service'in arkasındaki her hazır pod'a ayrı gider; Ready görünüp yanıt
+  vermeyen pod adıyla yakalanır.
+- **Workload ve pod bağlamı.** Kesintinin yanında pod'lar, restart'lar,
+  node'lar ve cluster olayları (`BackOff`, `FailedScheduling`…) görünür.
+
+UptimeRobot ve Grafana Cloud Synthetic Monitoring dışarıdan bakar,
+tamamlayıcıdır. Ingress controller'ı ve cert-manager'ı olan bir cluster'a
+kurulum (OpenShift'te "OpenShift" bölümündeki komut):
 
 ```
-backend/        Go API, scheduler, checker, alarm motoru, agent
-frontend/       Next.js (App Router) arayüzü
-deploy/helm/    Helm chart
-docs/adr/       Mimari karar kayıtları
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0 \
+  -n kubeat --create-namespace \
+  --set podSecurityContext.fsGroup=1001 \
+  --set ingress.enabled=true --set ingress.className=<kümenin sınıfı> \
+  --set ingress.host=kubeat.example.com \
+  --set 'ingress.annotations.cert-manager\.io/cluster-issuer=<issuer>'
 ```
 
-## Lokal çalıştırma
+`<kümenin sınıfı>` `kubectl get ingressclass`'ın verdiği ad (GKE'nin kendi
+Ingress'i için bkz. "GKE"), `<issuer>` cert-manager'ın ClusterIssuer'ıdır.
+Arayüz `https://kubeat.example.com`'da açılır; `admin`'in parolası:
 
 ```
-make dev        # ikisi birlikte; arayüz -> http://localhost:3000
-make backend    # API  -> http://localhost:8090
-make frontend   # UI   -> http://localhost:3000
-make test
+kubectl -n kubeat get secret kubeat-admin -o jsonpath='{.data.password}' | base64 -d; echo
 ```
 
-İlk çalıştırmada hesap yoktur; arayüz `/setup` sayfasında ilk yöneticiyi
-oluşturtur (`make dev ADMIN_PASSWORD=...` verilirse backend `admin` hesabını o
-parolayla açar). Veritabanındaki gizli değerleri şifreleyen anahtar ilk
-çalıştırmada `.dev/secret.key` dosyasına bir kez üretilir ve git'e girmez;
-silinirse `backend/uptime.db` de silinmelidir. Arayüz yalnızca bu makineden
-erişilsin diye `127.0.0.1`'de dinler; ağdaki başka bir cihazdan denemek için
-`make dev FRONTEND_HOST=0.0.0.0`.
+Önce **Bildirimler**'de bir Slack kanalı ekleyip **Test gönder** ile deneyin,
+sonra bir Service'i izlemeye alın: sonradan eklenen kanal, ondan önce açılmış
+kesintiyi duymaz.
 
-`make test` chart'ı da sınar (`deploy/helm/test-chart.sh`). `promtool`
-PATH'teyse ya da `PROMTOOL=/yol/promtool` verilirse alarm kurallarını
-`promtool check rules` ile denetler ve senaryolarını
-(`deploy/helm/prometheusrule-test.yaml`) çalıştırır; promtool yoksa bu adımı
-uyarıyla atlar, CI'da ise atlamaz.
+```
+kubectl -n <namespace> annotate service <servis> kubeat.io/monitor=true
+```
+
+Kubeat'in kendisi düşerse cluster dışındaki bir heartbeat alıcısı haber verir:
+
+```
+kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+```
+
+Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum".
 
 ## Cluster'a kurulum
+
+**Desteklenen sürümler:** OpenShift 4.14 ve üstü; gerçek cluster'da doğrulanan OpenShift 4.21 (Kubernetes 1.34).
 
 Her sürüm etiketi (`vX.Y.Z`) imajları `ghcr.io/yusufceng/kubeat-backend`
 ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
@@ -100,293 +121,24 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
   sabitlendiyse `null` ile silmek bile yetmez, pod'lar eski sürümde kalır.
   Eldeki ayarlar `helm get values kubeat -o yaml` ile alınır.
 
-### 0.38'e yükseltme
+**GKE.** Zonal bir cluster'ın tek control plane'i vardır ve control plane
+yükseltilirken cluster API'sine ulaşılamaz. `workload` ve `each_pod`
+monitor'leri durumu bu API'den okuduğundan o sırada yanlış kesinti açıp
+bildirim gönderebilir ([yol haritası, "Bilinen sınırlar"](docs/yol-haritasi.md#bilinen-sınırlar),
+S20 satırı). Regional ve Autopilot (her zaman regional) cluster'larda
+control plane yükseltmede de erişilebilir kalır. Zonal cluster'da GKE'nin
+bakım penceresini tanımlayın (otomatik yükseltmeler çoğunlukla o saatlerde
+yapılır) ve aynı saatlere Kubeat'te bir bakım penceresi koyun (bkz. "Bakım
+pencereleri ve susturma"). GKE acil ve zorunlu yükseltmeleri pencere
+dışında da yapabilir, elle başlatılan yükseltme pencereye bakmaz; kalıcı
+önlem regional bir cluster'dır. GKE'nin kendi Ingress controller'ı
+`ingressClassName`'e bakmaz, `kubernetes.io/ingress.class` annotation'ını
+okur: hızlı başlangıç komutunda `--set ingress.className=…` yerine
+`--set 'ingress.annotations.kubernetes\.io/ingress\.class=gce'` verin.
 
-0.38 güvenliği sıkılaştırır ve bazı varsayılanları değiştirir. 0.37 ya da
-öncesinden yükseltirken:
-
-1. **Önce yedek alın.** Veritabanı şeması 22'ye çıkar. 0.37.0 ve öncesi
-   yükseltilmiş veritabanını açmaz ("database is at version 22, newer than
-   this binary"), `helm rollback` backend'i yeniden başlatma döngüsünde
-   bırakır. Geri dönmek gerekirse yükseltmeden önce alınmış yedeği geri
-   yükleyin (bkz. "Yedekleme ve geri yükleme"); o yedekten sonraki
-   değişiklikler yeniden girilir ve bu sürümün aldığı yedekler eski
-   sürümlere yüklenemez.
-2. **Şifreleme anahtarı zorunlu.** Backend `UPTIME_SECRET_KEY` (ya da
-   `UPTIME_SECRET_KEY_FILE`) olmadan başlamaz; chart anahtarı kendisi
-   üretir. Chart dışı kurulumlar anahtarı vermeli ya da şifrelemeden bilerek
-   `UPTIME_ALLOW_PLAINTEXT_SECRETS=true` ile vazgeçmelidir. Anahtarlı ilk
-   açılış veritabanını sıkıştırır ve büyük bir veritabanında uzun sürer
-   (bkz. "Gizli değerlerin şifrelenmesi").
-3. **Hedef politikası.** Monitor'lar ve bildirim kanalları loopback'e,
-   link-local adreslere ve bulutların metadata servislerine bağlanmaz. Bu
-   aralıkları gerçekten kontrol eden monitor'lar (NodeLocal DNSCache'in
-   `169.254.20.10`'u, Azure DNS'in `168.63.129.16`'sı) için
-   `UPTIME_TARGET_ALLOW_CIDRS` verin (bkz. "Hedef politikası").
-   Yönlendirmeler monitor'un header'larını ve `auth` bilgisini yalnızca aynı
-   sunucuda kaldıklarında taşır; başka bir host'a ya da porta yönlenen ve
-   kimlik bilgisi isteyen monitor'ların hedefini son adrese çevirin.
-4. **Metrikler anahtar ister.** Chart'la kurulan backend'in `/metrics`'i
-   bearer token ister. ServiceMonitor onu gönderir; elle yapılandırılmış bir
-   Prometheus da göndermeli ya da `metrics.auth.enabled=false` verilmelidir
-   (bkz. "Metrik anahtarı").
-5. **Ingress TLS ile sunulur.** Ingress'i düz HTTP ile kullanan kurulumlar
-   TLS Secret'ını oluşturmalı ya da `ingress.tls.enabled=false`
-   vermelidir; SSO ise Ingress controller'ın önünde HTTPS ister (bkz.
-   "Dışarıya açma: Route ve Ingress").
-6. **Herkes bir kez yeniden girer.** HTTPS ile sunulan kurulumlarda oturum
-   çerezinin adı `__Host-kubeat_session` oldu.
-7. **SSO dönüş adresi.** `publicURL` Route ya da Ingress host'undan
-   farklıysa dönüş adresi `<publicURL>/auth/callback` olur: yükseltmeden
-   önce kimlik sağlayıcıya kaydedin ya da eskisini `oidc.redirectURL` ile
-   sabitleyin. 0.37.0'a kadar SSO Route ya da Ingress host'unu kullanıyordu;
-   yolu olan bir `publicURL`'de (`https://portal.example.com/kubeat`)
-   `oidc.redirectURL=https://<route ya da ingress host'u>/auth/callback`
-   verin. Backend'in reddedeceği bir dönüş adresiyle chart kurulmaz ve
-   hangi değerin düzeltileceğini söyler.
-8. **Push token'larını yenileyin.** Önceki sürümler push monitor'larının
-   rapor adreslerini izleyicilere de gösteriyordu. İzleyicilerin rapor
-   gönderememesi gereken monitor'larda token'ı monitor sayfasındaki
-   **Adresi yenile** düğmesiyle (`POST /api/v1/monitors/{id}/push-token`)
-   yenileyin ve job'lara yeni adresi verin.
-9. **Thanos'un 9091 portu.** Cluster çapındaki keşifle 9091'i kullanan
-   kurulumlar `prometheus.openshiftMonitoringView=true` vermelidir; yoksa
-   pod'ların CPU ve bellek değerleri boş kalır (bkz. "Pod'lar ve kaynak
-   kullanımı").
-10. **`backend.env` ve `frontend.env` okunmaz.** Boş değillerse chart
-    kurulmaz: ayarları `extraEnv`'e taşıyın. `--reuse-values` eski değeri
-    geri getirir; `--reset-then-reuse-values` (Helm 3.14+) ile
-    `--set backend.env=null --set backend.extraEnv.<AD>=<değer>` verin ya
-    da ayarları taşınmış bir values dosyasıyla `--reuse-values` olmadan
-    yükseltin.
-
-Gerisi bir şey yapmayı gerektirmez: izleyiciler HTTP monitor'larının istek
-gövdesini görmez; ters çevrilmiş monitor'lar politikanın reddini beklenen
-hata saymaz; kullanılamayan bir SSO ayarı backend'i durdurmaz, yalnızca
-SSO'yu kapatır; `helm upgrade --reuse-values` 0.37.0'dan da çalışır.
-
-### 0.40'a yükseltme
-
-0.40 veritabanı şemasını 26'ya çıkarır (durum sayfası bölümleri, kuralları,
-güncellemeleri ve ayarları; kanal gecikme ve tekrarı; yavaş yanıt eşiği).
-Yükseltmeden önce yedek alın: 0.39 ve öncesi yükseltilmiş veritabanını
-açmaz. Başka bir şey yapmak gerekmez; mevcut durum sayfaları tek bir adsız
-bölümle, kanallar gecikmesiz ve genel hatırlatma aralığıyla, monitor'lar
-yavaş yanıt eşiği kapalı olarak sürer.
-
-### 0.41'e yükseltme
-
-0.41 monitor'ların başka sistemlere yük bindirmesine karşı sınırlar getirir
-(bkz. "Hedef yükü"). Şema değişmez. Yükseltince:
-
-- Cluster dışındaki bir hedefi 30 saniyeden sık kontrol eden mevcut
-  monitor'lar **çalışmaya devam eder** ve hedefi, aralığı ve tekrar aralığı
-  değişmedikçe **düzenlenebilir**: adını, etiketlerini, açıklamasını
-  değiştirmek, duraklatıp sürdürmek, formu olduğu gibi kaydetmek çalışır.
-  Hedefi (yolu bile), aralığı ya da tekrar aralığını değiştiren bir
-  `PATCH` ise yeni kurala tabidir ve 30 saniyenin altında
-  `interval_seconds must be at least 30 for a target outside the cluster`
-  ile reddedilir. Böyle bir monitor **olduğu gibi kopyalanamaz**: kopya yeni
-  bir monitor'dur ve aynı hatayla reddedilir; önce aralığı 30 saniyeye (ya
-  da üstüne) çekin ya da `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL` ile sınırı
-  kurulumunuza göre ayarlayın (`0` ayrı kuralı kaldırır). Şirket ağındaki
-  ama cluster dışındaki hedefler de "dış" sayılır; cluster içi adlar
-  (`*.svc`, özel IP'ler) etkilenmez. Annotation ile yönetilen monitor'lar da
-  bu kurala tabidir: 30 saniyeden kısa `kubeat.io/interval` taşıyan dış bir
-  Ingress ya da Route için **yeni** monitor oluşturulmaz, keşif durumunda
-  nedeniyle atlanmış görünür. Yükseltmeden önce oluşturulmuş böyle bir
-  monitor ise **silinmez**: geçmişiyle birlikte, aralığına dokunulmadan
-  çalışmaya devam eder ve atlananlar listesinde "the monitor made before
-  the rule is kept at 10s" notuyla görünür; annotation kaldırılınca her
-  zamanki gibi kaldırılır. `UPTIME_DISCOVERY_DEFAULT_INTERVAL` 30 saniyenin
-  altındaysa aynısı geçerlidir: kendi aralığı olmayan mevcut dış Ingress ve
-  Route monitor'ları kalır, yenileri atlanır ve sunucu açılışta bunu
-  uyararak söyler.
-- Bir dış host adına 60'tan, bir cluster içi host adına 600'den ya da bir IP
-  adresine (hangi adla ulaşılırsa ulaşılsın) 600'den çok kontrol/dakika
-  düşen kurulumlarda bazı kontroller ertelenir; monitor sayfasında "Hedef hız
-  sınırında bekliyor" notu ve `kubeat_target_throttled_total` metriği bunu
-  gösterir. Tek bir ingress ya da router adresinin arkasındaki yüzlerce host
-  için bkz. "Hedef yükü"ndeki paylaşılan adres paragrafı. Gerçekten
-  gerekiyorsa `UPTIME_TARGET_MAX_RATE` / `UPTIME_CLUSTER_TARGET_MAX_RATE` /
-  `UPTIME_TARGET_ADDRESS_MAX_RATE` değerlerini yükseltin.
-- Mevcut monitor sayısı kotaların üstündeyse (1000 toplam, 200 namespace
-  başına; 5 dış host başına) hiçbir şey durmaz, yalnızca yeni monitor
-  oluşturulamaz ve dolu bir namespace'e monitor taşınamaz; annotation ile
-  yönetilen monitor'lar da kotaya ve host sınırına tabidir (sığmayanlar
-  keşif durumunda atlanmış görünür). Kotayı `UPTIME_MAX_MONITORS*` ile
-  yükseltin ya da `0` yapın.
-- Monitor'ları toplu oluşturan betikler son altmış saniyede 30'dan sonra 429
-  alır; `Retry-After` başlığına uyun ya da `UPTIME_MONITOR_CREATE_PER_MINUTE`'i
-  yükseltin.
-- Sayıdan ibaret host'lar (`http://2130706433/`, `0x7f000001`, `127.1`)
-  artık reddedilir; adresi adres olarak yazın.
-- Kontrollerin `User-Agent`'ı `kubeat/<sürüm> (+https://github.com/yusufceng/Kubeat; <UPTIME_PUBLIC_URL>)`
-  oldu; eskisine göre süzen bir WAF kuralı varsa güncelleyin ya da
-  `UPTIME_USER_AGENT` verin.
-
-### 0.42'ye yükseltme
-
-0.42 Kubeat Enterprise lisansını getirir (bkz. "Kubeat Enterprise
-lisansı"). Şema değişmez. Aşağıdakilerden birini kullanıyorsanız
-**yükseltmeden önce** lisansı Secret olarak verin
-(`license.existingSecret`); vermezseniz yükseltme yine çalışır ama:
-
-- LDAP ve OIDC ile giriş kapanır; yalnızca yerel hesaplar girebilir.
-- Namespace'le sınırlı kullanıcılar ve dizin grupları **sınırlı kalır**;
-  yeni bir sınır konamaz, mevcut sınır daraltılabilir ya da kaldırılabilir
-  ama genişletilemez.
-- Denetim kaydı görünmez; yazılmaya devam eder.
-- Birden fazla durum sayfası varsa hepsi yayında kalır ve düzenlenebilir,
-  yalnızca yenisi oluşturulamaz.
-
-İzleme, alarmlar ve bildirimler lisanstan etkilenmez.
-
-### 0.43'e yükseltme
-
-0.43 bildirim teslimatını, yedeklemeyi ve aracın kendi alarmlarını
-değiştirir; şema değişmez ve yükseltme sırasında yapılacak bir şey yoktur.
-Varsayılan davranış üç yerde değişir:
-
-- **Bildirim yeniden denenir.** Kanalın almadığı kesinti bildirimi olay
-  kapanana kadar artan aralıkla (1, 2, 4… dk; en çok
-  `UPTIME_NOTIFY_RETRY_MAX`, varsayılan 15 dk) yeniden gönderilir; düzelme
-  bildirimi ilk başarısız denemeden itibaren `UPTIME_NOTIFY_RETRY_FOR`
-  (varsayılan 1 sa) boyunca. Yeniden başlatmada bekleyen kesinti bildirimleri
-  bildirim kaydından toparlanır. Eski davranış (tek deneme) için
-  `UPTIME_NOTIFY_RETRY_MAX=0`. Kanallar artık birbirini bekletmez: yanıt
-  vermeyen bir webhook Slack'i ya da e-postayı geciktirmez (bkz. "Alarm").
-- **Yedek silme sırası.** Eski kopyalar yeni kopya yazılmadan önce `keep-1`'e
-  indirilir; volume yine de doluysa en eski kopya silinip yazım bir kez
-  yinelenir. `keep ≥ 2` ile son kopya hiç silinmez, `keep=1` ile tek kopya
-  gidebilir; dolu kalan volume bir aralık sonra yeniden denenir (bkz.
-  "Yedekleme ve geri yükleme").
-- **Yeni alarmlar ve metrik.** `metrics.prometheusRule.enabled` ile
-  `kubeat.self` grubuna `KubeatResultsDropped`, `KubeatNotificationsFailing`,
-  `KubeatWorkersSaturated`, `KubeatBackupFailing`, `KubeatBackupStale` ve
-  `KubeatLicenseExpiring` (warning ve critical) gelir; Alertmanager
-  yönlendirme ve susturma kurallarınıza ekleyin. `kubeat_notifications_total`
-  artık bildirimin son sonucunu sayar; denemeler yeni
-  `kubeat_notification_attempts_total` metriğindedir (bkz. "Aracın kendi
-  sağlığı").
-
-### 0.44'e yükseltme
-
-0.44 Kubeat'in kendi arızalarını sessiz bırakmaz ve kayıp yaratmaz. Şema
-değişmez; 0.43.0'a `helm rollback` ile dönülebilir. Varsayılan davranış şu
-yerlerde değişir:
-
-- **Kaldırmada PVC'ler kalır.** `helm uninstall`, Argo CD 2.7 ve sonrasında
-  uygulamayı silmek de, veri ve yedek PVC'lerini bırakır; eski davranış için
-  `backend.persistence.keepOnUninstall=false` ve
-  `backup.persistence.keepOnUninstall=false`. 0.43'ten gelirken yedeği
-  kapatmayı (`backup.enabled=false`) ya da `existingClaim`'e geçişi
-  yükseltmeyle aynı adımda yapmayın: Helm canlı nesneye baktığından 0.43'ün
-  yedek PVC'si o adımda yine silinir. Önce aynı values ile 0.44'e yükseltin
-  (bkz. "GitOps ile kurulum" ve "Yedekleme ve geri yükleme").
-- **Öz-sağlık alarmları sorun sürdükçe açık kalır.** `KubeatDown` backend
-  pod'u hiç yokken de yanar; `up{job="<release>-backend",
-  namespace="<namespace>"}` serisine bakar, ServiceMonitor kapalıyken bu
-  etiketlerle toplayan başka bir scrape yoksa sürekli yanar.
-  `KubeatMonitorDown` ve `KubeatCertificateExpiring` 10 dakikaya kadar süren
-  scrape boşluğunda açık kalır; `KubeatBackupFailing` yeni
-  `kubeat_backup_last_failure_timestamp_seconds` metriğine bakar ve bir kopya
-  başarılı olana kadar açık kalır. Bu dört alarmın etiketleri değiştiği için
-  yükseltmede (ve 0.43'e dönüşte) açık olanlar bir kez "resolved" olur ve yeni
-  etiketlerle yeniden yanar. Kubeat 10 dakikadan uzun düşükken alarmların
-  "resolved" gitmemesi için alarmları alan Alertmanager'a `KubeatDown`
-  susturma kuralını ekleyin (bkz. "Aracın kendi sağlığı").
-- **Heartbeat yazılamayan sonuçta kesilir.** `UPTIME_HEARTBEAT_URL` açıksa
-  heartbeat, kontrol sonuçları veritabanına yazılamazken de kesilir;
-  yükseltme anında veri volume'u zaten doluysa dış switch hemen alarm verir.
-  Reddedilen toplu yazım artık satır başına `check result dropped` yerine
-  yazım başına tek `batch insert failed` satırı loglar; bu satıra bakan log
-  alarmlarını taşıyın. Veri PVC'sinin boyut kuralı "Geçmiş verisi"nde.
-- **Bildirim yeniden başlatmada ve ölü makine kanalında kaybolmaz.**
-  Yeniden başlatmada kuyrukta ya da grup beklemesinde kalmış açık
-  kesintiler, kesintiden önce var olan kanallara gönderilir. Bildirim
-  kaydında hiç denemesi olmayan açık kesintiler de her yeniden başlatmada,
-  kesintiden önce var olan ve onu kapsayan kanallara gider; 0.44'ün ilk
-  açılışında bu, 0.43'te kuyrukta kaybolmuş ya da kanal kapalı veya kapsam
-  dışıyken açılmış kesintileri de kapsar. Yükseltmeden önce açık kesintilere
-  bakın. Bildirim almayan
-  bir webhook ya da PagerDuty kanalına yeni bildirim denenmez, kanalın
-  yeniden deneme zamanında gider; bir bildirimi sürekli reddeden (ör. 409)
-  kanalda diğer bildirimler en çok `UPTIME_NOTIFY_RETRY_MAX` (bir bildirimin
-  ilk reddedildiği geçişte bir geçiş daha) gecikir ve bu sürede aynı monitor
-  için bekleyen hatırlatmanın ve yavaşlık bildiriminin yerini yenisi alır.
-  Kapanışta insan kanallarının bekleyen grupları kuyruktan önce gider ve
-  kapanış `UPTIME_SHUTDOWN_TIMEOUT` ile sınırlıdır; yeni chart değeri
-  `backend.terminationGracePeriodSeconds` (varsayılan 30) bu süreden en az 5
-  sn uzun tutulmalıdır (bkz. "Alarm").
-
-0.42'den doğrudan geçiyorsanız "0.43'e yükseltme"yi de okuyun. Özellikle
-`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`
-15 dakikayı aşan özel bir bildirim ayarınız varsa backend açılmaz:
-`UPTIME_NOTIFY_RETRY_MAX`'ı bu süreden uzun verin, kısaltın ya da `0` ile
-yeniden denemeyi kapatın. Birden çok kurulumu aynı PagerDuty servisine
-bağlamayın: olay numaraları her kurulumda 1'den başlar, iki kurulumun aynı
-numaralı olayları tek alarmda birleşir ve birinin düzelmesi ötekini de
-kapatır. Her kuruluma ayrı bir servis verin.
-
-### 0.45'e yükseltme
-
-0.45 ilk imzalı sürümdür; bildirim teslimatında hata sınıflarını ayırır ve
-Kubeat'in körleşmesini dış heartbeat olmadan da duyurur. Şema değişmez (26);
-0.44.0'a `helm rollback` ile dönülebilir. Varsayılan davranış şu yerlerde
-değişir:
-
-- **İmzalı yayım, `latest` yok.** İmajlar ve chart cosign ile imzalı
-  yayımlanır, imajlar SBOM ve provenance taşır ve her sürümün GitHub
-  Release'i digest'leri ve SBOM'ları yazar (bkz. "Tedarik zinciri").
-  `latest` etiketi artık itilmez ve 0.44.0'da kalır: onu kullanan bir sürüm
-  etiketine ya da digest'e geçmeli.
-- **Reddeden makine kanalı duraklamaz.** Webhook ya da PagerDuty kanalı bir
-  bildirimi 429, 407 ve 408 dışında bir 4xx ile reddederse kanal artık
-  duraklamaz, aynı kanaldaki öteki bildirimler beklemeden gider. Reddedilen
-  bildirim kısa tekrar almaz ve 1, 2, 4… dk yerine doğrudan
-  `UPTIME_NOTIFY_RETRY_MAX` (varsayılan 15 dk) sonra yeniden denenir; geçici
-  bir 4xx (alıcı yeniden yayımlanırken 404, token yenilenirken 401) sayfayı
-  bu kadar geciktirebilir. Her şeyi reddeden bir makine kanalı bekleyen her
-  bildirim için bu aralıkla bir istek alır. 429'da ve `Retry-After`'lı 503'te
-  kısa tekrar yapılmaz, `Retry-After`'a uyulur.
-- **`KubeatNotificationsFailing` kanal başına.** Alarm `channel` ve
-  `channel_type` etiketleriyle ve `for: 5m` ile yanar; kanalın son denemesine
-  bakar ve kanal bir bildirimi alana ya da başarılı bir testten geçene kadar
-  açık kalır, 0.44'teki gibi 15 dakikada kendiliğinden sönmez. Kanal hâlâ
-  teslim edilmemiş bir açık kesinti taşıyorsa başarılı test alarmı söndürmez;
-  alarm kesinti teslim edilene ya da kapanana kadar açık kalır. Yükseltmeden 5
-  dakika sonra son denemesi başarısız kalmış her etkin kanal için yanar
-  (eski bir kanal testi dahil): yükseltmeden önce ya da sonra Bildirimler
-  sayfasında **Son gönderim**'i hatalı kanalları test edin ya da kapatın.
-  Kuyrukta düşen bildirim aynı adla, kanalsız ve 5 dakika sonra yanar;
-  `KubeatMetricsIncomplete` kanallar okunamadığında da yanar. Bu alarma bağlı
-  Alertmanager yönlendirmeleri ve susturmaları ile README'deki `KubeatDown`
-  susturma kuralı güncellenmelidir; `/metrics` artık kanal adlarını da verir.
-- **Körleşme heartbeat olmadan da duyulur.** Yeni critical alarm
-  `KubeatUnhealthy`, `kubeat_self_healthy` 5 dakika 0 kalınca yanar:
-  scheduler ilerlemiyor, kontrol sonuçlarının hiçbiri yazılamıyor ya da bir
-  yazım takıldı. Nedeni, karar değişince backend'in bir kez yazdığı
-  `self-health failing` log satırındadır. Scheduler durunca
-  `KubeatSchedulerStalled` ile birlikte yanar; tek sayfa isteyen "Aracın
-  kendi sağlığı"ndaki isteğe bağlı susturma kuralını ekler.
-- **Bildirim kuyruğu 1000.** `UPTIME_NOTIFY_QUEUE_SIZE` varsayılanı 100'den
-  1000'e çıktı; etkin monitor sayısı kuyruğu aşınca backend bir kez WARN
-  loglar. İsteğe bağlı `metrics.prometheusRule.clusterLabel` boşken kurallar
-  0.44'teki gibi kalır.
-- **Kurulum notlarında fsGroup uyarısı.** OpenShift dışında
-  `podSecurityContext`'i boş kurulumların `helm upgrade` notlarında yeni bir
-  fsGroup uyarısı çıkar. Render edilen manifest aynıdır; backend bugün
-  volume'a yazabiliyorsa uyarı yok sayılabilir. Yeni kurulumlar README
-  komutundaki `--set podSecurityContext.fsGroup=1001` ile yapılır; OpenShift'te
-  bu satır atlanır, UID ve fsGroup'u SCC atar.
-
-Geri dönüş: şema 26, `helm rollback` ile 0.44.0. Dönüşte
-`KubeatNotificationsFailing` eski ifadesine ve etiketlerine döner, yani
-yönlendirmeler yine güncellenir; `KubeatUnhealthy` ve yeni metrikler kalkar,
-`metrics.prometheusRule.clusterLabel` yok sayılır, açıkça verilmemişse kuyruk
-varsayılanı 100'e döner. Yayımlanmış imzalar kalır. 0.42 ya da 0.43'ten
-doğrudan geçiyorsanız "0.44'e yükseltme"yi ve öncesini de okuyun.
+**Yükseltme.** Sürümden sürüme yapılacaklar, davranış değişiklikleri, geri
+dönüş, alarm kurallarının değişip değişmediği, atlamalı yol ve yükseltmeden
+önce yedek: [docs/yukseltme.md](docs/yukseltme.md).
 
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
@@ -412,6 +164,47 @@ göstermez.
 Bu yüzden GitOps ile kurarken dört Secret'ı kendiniz oluşturun (Sealed
 Secrets, External Secrets Operator, ...) ve adlarını yukarıdaki
 `existingSecret` değerleriyle verin; chart o zaman bunları üretmez.
+
+**Kurulum notları görünmez.** `helm install` ve `helm upgrade`'in sonunda
+yazılan kurulum notları (chart'ın `NOTES.txt`'i) Argo CD'de ve OpenShift
+GitOps'ta hiç görünmez: Argo CD chart'ı yalnızca manifest üretmek için
+kullanır. Terraform'un `helm_release`'i de onları apply çıktısında
+göstermez (sağlayıcı 2.14.0'dan beri `metadata` içindeki `notes`'ta tutar,
+bir `output` ile okunur). Notların uyarıları ve her birini kapatan değer:
+
+| Uyarı | Ne zaman | Kapatan değer |
+| --- | --- | --- |
+| fsGroup | OpenShift dışında `podSecurityContext` boş: backend volume'lara yazamayabilir, açılışta `open database failed` ile durur | `podSecurityContext.fsGroup: 1001` (OpenShift'te boş kalır, SCC atar) |
+| Heartbeat ve kurallar | İkisi de kapalı: Kubeat'in kendi arızasını kimse duymaz | `heartbeat.urlSecret.name` (Secret'ın `url` anahtarı; bkz. "Aracın kendi sağlığı") ya da `metrics.prometheusRule.enabled: true` |
+| Yedek | `backup.enabled: false` (varsayılan): veri volume'u giderse monitor'lar, kanallar ve geçmiş de gider | `backup.enabled: true`; volume'u Velero ya da OADP ile yedekliyorsanız gerekmez |
+| Thanos 9091 | `prometheus.url` 9091'de ve keşif cluster çapında: pod'ların CPU ve belleği boş kalır | `prometheus.openshiftMonitoringView: true` |
+| Prometheus sertifikası denetlenmiyor | `prometheus.tokenFile` ile birlikte `prometheus.insecureSkipVerify: true`: token'ı o adreste yanıt veren alır | `prometheus.insecureSkipVerify: false` ve `prometheus.caFile` |
+| Ingress TLS | TLS Secret'ı yok (düz HTTP'de kimse giriş yapamaz) ya da Ingress TLS'siz (parolalar düz metin gider) | Secret'ı oluşturun ya da cert-manager'a oluşturtun (`ingress.annotations`); TLS Ingress'in önünde bitiyorsa `ingress.tls.enabled: false` ve `https://` ile `publicURL` |
+
+Notlar ayrıca LDAP ya da OIDC için lisansı (`license.existingSecret`),
+SSO'nun dönüş adresini (`publicURL` ya da `oidc.redirectURL`) ve elle
+yapılandırılmış bir Prometheus'un metrik anahtarını (bkz. "Metrik
+anahtarı") hatırlatır. OpenShift dışındaki bir GitOps values dosyası,
+yukarıdaki dört Secret'la birlikte:
+
+```yaml
+podSecurityContext:
+  fsGroup: 1001              # OpenShift'te bu blok yazılmaz
+secretKey:
+  existingSecret: kubeat-secret-key
+auth:
+  existingSecret: kubeat-admin
+apiToken:
+  existingSecret: kubeat-api-token
+metrics:
+  auth:
+    existingSecret: kubeat-metrics-token
+heartbeat:
+  urlSecret:
+    name: kubeat-heartbeat   # url anahtarlı Secret; ya da metrics.prometheusRule.enabled: true
+backup:
+  enabled: true
+```
 
 Uygulamayı silmek, Argo CD 2.7 ve sonrasında cascade silme de, veri ve
 yedek PVC'lerini bırakır: chart onlara Helm'in `helm.sh/resource-policy: keep`
@@ -498,6 +291,38 @@ Benzetimi kaldırmak: `helm --kube-context minikube -n kubeat-ocp uninstall
 kubeat`; CRD'ler, `openshift-monitoring` namespace'i ve `kubeat-ocp`'deki veri
 ve yedek PVC'leri kalır (`kubectl --context minikube -n kubeat-ocp delete pvc
 kubeat-data kubeat-backup`).
+
+## Yapı
+
+```
+backend/        Go API, scheduler, checker, alarm motoru, agent
+frontend/       Next.js (App Router) arayüzü
+deploy/helm/    Helm chart
+docs/adr/       Mimari karar kayıtları
+```
+
+## Lokal çalıştırma
+
+```
+make dev        # ikisi birlikte; arayüz -> http://localhost:3000
+make backend    # API  -> http://localhost:8090
+make frontend   # UI   -> http://localhost:3000
+make test
+```
+
+İlk çalıştırmada hesap yoktur; arayüz `/setup` sayfasında ilk yöneticiyi
+oluşturtur (`make dev ADMIN_PASSWORD=...` verilirse backend `admin` hesabını o
+parolayla açar). Veritabanındaki gizli değerleri şifreleyen anahtar ilk
+çalıştırmada `.dev/secret.key` dosyasına bir kez üretilir ve git'e girmez;
+silinirse `backend/uptime.db` de silinmelidir. Arayüz yalnızca bu makineden
+erişilsin diye `127.0.0.1`'de dinler; ağdaki başka bir cihazdan denemek için
+`make dev FRONTEND_HOST=0.0.0.0`.
+
+`make test` chart'ı da sınar (`deploy/helm/test-chart.sh`). `promtool`
+PATH'teyse ya da `PROMTOOL=/yol/promtool` verilirse alarm kurallarını
+`promtool check rules` ile denetler ve senaryolarını
+(`deploy/helm/prometheusrule-test.yaml`) çalıştırır; promtool yoksa bu adımı
+uyarıyla atlar, CI'da ise atlamaz.
 
 ## Güvenlik
 
@@ -1285,7 +1110,9 @@ kubectl -n kubeat get secret kubeat-metrics-token -o jsonpath='{.data.token}' | 
 ### Dışarıya açma: Route ve Ingress
 
 Girişte parola (LDAP'ta dizin parolası), sonra her istekte oturum çerezi
-gider; arayüz HTTPS ile sunulmalıdır.
+gider; arayüz HTTPS ile sunulmalıdır. Route ve Ingress yalnızca arayüzü
+açar; API Route'tan ya da Ingress'ten bilerek açılmaz, betikler ona backend
+Service'inden ulaşır (bkz. "API").
 
 - **Route** (`route.enabled=true`) edge TLS ile sunar ve düz HTTP'yi
   HTTPS'e yönlendirir. `route.annotations` router ayarlarını taşır:
@@ -1756,6 +1583,35 @@ aç" ile yeniden istenir. Hareket azaltma isteyen ziyaretçi için hiçbir şey
 canlanmaz.
 
 ## API
+
+API Route'tan ya da Ingress'ten geçmez: ikisi yalnızca arayüze gider, API
+backend Service'indedir (`<release>-backend`, port 8080). Cluster dışından
+port-forward ve API anahtarıyla erişilir:
+
+```
+kubectl -n <namespace> port-forward svc/<release>-backend 8090:8080 &
+TOKEN=$(kubectl -n <namespace> get secret <release>-api-token -o jsonpath='{.data.token}' | base64 -d)
+curl -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors
+```
+
+- **Anahtar.** Chart onu `<release>-api-token` Secret'ında (`token`
+  anahtarı) üretir; `apiToken.existingSecret` verildiyse o Secret'tadır
+  (bkz. "GitOps ile kurulum"). Yönetici yetkisiyle çalışır (bkz. "Hesaplar
+  ve giriş", API anahtarı).
+- **CI'dan.** İki yol var. CI işi cluster'a kendi kimliğiyle (kubeconfig'teki
+  bir servis hesabı ya da bulutun OIDC federasyonu) bağlanıp yukarıdaki gibi
+  port-forward açar; kimliğin namespace'te Service ve pod okuma ile
+  `pods/portforward` izni olmalıdır, anahtarı CI'ın gizli değişkenlerinde
+  tutun. Ya da iş cluster içinde bir Job olarak çalışır ve
+  `http://<release>-backend.<namespace>.svc:8080` adresine gider.
+- **NetworkPolicy.** `networkPolicy.enabled=true` iken backend'e yalnızca
+  arayüz, Prometheus ve `networkPolicy.backendIngressFrom`'da sayılanlar
+  bağlanır: API'yi çağıran Job'un namespace'ini oraya ekleyin (bkz.
+  "Güvenlik", Ağ erişimi).
+- Pilotta haftalık ölçümün API'den nasıl toplandığı:
+  [docs/pilot.md "Pilot boyunca"](docs/pilot.md#pilot-boyunca). Yükseltmeden önceki
+  denetimlerin betikleri yükseltme notlarındadır (bkz. "Cluster'a
+  kurulum", Yükseltme).
 
 `UPTIME_API_TOKEN` ayarlıysa örneklere `-H "Authorization: Bearer $TOKEN"`
 eklenmelidir.
@@ -2653,6 +2509,15 @@ böyle bir kurulumda heartbeat aralığını en kısa kontrol aralığından kı
 tutmayın. Bu servisin izlenen cluster'ın dışında olması gerekir, yoksa ikisi
 birlikte düşer.
 
+Chart'la kurulumda adres bir Secret'tan okunur (`heartbeat.urlSecret`,
+anahtarı `url`; aralığı `heartbeat.interval`); hızlı başlangıçtaki iki
+satır:
+
+```
+kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+```
+
 ### Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`
 
 Heartbeat'in kararı backend'in metriklerinde de yayınlanır. Dış alıcı
@@ -3069,11 +2934,13 @@ büyümez. Bellek bedeli ölçüldü: kuyruk açılışta yer başına ≈ 1 KB 
 metinleriyle birlikte ≈ 1,7 MiB tutar; varsayılan 256Mi bellek limitinin
 %1'inden az.
 
+### Bildirim teslimatı
+
 Teslim edilemeyen kesinti bildirimi kaybolmaz. Kanala yapılan her
 denemenin sonucu aşağıdaki dört sınıftan birine düşer ve motor sonraki
 adımı ona göre seçer.
 
-**Hata sınıfları.**
+#### Hata sınıfları
 
 | Sınıf | Yanıt | Kısa tekrar | Yeniden deneme | Makine kanalı (`webhook`, `pagerduty`) |
 | --- | --- | --- | --- | --- |
@@ -3140,7 +3007,9 @@ adımı ona göre seçer.
     düşer); hangi kanal olduğunu `KubeatNotificationsFailing` söyler (bkz.
     "Aracın kendi sağlığı").
 
-**Geçiş.** Bir kanal bir geçişte bir bildirime ulaşılamazsa, o geçişte ona
+#### Geçiş
+
+Bir kanal bir geçişte bir bildirime ulaşılamazsa, o geçişte ona
 yeniden gönderilecek diğer bildirimler denenmez ve beklemeleri ikiye
 katlanır: kapalı bir kanal her geçişte en çok bir denemenin süresi kadar
 tutar, bildirim başına değil. Meşgul bir makine kanalında da geçiş durur;
@@ -3148,7 +3017,9 @@ bekletilenler kanalın söylediği ana kayar, beklemeleri katlanmaz.
 Reddedilen bildirim geçişi durdurmaz: insanların okuduğu bir kanalın
 sürekli reddettiği mesaj, o kanalın öteki yeniden denemelerini bekletmez.
 
-**Almıyor sayılan makine kanalı.** Yazılımın okuduğu bir kanala
+#### Almıyor sayılan makine kanalı
+
+Yazılımın okuduğu bir kanala
 (`webhook`, `pagerduty`) ulaşılamazsa ya da kanal meşgulse, yeniden
 denemesinin zamanına kadar **almıyor** sayılır: bu sürede gelen yeni
 bildirimler ona denenmez, yeniden deneme listesine yazılır ve kanalın
@@ -3185,33 +3056,48 @@ sıradaki yeniden deneme geçişinde, bekleyenlerle birlikte gider.
   `UPTIME_NOTIFY_GROUP_WAIT=0` ile her bildirim ayrı denenir ve yanıt
   vermeyen bir insan kanalı patlamada kuyruğu yine yavaşlatır.
 
-Her deneme bildirim kaydına yazılır ve `kubeat_notification_attempts_total`
-sayacını artırır (denenmeden bekletilen bildirim yazılmaz ve sayılmaz);
-`kubeat_notifications_total` bildirimi bir kez, son sonucuyla sayar (kanal
-alınca `sent`, denemeler bitince `failed`). Chart'ın `KubeatNotificationsFailing`
-alarmı kanal başınadır: kanalın son denemesi başarısızsa ya da kanalın
-almadığı bir kesinti yeniden gönderilmeyi bekliyorsa 5 dakika sonra kanalın
-adıyla yanar, motorun vazgeçmesini beklemez ve denemeler
-`UPTIME_NOTIFY_RETRY_MAX` aralığına seyrekleşse de sönmez (bkz. "Aracın
-kendi sağlığı"). Kanal satırındaki **Son gönderim** son denemeyi gösterir:
-başarısız deneme orada hatasıyla görünür, kanal alınca yerini başarılı
-gönderim alır. Test, hatırlatma, sertifika ve yavaşlık bildirimleri yeniden
-denenmez (alıcı meşgulse bir kez daha gider): testin sonucu kanal
-satırında görünür, sonraki hatırlatma kendi aralığında gelir. Deneme
-listesi bellektedir: backend yeniden başlayınca açık kesintilerin hangi kanallara
-teslim edilemediğine bildirim kaydından bakılır ve o kanallara hemen
-yeniden gönderilir. Kayıtta hiç denemesi olmayan açık kesinti de gönderilir:
-yeniden başlatma onu kuyrukta, grup beklemesinde ya da almıyor sayılan bir
-kanalın listesinde yakalamıştır. Gecikmesiz kanallara hemen gider (gecikmeli
-kanallar için bkz. "Gecikme ve tekrar"), insanların okuduğu kanala aynı
-namespace'in kesintileri tek mesajda; kanal almazsa her zamanki gibi
-yeniden denenir. Kaydı `UPTIME_DELIVERY_RETENTION` (varsayılan 1 yıl) ile
-silinmiş, bu süreden uzun süren açık bir kesinti de yeniden başlatmada bir
-kez daha gönderilir. Kesintiden sonra oluşturulan kanal eski kesintiyi
-almaz; kesinti açıldığında onu duymayan eski bir kanal ise (o sırada
-kapalıydı ya da kapsamı veya olay seçimi sonradan genişledi) yeniden
-başlatmada onu alabilir. Bekleyen bir düzelme bildirimi yeniden başlatmayla
-düşer. `UPTIME_NOTIFY_RETRY_MAX=0` yeniden denemeyi ve almıyor saymayı
+#### Kayıt ve metrikler
+
+- Her deneme bildirim kaydına yazılır ve
+  `kubeat_notification_attempts_total` sayacını artırır (denenmeden
+  bekletilen bildirim yazılmaz ve sayılmaz); `kubeat_notifications_total`
+  bildirimi bir kez, son sonucuyla sayar (kanal alınca `sent`, denemeler
+  bitince `failed`).
+- Chart'ın `KubeatNotificationsFailing` alarmı kanal başınadır: kanalın son
+  denemesi başarısızsa ya da kanalın almadığı bir kesinti yeniden
+  gönderilmeyi bekliyorsa 5 dakika sonra kanalın adıyla yanar, motorun
+  vazgeçmesini beklemez ve denemeler `UPTIME_NOTIFY_RETRY_MAX` aralığına
+  seyrekleşse de sönmez (bkz. "Aracın kendi sağlığı").
+- Kanal satırındaki **Son gönderim** son denemeyi gösterir: başarısız
+  deneme orada hatasıyla görünür, kanal alınca yerini başarılı gönderim
+  alır.
+- Test, hatırlatma, sertifika ve yavaşlık bildirimleri yeniden denenmez
+  (alıcı meşgulse bir kez daha gider): testin sonucu kanal satırında
+  görünür, sonraki hatırlatma kendi aralığında gelir.
+
+#### Yeniden başlatma
+
+- Deneme listesi bellektedir: backend yeniden başlayınca açık kesintilerin
+  hangi kanallara teslim edilemediğine bildirim kaydından bakılır ve o
+  kanallara hemen yeniden gönderilir.
+- Kayıtta hiç denemesi olmayan açık kesinti de gönderilir: yeniden
+  başlatma onu kuyrukta, grup beklemesinde ya da almıyor sayılan bir
+  kanalın listesinde yakalamıştır. Gecikmesiz kanallara hemen gider
+  (gecikmeli kanallar için bkz. "Gecikme ve tekrar"), insanların okuduğu
+  kanala aynı namespace'in kesintileri tek mesajda; kanal almazsa her
+  zamanki gibi yeniden denenir.
+- Kaydı `UPTIME_DELIVERY_RETENTION` (varsayılan 1 yıl) ile silinmiş, bu
+  süreden uzun süren açık bir kesinti de yeniden başlatmada bir kez daha
+  gönderilir.
+- Kesintiden sonra oluşturulan kanal eski kesintiyi almaz; kesinti
+  açıldığında onu duymayan eski bir kanal ise (o sırada kapalıydı ya da
+  kapsamı veya olay seçimi sonradan genişledi) yeniden başlatmada onu
+  alabilir.
+- Bekleyen bir düzelme bildirimi yeniden başlatmayla düşer.
+
+#### Yeniden deneme ayarları
+
+`UPTIME_NOTIFY_RETRY_MAX=0` yeniden denemeyi ve almıyor saymayı
 tümüyle (meşgul ve reddedilen bildirim o zaman tek istekle bir kez
 denenir), `UPTIME_NOTIFY_RETRY_FOR=0` yalnızca düzelme için kapatır (yeniden
 başlatmada hiç denenmemiş kesinti yine bir kez gönderilir);
@@ -3219,7 +3105,9 @@ başlatmada hiç denenmemiş kesinti yine bir kez gönderilir);
 (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`,
 varsayılanlarla 30 sn) olmalıdır; daha kısası reddedilir, backend başlamaz.
 
-**Kapanış.** Backend durdurulurken (sürüm yükseltme, pod'un taşınması,
+#### Kapanış
+
+Backend durdurulurken (sürüm yükseltme, pod'un taşınması,
 `SIGTERM`) önce grup beklemesindeki bildirimler insanların okuduğu
 kanallara gider, sonra kuyrukta kalanlar ve o ana kadar zamanı gelenler.
 Bunun tümü `UPTIME_SHUTDOWN_TIMEOUT` (varsayılan 10 sn) ile sınırlıdır: süre
@@ -3229,6 +3117,8 @@ gider; kapanmış bir kesintinin gönderilemeyen düzelmesi ise kaybolur.
 Chart'ın `backend.terminationGracePeriodSeconds` değeri (varsayılan 30) bu
 süreden en az 5 sn uzun tutulmalıdır; kısa kalırsa Kubernetes backend'i
 kapanış bitmeden durdurur.
+
+### Sertifika bitişi
 
 HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
 `UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir "sertifika" olayı
