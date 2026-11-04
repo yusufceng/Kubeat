@@ -255,8 +255,14 @@ func TestPermissions(t *testing.T) {
 
 	// Monitors in three places, made with the service token.
 	mk := func(name, ns string) int64 {
+		// A target in the monitor's own namespace, so a scoped editor may
+		// clone it; a group-less one keeps the short placeholder host.
+		target := "x:1"
+		if ns != "" {
+			target = "db." + ns + ".svc:1"
+		}
 		var m monitorResponse
-		if code := do(t, "POST", base+"/api/v1/monitors", monitorJSON(name, "tcp", "x:1", `"namespace":"`+ns+`"`), &m); code != http.StatusCreated {
+		if code := do(t, "POST", base+"/api/v1/monitors", monitorJSON(name, "tcp", target, `"namespace":"`+ns+`"`), &m); code != http.StatusCreated {
 			t.Fatalf("create %s: status = %d", name, code)
 		}
 		return m.ID
@@ -318,7 +324,7 @@ func TestPermissions(t *testing.T) {
 		{viewer, "PATCH", "/monitors/" + itoa(billing), `{"enabled":false}`, http.StatusForbidden},
 		{viewer, "DELETE", "/monitors/" + itoa(billing), "", http.StatusForbidden},
 		{seer, "PATCH", "/monitors/" + itoa(loose), `{"enabled":false}`, http.StatusForbidden},
-		{editor, "POST", "/monitors", monitorJSON("e1", "tcp", "x:1", `"namespace":"shop"`), http.StatusCreated},
+		{editor, "POST", "/monitors", monitorJSON("e1", "tcp", "db.shop.svc:1", `"namespace":"shop"`), http.StatusCreated},
 		{editor, "POST", "/monitors", monitorJSON("e2", "tcp", "x:1", `"namespace":"billing"`), http.StatusForbidden},
 		{editor, "POST", "/monitors", monitorJSON("e3", "tcp", "x:1", ""), http.StatusForbidden},
 		{editor, "PATCH", "/monitors/" + itoa(shop), `{"description":"ok"}`, http.StatusOK},
@@ -328,7 +334,7 @@ func TestPermissions(t *testing.T) {
 		{editor, "POST", "/monitors/" + itoa(shop) + "/clone", `{"name":"shop-db-2"}`, http.StatusCreated},
 		{editor, "POST", "/monitors/" + itoa(billing) + "/clone", `{"name":"x"}`, http.StatusNotFound},
 		// Channels: only within the editor's namespaces, never without a scope.
-		{editor, "POST", "/channels", `{"name":"shop-hook","type":"webhook","target":"https://h/1","namespaces":["shop"]}`, http.StatusCreated},
+		{editor, "POST", "/channels", `{"name":"shop-hook","type":"webhook","target":"https://h.shop.svc/1","namespaces":["shop"]}`, http.StatusCreated},
 		{editor, "POST", "/channels", `{"name":"all-hook","type":"webhook","target":"https://h/2"}`, http.StatusForbidden},
 		{editor, "POST", "/channels", `{"name":"billing-hook","type":"webhook","target":"https://h/3","namespaces":["billing"]}`, http.StatusForbidden},
 		{viewer, "POST", "/channels", `{"name":"v","type":"webhook","target":"https://h/4","namespaces":["billing"]}`, http.StatusForbidden},
@@ -445,7 +451,7 @@ func TestLDAPSignIn(t *testing.T) {
 		t.Errorf("mehmet = %+v", sess.User)
 	}
 	mehmet := sess.Token
-	if code := doAs(t, mehmet, "POST", base+"/api/v1/monitors", monitorJSON("m", "tcp", "x:1", `"namespace":"shop"`), nil); code != http.StatusCreated {
+	if code := doAs(t, mehmet, "POST", base+"/api/v1/monitors", monitorJSON("m", "tcp", "db.shop.svc:1", `"namespace":"shop"`), nil); code != http.StatusCreated {
 		t.Errorf("mehmet creating in shop: status = %d", code)
 	}
 	// No mapped group, no access; a wrong password is a wrong password.

@@ -66,3 +66,39 @@ func InCluster(host string) bool {
 	}
 	return false
 }
+
+// Namespace returns the Kubernetes namespace a cluster-internal target names,
+// and true, or "" and false when it cannot be told from the host alone.
+//
+// A Service or a pod carries its namespace in its DNS name, in the label
+// before "svc" or "pod": "api.shop.svc", "api.shop.svc.cluster.local",
+// "10-0-0-1.shop.pod.cluster.local" and the headless form
+// "pod-0.api.shop.svc.cluster.local" all name the namespace "shop". The scan
+// runs from the end, so a Service named "svc" or a namespace named "svc" is
+// read right. A bare short name without a dot ("api") is a Service in the
+// backend pod's own namespace, Kubeat's, not a tenant's; an IP address (a
+// ClusterIP or a pod IP) names no namespace on its own. For those, and for a
+// cluster-internal host whose namespace is not written, false is returned:
+// the caller cannot attribute the target to a tenant.
+//
+// Only a host InCluster reports true for has a namespace to look for; an
+// external name is not asked about here.
+func Namespace(host string) (string, bool) {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "" {
+		return "", false
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return "", false // an address names no namespace
+	}
+	labels := strings.Split(host, ".")
+	for i := len(labels) - 1; i >= 1; i-- {
+		if labels[i] == "svc" || labels[i] == "pod" {
+			if ns := labels[i-1]; ns != "" {
+				return ns, true
+			}
+			return "", false
+		}
+	}
+	return "", false
+}

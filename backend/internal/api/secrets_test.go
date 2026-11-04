@@ -17,7 +17,9 @@ func TestMonitorSecretsStayWithTheirServer(t *testing.T) {
 	srv, db := newTestAPI(t)
 	base := srv.URL + "/api/v1/monitors"
 	ctx := context.Background()
-	addUser(t, srv.URL, "editor", store.RoleEditor, "shop")
+	// An editor of every namespace: this test is about the server a secret
+	// binds to, not the per-user target scope (see TestTargetsStayInScope).
+	addUser(t, srv.URL, "editor", store.RoleEditor, "*")
 	editor, _ := signIn(t, srv.URL, "editor", "parola-123")
 
 	var billing monitorResponse
@@ -126,7 +128,9 @@ func TestHostHeaderIsPartOfTheServer(t *testing.T) {
 	srv, db := newTestAPI(t)
 	base := srv.URL + "/api/v1/monitors"
 	ctx := context.Background()
-	addUser(t, srv.URL, "editor", store.RoleEditor, "shop")
+	// An editor of every namespace: this test is about the server a secret
+	// binds to, not the per-user target scope (see TestTargetsStayInScope).
+	addUser(t, srv.URL, "editor", store.RoleEditor, "*")
 	editor, _ := signIn(t, srv.URL, "editor", "parola-123")
 
 	var routed, direct monitorResponse
