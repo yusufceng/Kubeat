@@ -557,12 +557,14 @@ func TestHowLongABusyWebhookIsLeftAlone(t *testing.T) {
 	}
 }
 
-// A channel people read is not paused by a busy answer: only the message
-// it was busy for waits, for as long as it said, and the next message is
-// tried at once. A certificate warning, which is not sent again when it
-// is not taken, goes once more after a busy answer: the receiver did not
-// refuse it.
-func TestABusyChatIsNotPaused(t *testing.T) {
+// A channel people read that answers 429 is left alone for as long as it
+// said, as a webhook is: asked once, not UPTIME_NOTIFY_ATTEMPTS times, and
+// what comes up for it meanwhile is not tried but waits for then, and goes
+// with the message it was busy for. Its answers are not refusals: nothing
+// is counted against the messages. A certificate warning, which is not
+// sent again when it is not taken, goes once more after a busy answer: the
+// receiver did not refuse it. (0.45 tried the next message at once.)
+func TestABusyChatIsLeftAloneUntilItSaid(t *testing.T) {
 	f := newFixture(t, 1, 1) // "ops", a webhook; "api" has a certificate
 	f.retrying(15*time.Minute, time.Hour)
 	f.engine.opts.Attempts = 3
@@ -577,19 +579,27 @@ func TestABusyChatIsNotPaused(t *testing.T) {
 	f.result(a, false) // 0:10: chat is busy for it until 0:30
 	f.deliverLive()
 	f.clock = start.Add(15 * time.Second)
-	f.result(b, false) // 0:15: tried at once
+	f.result(b, false) // 0:15: held back for 0:30
 	f.deliverLive()
-	if got := f.sentTo("chat"); got != "down:b" {
-		t.Fatalf("at 0:15: %q, want b's outage at once", got)
+	if got := f.sentTo("chat"); got != "" {
+		t.Fatalf("at 0:15: %q, want nothing sent to chat", got)
 	}
-	if r := f.retryOf("chat", "a"); r == nil || !r.due.Equal(start.Add(30*time.Second)) || receiver.triesOf("chat/a") != 1 {
-		t.Fatalf("a's outage waits as %+v after %d tries, want one try and 0:30", r, receiver.triesOf("chat/a"))
+	if na, nb := receiver.triesOf("chat/a"), receiver.triesOf("chat/b"); na != 1 || nb != 0 {
+		t.Fatalf("%d tries of a's outage and %d of b's, want one and none: chat left alone", na, nb)
+	}
+	if got := f.sentTo("ops"); got != "down:a,down:b" {
+		t.Errorf("the webhook got %q, want both outages at once", got)
+	}
+	for _, name := range []string{"a", "b"} {
+		if r := f.retryOf("chat", name); r == nil || !r.due.Equal(start.Add(30*time.Second)) || r.attempts != 0 {
+			t.Fatalf("%s's outage waits as %+v, want to go at 0:30 with no refusal counted", name, r)
+		}
 	}
 	receiver.set("chat/a", 0, "")
 	f.clock = start.Add(30 * time.Second)
 	f.flush()
-	if got := f.sentTo("chat"); got != "down:b,down:a" {
-		t.Fatalf("at 0:30: %q, want a's outage", got)
+	if got := f.sentTo("chat"); got != "down:a,down:b" {
+		t.Fatalf("at 0:30: %q, want both outages", got)
 	}
 	f.checkCert(10 * 24 * time.Hour) // 1:00: chat is busy for the warning until 1:20
 	f.deliverLive()
@@ -599,13 +609,44 @@ func TestABusyChatIsNotPaused(t *testing.T) {
 	receiver.set("chat/api", 0, "")
 	f.clock = start.Add(80 * time.Second)
 	f.flush()
-	if got := f.sentTo("chat"); got != "down:b,down:a,cert_expiring:api" {
+	if got := f.sentTo("chat"); got != "down:a,down:b,cert_expiring:api" {
 		t.Errorf("at 1:20: %q, want the warning", got)
 	}
 	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=slack}{result=failed}":              2,
+		"kubeat_notifications_total{channel_type=slack}{event=down}{result=sent}":            2,
 		"kubeat_notifications_total{channel_type=slack}{event=cert_expiring}{result=sent}":   1,
 		"kubeat_notifications_total{channel_type=slack}{event=cert_expiring}{result=failed}": 0,
 	})
+}
+
+// A channel people read that refuses a message (4xx) is there, as a
+// webhook that refuses one is: it is not paused, and the next message goes
+// to it at once, while the refused one waits UPTIME_NOTIFY_RETRY_MAX.
+func TestARefusalDoesNotPauseAChat(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.retrying(15*time.Minute, time.Hour)
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	receiver := f.answer()
+	receiver.set("chat/bad", http.StatusForbidden, "")
+	bad, good := f.monitorIn("bad", ""), f.monitorIn("good", "")
+	start := f.clock
+
+	f.clock = start.Add(30 * time.Second)
+	f.result(bad, false) // 0:30: refused; sent again at 15:30
+	f.flush()
+	if f.engine.owed.failing[f.channel("chat").ID] {
+		t.Error("chat is paused after a refusal")
+	}
+	f.clock = start.Add(time.Minute)
+	f.result(good, false) // 1:00: at once
+	f.flush()
+	if got := f.sentTo("chat"); got != "down:good" {
+		t.Errorf("at 1:00: %q, want good's outage at once", got)
+	}
+	if r := f.retryOf("chat", "bad"); r == nil || !r.refused || !r.due.Equal(start.Add(15*time.Minute+30*time.Second)) {
+		t.Errorf("bad's outage waits as %+v, want refused and due at 15:30", r)
+	}
 }
 
 // A message a channel people read keeps refusing (4xx) does not keep its

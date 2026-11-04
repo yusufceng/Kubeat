@@ -307,13 +307,16 @@ func TestTheEndOfAnOutageIsNotSentAgainAfterANewerOutage(t *testing.T) {
 	})
 }
 
-// A channel people read that does not take a message is not sent, in the
-// same pass, the other messages waiting to be sent to it again: a channel
-// that is down costs a pass one attempt rather than one per message
-// waiting on it. The messages held back wait again, their wait doubled,
-// with no attempt on the record. (A channel software reads is sent
-// nothing at all until its retry: TestAWebhookThatTookNoneIsSentNothingUntilItsRetry.)
-func TestAChannelNotTakingOneIsSentNoOtherAgainInThatPass(t *testing.T) {
+// A channel people read that takes none is paused until its retry, as a
+// webhook is (TestAWebhookThatTookNoneIsSentNothingUntilItsRetry), with
+// GroupWait off too: what comes up for it meanwhile is not attempted but
+// held back for that retry's pass, neither on the record nor counted. In
+// that pass the message it never failed on goes first; not taken either,
+// it stops the pass, and the other is held back again, both waits
+// doubled: a chat that is down costs the loop one attempt a pass rather
+// than one per message. Once it answers, both go. (0.45 attempted every
+// new message to a chat that was down.)
+func TestAChatThatTookNoneIsSentNothingUntilItsRetry(t *testing.T) {
 	f := newFixture(t, 1, 1) // "ops", a webhook, takes everything
 	f.retrying(15*time.Minute, time.Hour)
 	// With GroupWait off, chat gets every notification on its own.
@@ -324,10 +327,9 @@ func TestAChannelNotTakingOneIsSentNoOtherAgainInThatPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Both monitors go down at once and chat takes neither; a minute on it
-	// does not take the first message sent again, and the second is not
-	// sent.
-	f.sender.fail("chat", 3)
+	// Both monitors go down at once: chat does not take api's outage and is
+	// not sent cart's, which is held back for its retry a minute on.
+	f.sender.fail("chat", 2)
 	f.clock = f.clock.Add(30 * time.Second)
 	batch := []store.CheckResult{
 		{MonitorID: f.monitor.ID, CheckedAt: f.clock, Error: "refused"},
@@ -338,9 +340,41 @@ func TestAChannelNotTakingOneIsSentNoOtherAgainInThatPass(t *testing.T) {
 	}
 	f.engine.Evaluate(ctx, batch)
 	f.flush()
-	if n := len(f.engine.owed.retries); n != 2 {
-		t.Fatalf("%d retries, want both outages to be sent again", n)
+	if got := f.sender.log(); got != "ops:down,ops:down" {
+		t.Fatalf("at the outages: %q, want the webhook told of both and chat of neither", got)
 	}
+	var waiting []string
+	for _, r := range f.engine.owed.retries {
+		waiting = append(waiting, fmt.Sprintf("%s:%d", r.note.Monitor.Name, r.attempts))
+		if !r.due.Equal(f.clock.Add(time.Minute)) {
+			t.Errorf("%s: due in %s, want both with chat's retry in a minute", r.note.Monitor.Name, r.due.Sub(f.clock))
+		}
+	}
+	if got := strings.Join(waiting, ","); got != "api:1,cart:0" {
+		t.Fatalf("waiting for chat (monitor:failed attempts) = %s, want api's outage not taken and cart's held back", got)
+	}
+	cartOutage, err := f.db.GetOpenIncident(ctx, cart.ID, store.IncidentDown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatEntries := func() int {
+		n := 0
+		for _, d := range f.deliveries(cartOutage.ID) {
+			if d.ChannelName == "chat" {
+				n++
+			}
+		}
+		return n
+	}
+	if n := chatEntries(); n != 0 {
+		t.Errorf("cart's delivery log has %d entries for chat, want none: it was not attempted", n)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=slack}{result=failed}": 1,
+	})
+
+	// A minute on, cart's outage goes first and is not taken: api's is held
+	// back again.
 	f.clock = f.clock.Add(time.Minute)
 	f.flush()
 	if got := f.sender.log(); got != "ops:down,ops:down" {
@@ -353,25 +387,14 @@ func TestAChannelNotTakingOneIsSentNoOtherAgainInThatPass(t *testing.T) {
 		}
 		attempts = append(attempts, r.attempts)
 	}
-	if got := fmt.Sprint(attempts); got != "[2 1]" {
-		t.Errorf("failed attempts counted = %s, want [2 1]: one message sent again, the other held back", got)
+	if got := fmt.Sprint(attempts); got != "[1 1]" {
+		t.Errorf("failed attempts counted = %s, want [1 1]: each attempted once, one now, the other held back", got)
 	}
-	// The record has the attempt that was made, not the message held back.
-	cartOutage, err := f.db.GetOpenIncident(ctx, cart.ID, store.IncidentDown)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var chatEntries int
-	for _, d := range f.deliveries(cartOutage.ID) {
-		if d.ChannelName == "chat" {
-			chatEntries++
-		}
-	}
-	if chatEntries != 1 {
-		t.Errorf("cart's delivery log has %d entries for chat, want the first attempt alone", chatEntries)
+	if n := chatEntries(); n != 1 {
+		t.Errorf("cart's delivery log has %d entries for chat, want the attempt made a minute on", n)
 	}
 	f.counts(map[string]float64{
-		"kubeat_notification_attempts_total{channel_type=slack}{result=failed}": 3,
+		"kubeat_notification_attempts_total{channel_type=slack}{result=failed}": 2,
 		"kubeat_notification_attempts_total{channel_type=slack}{result=sent}":   0,
 	})
 
@@ -454,7 +477,9 @@ func TestAGroupNotTakenIsSentAgainAsOneMessage(t *testing.T) {
 	})
 
 	// Both recover, both fail again, and orders recovers before chat is
-	// sent the group again: what chat gets is cart's outage alone.
+	// sent the group again: what chat gets is cart's outage alone. Chat,
+	// paused since it did not take the group, is sent the end of orders'
+	// outage with it, ahead of it: chat never failed on that.
 	results(true, monitors...)
 	f.flush()
 	f.sender.reset()
@@ -463,13 +488,13 @@ func TestAGroupNotTakenIsSentAgainAsOneMessage(t *testing.T) {
 	f.flush()
 	results(true, monitors[1])
 	f.flush()
-	if got := f.sender.log(); got != "ops:down,ops:down,ops:up,chat:up" {
-		t.Fatalf("after orders recovered: %q", got)
+	if got := f.sender.log(); got != "ops:down,ops:down,ops:up" {
+		t.Fatalf("after orders recovered: %q, want orders' end held back for chat", got)
 	}
 	f.clock = f.clock.Add(time.Minute)
 	f.flush()
 	if got := f.sender.log(); got != "ops:down,ops:down,ops:up,chat:up,chat:down" {
-		t.Fatalf("a minute on: %q, want chat sent cart's outage alone", got)
+		t.Fatalf("a minute on: %q, want chat sent orders' end, then cart's outage alone", got)
 	}
 	f.sender.mu.Lock()
 	last := f.sender.sent[len(f.sender.sent)-1]
@@ -743,6 +768,113 @@ func TestAHeldBackReminderGivesWayToANewerOne(t *testing.T) {
 	f.sender.mu.Unlock()
 	if !reminder.At.Equal(opened.Add(40 * time.Second)) {
 		t.Errorf("the reminder sent is of %s, want the newer one", reminder.At.Sub(opened))
+	}
+}
+
+// A chat that took none is held back the reminders that come up for it,
+// grouped by namespace, as a webhook is held back its own: in its next
+// pass it is sent the outage first and then each monitor's latest
+// reminder, once. A newer reminder about one monitor of a grouped one
+// takes that monitor's place in it; the others' stay.
+func TestAPausedChatIsSentTheLatestReminderOfEachMonitor(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.retrying(15*time.Minute, time.Hour)
+	f.engine.opts.GroupWait = time.Minute // flush shuts the loop down, which sends the groups
+	f.engine.opts.ReminderInterval = 20 * time.Second
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	cart, orders := f.monitorIn("cart", "shop"), f.monitorIn("orders", "shop")
+	start := f.clock
+	failing := func(at time.Duration, monitors ...store.Monitor) {
+		t.Helper()
+		f.clock = start.Add(at)
+		var batch []store.CheckResult
+		for _, m := range monitors {
+			batch = append(batch, store.CheckResult{MonitorID: m.ID, CheckedAt: f.clock, Error: "refused"})
+		}
+		if err := f.db.InsertCheckResults(context.Background(), batch); err != nil {
+			t.Fatal(err)
+		}
+		f.engine.Evaluate(context.Background(), batch)
+		f.flush()
+	}
+	f.sender.fail("chat", 1)
+	failing(30*time.Second, cart, orders) // 0:30: chat does not take the group; its retry is at 1:30
+	failing(50*time.Second, cart, orders) // 0:50: both are reminded of in one message, held back
+	failing(70*time.Second, cart)         // 1:10: cart's newer reminder, held back too
+	var waiting []string
+	for _, r := range f.engine.owed.retries {
+		names := []string{}
+		for _, m := range members(r.note) {
+			names = append(names, m.Monitor.Name)
+		}
+		waiting = append(waiting, fmt.Sprintf("%s:%s:%v", r.note.Event, strings.Join(names, "+"), r.once))
+	}
+	if got := strings.Join(waiting, ","); got != "down:cart+orders:false,reminder:orders:true,reminder:cart:true" {
+		t.Fatalf("waiting for chat (event:monitors:once) = %s, want the outage and each monitor's latest reminder", got)
+	}
+
+	f.clock = start.Add(90 * time.Second)
+	f.flush()
+	if got := f.sentTo("chat"); got != "down:cart,reminder:orders,reminder:cart" {
+		t.Fatalf("at chat's retry: %q, want the outage of both, then orders' reminder and cart's", got)
+	}
+	f.sender.mu.Lock()
+	var reminded []time.Duration
+	for i, n := range f.sender.sent {
+		if f.sender.channels[i] == "chat" && n.Event == EventReminder {
+			reminded = append(reminded, n.At.Sub(start))
+		}
+	}
+	f.sender.mu.Unlock()
+	if got := fmt.Sprint(reminded); got != "[50s 1m10s]" {
+		t.Errorf("the reminders sent are of %s, want orders' of 0:50 and cart's newer one of 1:10", got)
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries left, want none", n)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notifications_total{channel_type=slack}{event=reminder}{result=sent}":   2,
+		"kubeat_notifications_total{channel_type=slack}{event=reminder}{result=failed}": 0,
+	})
+}
+
+// A channel people read with a delay is paused too: an outage whose delay
+// passes while the channel waits for its retry is held back for that
+// retry's pass, not attempted, and goes in it ahead of what the channel
+// did not take.
+func TestAPausedChatWithADelayHearsTheOutageInItsNextPass(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook without a delay
+	f.retrying(15*time.Minute, time.Hour)
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused", Delay: time.Minute})
+	cart, orders := f.monitorIn("cart", "shop"), f.monitorIn("orders", "billing")
+	start := f.clock
+	f.sender.fail("chat", 1)
+	f.clock = start.Add(30 * time.Second)
+	f.result(cart, false) // 0:30: chat is owed it at 1:30
+	f.flush()
+	f.clock = start.Add(time.Minute)
+	f.result(orders, false) // 1:00: chat is owed it at 2:00
+	f.flush()
+	f.clock = start.Add(90 * time.Second) // 1:30: chat does not take cart's; its retry is at 2:30
+	f.flush()
+	f.clock = start.Add(2 * time.Minute) // 2:00: orders' delay is up while chat waits
+	f.flush()
+	if got := f.sentTo("chat"); got != "" {
+		t.Fatalf("at 2:00: %q, want nothing sent to chat", got)
+	}
+	if r := f.retryOf("chat", "orders"); r == nil || r.attempts != 0 || !r.due.Equal(start.Add(150*time.Second)) {
+		t.Fatalf("orders' outage waits as %+v, want held back, untried, for chat's retry at 2:30", r)
+	}
+	f.counts(map[string]float64{
+		"kubeat_notification_attempts_total{channel_type=slack}{result=failed}": 1,
+	})
+	f.clock = start.Add(150 * time.Second) // 2:30
+	f.flush()
+	if got := f.sentTo("chat"); got != "down:orders,down:cart" {
+		t.Errorf("at chat's retry: %q, want orders' outage, never failed on, then cart's", got)
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries left, want none", n)
 	}
 }
 

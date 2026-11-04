@@ -34,18 +34,19 @@ import (
 // Options.RetryMax; after a refusal, RetryMax; after a busy answer, its
 // Retry-After, without doubling the wait. A grouped message is attempted
 // again as one, less the monitors whose outages ended meanwhile. A channel
-// software reads that an attempt did not reach, or that was busy, is
-// paused until its next retry (Engine.paused): what comes up for it
-// meanwhile is not attempted but held back for that retry's pass, where it
-// goes with what else waits for the channel, once only if it is not
-// attempted again otherwise (retry.once), and what the channel refused
-// fewer times goes first (outbound.order). A refusal does not pause it:
-// the receiver is there, and the rest goes. These too are in memory: at a
-// start the delivery log says which open outages a channel was sent and
-// did not take, and they are sent again, and which a channel without a
-// delay was never sent, having been queued or waiting for its group at the
-// restart, and they are told then (restore); an end of an outage still to
-// be sent again is lost with the restart.
+// that an attempt did not reach, or that was busy, is paused until its
+// next retry (Engine.paused), whether software or people read it: what
+// comes up for it meanwhile, a group included, is not attempted but held
+// back for that retry's pass, where it goes with what else waits for the
+// channel, once only if it is not attempted again otherwise (retry.once),
+// and what the channel refused fewer times goes first (outbound.order). A
+// refusal does not pause it: the receiver is there, and the rest goes.
+// These too are in memory: at a start the delivery log says which open
+// outages a channel was sent and did not take, and they are sent again,
+// and which a channel without a delay was never sent, having been queued,
+// waiting for its group or held back for it at the restart, and they are
+// told then (restore); an end of an outage still to be sent again is lost
+// with the restart.
 
 // owedKind is what a channel is still owed about an outage.
 type owedKind int
@@ -147,8 +148,9 @@ func (r *retry) narrow(keep func(Notification) (Notification, bool)) bool {
 type schedule struct {
 	entries map[owedKey]*owed
 	retries []*retry
-	// failing are the channels software reads whose last attempt failed:
-	// until they take one, they are paused (Engine.paused).
+	// failing are the channels whose last pass stopped at a failure that
+	// did not reach them or a busy answer: until they take one, they are
+	// paused (Engine.paused).
 	failing map[int64]bool
 	seq     int
 }
@@ -175,19 +177,27 @@ func (s *schedule) dropRetry(r *retry) {
 	}
 }
 
-// supersede drops the note about the notification's monitor still held
+// supersede drops the notes about the notification's monitors still held
 // back for the channel that n, newer, takes the place of (supersedes): a
 // reminder, as a newer reminder does in a group (dropStaleReminders), or
 // a slowness notification, the monitor's latest state being all there is
-// to tell (PagerDuty keeps one alert of a monitor's slowness anyway).
-// However long a channel is down, one of each about a monitor waits for
-// it at most.
+// to tell (PagerDuty keeps one alert of a monitor's slowness anyway). A
+// grouped message held back, for a channel people read, loses the
+// monitors n is about and goes on for the others; one left with none is
+// dropped. However long a channel is down, one of each about a monitor
+// waits for it at most.
 func (s *schedule) supersede(channelID int64, n Notification) {
+	newer := make(map[int64]bool)
+	for _, m := range members(n) {
+		newer[m.Monitor.ID] = true
+	}
 	kept := s.retries[:0]
 	for _, r := range s.retries {
-		if !r.once || r.channel.ID != channelID || r.note.Monitor.ID != n.Monitor.ID || !supersedes(n.Event, r.note.Event) {
-			kept = append(kept, r)
+		if r.once && r.channel.ID == channelID && supersedes(n.Event, r.note.Event) &&
+			!r.narrow(func(m Notification) (Notification, bool) { return m, !newer[m.Monitor.ID] }) {
+			continue
 		}
+		kept = append(kept, r)
 	}
 	s.retries = kept
 }
@@ -351,25 +361,28 @@ func (e *Engine) retries(n Notification) bool {
 	return n.Event == EventDown || n.Event == EventUp && e.opts.RetryFor > 0
 }
 
-// pauses says whether the channel is paused once an attempt does not
-// reach it or it is busy: a channel software reads, with the attempts
-// again on.
-func (e *Engine) pauses(ch store.Channel) bool {
-	return machine(ch.Type) && e.opts.RetryMax > 0
+// pausing says whether a channel is paused once an attempt does not reach
+// it or it is busy: with the attempts again on, every channel is, whether
+// software or people read it. An e-mail relay or a chat that does not
+// answer would otherwise hold up the loop, and the pages of the channels
+// software reads with it, for an attempt per group of an outage that
+// spreads over namespaces.
+func (e *Engine) pausing() bool {
+	return e.opts.RetryMax > 0
 }
 
-// paused returns the retry that a channel software reads waits for when
-// its last pass stopped at a failure that did not reach it or a busy
-// answer: the first of its retries still to come, those waiting out a
-// refusal aside. Until it is due the channel is sent nothing, and what
-// comes up for it is held back for that retry's pass (retryLater), where
+// paused returns the retry that a channel waits for when its last pass
+// stopped at a failure that did not reach it or a busy answer: the first
+// of its retries still to come, those waiting out a refusal aside. Until
+// it is due the channel is sent nothing, and what comes up for it, a
+// group included, is held back for that retry's pass (retryLater), where
 // it goes with what else waits for the channel: a channel that is down
-// costs the loop one attempt per wait rather than one per notification, a
-// busy one is asked again when it said, and the queue keeps moving. Nil
-// when the channel took or refused all it was sent last, or has nothing
-// to be sent again but what it refused.
+// costs the loop one attempt per wait rather than one per notification or
+// group, a busy one is asked again when it said, and the queue keeps
+// moving. Nil when the channel took or refused all it was sent last, or
+// has nothing to be sent again but what it refused.
 func (e *Engine) paused(ch store.Channel, now time.Time) *retry {
-	if !e.pauses(ch) || !e.owed.failing[ch.ID] {
+	if !e.pausing() || !e.owed.failing[ch.ID] {
 		return nil
 	}
 	var first *retry
@@ -392,8 +405,8 @@ func (e *Engine) paused(ch store.Channel, now time.Time) *retry {
 // A note held back in a pass that stopped at a failure (deliver) waits the
 // same way, behind a failure that did not reach the channel twice as long
 // as before, behind a busy answer until the channel said, with no attempt
-// counted against it. A first note held back for a channel software reads
-// (deliver, paused) waits for the channel's next pass and goes in it, once
+// counted against it. A first note held back for a channel (deliver,
+// paused) waits for the channel's next pass and goes in it, once
 // only if it is not attempted again otherwise, and its RetryFor counts
 // from that pass, its first attempt: not from when it was held back, which
 // a wait longer than RetryFor would end before any attempt. Held back
@@ -529,8 +542,8 @@ func (e *Engine) route(ch store.Channel, n Notification, now time.Time) bool {
 // outage is over or that are gone, for the end of an outage less those
 // with a newer outage open, and not at all to a channel gone or no
 // longer listening, or past RetryFor for the end of an outage. A paused
-// channel is sent none of it: what falls due for it waits for its next
-// pass (paused).
+// channel, whoever reads it, is sent none of it: what falls due for it
+// waits for its next pass (paused).
 func (e *Engine) deliverOwed(ctx context.Context) {
 	now := e.now()
 	due := e.owed.due(now)
@@ -667,7 +680,8 @@ func (e *Engine) deliverOwed(ctx context.Context) {
 		if !machine(ch.Type) {
 			n, _ := grouped(key.event, notes) // a batch is never empty
 			notes = []Notification{n}
-		} else if e.paused(ch, now) != nil {
+		}
+		if e.paused(ch, now) != nil {
 			for _, n := range notes {
 				held = append(held, failed{channel: ch, note: n, held: true})
 			}

@@ -689,6 +689,16 @@ bekleyen her bildirim için `UPTIME_NOTIFY_RETRY_MAX`'ta bir istek alır ve
 o geçiş teslimat döngüsünü tutar. `UPTIME_NOTIFY_GROUP_WAIT=0` iken yanıt
 vermeyen insan kanalı değişmedi.
 
+Güncelleme (2026-10-30, S55, #62): S25'in "Kalan" cümlesindeki yanıt
+vermeyen insan kanalı kısmı kapandı. Ulaşılamayan ya da meşgul insan kanalı
+(Slack, e-posta…) da yeniden deneme zamanına kadar almıyor sayılır,
+gruplama kapalıyken de: yeni bildirimler ve namespace grupları ona
+denenmez, kanalın sıradaki geçişinde gider. Ölü bir e-posta relay'iyle 1, 3
+ve 5 namespace'e yayılan kesintide webhook, grup teslimi sürerken gelen
+yeni kesintiyi grup sayısından bağımsız olarak en çok bir deneme süresinde
+alır (`go test -race`,
+`TestADeadMailRelayDoesNotHoldUpThePagesOfAnOutageOverNamespaces`).
+
 ## "Sustur"u durum sayfasını etkilemeyen bir bildirim susturmasına çevirmek
 
 2026-10-28'de ertelendi (S33,
@@ -944,6 +954,13 @@ gauge'la. 4. köşe S27, 2. köşe S40 ile sprint 5 kuyruğunda; `alert`
 paketinin sırası S55 → S27 → S40 → S57. Notlar merge'de yazılır
 ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
+3. köşenin kuyruk doluluğu parçası kapandı (S55, #62):
+`kubeat_notification_queue_length` teslimat kuyruğunda o an bekleyen
+bildirim sayısını her scrape'te verir (README "Aracın kendi sağlığı").
+Almıyor sayılan kanala bekletilen hatırlatma, sertifika ve yavaşlık
+bildirimlerinin sayısı hâlâ yalnızca `notifications held back` log
+satırında; o kısım bu maddede kalır, tetikleyicisi değişmedi.
+
 ## Duyurulan bakımı durum sayfası ve rapor uptime'ından ayırmak
 
 2026-10-29'da ertelendi (S45,
@@ -1133,6 +1150,28 @@ kanallarını geciktirmesi S55 (#62) ile duraklatmayla kapanır; yapısal
 mekanizma ((a) ve kanal başına goroutine) seçilmedi
 ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
+Güncelleme (2026-10-30, S55, #62): ulaşılamayan ya da meşgul insan kanalı
+duraklatmayla kapandı (README "Alarm", "Almıyor sayılan kanal"). Yeni bir
+kalan:
+
+- **Yeniden denenmeyen bildirimin ulaşamadığı kanal duraklamaz.**
+  Hatırlatma, sertifika ve yavaşlık bildirimi (`UPTIME_NOTIFY_RETRY_FOR=0`
+  iken düzelme de) ilk denemesinde kanala ulaşamazsa düşer; kanalın
+  yeniden denenecek başka bir bildirimi yoksa kanal almıyor sayılmaz,
+  çünkü bekleyeceği bir yeniden deneme zamanı yoktur. Kesintileri almış bir
+  e-posta relay'i ya da Slack sonradan düşerse, birden çok namespace'te
+  aynı anda gelen hatırlatma (`UPTIME_REMINDER_INTERVAL`), sertifika ya da
+  yavaşlık grupları ona yine grup başına denenir ve teslimat döngüsünü her
+  biri için bir deneme süresi (varsayılanlarla 25 sn) tutar; makine
+  kanalında da aynıdır (S25'ten beri). Kanalın kendi tekrarı
+  (`repeat_seconds`) tek geçişte gittiği için etkilenmez; hatırlatma
+  varsayılan olarak kapalıdır. Seçenek: böyle bir hatadan sonra kanalı,
+  bekleyecek bir bildirim olmadan da 1 dakika (sonra katlanarak) almıyor
+  saymak; bu, makine kanallarının bugünkü davranışını da değiştirir ve
+  PO kararı ister. Tetikleyici: bir hatırlatma ya da yavaşlık patlamasında
+  geç kalan bir sayfa, ya da aynı insan kanalına art arda ulaşılamayan
+  grupların `notification failed` satırları.
+
 ## Yayım hattının kalanları: sürüm sabitleri, kuru deneme, imza kapsamı
 
 2026-10-29'da ertelendi (#47 ve #48'in kapsam dışı parçaları; developer
@@ -1274,6 +1313,11 @@ README "clusterLabel" bölümünün "Yokluk penceresi" maddesinde ve values.yaml
 `clusterLabel` yorumunda. Kalan parçalar (HA çiftinde kopya başına alarm,
 uyarının tekrarı, `clusterLabel`'ı kendiliğinden bulmak, `Healthy` ve takılı
 worker'lar) bu maddede.
+
+Güncelleme (2026-10-30, S55, #62): doluluk metriği kapandı:
+`kubeat_notification_queue_length` teslimat kuyruğunda o an bekleyen
+bildirim sayısını her scrape'te verir. Kuyruk uyarısının tekrarı bu
+maddede kalır.
 
 ## Hiçbir kanala ulaşamayan kesintide heartbeat'i kesmek
 

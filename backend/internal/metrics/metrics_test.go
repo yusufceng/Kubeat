@@ -35,7 +35,31 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.LastBackup(time.Now())
 	m.License(time.Now())
 	m.WatchHealth(func() error { return nil })
+	m.WatchQueue(func() int { return 0 })
 	m.UndeliveredOutages(map[int64]int{1: 1})
+}
+
+// kubeat_notification_queue_length is read from the queue at every scrape:
+// it follows the queue without anything recording it, and has no labels.
+func TestNotificationQueueLengthIsReadAtScrape(t *testing.T) {
+	m := New("test")
+	var queued int
+	m.WatchQueue(func() int { return queued })
+	for _, n := range []int{0, 37, 1000, 0} {
+		queued = n
+		got, err := m.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value, ok := got["kubeat_notification_queue_length"]; !ok || value != float64(n) {
+			t.Errorf("with %d queued: kubeat_notification_queue_length = %v (present: %v), want %d", n, value, ok, n)
+		}
+	}
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if body := rec.Body.String(); !strings.Contains(body, "# TYPE kubeat_notification_queue_length gauge") {
+		t.Errorf("the exposition lacks the gauge:\n%s", body)
+	}
 }
 
 // kubeat_self_healthy is read from the judgement at every scrape: it follows

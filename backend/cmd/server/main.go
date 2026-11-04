@@ -163,6 +163,7 @@ func main() {
 		// (backend.terminationGracePeriodSeconds) must outlast both.
 		DrainTimeout: cfg.ShutdownTimeout,
 	})
+	meter.WatchQueue(alerts.QueueLength)
 	// Notifications raised by the scheduler's final flush must still go out,
 	// so delivery stops only after the scheduler has.
 	alertCtx, stopAlerts := context.WithCancel(context.Background())
