@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -213,23 +215,71 @@ type PagerDutySender struct {
 // takes up to 255 characters long.
 const dedupInstanceLimit = 200
 
-// dedupInstance is an instance as it goes into a dedup key: its letters,
-// digits, dots, dashes and underscores, every run of other characters
-// (spaces, a port's colon, letters outside ASCII) as one dash, none at
-// either end, at most dedupInstanceLimit characters. The key then reads
-// the same wherever PagerDuty passes it on. Empty when nothing is left.
+// latinASCII is the ASCII each accented letter of Latin-1 Supplement and
+// Latin Extended-A (U+00C0 to U+017F) stands for in a dedup key: the
+// letter without its accent, a ligature as its two letters. Every Turkish
+// letter is among them: ç, ğ, ı, İ, ö, ş, ü and their upper case.
+var latinASCII = func() map[rune]string {
+	m := map[rune]string{}
+	for ascii, letters := range map[string]string{
+		"A": "ÀÁÂÃÄÅĀĂĄ", "a": "àáâãäåāăą",
+		"C": "ÇĆĈĊČ", "c": "çćĉċč",
+		"D": "ÐĎĐ", "d": "ðďđ",
+		"E": "ÈÉÊËĒĔĖĘĚ", "e": "èéêëēĕėęě",
+		"G": "ĜĞĠĢ", "g": "ĝğġģ",
+		"H": "ĤĦ", "h": "ĥħ",
+		"I": "ÌÍÎÏĨĪĬĮİ", "i": "ìíîïĩīĭįı",
+		"J": "Ĵ", "j": "ĵ",
+		"K": "Ķ", "k": "ķĸ",
+		"L": "ĹĻĽĿŁ", "l": "ĺļľŀł",
+		"N": "ÑŃŅŇŊ", "n": "ñńņňŉŋ",
+		"O": "ÒÓÔÕÖØŌŎŐ", "o": "òóôõöøōŏő",
+		"R": "ŔŖŘ", "r": "ŕŗř",
+		"S": "ŚŜŞŠ", "s": "śŝşšſ",
+		"T": "ŢŤŦ", "t": "ţťŧ",
+		"U": "ÙÚÛÜŨŪŬŮŰŲ", "u": "ùúûüũūŭůűų",
+		"W": "Ŵ", "w": "ŵ",
+		"Y": "ÝŶŸ", "y": "ýÿŷ",
+		"Z": "ŹŻŽ", "z": "źżž",
+		"AE": "Æ", "ae": "æ", "OE": "Œ", "oe": "œ", "IJ": "Ĳ", "ij": "ĳ",
+		"TH": "Þ", "th": "þ", "ss": "ß",
+	} {
+		for _, r := range letters {
+			m[r] = ascii
+		}
+	}
+	return m
+}()
+
+// dedupInstance is an instance as it goes into a dedup key: its ASCII
+// letters, digits, dots, dashes and underscores as they are; an accented
+// Latin letter, the Turkish ones among them, as the ASCII nearest it
+// (latinASCII: Üretim as Uretim, üç as uc, Test-Ç and Test-Ş apart as
+// Test-C and Test-S); a mark that combines with the letter before it, in
+// a name not composed, dropped; every run of other characters (spaces, a
+// port's colon, letters of other scripts) as one dash, none at either
+// end; at most dedupInstanceLimit characters. The key then reads the same
+// wherever PagerDuty passes it on. Empty when nothing is left.
 func dedupInstance(instance string) string {
 	var b strings.Builder
 	dash := false
 	for _, r := range instance {
-		if !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '.' || r == '-' || r == '_') {
+		var ascii string
+		switch {
+		case 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '.' || r == '-' || r == '_':
+			ascii = string(r)
+		case latinASCII[r] != "":
+			ascii = latinASCII[r]
+		case unicode.Is(unicode.Mn, r):
+			continue
+		default:
 			dash = true
 			continue
 		}
 		if dash && b.Len() > 0 {
 			b.WriteByte('-')
 		}
-		b.WriteRune(r)
+		b.WriteString(ascii)
 		dash = false
 	}
 	key := b.String()
@@ -237,6 +287,28 @@ func dedupInstance(instance string) string {
 		key = key[:dedupInstanceLimit]
 	}
 	return strings.Trim(key, "-")
+}
+
+// LogInstance writes, as the process starts, which installation the
+// notifications name and how it reads in PagerDuty's dedup key, so that
+// the key an alert is open under can be found in the log: one line, INFO
+// when the key carries the name as it is, or there is none. It is a WARN
+// when the key keeps nothing of the name, the keys then carrying no
+// installation as with none at all, or not the name as it was: another
+// installation whose name differs only in what the key drops shares the
+// key.
+func LogInstance(logger *slog.Logger, instance string) {
+	key := dedupInstance(instance)
+	switch {
+	case instance == "":
+		logger.Info("notifications name no installation: set UPTIME_INSTANCE_NAME, or UPTIME_PUBLIC_URL, when several installations share a PagerDuty service or a webhook")
+	case key == "":
+		logger.Warn("nothing of the installation's name is left for PagerDuty's dedup key, which carries no installation then, as with no name at all: name it with ASCII letters, digits, dots, dashes and underscores", "instance", instance)
+	case key != instance:
+		logger.Warn("the installation's name is reduced in PagerDuty's dedup key: name it with ASCII letters, digits, dots, dashes and underscores to have it there as it is", "instance", instance, "key", key)
+	default:
+		logger.Info("notifications name this installation", "instance", instance, "key", key)
+	}
 }
 
 // dedupKey is the deduplication key of the alert a notification is about:

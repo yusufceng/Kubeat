@@ -251,7 +251,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   bir sürüme dönmeden önce de, açık PagerDuty olaylarını kapatın; eski
   anahtarla açılmış alarm Kubeat'ten kapanmaz. Kimliği olmayan kurulumların
   anahtarı eskisi gibidir (`kubeat-incident-<n>`): aynı servisi paylaşan
-  kimliksiz kurulumların aynı numaralı olayları yine tek alarmda birleşir
+  kimliksiz kurulumların aynı numaralı olayları yine tek alarmda birleşir;
+  0.45 ve öncesindeki kurulumlar da kimliksizdir, ortak servisteki filo
+  0.46'ya geçip her kurulum kimlik alana kadar ayrı servis kullanın
   (S28, #61; README "Bildirim kanalları", **Kurulum kimliği**).
 - Chart'ın alarmları backend'i cluster'ın Prometheus'u scrape edebildiği
   sürece görür: Kubeat 10 dakikadan uzun düşerse kesinti, sertifika ve yedek

@@ -1,15 +1,18 @@
 package alert
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -183,11 +186,95 @@ func TestPagerDutySender(t *testing.T) {
 	}
 }
 
+// The instance goes into the key in ASCII: a Turkish or another accented
+// Latin letter as the letter nearest it, so that Üretim is Uretim rather
+// than retim and Test-Ç and Test-Ş are two keys; a run of what is neither
+// as one dash, none at either end; a name of which nothing is left as no
+// instance.
+func TestDedupInstanceReadsInASCII(t *testing.T) {
+	for _, tc := range []struct{ instance, key string }{
+		{"", ""},
+		{"prod-eu", "prod-eu"},
+		{"Üretim", "Uretim"},
+		{"üç", "uc"},
+		{"Test-Ç", "Test-C"},
+		{"Test-Ş", "Test-S"},
+		{"Ön-üretim", "On-uretim"},
+		{"İstanbul üretim", "Istanbul-uretim"},
+		{"ÇĞIİÖŞÜ çğıiöşü", "CGIIOSU-cgiiosu"},
+		{"ğüş", "gus"},
+		{"Zürich São Paulo", "Zurich-Sao-Paulo"},
+		{"Łódź", "Lodz"},
+		{"Ærø", "AEro"},
+		{"Straße", "Strasse"},
+		{"u\u0308retim", "uretim"}, // ü not composed: u and a combining diaeresis
+		{"kubeat.apps.example:8443", "kubeat.apps.example-8443"},
+		{"Prod EU / 1", "Prod-EU-1"},
+		{"-prod_2-", "prod_2"},
+		{"東京", ""},
+		{"Москва", ""},
+		{"🙂", ""},
+	} {
+		if got := dedupInstance(tc.instance); got != tc.key {
+			t.Errorf("dedupInstance(%q) = %q, want %q", tc.instance, got, tc.key)
+		}
+	}
+	// Every letter of Latin-1 Supplement and Latin Extended-A has its ASCII.
+	for r := rune(0xC0); r <= 0x17F; r++ {
+		if unicode.IsLetter(r) && latinASCII[r] == "" {
+			t.Errorf("no ASCII for %c (U+%04X)", r, r)
+		}
+	}
+}
+
+// The start says, in one line, which installation the notifications name
+// and how it reads in PagerDuty's dedup key, so that the key an alert is
+// open under can be found in the log: INFO when the key carries the name
+// as it is, or there is none; WARN when the key reduces the name or keeps
+// nothing of it, the keys then carrying no installation.
+func TestLogInstanceSaysHowTheKeyReads(t *testing.T) {
+	for _, tc := range []struct{ instance, level, key string }{
+		{"", "INFO", ""},
+		{"prod-eu", "INFO", "prod-eu"},
+		{"kubeat.apps.example", "INFO", "kubeat.apps.example"},
+		{"Üretim", "WARN", "Uretim"},
+		{"kubeat.apps.example:8443", "WARN", "kubeat.apps.example-8443"},
+		{"東京", "WARN", ""},
+	} {
+		var out bytes.Buffer
+		LogInstance(slog.New(slog.NewJSONHandler(&out, nil)), tc.instance)
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		if len(lines) != 1 {
+			t.Fatalf("instance %q: %d lines logged:\n%s", tc.instance, len(lines), out.String())
+		}
+		var line map[string]any
+		if err := json.Unmarshal([]byte(lines[0]), &line); err != nil {
+			t.Fatalf("instance %q: %v: %s", tc.instance, err, lines[0])
+		}
+		if line["level"] != tc.level {
+			t.Errorf("instance %q: level %v, want %s: %s", tc.instance, line["level"], tc.level, lines[0])
+		}
+		if tc.instance == "" {
+			if _, ok := line["instance"]; ok {
+				t.Errorf("instance %q: the line names an instance: %s", tc.instance, lines[0])
+			}
+			continue
+		}
+		if line["instance"] != tc.instance {
+			t.Errorf("instance %q: the line says instance %v: %s", tc.instance, line["instance"], lines[0])
+		}
+		if key, ok := line["key"]; tc.key == "" && ok || tc.key != "" && key != tc.key {
+			t.Errorf("instance %q: the line says key %v, want %q: %s", tc.instance, key, tc.key, lines[0])
+		}
+	}
+}
+
 // The dedup key names the installation, so that installations sharing a
 // PagerDuty service keep their alerts apart: the same incident of two
 // installations is two alerts. Without an instance the key is the one it
-// always was. The instance goes into the key as letters, digits, dots,
-// dashes and underscores, and as it is into the custom details.
+// always was. The instance goes into the key in ASCII letters, digits,
+// dots, dashes and underscores (dedupInstance), and as it is into the
+// custom details.
 func TestPagerDutyKeysNameTheInstance(t *testing.T) {
 	srv, seen := provider(t, http.StatusAccepted, `{"status":"success"}`)
 	sender := &PagerDutySender{Client: srv.Client(), URL: srv.URL}
@@ -203,9 +290,9 @@ func TestPagerDutyKeysNameTheInstance(t *testing.T) {
 		{"staging", "kubeat-staging-incident-4", "kubeat-staging-slow-7"},
 		{"kubeat.apps.example:8443", "kubeat-kubeat.apps.example-8443-incident-4", "kubeat-kubeat.apps.example-8443-slow-7"},
 		{"Prod EU / 1", "kubeat-Prod-EU-1-incident-4", "kubeat-Prod-EU-1-slow-7"},
-		{"İstanbul üretim", "kubeat-stanbul-retim-incident-4", "kubeat-stanbul-retim-slow-7"},
+		{"İstanbul üretim", "kubeat-Istanbul-uretim-incident-4", "kubeat-Istanbul-uretim-slow-7"},
 		{"-prod_2-", "kubeat-prod_2-incident-4", "kubeat-prod_2-slow-7"},
-		{"ğüş", "kubeat-incident-4", "kubeat-slow-7"}, // nothing left for the key
+		{"東京", "kubeat-incident-4", "kubeat-slow-7"}, // nothing left for the key
 	} {
 		before := len(seen())
 		down, slowed := sampleDown(), slow

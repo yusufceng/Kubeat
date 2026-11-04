@@ -141,6 +141,7 @@ func main() {
 		From:     cfg.SMTPFrom,
 		Security: cfg.SMTPSecurity,
 	}, alert.Endpoints{Telegram: cfg.TelegramAPIURL, PagerDuty: cfg.PagerDutyEventsURL})
+	alert.LogInstance(logger, cfg.InstanceName)
 	alerts := alert.New(db, senders, alert.Options{
 		RecoveryThreshold: cfg.RecoveryThreshold,
 		CertWarning:       cfg.CertWarning,

@@ -3410,13 +3410,17 @@ kuruluma kimliğini açıkça verin.
   yavaşlıkta `kubeat-<kimlik>-slow-<monitor no>` olur: iki kurulumun aynı
   numaralı olayları ayrı alarmlardır, birinin düzelmesi ötekini kapatmaz.
   Kimlik anahtara ASCII harf, rakam, nokta, tire ve alt çizgiyle girer:
-  öteki karakterlerin (boşluk, portun `:`'sı, `ü` gibi harfler) her dizisi
-  tek bir tireye döner, baştaki ve sondaki tireler düşer, en çok 200
-  karakter kalır (`prod eu` → `prod-eu`, `:8443` → `-8443`); hiçbiri
-  kalmazsa anahtar kimliksizdir. `custom_details`'in `instance` alanında
-  kimlik olduğu gibi durur. Kimlik yoksa anahtar `kubeat-incident-<olay no>`
-  ve `kubeat-slow-<monitor no>` kalır; testin anahtarı her zaman
-  `kubeat-test`.
+  Türkçe ve öteki aksanlı Latin harfleri en yakın ASCII harfe çevrilir
+  (`Üretim` → `Uretim`, `üç` → `uc`; `Test-Ç` ile `Test-Ş` ayrı kalır:
+  `Test-C`, `Test-S`), öteki karakterlerin (boşluk, portun `:`'sı, Latin
+  dışı harfler) her dizisi tek bir tireye döner, baştaki ve sondaki tireler
+  düşer, en çok 200 karakter kalır (`prod eu` → `prod-eu`, `:8443` →
+  `-8443`); hiçbiri kalmazsa anahtar kimliksizdir. Backend açılışta
+  kullanılan kimliği ve anahtardaki hâlini tek bir `INFO` satırıyla loglar;
+  anahtardaki hâl boşsa ya da kimlikten farklıysa satır `WARN`'dır.
+  `custom_details`'in `instance` alanında kimlik olduğu gibi durur. Kimlik
+  yoksa anahtar `kubeat-incident-<olay no>` ve `kubeat-slow-<monitor no>`
+  kalır; testin anahtarı her zaman `kubeat-test`.
 - **Geçiş.** Anahtar kayda yazılmaz, her gönderimde kimlikten kurulur.
   Backend'in son açılışından önce açılmış bir olayın ya da başlamış bir
   yavaşlığın düzelmesi iki istekle gider: önce kimlikli, sonra kimliksiz
@@ -3432,9 +3436,12 @@ kuruluma kimliğini açıkça verin.
   açık PagerDuty olaylarını kapatın: eski anahtarla açılmış alarm Kubeat'ten
   kapanmaz.
 - **Kimliksiz kurulum.** Aynı servisi paylaşan kurulumların hepsine kimlik
-  verin. Kimliksiz kurulumların aynı numaralı olayları yine tek alarmda
-  birleşir. Kimlikli bir kurulumun son açılışından önce açılmış bir
-  olayının düzelmesi kimliksiz anahtarla da gittiği için, kimliksiz bir
+  verin. 0.45 ve öncesindeki kurulumlar da kimliksizdir; ortak servisteki
+  filo 0.46'ya geçip her kurulum kimlik alana kadar ayrı servis kullanın.
+  Kimliksiz kurulumların aynı numaralı olayları yine tek alarmda birleşir.
+  Kimlikli bir kurulumun son açılışından önce açılmış bir olayının
+  düzelmesi kimliksiz anahtarla da gittiği için (ölçü süreç başlangıcıdır:
+  yalnız yükseltmede değil, her yeniden başlatmada), kimliksiz bir
   kurulumun aynı numaralı alarmını da kapatabilir.
 - **İnsanların okuduğu kanallar.** Slack ve Mattermost kimliği alt bilgide
   (`Kubeat · <kimlik>`), Teams ve Google Chat kartın son alanında
