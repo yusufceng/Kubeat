@@ -1211,6 +1211,13 @@ da yüksek açıklar için hedef süre: [SECURITY.md](SECURITY.md).
 - İmajlar yalnızca sürüm etiketinde derlenir ve yayımlanmış bir sürümün imajı
   yeniden itilmez. Taban imajdaki kritik ya da yüksek bir açığın düzeltmesi
   yeni bir yama sürümüyle gelir (SECURITY.md).
+- 0.46.0'dan beri yayım yalnızca `main`'den ya da bir `release/v*` dalından
+  erişilebilen ve CI'ı yeşil bir commit'ten çıkar. Yayım iş akışının ilk işi,
+  imajlar derlenmeden önce, etiketlenen commit'in dalını ve CI'ın o
+  commit'teki push koşusunda beş zorunlu check'in (`backend`, `frontend`,
+  `chart`, `chart (Helm 3)`, `govulncheck`) başarılı olduğunu denetler; CI
+  sürüyorsa en çok 30 dakika bekler. Geçmezse hiçbir şey itilmez
+  ([CONTRIBUTING.md](CONTRIBUTING.md) "Yayım iş akışı").
 
 #### İmza, SBOM ve provenance
 
@@ -1232,7 +1239,8 @@ da yüksek açıklar için hedef süre: [SECURITY.md](SECURITY.md).
   `docker buildx imagetools inspect ghcr.io/yusufceng/kubeat-backend:<sürüm> --format '{{ json (index .SBOM "linux/amd64").SPDX }}'`.
 - Her sürümün GitHub Release'i iki imajın ve chart'ın digest'ini, doğrulama
   komutunu ve backend ile frontend için platform başına SPDX SBOM dosyalarını
-  taşır.
+  taşır; 0.46.0'dan beri sürümün yükseltme notuna (etiketteki
+  `docs/yukseltme.md`'de sürümün bölümü) de bağlanır.
 - 0.45'ten beri `latest` etiketi itilmez; 0.44.0'da kalır. Sürüm etiketini ya
   da digest'i kullanın. Chart imaj etiketini zaten `appVersion`'dan alır.
 
@@ -1275,7 +1283,8 @@ oras cp -r ghcr.io/yusufceng/charts/kubeat:<sürüm>   registry.sirket.local/cha
 
 - `oras cp` index'i iki mimarisi ve attestation'larıyla, `-r` de imza
   bundle'ını kopyalar; digest değişmez. Sonra "İmzayı doğrulamak"taki komut
-  aynalanan referanslarla çalıştırılır.
+  aynalanan referanslarla çalıştırılır. Yayım iş akışı bu yolu her sürümde
+  kendisi de koşar ("Hava boşluklu ortamda doğrulamak").
 - `cosign copy` bu iş için kullanılmaz: cosign v3'te kullanımdan kalktı ve
   yalnızca eski biçimdeki imzaları (`sha256-<digest>.sig` etiketi) taşır.
 - `skopeo copy --all` imajı attestation'larıyla taşır, imzayı taşımaz:
@@ -1284,8 +1293,9 @@ oras cp -r ghcr.io/yusufceng/charts/kubeat:<sürüm>   registry.sirket.local/cha
   etiketinde arar. Aynı nedenle CRI-O'nun imza politikası bu imzaları görmez;
   doğrulamayı aynalama adımında `cosign verify` ile yapın.
 - `helm pull` ile `helm push` chart'ı taşır, imzasını taşımaz.
-  [docs/pilot.md](docs/pilot.md) "İmajları aynalamak"taki komutlar imzasız
-  aynalamadır.
+  [docs/pilot.md](docs/pilot.md) "İmajları aynalamak" buradaki imzalı yolu
+  sürümlü komutlarla verir; imzasız `skopeo` ve `helm` yolu orada bir
+  nottadır.
 - İki ağ arasında registry bağlantısı yoksa imaj ve chart diskle taşınır.
   Bağlı tarafta
   `cosign save --dir kubeat-backend ghcr.io/yusufceng/kubeat-backend@<backend-digest>`
@@ -1324,9 +1334,19 @@ cosign verify --trusted-root trusted_root.json \
 - Sigstore'un TUF deposunu iç ağa aynalıyorsanız kopya yerine
   `cosign initialize --mirror <adres> --root <root.json>` ile ona bağlanın;
   `cosign verify` o zaman `--trusted-root`'suz çalışır.
-- Yayım iş akışı bu adımları her sürümde kendisi de dener: `cosign save` ile
-  diske yazdığı backend imajını ve chart'ı, ağ bağlantısı kesilmişken
-  `--trusted-root` ve `--local-image` ile doğrular.
+- Yayım iş akışı bu yolu her sürümde kendisi de koşar; biri geçmezse GitHub
+  Release açılmaz:
+  - İki imajı ve chart'ı, iş içinde ayağa kalkan bir registry'ye
+    (`registry:2.8.3`; ghcr.io gibi referrers API'si yok, imza
+    `sha256-<digest>` etiketiyle taşınır) digest'lerinden `oras cp -r` ile,
+    sürüm etiketiyle aynalar. Aynadaki etiketin digest'i imzalanan digest
+    olmalıdır.
+  - Aynalanan referansları, docs/pilot.md'deki gibi etiketle ve yukarıdaki
+    gibi digest'le, ağ bağlantısı kesilmişken `--trusted-root` ile doğrular.
+  - `cosign save` ile diske yazdığı iki imajı ve chart'ı yine ağ kesikken
+    `--trusted-root` ve `--local-image` ile doğrular.
+  - Ağ kesintisini bütün bağlantıları reddeden bir vekil sağlar; yalnızca
+    iş içindeki registry'ye (localhost) bağlanılabilir.
 
 #### Digest'le sabitlemek
 

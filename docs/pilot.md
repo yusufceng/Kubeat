@@ -73,24 +73,54 @@ politikası").
 
 ### İmajları aynalamak
 
-`ghcr.io` cluster'dan erişilemiyorsa üç şey aynalanır; `skopeo` iki
-mimariyi birden taşır:
+`ghcr.io` cluster'dan erişilemiyorsa iki imaj ve chart iç registry'ye
+imzalarıyla aynalanır ve kurulumdan önce orada doğrulanır. Gerekenler
+[ORAS](https://oras.land) (`oras cp -r`), cosign v3 ve Sigstore'un trusted
+root'u; doğrulama Sigstore'a bağlanmaz, trusted root'u bağlı bir makinede
+almak yeter:
 
 ```sh
+# Bağlı bir makinede: trusted root (README "Hava boşluklu ortamda doğrulamak")
+cosign initialize
+cp ~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json .
+
+# İmajlar ve chart, imzalarıyla
 R=registry.sirket.local/kubeat
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.45.0  docker://$R/kubeat-backend:0.45.0
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.45.0 docker://$R/kubeat-frontend:0.45.0
-helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0        # kubeat-0.45.0.tgz
-helm push kubeat-0.45.0.tgz oci://registry.sirket.local/charts
+oras cp -r ghcr.io/yusufceng/kubeat-backend:0.45.0  $R/kubeat-backend:0.45.0
+oras cp -r ghcr.io/yusufceng/kubeat-frontend:0.45.0 $R/kubeat-frontend:0.45.0
+oras cp -r ghcr.io/yusufceng/charts/kubeat:0.45.0   registry.sirket.local/charts/kubeat:0.45.0
+
+# İç ağda, aynalanan kopyaların imzası
+cosign verify --trusted-root trusted_root.json \
+  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v0.45.0 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  $R/kubeat-backend:0.45.0 $R/kubeat-frontend:0.45.0 registry.sirket.local/charts/kubeat:0.45.0
 ```
+
+- `oras cp -r` imajı iki mimarisi, SBOM'u ve provenance'ıyla, `-r` de imza
+  bundle'ıyla kopyalar; digest değişmez. Yayım iş akışı aynı yolu her
+  sürümde CI'da koşar: bir registry'ye aynalar, ağ kesikken doğrular (README
+  "Hava boşluklu ortamda doğrulamak").
+- `cosign verify` her referansın imzasını ve sertifikadaki kimliği (bu
+  sürümün etiketinde koşan yayım iş akışı) denetler; biri geçmezse kurulum
+  yapılmaz. Release'teki digest'lerle doğrulayıp kurmak için README
+  "Digest'le sabitlemek".
 
 Values'ta `backend.image.repository`, `frontend.image.repository` ve
 registry parola istiyorsa `imagePullSecrets` verilir; chart
 `oci://registry.sirket.local/charts/kubeat` adresinden kurulur.
 
-Bu komutlar imzaları taşımaz. 0.45'ten beri imajlar ve chart imzalı
-yayımlanır; imzalarıyla aynalamak ve iç ağda doğrulamak için README "Tedarik
-zinciri".
+**Not: imzasız yol.** `skopeo copy --all` imajı attestation'larıyla, `helm
+pull` ile `helm push` chart'ı taşır, ikisi de imzayı taşımaz: iç registry'de
+doğrulama yapılamaz (README "İmzalarla aynalamak"). Yalnızca imza
+doğrulanmayacaksa:
+
+```sh
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.45.0  docker://$R/kubeat-backend:0.45.0
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.45.0 docker://$R/kubeat-frontend:0.45.0
+helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0        # kubeat-0.45.0.tgz
+helm push kubeat-0.45.0.tgz oci://registry.sirket.local/charts
+```
 
 ## Kurulum
 

@@ -1195,6 +1195,32 @@ non_fast_forward bypass'sız olur; main kural seti `release/v*` dallarını da
 kapsar); "Immutable releases" S53 ile açılır
 ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
+Güncelleme (2026-10-30, S52 #63): yeşil CI kapısı
+(`scripts/release-gate.sh`), CI'da hava boşluklu aynalama, Release
+bağlantısı ve Chart.yaml `home`/`sources` geldi (CONTRIBUTING "Yayım iş
+akışı"). Sprint 3'ün iki bulgusu, v0.46.0 etiketinde doğrulanınca kapanır.
+Bilerek böyle bırakılanlar:
+
+- **Zorunlu check'ler betikte.** Kapı beş check'i kendi listesinden okur,
+  kural setinden değil; kural seti değişirse liste ve CONTRIBUTING de
+  değişir. Tetikleyici: kural setine yeni bir check girmesi ya da listenin
+  kural setinden ayrışması.
+- **Ağ kesintisi bir vekille.** Ağsız doğrulamada bütün bağlantıları
+  reddeden bir vekil ağın yerini tutar; Go istemcileri ona uyar ve
+  localhost'taki aynaya doğrudan gider. Ayrı bir ağ ad alanı ya da
+  `--internal` Docker ağıyla gerçek yalıtım yok. Tetikleyici: cosign'ın vekil
+  ayarını atlayan bir bağlantı kurması ya da bir müşterinin gerçek yalıtım
+  istemesi.
+- **API hatasında kapı hemen düşer.** Geçici bir GitHub API hatası yeniden
+  denenmez; "Re-run failed jobs" yeter. Tetikleyici: bir sürümün bu yüzden
+  birden çok kez yeniden koşturulması.
+- **Registry imajı ve ORAS.** `registry:2.8.3` etiketle, ORAS sürüm ve
+  sağlama toplamıyla sabit; registry imajını digest'e S54 çevirir (sprint 5).
+
+"Kuru denemede etiket denetimi", `make bump`, `--version`'sız kurulum, ayrı
+`image.digest`, tarama bulgusu için otomatik issue ve `cosign sign
+--recursive` değişmedi.
+
 ## Öz-sağlık kurallarının ve kuyruk uyarısının kalanları
 
 2026-10-29'da ertelendi (#50; SRE incelemesinin düşük bulguları ve
