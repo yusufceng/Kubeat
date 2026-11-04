@@ -3,10 +3,11 @@
 # from a scenario's files as GitHub would, and a fake clock (date and sleep),
 # and checks what the gate decides. Nothing waits and nothing goes to the
 # network. A tag on main or on a release/v* branch whose push run of CI
-# passed goes on. A failed check, a commit on neither branch, a pull
-# request's run in place of a push run, CI still running after 30 minutes
-# and an API error stop it; the wait for CI is checked on the clock. A dry
-# run takes the branch's pull request run and does not ask about branches.
+# passed goes on. A failed or skipped check, a commit on neither branch, a
+# pull request's run in place of a push run, CI still running after 30
+# minutes and an API error stop it; the wait for CI is checked on the clock.
+# A dry run takes the branch's pull request run and does not ask about
+# branches.
 # Usage: scripts/test-release-gate.sh
 set -u
 
@@ -149,9 +150,9 @@ run() {
     | map({name: ., status: "completed", conclusion: "success"})}' >"$FAKE/jobs-$1.json"
 }
 
-# job ID NAME STATE: the run's job NAME ended in STATE (failure, cancelled...),
-# is still in STATE (queued, in_progress) or, with -, is not there. A NAME
-# that is not one of the five adds a job.
+# job ID NAME STATE: the run's job NAME ended in STATE (failure, cancelled,
+# skipped...), is still in STATE (queued, in_progress) or, with -, is not
+# there. A NAME that is not one of the five adds a job.
 job() {
   json "jobs-$1.json" '.jobs |= (map(select(.name != $name))
       + if $state == "-" then []
@@ -273,6 +274,16 @@ run 1 push
 job 1 "chart (Helm 3)" -
 gate tag "$SHA"
 stops "a finished run without a check" "chart (Helm 3): no such job"
+
+# A required check that was skipped (a job with an if: that was false) has
+# not passed: the ruleset lets a skipped required check through, the gate
+# does not, and it does not wait for it either.
+scenario tag-skipped-check
+run 1 push
+job 1 govulncheck skipped
+gate tag "$SHA"
+stops "a skipped check" "CI failed on $SHA: govulncheck: skipped (https://github.com/o/r/actions/runs/1). Nothing was pushed."
+waited "a skipped check" 0
 
 # Only the five checks count, and every push run on the commit.
 scenario tag-other-job

@@ -122,10 +122,11 @@ koşar:
    - Etiketlenen commit `main`'den ya da bir `release/v*` dalından
      erişilebilir.
    - CI'ın o commit'teki **push** koşusunda beş zorunlu check ("Merge")
-     başarılıdır; commit'te birden çok push koşusu varsa her biri. PR koşusu
-     sayılmaz: `main` kural setinde "strict" kapalı olduğundan squash commit'i
-     PR'ın sınadığı ağaç değildir. Bu yüzden ci.yml `release/v*` dallarına
-     push'ta da koşar.
+     başarılıdır; commit'te birden çok push koşusu varsa her biri. Yalnızca
+     `success` sayılır: atlanan (`skipped`) bir check kural setinde geçmiş
+     sayılır, kapıda sayılmaz. PR koşusu sayılmaz: `main` kural setinde
+     "strict" kapalı olduğundan squash commit'i PR'ın sınadığı ağaç
+     değildir. Bu yüzden ci.yml `release/v*` dallarına push'ta da koşar.
    - CI sürüyorsa ya da koşu henüz başlamadıysa kapı 30 saniyede bir sorar,
      en çok 30 dakika bekler, sonra düşer. Başarısız bir check kapıyı hemen
      düşürür.
@@ -134,7 +135,8 @@ koşar:
      check'lerin listesi betiktedir: kural seti değişirse betik ve bu
      dosya da değişir.
    - Kararı `scripts/test-release-gate.sh` sahte bir API'yle sınar (yeşil,
-     kırmızı, sürüyor, PR koşusu, dalda değil; `make test`, CI'ın chart işi).
+     kırmızı, atlanan check, sürüyor, PR koşusu, dalda değil; `make test`,
+     CI'ın chart işi).
 2. `images`: iki imajı yalnızca sürüm etiketiyle iter, `latest` itilmez.
    Index BuildKit'in SPDX SBOM'unu ve SLSA provenance'ını (`mode=max`)
    taşır; platform başına SBOM'lar iş akışı artefaktı olarak saklanır.

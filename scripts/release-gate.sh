@@ -14,10 +14,11 @@
 # branch with an open pull request, that is the pull request's run.
 #
 # Every such run counts, each by its latest attempt, and a failed check
-# fails the gate at once. While CI is still running, or has not started yet,
-# the gate asks again every 30 seconds and fails after 30 minutes. Nothing
-# has been pushed then; once CI is done, re-run the release run's failed jobs
-# (CONTRIBUTING.md, "Yayım iş akışı").
+# fails the gate at once. Only success passes: a required check that was
+# skipped passes the ruleset, not the gate. While CI is still running, or
+# has not started yet, the gate asks again every 30 seconds and fails after
+# 30 minutes. Nothing has been pushed then; once CI is done, re-run the
+# release run's failed jobs (CONTRIBUTING.md, "Yayım iş akışı").
 #
 # The gate asks GitHub's REST API through gh api, with the token in GH_TOKEN
 # (contents: read and actions: read are enough), about the repository
@@ -153,6 +154,7 @@ ci() {
     while IFS="$TAB" read -r name job conclusion; do
       [ -n "$name" ] || continue
       if [ "$job" = completed ]; then
+        # Only success passes; skipped, cancelled and the rest do not.
         [ "$conclusion" = success ] || failed="$failed, $name: $conclusion"
       elif [ "$job" != missing ]; then
         running="$running, $name: $job"
