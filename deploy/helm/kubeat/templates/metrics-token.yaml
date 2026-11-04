@@ -4,7 +4,11 @@ upgrades; set metrics.auth.existingSecret to manage it yourself. It is a
 token of its own, never the API token: the Prometheus that scrapes keeps a
 copy in its configuration (on OpenShift in a Secret of
 openshift-user-workload-monitoring), where it must open nothing but the
-metrics.
+metrics. It is also left in place when the release is removed, like the
+database's PVC and tied to the same switch
+(backend.persistence.keepOnUninstall): a reinstall with the same release name
+and namespace then keeps the token, so a Prometheus configured by hand with
+the old one goes on scraping.
 */ -}}
 {{- if and (include "kubeat.metricsAuth" .) (not (dig "auth" "existingSecret" "" .Values.metrics)) }}
 {{- $name := printf "%s-metrics-token" .Release.Name }}
@@ -15,6 +19,10 @@ metadata:
   name: {{ $name }}
   labels:
     {{- include "kubeat.labels" . | nindent 4 }}
+  {{- if include "kubeat.keepData" . }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
 type: Opaque
 data:
   {{- if and $existing $existing.data (index $existing.data "token") }}

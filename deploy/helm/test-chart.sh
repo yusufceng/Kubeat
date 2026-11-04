@@ -154,6 +154,59 @@ notes "nothing kept" omits "delete pvc" --namespace kubeat "${BACKUPS[@]}" \
   --set backend.persistence.keepOnUninstall=false --set backup.persistence.keepOnUninstall=false
 notes "nothing kept without backups" omits "delete pvc" --namespace kubeat --set backend.persistence.keepOnUninstall=false
 
+# The chart's own Secrets (the admin password, the API token, the metrics
+# token) are left behind on the same switch as the database's PVC, so that a
+# reinstall with the same release name and namespace keeps the password and
+# tokens instead of regenerating them (which would break sign-in and any
+# script or Prometheus using the old token). They carry helm.sh/resource-policy:
+# keep, like the encryption key's Secret.
+# secret NAME FILE has|lacks|absent TEXT VALUES...: the Secret from
+# templates/FILE rendered with these values has TEXT, lacks it, or is not
+# rendered at all.
+secret() {
+  local name="$1" file="$2" want="$3" text="$4"
+  shift 4
+  if ! helm template kubeat "$CHART" --show-only "templates/$file" "$@" >"$WORK/secret" 2>"$WORK/err"; then
+    if grep -q "could not find template" "$WORK/err"; then
+      [ "$want" = absent ] || failed "$name: $file is not rendered"
+    else
+      failed "$name: refused: $(cat "$WORK/err")"
+    fi
+    return
+  fi
+  if [ "$want" = absent ]; then
+    failed "$name: $file is rendered"
+  elif grep -qF -- "$text" "$WORK/secret"; then
+    [ "$want" = has ] || failed "$name: $file has \"$text\""
+  else
+    [ "$want" = lacks ] || failed "$name: $file lacks \"$text\""
+  fi
+}
+for f in admin-secret.yaml api-token.yaml metrics-token.yaml; do
+  secret "defaults" "$f" has "helm.sh/resource-policy: keep"
+  # A release upgraded with --reuse-values from before the switch renders it
+  # as null; read with a default of true, the Secret is kept all the same.
+  secret "no keepOnUninstall value" "$f" has "helm.sh/resource-policy: keep" --set backend.persistence.keepOnUninstall=null
+  secret "data not kept" "$f" lacks "helm.sh/resource-policy: keep" --set backend.persistence.keepOnUninstall=false
+done
+# The metrics token's Secret exists only with metrics auth on; a Secret of
+# one's own (existingSecret) the chart neither renders nor annotates.
+secret "metrics auth off" metrics-token.yaml absent "" --set metrics.auth.enabled=false
+secret "auth.existingSecret" admin-secret.yaml absent "" --set auth.existingSecret=my-admin
+secret "apiToken.existingSecret" api-token.yaml absent "" --set apiToken.existingSecret=my-api-token
+
+# The install notes name the kept Secrets and the command that deletes them,
+# and that command names exactly the ones the chart generated and kept.
+DELETE_SECRET="kubectl -n kubeat delete secret"
+notes "kept secrets" says "$DELETE_SECRET kubeat-admin kubeat-api-token kubeat-metrics-token" --namespace kubeat
+notes "kept secrets without the value" says "$DELETE_SECRET kubeat-admin kubeat-api-token kubeat-metrics-token" \
+  --namespace kubeat --set backend.persistence.keepOnUninstall=null
+notes "secrets not kept" omits "delete secret" --namespace kubeat --set backend.persistence.keepOnUninstall=false
+notes "admin from auth.existingSecret" says "$DELETE_SECRET kubeat-api-token kubeat-metrics-token" --namespace kubeat --set auth.existingSecret=my-admin
+notes "admin from auth.existingSecret" omits "kubeat-admin" --namespace kubeat --set auth.existingSecret=my-admin
+notes "metrics auth off" says "$DELETE_SECRET kubeat-admin kubeat-api-token" --namespace kubeat --set metrics.auth.enabled=false
+notes "metrics auth off" omits "kubeat-metrics-token" --namespace kubeat --set metrics.auth.enabled=false
+
 # The SSO redirect URL: the chart takes what the backend's checkCallbackURL
 # takes, refuses the rest, and names the value a refused one came from.
 renders "redirect from route.host" "${SSO[@]}" "${ROUTE[@]}"
