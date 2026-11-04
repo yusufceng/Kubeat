@@ -3329,8 +3329,6 @@ adımı ona göre seçer.
   okuduğu kanal da, `Retry-After` kadar almıyor sayılır: o sürede gelen
   bildirimler ve gruplar beklenen anda onunla birlikte gider, hız sınırına
   takılan bir PagerDuty ya da Slack her geçişte en çok bir kez 429 alır.
-  0.45'te insanların okuduğu kanalda yalnızca o mesaj bekliyor, öteki
-  mesajlar yine anında deneniyordu.
 - **Ulaşılamadı.** Bir deneme kanala `UPTIME_NOTIFY_ATTEMPTS` kısa tekrar
   yapar; hepsi başarısızsa (SMTP relay'i yeniden başlıyor, Slack 5xx
   dönüyor) bildirim 1 dakika sonra, sonra her başarısız denemede iki katı
@@ -3397,16 +3395,14 @@ almıyor sayılmaz (bkz. yukarıda "Reddetti").
   kez denenir ve kuyruk akar. Ölü bir webhook ya da PagerDuty varken Slack
   ve e-posta grupları, yanıt vermeyen bir e-posta relay'i ya da Slack
   varken PagerDuty ve webhook sayfaları en çok o kanala yapılan bir
-  denemenin süresi kadar bekler, kaç namespace düşmüş olursa olsun. 0.45'te
-  insanların okuduğu kanallar almıyor sayılmazdı: birden çok namespace'e
-  yayılan bir kesintide ulaşılamayan bir e-posta relay'i döngüyü grup
-  başına bir deneme süresi tutuyor, bu arada açılan kesintilerin
-  sayfalarını o kadar geciktiriyordu.
+  denemenin süresi kadar bekler, kaç namespace düşmüş olursa olsun.
 - Bedeli: almıyor sayılan kanala giden yeni mesaj, kanal bu arada dönse de,
   kanalın sıradaki yeniden deneme geçişini bekler. Kanal dönünce yeni
   kesinti sayfası da, Slack ya da e-posta mesajı da en çok kanalın o anki
   bekleme süresi kadar gecikir; üst sınır `UPTIME_NOTIFY_RETRY_MAX`
-  (varsayılan 15 dk). Kanalın reddettiği bir bildirimin
+  (varsayılan 15 dk). Kanalı düzenlemek ya da kanal testi duraklatmayı
+  kaldırmaz (test kuyruğu atlar); düzeltilmiş ayar sıradaki geçişte
+  kullanılır. Kanalın reddettiği bir bildirimin
   `UPTIME_NOTIFY_RETRY_MAX` beklemesi kanalın geçişi sayılmaz: kanal yine
   kendi yeniden denemesinin zamanında denenir.
 - Geçişte kanalın daha az reddettiği bildirimler önce denenir (hatırlatma
