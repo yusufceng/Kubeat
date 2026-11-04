@@ -123,6 +123,28 @@ again with the same release name and namespace picks them up:
 To delete them once the release is uninstalled:
   kubectl -n {{ $.Release.Namespace }} delete pvc {{ join " " . }}
 {{- end }}
+{{- $keptSecrets := list }}
+{{- if include "kubeat.keepData" . }}
+{{- if not .Values.auth.existingSecret }}{{ $keptSecrets = append $keptSecrets (printf "%s-admin" .Release.Name) }}{{ end }}
+{{- if not .Values.apiToken.existingSecret }}{{ $keptSecrets = append $keptSecrets (printf "%s-api-token" .Release.Name) }}{{ end }}
+{{- if and (include "kubeat.metricsAuth" .) (not (dig "auth" "existingSecret" "" .Values.metrics)) }}{{ $keptSecrets = append $keptSecrets (printf "%s-metrics-token" .Release.Name) }}{{ end }}
+{{- end }}
+{{- with $keptSecrets }}
+
+helm uninstall also leaves these Secrets, so that installing again with the
+same release name and namespace keeps the administrator password, the API
+token and the metrics token (backend.persistence.keepOnUninstall):
+{{- range . }}
+  - {{ . }}
+{{- end }}
+Without them a reinstall generates new ones: the sign-in password above would
+no longer match the account kept in the database, and scripts or a Prometheus
+still using the old API or metrics token would fail. The encryption key Secret
+({{ $.Release.Name }}-secret-key) is kept on its own policy either way.
+To delete these once the release is uninstalled (a reinstall then generates
+new ones):
+  kubectl -n {{ $.Release.Namespace }} delete secret {{ join " " . }}
+{{- end }}
 {{- if and (contains ":9091" .Values.prometheus.url) .Values.discovery.enabled (not .Values.discovery.namespaces) (not .Values.prometheus.openshiftMonitoringView) }}
 
 WARNING: prometheus.url is on port 9091, where OpenShift's Thanos Querier

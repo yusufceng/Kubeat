@@ -2788,9 +2788,16 @@ kurmadan, Kubeat'in körleştiği cluster'ın kendi Alertmanager'ından
   yazılmaya devam eder.
 - **Hangi arızayı ne duyurur.** Kurallı bir kurulumda
   (`metrics.prometheusRule.enabled=true`) Kubeat'in kendi arızası heartbeat
-  olmadan da cluster içinden duyulur: pod yoksa `KubeatDown`, volume doluysa
-  ya da yazım takıldıysa `KubeatUnhealthy`. Cluster'ın tamamı ya da
-  Prometheus'u düşerse bunları söyleyecek kimse kalmaz; o durumu yalnızca
+  olmadan da cluster içinden duyulur: pod yoksa `KubeatDown`, sonuçlar
+  yazılamıyorsa (yazım takıldıysa ya da dolu volume'da sonuç kaybı
+  başladıysa) `KubeatUnhealthy`. `KubeatUnhealthy` disk doluluğunu değil
+  kaybolan sonuçları ölçer: SQLite'ın WAL'ı var olan alanı kullandığından
+  dolu bir volume'da yazımlar bir süre düşmeyebilir ve seyrek (az monitor'lü)
+  bir kurulumda dolu disk uzun süre sessiz kalabilir, bu yüzden PVC doluluğunu
+  platform alarmına bırakın (OpenShift'te `KubePersistentVolumeFillingUp`;
+  `kubelet_volume_stats_*` ile `<release>-data` PVC'si;
+  [docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md)). Cluster'ın
+  tamamı ya da Prometheus'u düşerse bunları söyleyecek kimse kalmaz; o durumu yalnızca
   cluster dışındaki heartbeat duyurur. Bildirim alamayan kanalı yalnızca
   kurallar duyurur: `KubeatNotificationsFailing` kanal başına yanar (bkz.
   yukarıda "Kanal başına bildirim alarmı"); heartbeat de
@@ -3017,12 +3024,15 @@ release'i kaldırıp yeniden kurmak bu yüzden monitor'ları, kanalları,
 olayları ve geçmişi götürmez: **aynı release adı ve namespace'le** (ve aynı
 values ile) yapılan yeniden kurulum, `helm install` ya da
 `helm upgrade --install`, kalan PVC'leri ve anahtarı olduğu gibi alır ve
-backend veritabanını kaldığı yerden açar. Chart'ın ürettiği öteki Secret'lar
-kaldırmayla gider ve yeniden üretilir: hesaplar eski parolalarıyla kalır,
-yeni `<release>-admin` Secret'ındaki parola geçmez (unutulduysa
-`UPTIME_ADMIN_PASSWORD_RESET`, bkz. "Hesaplar ve giriş"); API ve metrik
-anahtarları da yenilenir, eskilerini kullanan betikler ve elle
-yapılandırılmış bir Prometheus yenilerini almalıdır.
+backend veritabanını kaldığı yerden açar. Chart'ın ürettiği üç Secret de aynı
+anahtara (`backend.persistence.keepOnUninstall`) bağlı `helm.sh/resource-policy:
+keep` taşır ve kaldırmada kalır: `<release>-admin` ile yönetici parolası,
+`<release>-api-token` ile API anahtarı ve `<release>-metrics-token` ile metrik
+anahtarı yeniden kurulumda sahiplenilir, eskisi gibi kalır. Böylece kurulum
+notları geçerli parolayı gösterir (yeniden üretilen, geçmeyen bir parola
+değil) ve eski anahtarı kullanan betikler ile elle yapılandırılmış bir
+Prometheus çalışmayı sürdürür. `keepOnUninstall=false` ile bu üç Secret de
+veri PVC'siyle birlikte gider ve yeniden kurulumda yeniden üretilir.
 
 PVC'leri bilerek silmek için release'i kaldırdıktan sonra (kurulum notları
 komutu yalnızca kalacak PVC'lerle yazar):
@@ -3030,6 +3040,16 @@ komutu yalnızca kalacak PVC'lerle yazar):
 ```sh
 kubectl -n kubeat delete pvc kubeat-data kubeat-backup
 ```
+
+Aynı anahtarla korunan üç Secret de kalır; onları da silmek için (yeniden
+kurulum yenilerini üretir; kurulum notları bu komutu da yazar):
+
+```sh
+kubectl -n kubeat delete secret kubeat-admin kubeat-api-token kubeat-metrics-token
+```
+
+Şifreleme anahtarı `<release>-secret-key` kendi politikasıyla her durumda
+kalır; onu silmek saklanan yedeklerin de okunamaz olması demektir.
 
 Ya da önce `backend.persistence.keepOnUninstall=false` ve
 `backup.persistence.keepOnUninstall=false` ile yükseltin; `helm uninstall`
@@ -3046,97 +3066,11 @@ ile 0.44'e yükseltin, değişikliği sonraki yükseltmede yapın. Namespace'i
 silmek ise PVC'leri de siler: kopyaların cluster dışına taşınması bunun için
 de gerekir.
 
-Kopyaları cluster dışına almak için (backend imajında `tar` olmadığından
-`kubectl cp` çalışmaz):
-
-```sh
-kubectl exec deploy/kubeat-backend -- ls /backup
-kubectl exec deploy/kubeat-backend -- cat /backup/kubeat-20261012T030000Z.db > kubeat-20261012T030000Z.db
-kubectl get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d > kubeat-secret.key
-```
-
-Anahtar dosyasını kopyalarla birlikte ama ayrı ve erişimi kısıtlı bir yerde
-saklayın. Kopyadaki gizli değerler, kopya alındığı sırada kullanılan
-`UPTIME_SECRET_KEY` ile şifrelidir; anahtarı olmayan bir kopya işe yaramaz.
-
-Geri yükleme bir yardımcı pod ile yapılır. Komutlar release adının `kubeat`
-olduğunu varsayar; değilse `kubeat-data`, `kubeat-backup` ve
-`kubeat-secret-key` adlarındaki ön eki değiştirin. Yardımcı pod backend
-imajını kullanır, ek bir imaj çekilmez:
-
-```yaml
-# kubeat-restore.yaml: image, kurulumdaki backend imajı olmalıdır
-# (kubectl get deploy kubeat-backend -o jsonpath='{..image}')
-apiVersion: v1
-kind: Pod
-metadata:
-  name: kubeat-restore
-spec:
-  restartPolicy: Never
-  securityContext: { fsGroup: 1001 }             # OpenShift'te bu satırı çıkarın
-  containers:
-    - name: restore
-      image: ghcr.io/yusufceng/kubeat-backend:<sürüm>
-      command: ["sleep", "3600"]
-      securityContext:
-        allowPrivilegeEscalation: false
-        runAsNonRoot: true
-        capabilities: { drop: ["ALL"] }
-        seccompProfile: { type: RuntimeDefault }
-      volumeMounts:
-        - { name: data, mountPath: /data }
-        - { name: backup, mountPath: /backup }   # yeni kurulumda bu ikisini çıkarın
-  volumes:
-    - name: data
-      persistentVolumeClaim: { claimName: kubeat-data }
-    - name: backup                               # yeni kurulumda bu ikisini çıkarın
-      persistentVolumeClaim: { claimName: kubeat-backup }
-```
-
-Pod düzeyindeki `securityContext`, yardımcı pod'un volume'lara backend gibi
-yazabilmesi içindir; kurulum komutundaki `podSecurityContext.fsGroup=1001`'in
-karşılığıdır (bkz. "Cluster'a kurulum"). Olmazsa volume'un kökü root'a ait
-bir cluster'da aşağıdaki kopyalama `/data`'ya yazamaz ve backend o sırada
-sıfır replikada, yani izleme durmuş hâlde kalır.
-
-- **OpenShift'te** bu satırı çıkarın; UID ve fsGroup'u SCC atar.
-- **Kurulumda başka bir `podSecurityContext` verdiyseniz** satırdaki değeri
-  onunla değiştirin. Kurulumdaki değer:
-  `kubectl get deploy kubeat-backend -o jsonpath='{.spec.template.spec.securityContext}'`
-  (çıktı, ör. `{"fsGroup":1001}`, olduğu gibi yazılabilir).
-
-Aynı kurulumda, yedek volume'undaki bir kopyaya dönmek:
-
-1. Backend'i durdurun ve pod'un gitmesini bekleyin:
-   `kubectl scale deploy/kubeat-backend --replicas=0`.
-2. `kubectl apply -f kubeat-restore.yaml`, ardından
-   `kubectl wait --for=condition=Ready pod/kubeat-restore`.
-3. Kopyayı yerine koyun:
-   `kubectl exec kubeat-restore -- sh -c 'cp /backup/kubeat-20261012T030000Z.db /data/uptime.db.restore && mv /data/uptime.db.restore /data/uptime.db'`.
-4. `kubectl exec kubeat-restore -- ls /data` ile bakın: backend düzgün
-   kapandıysa yalnızca `uptime.db` vardır. Yanında `uptime.db-wal` ve
-   `uptime.db-shm` kaldıysa (backend çökmüşse) bu ikisini silin; yoksa eski
-   veritabanının yazılmamış sayfaları geri yüklenen kopyanın üzerine
-   uygulanmaya çalışılır.
-5. `kubectl delete pod kubeat-restore`, sonra
-   `kubectl scale deploy/kubeat-backend --replicas=1`.
-
-Cluster ya da namespace kaybolduysa, yeni bir kuruluma:
-
-1. Saklanan anahtarla bir Secret oluşturun ve chart'ı onunla kurun:
-   `kubectl create secret generic kubeat-restored-key --from-file=key=kubeat-secret.key`,
-   `helm install kubeat ... --set secretKey.existingSecret=kubeat-restored-key`.
-   Yedeklemeyi de açın (`backup.enabled=true`).
-2. Backend hazır olunca (boş bir veritabanı oluşturur) yukarıdaki 1. ve 2.
-   adımları uygulayın; yardımcı pod'da `backup` volume'u gerekmez.
-3. Bilgisayardaki kopyayı yazın:
-   `kubectl exec -i kubeat-restore -- sh -c 'cat > /data/uptime.db.restore && mv /data/uptime.db.restore /data/uptime.db' < kubeat-20261012T030000Z.db`.
-4. Yukarıdaki 4. ve 5. adımlar.
-
-Kopyadan sonraki kontrol sonuçları ve değişiklikler kaybolur. Eski bir
-sürümün kopyası yeni sürümde açılır ve şeması yükseltilir; yeni bir sürümün
-kopyası eski sürümde açılmaz. Anahtar yanlışsa backend başlamaz. Prova
-kaydı ve hedef süreler: [docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md).
+Yedek kopyaları cluster dışına almak, bir yardımcı pod ile adım adım geri
+yükleme (aynı kurulumda ve cluster ya da namespace kaybında), node kaybından
+ve dolu volume'dan dönüş, geri yüklemeden önce susturma ile GitOps self-heal,
+geri yükleme pod'unun fsGroup/UID'i, RPO/RTO hedefleri ve prova kaydı
+runbook'tadır: [docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md).
 
 `kubeat_backup_last_success_timestamp_seconds` metriği en yeni kopyanın
 zamanını verir: son başarılı kopyanın, yeniden başlatmadan sonra da yedek
