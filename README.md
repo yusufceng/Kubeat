@@ -175,7 +175,7 @@ bir `output` ile okunur). Notların uyarıları ve her birini kapatan değer:
 | Uyarı | Ne zaman | Kapatan değer |
 | --- | --- | --- |
 | fsGroup | OpenShift dışında `podSecurityContext` boş: backend volume'lara yazamayabilir, açılışta `open database failed` ile durur | `podSecurityContext.fsGroup: 1001` (OpenShift'te boş kalır, SCC atar) |
-| Heartbeat ve kurallar | İkisi de kapalı: Kubeat'in kendi arızasını kimse duymaz | `heartbeat.urlSecret.name` (Secret'ın `url` anahtarı; bkz. "Aracın kendi sağlığı") ya da `metrics.prometheusRule.enabled: true` |
+| Heartbeat ve kurallar | İkisi de kapalı: Kubeat'in kendi arızasını kimse duymaz | `heartbeat.urlSecret.name` (Secret'ın `url` anahtarı; bkz. "Aracın kendi sağlığı") ya da `metrics.prometheusRule.enabled: true`. Notlar kural seçeneğini yalnızca PrometheusRule CRD'sini gördüğünde önerir; `helm template` `--api-versions monitoring.coreos.com/v1` verilmeden CRD'li cluster'da da görmez |
 | Yedek | `backup.enabled: false` (varsayılan): veri volume'u giderse monitor'lar, kanallar ve geçmiş de gider | `backup.enabled: true`; volume'u Velero ya da OADP ile yedekliyorsanız gerekmez |
 | Thanos 9091 | `prometheus.url` 9091'de ve keşif cluster çapında: pod'ların CPU ve belleği boş kalır | `prometheus.openshiftMonitoringView: true` |
 | Prometheus sertifikası denetlenmiyor | `prometheus.tokenFile` ile birlikte `prometheus.insecureSkipVerify: true`: token'ı o adreste yanıt veren alır | `prometheus.insecureSkipVerify: false` ve `prometheus.caFile` |
@@ -369,7 +369,9 @@ Helm chart API anahtarını ilk kurulumda rastgele üretir, bir Secret'ta
 saklar ve güncellemelerde korur; Argo CD gibi araçlarla kurarken bkz.
 "GitOps ile kurulum".
 
-**Ağ erişimi.** `networkPolicy.enabled=true` (varsayılan kapalı) backend'e
+### Ağ erişimi
+
+`networkPolicy.enabled=true` (varsayılan kapalı) backend'e
 yalnızca arayüz pod'larının, `metrics.serviceMonitor.enabled` açıksa
 `networkPolicy.metricsFrom`'daki Prometheus'un ve
 `networkPolicy.backendIngressFrom`'da sayılanların bağlanmasına izin verir;
@@ -377,15 +379,167 @@ NetworkPolicy uygulayan bir ağ eklentisi gerekir. `metricsFrom` varsayılan
 olarak OpenShift'in user workload monitoring'ini
 (`openshift-user-workload-monitoring` namespace'i) seçer; platformun kendi
 Prometheus'u için `openshift-monitoring`, başka cluster'larda Prometheus'un
-namespace'i yazılır. Politika yalnızca backend'e gelen bağlantıları
+namespace'i yazılır. `metricsFrom` yalnızca `metrics.serviceMonitor.enabled`
+ile uygulanır: ServiceMonitor'süz bir scraper'ın (Grafana Alloy, elle
+yapılandırılmış Prometheus) namespace'i `networkPolicy.backendIngressFrom`'a
+yazılır (bkz. "Aracın kendi sağlığı", Operator'süz cluster). Politika
+yalnızca backend'e gelen bağlantıları
 kısıtlar, backend'in kendi bağlantılarını değil: kontroller her servise,
-pod'a ve adrese ulaşabilmelidir. Politika açıkken başka namespace'lerdeki
+pod'a ve adrese ulaşabilmelidir; izlenen namespace'in kendi politikası bunu
+engelleyebilir (aşağıda "İzlenen namespace'ler"). Politika açıkken başka
+namespace'lerdeki
 işler push raporlarını backend'e değil arayüze gönderir
 (`http://<release>-frontend.<namespace>.svc:3000/api/push/<token>`); arayüz
 raporu backend'e iletir. Chart `PUSH_INTERNAL_URL`'i bu adrese çevirir,
 monitor sayfası da cluster içi adres olarak bunu gösterir. API anahtarıyla
 backend'e doğrudan bağlanan betikler `networkPolicy.backendIngressFrom` ile
 izin almalıdır.
+
+#### İzlenen namespace'ler
+
+Kontroller backend pod'undan, Kubeat'in namespace'inden çıkar. İzlenen
+namespace'te gelen trafiği varsayılan olarak reddeden bir NetworkPolicy
+varsa (OpenShift'te proje şablonuyla her yeni namespace'e gelen
+`default-deny` ile yalnızca router'a, platform izlemesine ve namespace'in
+kendisine izin veren `allow-from-openshift-ingress`,
+`allow-from-openshift-monitoring` ve `allow-same-namespace`) backend'in
+bağlantıları da düşer ve ilk gün yanlış kesinti açılır:
+
+- **Düşer.** Service adresine ya da pod'a bağlanan her kontrol: `http`,
+  `tcp`, `grpc`, `websocket`, `postgres`, `mysql`, `redis` ve `each_pod`
+  (hazır pod'ların her birine). Açıklaması `connect_timeout` olur:
+  bağlantı isteğine zaman aşımına kadar yanıt gelmez (bkz. "Başarısız
+  kontrolün ayrıntıları").
+- **Çalışır.** Route ve Ingress monitor'leri router'dan ya da ingress
+  controller'dan geçer; şablon router'a izin verir. `workload` monitor'ü
+  pod'a bağlanmaz, cluster API'sinden okur. `push` raporu hedeften
+  Kubeat'e gelir.
+- **Ağ eklentisine bağlı.** `ping` (ICMP) politikayı protokole bakmadan
+  uygulayan eklentilerde (OVN-Kubernetes, Calico) düşer. `dns` kontrolü
+  çözücünün namespace'ine gider (`openshift-dns`, `kube-system`; `resolver`
+  verildiyse onunkine); oradaki politika belirler.
+
+Belirti: aynı uygulamanın Route monitor'ü yeşil, Service ve `each_pod`
+monitor'leri `connect_timeout`. Çare, izlenen namespace'e Kubeat'in backend
+pod'larından gelen trafiğe izin veren bir politika; politikalar toplanır,
+`default-deny`'ın yanına eklenir, hiçbirini değiştirmez:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-kubeat
+spec:
+  podSelector: {}                    # namespace'teki bütün pod'lar
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kubeat    # Kubeat'in namespace'i
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kubeat
+              app.kubernetes.io/instance: kubeat     # release adı
+              app.kubernetes.io/component: backend
+```
+
+Etiketler chart'ın backend pod'larınınkidir (`app.kubernetes.io/name`,
+release adını taşıyan `app.kubernetes.io/instance` ve
+`app.kubernetes.io/component`;
+[deploy/helm/kubeat/templates/_helpers.tpl](deploy/helm/kubeat/templates/_helpers.tpl)).
+`namespaceSelector` ile `podSelector` aynı `from` öğesinde olduğundan
+yalnızca o namespace'in o pod'ları geçer. Yalnızca izlenen portlar
+açılacaksa kurala `ports` eklenir; `ping` o zaman yine düşer, ICMP'nin
+portu yoktur.
+
+OpenShift'te:
+
+- **Yeni projelere** proje şablonuyla: `oc adm create-bootstrap-project-template -o yaml > template.yaml`,
+  politika şablonun `objects` listesine eklenir (`namespace` yazılmaz,
+  şablon projeye uygular), `oc create -f template.yaml -n openshift-config`,
+  `oc edit project.config.openshift.io/cluster` ile
+  `spec.projectRequestTemplate.name: project-request`. Şablon yalnızca
+  bundan sonra açılan projelere uygulanır.
+- **Var olan namespace'lere** aynı dosya uygulanır:
+  `for ns in ekip-prod ekip-test; do oc -n "$ns" apply -f allow-from-kubeat.yaml; done`.
+- **Cluster çapında**, OVN-Kubernetes'te `AdminNetworkPolicy`
+  (`policy.networking.k8s.io/v1alpha1`; OpenShift 4.16'dan beri tam
+  destekli): cluster yöneticisinin tek bir kaynağı seçtiği namespace'lere
+  Kubeat'in backend'inden gelen trafiğe izin verir, namespace'lerin kendi
+  `NetworkPolicy`'leri onu geçersiz kılamaz ve namespace'lere tek tek
+  politika basmak gerekmez:
+
+  ```yaml
+  apiVersion: policy.networking.k8s.io/v1alpha1
+  kind: AdminNetworkPolicy
+  metadata:
+    name: allow-from-kubeat
+  spec:
+    priority: 10
+    subject:
+      namespaces: {}                 # bütün namespace'ler; matchLabels ile daraltılır
+    ingress:
+      - name: kubeat-backend
+        action: Allow
+        from:
+          - pods:
+              namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: kubeat
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: kubeat
+                  app.kubernetes.io/instance: kubeat
+                  app.kubernetes.io/component: backend
+  ```
+
+Kubeat'in kendi namespace'i de şablondan politika alıyorsa:
+
+- Router arayüze `allow-from-openshift-ingress` ile (router'ın namespace'i
+  `policy-group.network.openshift.io/ingress: ""` etiketiyle seçilir),
+  arayüz backend'e `allow-same-namespace` ile ulaşır; bunlar yeter
+  (platform izlemesine `allow-from-openshift-monitoring`
+  `network.openshift.io/policy-group: monitoring` etiketiyle izin verir;
+  user workload monitoring'in scrape'i aşağıdaki chart politikasıyla
+  açılır). Chart'ın kendi politikası
+  (`networkPolicy.enabled=true`) şablonunkilerle toplanır ve backend'e
+  `metricsFrom`'daki scraper'ı ve `backendIngressFrom`'u da açar; Kubeat'in
+  namespace'i varsayılan-ret alıyorsa onu açın, yoksa scraper'ın
+  namespace'ine izin veren bir politikayı kendiniz yazarsınız.
+- Push raporu gönderen başka namespace'lerin işleri için arayüze (port
+  3000; `networkPolicy.enabled` kapalıyken backend'e, port 8080) izin
+  gerekir, Kubeat'in namespace'inde:
+
+  ```yaml
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: allow-push-from-teams
+    namespace: kubeat
+  spec:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: kubeat
+        app.kubernetes.io/instance: kubeat
+        app.kubernetes.io/component: frontend
+    policyTypes: ["Ingress"]
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ekip-prod
+        ports:
+          - port: 3000
+            protocol: TCP
+  ```
+
+- Şablon egress'i de kapatıyorsa (`policyTypes: ["Egress"]` ile
+  varsayılan-ret; OpenShift'in belgelediği örnek şablon kapatmaz) backend'in
+  çıkışı için ayrı bir egress izni gerekir: kontroller izlenen namespace'lere
+  ve dış adreslere, keşif cluster API'sine, bildirimler ve heartbeat
+  dışarıya, ad çözümü cluster DNS'ine gider. Chart egress politikası
+  üretmez.
 
 ### Hedef politikası
 
@@ -889,6 +1043,19 @@ UPTIME_LDAP_BIND_PASSWORD=...
   (`mail`) ve `UPTIME_LDAP_GROUP_ATTR` (`memberOf`) özniteliklerinden okunur.
   `memberOf` vermeyen dizinler için `UPTIME_LDAP_GROUP_FILTER`
   (`(member={dn})`) ve `UPTIME_LDAP_GROUP_BASE_DN` ile gruplar aranır.
+- **İç içe gruplar (Active Directory).** `memberOf` yalnızca doğrudan
+  üyelikleri verir: kullanıcı A grubunda, A grubu B grubundaysa `memberOf`'ta
+  B yoktur. Eşlemede B (ör. bir domain local grup) verilmişse kullanıcı
+  giremez; denetim kaydında `login_denied` ("none of your N groups has a
+  role here"). Ya doğrudan üye olunan grubu eşleyin ya da zincir süzgecini
+  açın: `UPTIME_LDAP_GROUP_FILTER=(member:1.2.840.113556.1.4.1941:={dn})`
+  (AD'nin `LDAP_MATCHING_RULE_IN_CHAIN` kuralı, Microsoft
+  ["Search Filter Syntax"](https://learn.microsoft.com/en-us/windows/win32/adsi/search-filter-syntax))
+  ve `UPTIME_LDAP_GROUP_BASE_DN` ile grupların durduğu dar bir OU; bulunan
+  gruplar `memberOf`'takilere eklenir. Arama bütün üyelik zincirini
+  yürüdüğünden geniş bir base DN'de pahalıdır, dar tutun. Chart'ta ikisi
+  `ldap.extraEnv` altına yazılır ([values.yaml](deploy/helm/kubeat/values.yaml)).
+  glauth bu kuralı tanımadığından yerel test düzeneğinde denenmez.
 - TLS: `ldaps://` ya da `UPTIME_LDAP_START_TLS=true`; özel CA için
   `UPTIME_LDAP_CA_FILE` (chart'ta `backend.extraVolumes` ile bağlanır).
 - **Roller gruplardan gelir.** **Kullanıcılar** sayfasındaki LDAP bölümünde
@@ -1094,11 +1261,13 @@ yapılandırmasına anahtarı ekleyin ya da `metrics.auth.enabled=false` verin:
 
 ```yaml
 scrape_configs:
-  - job_name: kubeat
+  - job_name: kubeat-backend        # <release>-backend: KubeatDown bu job'a bakar
     authorization:
       credentials_file: /etc/prometheus/kubeat/token   # <release>-metrics-token Secret'ından bağlanır
     static_configs:
       - targets: ["kubeat-backend.kubeat.svc:8080"]
+        labels:
+          namespace: kubeat          # Kubeat'in namespace'i; KubeatDown buna da bakar
 ```
 
 Anahtarı okumak için:
@@ -1113,6 +1282,15 @@ Girişte parola (LDAP'ta dizin parolası), sonra her istekte oturum çerezi
 gider; arayüz HTTPS ile sunulmalıdır. Route ve Ingress yalnızca arayüzü
 açar; API Route'tan ya da Ingress'ten bilerek açılmaz, betikler ona backend
 Service'inden ulaşır (bkz. "API").
+
+TLS Route'ta (router) ya da Ingress controller'da biter: router → frontend
+ve frontend → backend trafiği pod ağında düz HTTP'dir ve giriş parolası
+(LDAP'ta dizin parolası) bu iki adımdan da geçer. OVN-Kubernetes'te IPsec
+açıksa (`ipsecConfig.mode: Full`; varsayılan kapalı, platformun kararı)
+node'lar arası pod trafiği şifrelenir, aynı node'daki pod'lar arasındaki
+trafik şifrelenmez. Route yalnızca edge'dir, reencrypt seçeneği yoktur
+([yol haritası, "Bilinen sınırlar"](docs/yol-haritasi.md#bilinen-sınırlar),
+S59 satırı).
 
 - **Route** (`route.enabled=true`) edge TLS ile sunar ve düz HTTP'yi
   HTTPS'e yönlendirir. `route.annotations` router ayarlarını taşır:
@@ -2151,7 +2329,7 @@ sırayla denenir, ilk eşleşen kazanır:
 | `dns_not_found` (`host`) | Başka bir ad çözülmüyor | Ad yanlış ya da gösterdiği şey yok |
 | `dns_failed` | DNS sunucusu yanıt vermedi ya da hata döndü | Cluster DNS'i |
 | `connection_refused` | Bağlantı reddedildi | Dinleyen yok: süreç çalışmıyor ya da port (Service'in `targetPort`'u) yanlış |
-| `connect_timeout` | Bağlantı denemesine zaman aşımına kadar yanıt gelmedi | Trafiği bir NetworkPolicy ya da güvenlik duvarı düşürüyor veya pod ya da node yok |
+| `connect_timeout` | Bağlantı denemesine zaman aşımına kadar yanıt gelmedi | Trafiği bir NetworkPolicy ya da güvenlik duvarı düşürüyor veya pod ya da node yok. Aynı uygulamanın Route monitor'ü yeşilken Service ve `each_pod` monitor'leri böyle düşüyorsa izlenen namespace'in varsayılan-ret politikasıdır; çaresi `allow-from-kubeat` (bkz. "Ağ erişimi", İzlenen namespace'ler) |
 | `response_timeout` | Bağlanıldı ama yanıt (TLS el sıkışması dahil) zaman aşımına kadar gelmedi | Uygulama yavaş, takılmış ya da aşırı yüklü |
 | `timeout` | Zaman aşımı, hangi aşamada olduğu bilinmiyor | İkisinden biri |
 | `connection_reset`, `connection_closed` | Bağlantı sıfırlandı ya da yanıt gelmeden kapandı | Süreç çöktü, yeniden başladı ya da başka bir protokol (TLS, HTTP/2) bekliyor |
@@ -2195,6 +2373,13 @@ Kullanıcı yalnızca kapsamındaki namespace'leri görür. `format=csv` (sayfad
 "CSV indir") monitor başına bir satır verir; ekiplere giden aylık rapora
 eklenmek için. Sonradan eklenen sütunlar (`monitored_seconds`,
 `mttr_seconds`, `mtbf_seconds`) sondadır, eski sütunların yeri değişmez.
+
+**Bakım ve uptime.** Bakım penceresindeki başarısız kontroller durum
+sayfasında ve raporda uptime'a dahildir; bakımda olay açılmadığından aynı
+CSV satırında `uptime_percent` düşer, `downtime_seconds` artmaz. SLA için
+`downtime_seconds`'ı kullanın
+([yol haritası, "Bilinen sınırlar"](docs/yol-haritasi.md#bilinen-sınırlar),
+S45 satırı).
 
 **MTTR ve MTBF.** MTTR (ortalama düzelme süresi) dönemdeki toplam kesinti
 süresinin kesinti sayısına, MTBF (arızalar arası ortalama süre) çalışır
@@ -2286,6 +2471,15 @@ veren 9092 portu kullanılır (bkz. "Cluster-admin olmadan"). Keşif cluster
 Token'ın gittiği sunucunun sertifikası `prometheus.caFile` ile doğrulanır;
 `prometheus.insecureSkipVerify` token ile birlikte kullanılmamalıdır (bkz.
 "Servis hesabı").
+
+**GKE ve Grafana Cloud.** Kubeat yalnızca `prometheus.url`'deki Prometheus
+uyumlu bir API'yi okur, anonim ya da `prometheus.tokenFile`'daki bearer
+token'la; Grafana Cloud'a doğrudan bağlanamaz. Cluster'da kendi Prometheus'u
+olmayan bir GKE'de (Grafana Alloy metrikleri Grafana Cloud'a gönderir)
+`prometheus.url` boş kalır ve monitor sayfasındaki pod paneli CPU ile
+belleği göstermez; pod'lar, hazır olma, restart'lar ve olaylar yine
+görünür. `metrics.k8s.io`'dan okumak [backlog](docs/backlog.md)'ta
+("Prometheus yokken pod CPU ve belleğini metrics.k8s.io'dan okumak").
 
 **Yükseltme notu:** Keşif ClusterRole'ü bu sürümle namespace'leri yalnızca
 listeler, tek tek okuma (`get`) izni vermez. OpenShift 4.14 ve öncesinde
@@ -2502,6 +2696,9 @@ route:
 
 ServiceMonitor ile PrometheusRule prometheus-operator CRD'lerini ister;
 OpenShift'te user workload monitoring açık olmalıdır (`enableUserWorkload: true`).
+CRD'lerin olmadığı bir cluster'da `metrics.serviceMonitor.enabled` ve
+`metrics.prometheusRule.enabled` kurulumu düşürür; operator'süz cluster
+için aşağıda "Operator'süz cluster".
 
 **Heartbeat (dead man's switch).** `UPTIME_HEARTBEAT_URL` ayarlanırsa backend
 bu adrese her `UPTIME_HEARTBEAT_INTERVAL` sürede bir `GET` atar. Karşı taraf
@@ -2529,6 +2726,16 @@ böyle bir kurulumda heartbeat aralığını en kısa kontrol aralığından kı
 tutmayın. Bu servisin izlenen cluster'ın dışında olması gerekir, yoksa ikisi
 birlikte düşer.
 
+Heartbeat bildirim alamayan kanalı duymaz: kararı teslimata bakmaz, tek
+Slack kanalınız bozulduğunda heartbeat sürer ve kesinti duyurulmaz. Tek
+kanallı kurulumda ya farklı türde ikinci bir kanal ekleyin (e-posta,
+PagerDuty, Telegram; aynı türden ikincisi aynı arızayla düşer) ya da kanal
+başına yanan `KubeatNotificationsFailing`'i açın
+(`metrics.prometheusRule.enabled=true`; operator'süz cluster'da aşağıda
+"Operator'süz cluster"). Heartbeat'i teslimata bağlamak
+[backlog](docs/backlog.md)'ta ("Hiçbir kanala ulaşamayan kesintide
+heartbeat'i kesmek").
+
 Chart'la kurulumda adres bir Secret'tan okunur (`heartbeat.urlSecret`,
 anahtarı `url`; aralığı `heartbeat.interval`); hızlı başlangıçtaki iki
 satır:
@@ -2549,7 +2756,12 @@ kurmadan, Kubeat'in körleştiği cluster'ın kendi Alertmanager'ından
   `UPTIME_HEARTBEAT_INTERVAL`'dır (varsayılan 1 dk); heartbeat kapalıyken
   `UPTIME_SCHEDULER_TICK`'in iki katından kısa verilmişse iki tick sayılır.
   Anlamı heartbeat'inkiyle aynıdır: hiç sonuç gelmeyen aralık da, bazı
-  sonuçların düşmesi de sağlıklıdır.
+  sonuçların düşmesi de sağlıklıdır. Kontrol aralıkları pencereden uzun
+  monitor'lerden oluşan seyrek bir kurulumda gauge yalnızca sonuç gelen
+  pencerelerde 0 olur ve `KubeatUnhealthy`'nin 5 dakikası dolmayabilir:
+  pencereyi en kısa kontrol aralığından kısa tutmayın. Heartbeat Secret'ı
+  yokken chart `heartbeat.interval`'ı uygulamaz; pencere `backend.extraEnv`
+  ile `UPTIME_HEARTBEAT_INTERVAL` verilerek ayarlanır.
 - **Kural.** `KubeatUnhealthy` gauge 5 dakika 0 kalınca `critical` yanar:
   veri volume'u doldu ya da salt okunur oldu, bir yazım aralıktan uzun
   sürüyor ya da scheduler ilerlemiyor. Yalnızca bazı sonuçların düşmesi
@@ -2569,8 +2781,12 @@ kurmadan, Kubeat'in körleştiği cluster'ın kendi Alertmanager'ından
   olmadan da cluster içinden duyulur: pod yoksa `KubeatDown`, volume doluysa
   ya da yazım takıldıysa `KubeatUnhealthy`. Cluster'ın tamamı ya da
   Prometheus'u düşerse bunları söyleyecek kimse kalmaz; o durumu yalnızca
-  cluster dışındaki heartbeat duyurur. Heartbeat de kurallar da kapalıysa
-  kurulum notu (`NOTES.txt`) bunu uyarır.
+  cluster dışındaki heartbeat duyurur. Bildirim alamayan kanalı yalnızca
+  kurallar duyurur: `KubeatNotificationsFailing` kanal başına yanar (bkz.
+  yukarıda "Kanal başına bildirim alarmı"); heartbeat de
+  `kubeat_self_healthy` de teslimata bakmaz. Heartbeat de kurallar da
+  kapalıysa kurulum notu (`NOTES.txt`) bunu uyarır; kurallar kapalıyken
+  heartbeat'in kanalı duymadığını söyler.
 - **Probe'lar bağlanmaz.** Liveness ve readiness probe'ları bu karara bağlı
   değildir (`/api/v1/health` süreç ayakta oldukça yanıt verir), çünkü dolu
   bir volume'da yeniden başlatmak sorunu çözmez, pod'u yeniden başlatma
@@ -2609,8 +2825,10 @@ bu değerle render edilen kurallar taşınır.
   `KubeatDown`'ı, o cluster'ın `up` serisi son 24 saatte görüldüyse 5
   dakikada yanar ve pencere boyunca açık kalır. 24 saatten uzun yokluğu bu
   ifade görmez, onu heartbeat duyurur; hiçbir cluster'da seri kalmadıysa
-  `absent(...)` yine yanar. Kubeat'i bir cluster'dan bilerek kaldırınca o
-  cluster'ın `KubeatDown`'ı 24 saat yanar; bu sürede susturun.
+  `absent(...)` cluster etiketi olmayan bir `KubeatDown` daha açar (depo
+  kesintisi, hepsinin birlikte kaldırılması): cluster başına olanların
+  yanında fazladan bir alarmdır. Kubeat'i bir cluster'dan bilerek
+  kaldırınca o cluster'ın `KubeatDown`'ı 24 saat yanar; bu sürede susturun.
 - **Susturma kuralları.** Yukarıdaki `alertmanager.yaml` örneğinde `equal`
   listesine bu etiketi de ekleyin (`equal: [namespace, cluster]`); yoksa bir
   cluster'ın `KubeatDown`'ı öbür cluster'daki aynı namespace'in alarmlarını
@@ -2618,6 +2836,119 @@ bu değerle render edilen kurallar taşınır.
 - **Etiket adı.** Prometheus etiket adı olmalı ve kuralların kendi
   kullandığı etiketlerden (`namespace`, `job`, `pod`, `monitor`,
   `channel`…) biri olmamalıdır; chart aksini reddeder.
+
+### Operator'süz cluster: Alloy, Grafana Cloud ve Mimir
+
+ServiceMonitor ve PrometheusRule prometheus-operator'ün CRD'leridir
+(`monitoring.coreos.com/v1`). CRD'lerin olmadığı bir cluster'da, örneğin
+metrikleri Grafana Alloy'un Grafana Cloud'a ya da Mimir'e gönderdiği bir
+GKE'de, `metrics.serviceMonitor.enabled=true` ya da
+`metrics.prometheusRule.enabled=true` kurulumu düşürür: API sunucusu türü
+tanımaz ve `helm upgrade` `no matches for kind "PrometheusRule"` ile
+reddedilir. Kubeat'in kendi alarmları orada üç yoldan birine gider; ilki
+önerilendir, çünkü yalnızca onda kurallar chart'la birlikte yükselir.
+
+- **PrometheusRule CRD'si ve Alloy `mimir.rules.kubernetes`.** Operator
+  kurulmadan yalnızca CRD kurulur (prometheus-operator'ün yayımladığı
+  `monitoring.coreos.com_prometheusrules.yaml` ya da
+  `prometheus-operator-crds` chart'ı); CRD'yi işleyen operator olmadığından
+  cluster'da kuralı okuyan yoktur, onu Alloy okur. Kubeat
+  `metrics.prometheusRule.enabled=true` ile kurulur (kurallar birden çok
+  cluster'ın tek deposunda değerlendiriliyorsa
+  `metrics.prometheusRule.clusterLabel` da, bkz. yukarıda), Alloy'un
+  yapılandırmasına `mimir.rules.kubernetes` bileşeni eklenir: Alloy
+  cluster'daki PrometheusRule nesnelerini bulur ve Mimir'in (Grafana
+  Cloud'un) ruler'ına yükler. Her `helm upgrade` kuralı değiştirince Alloy
+  yenisini kendisi taşır; kopyalanacak bir şey yoktur.
+
+  ```alloy
+  mimir.rules.kubernetes "kubeat" {
+    address   = "<Mimir ya da Grafana Cloud'un ruler adresi>"
+    tenant_id = "<tenant>"
+    basic_auth {
+      username = "<kullanıcı>"
+      password = "<API anahtarı>"
+    }
+    rule_namespace_selector {
+      match_labels = { "kubernetes.io/metadata.name" = "kubeat" }
+    }
+  }
+  ```
+
+  Alloy'un servis hesabı `monitoring.coreos.com` grubunda `prometheusrules`
+  ve `namespaces` kaynaklarını listeleyip izleyebilmelidir (bileşenin
+  belgesindeki RBAC). Tek depoda birden çok cluster için her cluster'ın
+  Alloy'u kendi kurallarını yükler; `clusterLabel` verilince kurallar
+  `namespace` ve `job`'un yanında o etikete göre toplanır.
+- **Kopyalamak.** CRD de kurulamıyorsa kurallar chart'tan render edilip
+  depoya `mimirtool rules sync` ile taşınır. Kopya chart'la yükselmez:
+  kural sayısı 0.42'de 5, 0.43'te 12, 0.45'te 13'tü; 0.44'te kopyalayan
+  0.45'te `KubeatUnhealthy` olmadan sessizce sürer. Bu yüzden eşitleme
+  komutu her yükseltmede koşar. [docs/yukseltme.md](docs/yukseltme.md) her
+  sürümde "Alarm kuralları: değişti" ya da "değişmedi" der; "değişti" diyen
+  her sürümde kopya yenilenir. Komut (`MIMIR_ADDRESS`, `MIMIR_TENANT_ID` ve
+  `MIMIR_API_KEY` ortamdan; `namespace` satırı mimirtool'un kural dosyası
+  biçimidir; yedek açıksa `backup.enabled=true` `KubeatBackupStale`'i de
+  render eder):
+
+  ```sh
+  { echo "namespace: kubeat"
+    helm template kubeat oci://ghcr.io/yusufceng/charts/kubeat --version <kurulu sürüm> \
+      -n kubeat --show-only templates/prometheusrule.yaml \
+      --set metrics.prometheusRule.enabled=true \
+      --set metrics.prometheusRule.clusterLabel=cluster \
+      --set backup.enabled=true |
+      awk 'f { sub(/^  /, ""); print } /^spec:$/ { f = 1 }'
+  } > kubeat-rules.yaml
+  mimirtool rules sync kubeat-rules.yaml
+  ```
+
+  Aynı komut yükseltme hattında, örneğin GitHub Actions'ta bir adım olarak
+  (Alloy yolunda gerekmez):
+
+  ```yaml
+  - name: Kubeat alarm kurallarını eşitle
+    env:
+      KUBEAT_VERSION: <kurulu sürüm>
+      MIMIR_ADDRESS: ${{ secrets.MIMIR_ADDRESS }}
+      MIMIR_TENANT_ID: ${{ secrets.MIMIR_TENANT_ID }}
+      MIMIR_API_KEY: ${{ secrets.MIMIR_API_KEY }}
+    run: |
+      { echo "namespace: kubeat"
+        helm template kubeat oci://ghcr.io/yusufceng/charts/kubeat --version "$KUBEAT_VERSION" \
+          -n kubeat --show-only templates/prometheusrule.yaml \
+          --set metrics.prometheusRule.enabled=true --set metrics.prometheusRule.clusterLabel=cluster |
+          awk 'f { sub(/^  /, ""); print } /^spec:$/ { f = 1 }'
+      } > kubeat-rules.yaml
+      mimirtool rules sync kubeat-rules.yaml
+  ```
+
+  Google Cloud Managed Service for Prometheus'ta kurallar
+  `monitoring.googleapis.com/v1` API'sinin `Rules` (namespace),
+  `ClusterRules` ya da `GlobalRules` kaynaklarıyla verilir; `spec.groups`
+  Prometheus kural dosyasıyla aynı biçimdedir, yani `kubeat-rules.yaml`'ın
+  `groups` kısmı bir `Rules` nesnesine konur. PrometheusRule'u okumaz; bu
+  kopya da chart'la yükselmez.
+- **Yalnızca heartbeat.** Kuralsız kurulumda tek öz-koruma cluster
+  dışındaki heartbeat'tir (yukarıdaki iki satır); bildirim alamayan kanalı
+  duymaz, kesinti ve sertifika alarmları da Alertmanager'a gitmez.
+
+**Elle scrape.** ServiceMonitor olmadan Kubeat'in metriklerini Alloy'un
+`prometheus.scrape` bileşeni ya da elle yapılandırılmış bir Prometheus
+toplar; kurallar ServiceMonitor'ün verdiği etiketleri bekler:
+
+- Job adı `<release>-backend`, `namespace` etiketi Kubeat'in namespace'i;
+  yoksa `KubeatDown` sürekli yanar (`up{job="<release>-backend",
+  namespace="<namespace>"}`). Hedef `<release>-backend.<namespace>.svc:8080`,
+  yol `/metrics`.
+- Scrape metrik anahtarını bearer token olarak gönderir (bkz. "Metrik
+  anahtarı"; örnek yapılandırma orada); Alloy'da anahtar pod'a bağlanıp
+  `bearer_token_file` ile verilir, ya da `metrics.auth.enabled=false`.
+- `networkPolicy.enabled=true` iken scraper'ın namespace'i
+  `networkPolicy.backendIngressFrom`'a eklenir; `networkPolicy.metricsFrom`
+  yalnızca `metrics.serviceMonitor.enabled` ile uygulanır.
+
+Pod paneli için bkz. "Pod'lar ve kaynak kullanımı", GKE ve Grafana Cloud.
 
 ## Yedekleme ve geri yükleme
 
@@ -2929,6 +3260,12 @@ Keşif sayfasından elle içe aktarılmış bir nesneye
 annotation eklenirse elle yapılan monitor'a dokunulmaz; durum keşif
 sayfasında "already monitored by hand" olarak görünür. Her değişiklik
 denetim kaydına `discovery` adıyla yazılır.
+
+Gateway API `HTTPRoute` okunmaz: keşif adayı ya da annotation hedefi
+değildir. Ingress'ten HTTPRoute'a geçerken Ingress silinince monitor
+geçmişiyle birlikte kalkar; geçişten önce elle monitor oluşturun
+([yol haritası, "Bilinen sınırlar"](docs/yol-haritasi.md#bilinen-sınırlar),
+S49 satırı).
 
 ## Alarm
 
@@ -3558,6 +3895,20 @@ Enterprise lisansı şu özellikleri açar:
 | `scoped_access`: kullanıcıları ve grupları namespace'lerle sınırlamak | Her rol tüm namespace'leri (`*`) görür |
 | `audit`: denetim kaydını görmek | Kayıt yine yazılır; lisans gelince geçmişiyle görünür |
 | `status_pages`: birden fazla durum sayfası | Bir durum sayfası oluşturulabilir |
+
+**Nasıl alınır.** Değerlendirme ve pilot için lisans ücretsizdir: depoda
+[`license` etiketli bir issue](https://github.com/yusufceng/Kubeat/issues?q=label%3Alicense)
+açın (kurum, cluster sayısı, süre); dosya issue'ya değil, size verilen özel
+kanaldan gelir. Kurumunuzun adını herkese açık bir depoya yazamıyorsanız
+issue'yu kurum adı yazmadan açın, depo sahibi özel bir kanaldan döner.
+Fiyat ve sözleşme ilk dış müşteriyle birlikte belirlenir. Küçük bir ekibe
+çoğu zaman ücretsiz katman yeter: [yukarıdaki tablonun](#kubeat-enterprise-lisansı)
+"Lisanssız" sütunu tam bir izleme aracıdır, lisans yalnızca dizinle giriş,
+namespace sınırı, denetim kaydı ve birden çok durum sayfası içindir.
+
+Aynı lisans dosyası birden çok cluster'da geçer: lisans cluster'a
+bağlanmaz, kurulum sayısı sözleşmeyle sınırlanır
+([ADR-0002](docs/adr/0002-open-core-lisans.md), "Sonuçlar").
 
 Lisans, Kubeat'in çevrimdışı anahtarıyla imzalanmış bir dosyadır. İçinde
 müşteri, açtığı özellikler ve bitiş tarihi yazar. Backend imzayı kendi
