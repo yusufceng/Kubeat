@@ -122,17 +122,23 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   Azure Files gibi ağ dosya sistemlerinde iki pod aynı anda yazıp SQLite'ı
   bozabilir. Node çökünce backend pod'u Terminating'de kalabilir ve yeni pod
   volume'u bağlayamayabilir (Multi-Attach); Kubeat kendiliğinden dönmeyebilir
-  ve `KubeatDown` yanar. Adımlar S41 runbook'unda (sprint 5'in korumalı 1.
-  maddesi, [#82](https://github.com/yusufceng/Kubeat/issues/82),
-  [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md);
-  merge'de `docs/yedek-geri-yukleme.md`'ye bağlanır).
+  ve `KubeatDown` yanar. Veri kaybı yoktur, volume sağlamdır; dönüş adımları
+  (node'u beklemek ya da takılı pod'u zorla silmek)
+  [yedek-geri-yukleme.md](yedek-geri-yukleme.md) "Node kaybından dönüş"te
+  ([#82](https://github.com/yusufceng/Kubeat/issues/82)).
 - Veri volume'u dolunca kontrol sonuçları yazılamaz ve kaybolur (bellekte
   tutulmaz): olay açılmaz, bildirim gitmez. Kubeat bunu kendi bildirim
-  kanallarından duyuramaz. 0.45'ten beri `kubeat_self_healthy` 0 olur ve
-  chart'ın kuralları açıksa `KubeatUnhealthy` 5 dakikada `critical` yanar,
-  heartbeat olmadan da; heartbeat varsa o da kesilir. İkisi de kapalıysa
-  kimse duymaz; kurulum notu bunu uyarır. Volume kendiliğinden büyümez;
-  boyut kuralı README "Geçmiş verisi"nde ([backlog](backlog.md) "Dolan veri
+  kanallarından duyuramaz. 0.45'ten beri sonuç kaybı başlayınca
+  `kubeat_self_healthy` 0 olur ve chart'ın kuralları açıksa `KubeatUnhealthy`
+  5 dakikada `critical` yanar, heartbeat olmadan da; heartbeat varsa o da
+  kesilir. Ama `KubeatUnhealthy` disk doluluğunu değil kaybolan sonuçları
+  ölçer: SQLite'ın WAL'ı var olan alanı kullandığından seyrek (az monitor'lü)
+  bir kurulumda dolu disk uzun süre sessiz kalabilir, bu yüzden PVC doluluğu
+  için platform alarmı gerekir (OpenShift'te `KubePersistentVolumeFillingUp`,
+  `kubelet_volume_stats_*`). İkisi de kapalıysa kimse duymaz; kurulum notu
+  bunu uyarır. Volume kendiliğinden büyümez; boyut kuralı README "Geçmiş
+  verisi"nde, dönüş adımları [yedek-geri-yukleme.md](yedek-geri-yukleme.md)
+  "Dolu veri volume'undan dönüş"te ([backlog](backlog.md) "Dolan veri
   volume'u: büyütme, kotaya göre saklama, yazılamayan sonuçlar").
 - Giriş kilidi sayacı backend belleğindedir; yeniden başlatınca sıfırlanır.
   Tek replica olduğu için şimdilik sorun değildir. Kilit kullanıcı adına
