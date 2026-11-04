@@ -23,7 +23,6 @@ export type PaletteMonitor = {
   kind: string;
   namespace: string;
   state: DisplayState;
-  target: string;
 };
 
 /** How many monitors the palette draws at once; typing narrows the rest down. */
@@ -86,7 +85,7 @@ function entries(monitors: PaletteMonitor[], canEdit: boolean, admin: boolean, t
       hint: m.namespace || t(MANUAL_LABEL),
       href: `/monitors/${m.id}`,
       icon: <StatusGlyph kind={style.glyph} live={m.state === "down"} label={t(style.label)} />,
-      fields: [m.name, m.namespace, m.kind, m.target, m.aka],
+      fields: [m.name, m.namespace, m.kind, m.aka],
       rank: urgencyRank(m.state),
     });
   }

@@ -20,7 +20,6 @@ export async function GET() {
       kind: kindShort(m.source, m.type, m.target),
       namespace: m.namespace,
       state: displayState(m),
-      target: m.target,
     }));
     return Response.json(brief, { headers });
   } catch (err) {
