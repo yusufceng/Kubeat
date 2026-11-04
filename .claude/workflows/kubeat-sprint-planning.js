@@ -167,7 +167,7 @@ phase('Plan')
 const plan = await agent(`${common}
 Görev (planlama modu): Sprint ${S.number} planı.
 1. \`${S.sprintFile}\` dosyasını rol dosyandaki biçimde yaz (Türkçe; tarih ${S.date}); ${S.prevSprintFile} biçim örneğidir. "Yükseltme notu" (davranış değiştiren her madde için bir cümle; developer raporlarından doldurulacak) ve "Kullanıcıda kalanlar" başlıklarını da aç.
-2. Önceki retronun süreç kararlarını docs/agents/sprint-takimi.md'ye kısa olarak işle: tamamlanma tanımına "davranış değiştiren madde yükseltme notuna bir cümle verir; sürüm PR'ı README'deki yükseltme bölümünü taşır", döngüye "sprint takvimle değil teslimatla (merge, sürüm, müşteri puanı) kapanır", "doğrulanamayan maddeler sprint dosyasında Kullanıcıda kalanlar listesine yazılır".
+2. Önceki sprint dosyasının "Retro" bölümündeki "değişecek" kararlarından süreçle ilgili olanları docs/agents/sprint-takimi.md'ye kısa olarak işle; zaten yazılı olanı tekrarlama.
 3. Seçilen her madde için \`gh issue create\` ile şablona uygun bir issue aç: etiketler \`ready-for-agent\` ve türü (\`bug\`, \`enhancement\`, \`documentation\`). Gövde Türkçe; sprint dosyasının yolunu yaz; şirket, kişi ve host adı yazma. Issue numaralarını sprint dosyasına işle.
 4. PO'nun "backlog_additions" maddelerini docs/backlog.md biçiminde ekle; "roadmap_changes" varsa docs/yol-haritasi.md'yi düzenle (29. satır sprint durumunu gösterir).
 5. Dal adlarını (feat/, fix/, docs/, chore/, ci/ + kısa İngilizce kebab-case) ve her madde için inceleyiciyi (ops etkisi olana "sre", belge ve kabul ölçütü ağırlıklı olana "ba") ver. Aynı dosyalara dokunan maddeler için bağımlılık ve merge sırası yaz.
