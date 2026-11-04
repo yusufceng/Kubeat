@@ -182,11 +182,11 @@ func TestGuardChecksRedirectHops(t *testing.T) {
 func TestJSONValueIsShortenedInResults(t *testing.T) {
 	long := `{"data":{"items":["` + strings.Repeat("x", 5000) + `"]},"name":"` + strings.Repeat("ş", 150) + `","n":"` + strings.Repeat("7", 300) + `"}`
 
-	_, err := matchJSON([]byte(long), "data", "==", "nothing")
+	_, err := matchJSON([]byte(long), "data", "==", "nothing", true)
 	if err == nil || len(err.Error()) > 200 || !strings.Contains(err.Error(), `is {"items":["xxx`) || !strings.Contains(err.Error(), "…, expected == nothing") {
 		t.Errorf("mismatch: %d bytes: %v", len(err.Error()), err)
 	}
-	detail, err := matchJSON([]byte(long), "data", "contains", "items")
+	detail, err := matchJSON([]byte(long), "data", "contains", "items", true)
 	if err != nil || detail != "data = "+shownValue(`{"items":["`+strings.Repeat("x", 5000)+`"]}`) || !strings.HasSuffix(detail, "…") {
 		t.Errorf("match: %q, %v", detail, err)
 	}
@@ -198,11 +198,11 @@ func TestJSONValueIsShortenedInResults(t *testing.T) {
 		t.Errorf("a value of exactly the limit was cut: %q", got)
 	}
 	// An ordering that needs numbers repeats the value shortened too.
-	_, err = matchJSON([]byte(long), "name", ">", "1")
+	_, err = matchJSON([]byte(long), "name", ">", "1", true)
 	if err == nil || strings.Count(err.Error(), "ş") != maxShownValue {
 		t.Errorf("ordering error: %v", err)
 	}
-	if _, err := matchJSON([]byte(long), "n", "==", "7"); err == nil || strings.Count(err.Error(), "7") != maxShownValue+1 {
+	if _, err := matchJSON([]byte(long), "n", "==", "7", true); err == nil || strings.Count(err.Error(), "7") != maxShownValue+1 {
 		t.Errorf("numeric mismatch: %v", err)
 	}
 }

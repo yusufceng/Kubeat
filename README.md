@@ -595,6 +595,15 @@ ile yazılır, geçersiz bir girdi backend'i başlatmaz:
 - `UPTIME_TARGET_ALLOW_CIDRS`: istisnalar; yerleşik ya da eklenmiş her
   yasağın önüne geçer.
 
+Bir monitor'ün ya da kanal webhook'unun hedefini giriş yapmış herhangi bir
+kullanıcı belirler; kontrol ve bildirim, politikanın izin verdiği her adrese
+ulaşır. Bulut metadata'sı ve loopback yerleşik olarak yasaktır ama cluster
+içi (RFC1918) adresler izleme için bilerek açıktır. Hassas ya da çok kiracılı
+bir cluster'da, kullanıcıların bir monitor'le yoklamaması gereken yönetim ve
+iç servis aralıklarını (API sunucusu, öteki ekiplerin Service'leri)
+`UPTIME_TARGET_DENY_CIDRS`'e ekleyin; böylece bir kullanıcı bir monitor ya da
+webhook'u o adreslere yöneltemez.
+
 ```
 # Aynı node'daki bir ajanın 127.0.0.1'deki ucunu kontrol etmek
 UPTIME_TARGET_ALLOW_CIDRS=127.0.0.1/32
@@ -4043,6 +4052,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SERIES_POINTS` | `120` | Bir grafikteki yaklaşık nokta sayısı |
 | `UPTIME_HTTP_INSECURE_SKIP_VERIFY` | `false` | TLS kullanan tüm kontrollerde (HTTP, TCP, gRPC, WebSocket) sertifika doğrulamasını kapatır |
 | `UPTIME_KEYWORD_BODY_LIMIT_BYTES` | `1048576` | Keyword ya da JSON değeri aranırken yanıt gövdesinin okunan kısmı |
+| `UPTIME_CHECK_SHOW_VALUE` | `true` | JSON kontrolü bulduğu değeri sonuç ve hatada tekrarlar; hedefin yanıtı monitor'ü görenlerin görmemesi gereken veri taşıyabiliyorsa `false` yapın |
 | `UPTIME_TARGET_DENY_CIDRS` | – | Kontrollerin ve bildirimlerin bağlanmayacağı, yerleşik listeye (loopback, link-local, metadata, multicast) eklenen aralıklar; virgülle ayrılmış CIDR. Bkz. "Hedef politikası" |
 | `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |

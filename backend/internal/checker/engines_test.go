@@ -44,7 +44,7 @@ func TestHTTPRequestOptions(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := New(Options{BodyLimit: 1 << 20})
+	c := New(Options{BodyLimit: 1 << 20, ShowValue: true})
 	check := func(path string, edit func(*store.HTTPOptions)) store.CheckResult {
 		m := httpMonitor(srv.URL + path)
 		edit(&m.HTTP)
@@ -128,7 +128,7 @@ func TestMatchJSON(t *testing.T) {
 		{"checks[0]", "contains", `"state":"up"`},
 	}
 	for _, tt := range pass {
-		if _, err := matchJSON([]byte(doc), tt.path, tt.op, tt.want); err != nil {
+		if _, err := matchJSON([]byte(doc), tt.path, tt.op, tt.want, true); err != nil {
 			t.Errorf("%s %s %s: %v", tt.path, tt.op, tt.want, err)
 		}
 	}
@@ -144,22 +144,40 @@ func TestMatchJSON(t *testing.T) {
 		{"status", "~", "UP"},
 	}
 	for _, tt := range fail {
-		if detail, err := matchJSON([]byte(doc), tt.path, tt.op, tt.want); err == nil {
+		if detail, err := matchJSON([]byte(doc), tt.path, tt.op, tt.want, true); err == nil {
 			t.Errorf("%s %s %s: passed with %q", tt.path, tt.op, tt.want, detail)
 		}
 	}
 
 	// A document that is an array itself.
-	if _, err := matchJSON([]byte(`[{"id":7}]`), "[0].id", "==", "7"); err != nil {
+	if _, err := matchJSON([]byte(`[{"id":7}]`), "[0].id", "==", "7", true); err != nil {
 		t.Errorf("root array: %v", err)
 	}
-	if _, err := matchJSON([]byte(`<html>`), "status", "==", "UP"); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+	if _, err := matchJSON([]byte(`<html>`), "status", "==", "UP", true); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
 		t.Errorf("not JSON: err = %v", err)
 	}
 	for _, bad := range []string{"", ".a", "a.", "a..b", "a[x]", "a[-1]", "a[0", "a[0]b", "a.[0]"} {
 		if _, err := ParseJSONPath(bad); err == nil {
 			t.Errorf("ParseJSONPath(%q) was accepted", bad)
 		}
+	}
+}
+
+func TestJSONValueHiddenWhenShowValueOff(t *testing.T) {
+	doc := []byte(`{"secret":"hunter2","status":"down"}`)
+	// With showValue off, neither the success detail nor the mismatch error
+	// repeats the value the response held.
+	detail, err := matchJSON(doc, "secret", "==", "hunter2", false)
+	if err != nil || strings.Contains(detail, "hunter2") {
+		t.Errorf("match detail = %q, err = %v; want no value shown", detail, err)
+	}
+	_, err = matchJSON(doc, "status", "==", "up", false)
+	if err == nil || strings.Contains(err.Error(), "down") {
+		t.Errorf("mismatch error = %v; want the found value hidden", err)
+	}
+	// With showValue on it is shown, as before.
+	if _, err := matchJSON(doc, "status", "==", "up", true); err == nil || !strings.Contains(err.Error(), "down") {
+		t.Errorf("mismatch error with showValue on = %v; want the value shown", err)
 	}
 }
 
