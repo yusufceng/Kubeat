@@ -122,8 +122,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   Azure Files gibi ağ dosya sistemlerinde iki pod aynı anda yazıp SQLite'ı
   bozabilir. Node çökünce backend pod'u Terminating'de kalabilir ve yeni pod
   volume'u bağlayamayabilir (Multi-Attach); Kubeat kendiliğinden dönmeyebilir
-  ve `KubeatDown` yanar. Adımlar S41'de (sprint 5'in korumalı 1. maddesi,
-  [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
+  ve `KubeatDown` yanar. Adımlar S41 runbook'unda (sprint 5'in korumalı 1.
+  maddesi, [#82](https://github.com/yusufceng/Kubeat/issues/82),
+  [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md);
+  merge'de `docs/yedek-geri-yukleme.md`'ye bağlanır).
 - Veri volume'u dolunca kontrol sonuçları yazılamaz ve kaybolur (bellekte
   tutulmaz): olay açılmaz, bildirim gitmez. Kubeat bunu kendi bildirim
   kanallarından duyuramaz. 0.45'ten beri `kubeat_self_healthy` 0 olur ve
@@ -137,7 +139,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   göredir: adını bilen biri bir hesabı `UPTIME_LOGIN_MAX_FAILURES` yanlış
   denemeyle `UPTIME_LOGIN_LOCKOUT` süresince kilitleyebilir; IP bazlı sınır
   yoktur. Kilitli bir hesap için API anahtarı, SSO ya da backend'i yeniden
-  başlatmak kalır (README, "Kilitli hesaba girmek").
+  başlatmak kalır (README, "Kilitli hesaba girmek"). Kaynak IP başına kademeli
+  throttle'a geçme (CWE-307, S65) sprint 6'ya, S63 ile birlikte ertelendi
+  ([backlog](backlog.md) "Giriş kilitlemesinin hizmet reddi riski");
+  ara önlem bu satırdaki kullanıcı-adı bazlı kilittir.
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
   bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
   sınırını tanımaz; bu yüzden
@@ -174,7 +179,13 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 - Hedef politikası yalnızca loopback, link-local (bulut metadata servisi) ve
   multicast adreslerini kapatır; özel ağlar bilerek açıktır, yani monitor ya
   da kanal düzenleyebilen biri cluster içindeki her servise istek
-  gönderebilir. Bunu `UPTIME_TARGET_DENY_CIDRS` daraltır. Vekil
+  gönderebilir. Bunu `UPTIME_TARGET_DENY_CIDRS` daraltır; ama çok kiracılı
+  bir cluster'da API sunucusu ve ekip Service'leri meşru izlenenlerle aynı
+  ClusterIP aralığını paylaştığı için deny-CIDR cross-tenant erişimi
+  ayıramaz. Gerçek cross-tenant savunma kullanıcı başına (namespace/rol
+  bazlı) hedef kısıtıdır (ADR-0003 c, S64, sprint 5'in 3. maddesi,
+  [#84](https://github.com/yusufceng/Kubeat/issues/84),
+  [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)). Vekil
   (`HTTP_PROXY`) üzerinden giden istekte hedef backend'de çözülüp denetlenir,
   ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun ağına bağlıdır.
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye

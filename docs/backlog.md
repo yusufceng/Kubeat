@@ -1557,6 +1557,24 @@ bırakabiliyor; tam da izlemeye en çok ihtiyaç duyulan anda. Düzeltme kaynak 
 başına kademeli throttle'a geçmek ve hesabı sert kilitlememektir; bu, auth'ta
 güvenlik tavizi olan bir tasarım değişikliğidir (IP throttle dağıtık tahmine
 daha zayıf, ama meşru kullanıcıyı kilitlemez) ve aceleye getirilmemeli. Bugünkü
-risk sınırlı ve kendiliğinden geçen 15 dakikalık bir kilit. Tetikleyici: sprint
-5 güvenlik teması; bir ADR ile karar verilir. Ara önlem: güçlü parolalar ve
+risk sınırlı ve kendiliğinden geçen 15 dakikalık bir kilit. Tetikleyici:
+sprint 6, S63 ile birlikte (sprint 5 güvenlik kapasitesi S64'e gitti ve S65
+S63 ile aynı `auth.go`/Throttle yüzeyine dokunduğu için verilmiş karar
+sprint 6'ya ertelendi, [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)); bir ADR ile karar verilir. Ara önlem: güçlü parolalar ve
 `login_failed` denetim kaydının izlenmesi.
+
+## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
+
+2026-11-04'te ertelendi (sprint 5 planı; [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)).
+S66'nın yük taşıyan parçası (deny-CIDR cross-tenant'ı ayıramaz, çünkü API
+sunucusu ve ekip Service'leri aynı ClusterIP aralığında; gerçek savunma c)
+S64'ün belge kabul ölçütüne girdi (ADR-0003 "Sonuçlar" + README "Hedef
+politikası"), bu yüzden bu sprint kapanıyor. Kalan konsolidasyon düşük
+aciliyetli belge işi: README "Güvenlik"ten bağlı tek "Sıkı / çok kiracılı ve
+internete açık kurulum" kontrol listesi (deny-CIDR, `UPTIME_CHECK_SHOW_VALUE=false`,
+giriş yüzeyini kısıtlama ve giriş kilidinin bugünkü sınırı), pilot.md "Ön
+koşullar"a deny-CIDR + `UPTIME_CHECK_SHOW_VALUE=false` satırı ve chart values
+sertleştirme bloğunun örneklenmesi. 0.46.0 için geçici "bilinen-açık" satırı
+yazılmaz: 0.46.1 + advisory kullanıcıda bekliyor ve 0.47.0 fixleri zaten
+taşıyacak. Tetikleyici: ilk gerçek internete açık (GKE Ingress) çok kiracılı
+kurulum ya da bir güvenlik incelemesi.

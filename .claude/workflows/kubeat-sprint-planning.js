@@ -134,7 +134,7 @@ const findings = (await parallel(discovery.map(d => () =>
   agent(`${common}
 Görev: Sprint ${S.number} keşfi. Önceki keşif ${S.prevDate}'de yapıldı; hikâyeleri ${S.prevStoriesFile} içinde. Aynı bulguları yeniden üretme.
 1. ${S.prevSprintFile} dosyasını ve docs/backlog.md'nin ${S.prevDate} ve sonrası girdilerini oku.
-2. Son sürümün değişikliklerini incele: \`git log --oneline ${S.prevTag}..${S.tag}\`, ilgili diff'ler ve README "${S.upgradeSection}".
+2. Son sürümün değişikliklerini incele: \`git log --oneline ${S.prevTag}..${S.tag}\`, ilgili diff'ler ve docs/yukseltme.md "${S.upgradeSection}".
 3. candidates: "Sonraki sprint" adaylarını (${S.candidates}) ve önceki sprint sonunun yeni müşteri bulgularını kendi işin açısından değerlendir; seni ilgilendirmeyeni "beni ilgilendirmiyor" diye işaretle.
 4. findings: en çok 5 YENİ bulgu: önceki sprint dosyasında ve backlog'da olmayan ya da yeni kanıtı olan; özellikle son sürümün getirdiği yeni riskler ve geçen sefer bakılmayan alanlar. ${d.extra}`,
     { label: `keşif:${d.label}`, phase: 'Keşif', schema: FINDINGS, agentType: d.role })
@@ -156,7 +156,7 @@ log(`BA: ${stories.stories.length} hikâye, ${stories.already_exists.length} zat
 
 phase('Öncelik')
 const decision = await agent(`${common}
-Görev: Sprint ${S.number} için sprint hedefini ve en çok DÖRT maddelik sıralı listeyi seç; kalan her hikâye için karar ver ve gerekçele. Önceki sprintin retrosu ve PMO'nun sprint önerisi ${S.prevSprintFile} "Retro" bölümünde: girdi say, bağlayıcı değil. Retro kararları: sprint takvimle değil teslimatla kapanır; sürüm PR'ı README'de yükseltme notu taşır; doğrulanamayan şey sprint dosyasında "Kullanıcıda kalanlar"a yazılır. release.yml'i değiştiren bir madde seçersen doğrulaması bu sprintin sürüm etiketiyle olur; bunu gerekçeye ve riske yaz. "release" alanında sprint sonunda sürüm çıkıp çıkmayacağını söyle.
+Görev: Sprint ${S.number} için sprint hedefini ve en çok DÖRT maddelik sıralı listeyi seç; kalan her hikâye için karar ver ve gerekçele. Önceki sprintin retrosu ve PMO'nun sprint önerisi ${S.prevSprintFile} "Retro" bölümünde: girdi say, bağlayıcı değil. Retro kararları: sprint takvimle değil teslimatla kapanır; sürüm PR'ı docs/yukseltme.md'de yükseltme notu taşır; doğrulanamayan şey sprint dosyasında "Kullanıcıda kalanlar"a yazılır. release.yml'i değiştiren bir madde seçersen doğrulaması bu sprintin sürüm etiketiyle olur; bunu gerekçeye ve riske yaz. "release" alanında sprint sonunda sürüm çıkıp çıkmayacağını söyle.
 
 Hikâyeler (JSON):
 ${JSON.stringify(stories, null, 1)}`,
