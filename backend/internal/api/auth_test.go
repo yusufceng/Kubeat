@@ -487,10 +487,11 @@ func TestLDAPSignIn(t *testing.T) {
 	if strings.Join(sess.User.Namespaces, ",") != "billing" {
 		t.Errorf("mehmet after the mapping was removed = %+v", sess.User)
 	}
-	// The directory being down is not a wrong password.
+	// The directory being down is answered as a wrong password is, so that it
+	// does not tell a directory name from a local account's (enumeration).
 	directory.down = true
-	if code := doAs(t, "", "POST", base+"/api/v1/auth/login", `{"username":"ayse","password":"s3cret"}`, nil); code != http.StatusBadGateway {
-		t.Errorf("directory down: status = %d, want 502", code)
+	if code := doAs(t, "", "POST", base+"/api/v1/auth/login", `{"username":"ayse","password":"s3cret"}`, nil); code != http.StatusUnauthorized {
+		t.Errorf("directory down: status = %d, want 401", code)
 	}
 	directory.down = false
 

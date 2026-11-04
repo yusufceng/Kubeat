@@ -517,8 +517,15 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			undo()
+			// Answer as a wrong password does. That the directory was asked at
+			// all tells a directory name from a local account's, which is
+			// enumeration; a distinct "directory unreachable" answer gave it
+			// away while the directory was down. The real reason is logged for
+			// the operator; a local account still signs in, and the directory's
+			// own users wait the outage out. The attempt is undone, so an
+			// outage does not count toward a lockout.
 			h.opts.Logger.Error("ldap sign-in failed", "user", req.Username, "error", err)
-			writeError(w, http.StatusBadGateway, "the directory could not be asked; try again later")
+			unauthorized(w, "invalid username or password")
 			return
 		}
 		user, err = h.directoryUser(r.Context(), user, known, store.UserLDAP, directoryIdentity{
