@@ -253,6 +253,45 @@ NO_BACKUPS="No backups of the database are taken"
 notes "backups off" says "$NO_BACKUPS"
 notes "backups off" says "Velero, OADP"
 notes "backups on" omits "$NO_BACKUPS" "${BACKUPS[@]}"
+# The warning carries the two lines that turn the heartbeat on, as the
+# README's quick start gives them, and offers the rules only where the
+# PrometheusRule CRD is: helm template sees it with --api-versions, as the
+# cluster's API shows it to helm install. A heartbeat without the rules
+# hears no channel that takes no notifications; the notes say so, and say
+# nothing of it once the rules are on.
+CHART_VERSION="$(awk '/^version:/ { print $2; exit }' "$CHART/Chart.yaml")"
+HEARTBEAT_SECRET="kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url="
+HEARTBEAT_SET="helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version $CHART_VERSION -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat"
+RULES_SET="--set metrics.prometheusRule.enabled=true"
+NO_CRD="need the PrometheusRule CRD, which this cluster does not have"
+UNHEARD_CHANNEL="The heartbeat does not hear a channel that takes no notifications"
+CRD=(--api-versions monitoring.coreos.com/v1)
+HEARTBEAT=(--set heartbeat.urlSecret.name=kubeat-heartbeat)
+RULES_ON=(--set metrics.prometheusRule.enabled=true)
+notes "no heartbeat, no rules" says "$HEARTBEAT_SECRET" --namespace kubeat
+notes "no heartbeat, no rules" says "$HEARTBEAT_SET" --namespace kubeat
+notes "no heartbeat, no rules" says "$UNHEARD_CHANNEL" --namespace kubeat
+notes "no heartbeat, no rules, no CRD" omits "$RULES_SET" --namespace kubeat
+notes "no heartbeat, no rules, no CRD" says "$NO_CRD" --namespace kubeat
+notes "no heartbeat, no rules, no CRD" says '"Operator'"'"'süz cluster"' --namespace kubeat
+notes "no heartbeat, no rules, CRD" says "$RULES_SET" --namespace kubeat "${CRD[@]}"
+notes "no heartbeat, no rules, CRD" omits "$NO_CRD" --namespace kubeat "${CRD[@]}"
+notes "heartbeat, no rules" says "$UNHEARD_CHANNEL" "${HEARTBEAT[@]}"
+notes "heartbeat, no rules" omits "$HEARTBEAT_SECRET" --namespace kubeat "${HEARTBEAT[@]}"
+notes "heartbeat, no rules, no CRD" omits "$RULES_SET" "${HEARTBEAT[@]}"
+notes "heartbeat, no rules, no CRD" says "$NO_CRD" "${HEARTBEAT[@]}"
+notes "heartbeat, no rules, CRD" says "$RULES_SET" "${HEARTBEAT[@]}" "${CRD[@]}"
+notes "heartbeat, no rules, CRD" omits "$NO_CRD" "${HEARTBEAT[@]}" "${CRD[@]}"
+notes "rules, no heartbeat" omits "$UNHEARD_CHANNEL" "${RULES_ON[@]}"
+notes "heartbeat and rules" omits "$UNHEARD_CHANNEL" "${HEARTBEAT[@]}" "${RULES_ON[@]}"
+notes "heartbeat and rules" omits "$RULES_SET" "${HEARTBEAT[@]}" "${RULES_ON[@]}" "${CRD[@]}"
+# The API: a port-forward to the backend and the token's Secret, the
+# chart's or the one named in apiToken.existingSecret.
+API_FORWARD="kubectl -n kubeat port-forward svc/kubeat-backend 8090:8080"
+notes "API port-forward" says "$API_FORWARD" --namespace kubeat
+notes "API token from the chart's Secret" says "kubectl -n kubeat get secret kubeat-api-token -o jsonpath='{.data.token}' | base64 -d" --namespace kubeat
+notes "API token from apiToken.existingSecret" says "kubectl -n kubeat get secret my-api-token -o jsonpath='{.data.token}' | base64 -d" --namespace kubeat --set apiToken.existingSecret=my-api-token
+notes "API token from apiToken.existingSecret" omits "kubeat-api-token" --namespace kubeat --set apiToken.existingSecret=my-api-token
 
 # The alert rules: Kubeat's self-health rules render, the backup staleness
 # rule only with backups on, with a threshold read from backup.interval.
