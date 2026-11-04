@@ -447,6 +447,10 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		forbidden(w)
 		return
 	}
+	if err := targetInScope(principal(r), channelTargetHost(typ, target)); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
 	tags, err := channelTags(req.Tags)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -541,6 +545,12 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		if keep && ch.Secret != "" && store.Endpoint(ch.Target) != store.Endpoint(stored) {
 			writeError(w, http.StatusBadRequest, "enter secret again: a stored secret goes only to the server it was entered for")
 			return
+		}
+		if req.Target != nil {
+			if err := targetInScope(p, channelTargetHost(ch.Type, ch.Target)); err != nil {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
 		}
 	}
 	if req.Namespaces != nil {

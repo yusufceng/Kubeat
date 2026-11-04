@@ -179,6 +179,8 @@ export const monitorForm = defineMessages(
     "monitorForm.actions.error.cluster": "Cluster'a erişilemedi: {message}",
     "monitorForm.actions.error.forbidden": "Bu işlem için yetkiniz yok.",
     "monitorForm.actions.error.forbiddenDetail": "Yetki yok: {message}",
+    "monitorForm.actions.error.targetScope":
+      "Bu hedef kapsamınızdaki namespace'lerin dışında. Yalnızca görebildiğiniz namespace'lerin Service ya da pod adreslerini (service.namespace.svc) izleyebilirsiniz; cluster içi bir IP ya da kısa ad kabul edilmez.",
     "monitorForm.actions.error.notFound": "Bulunamadı ya da bu kayda erişim yetkiniz yok.",
     "monitorForm.actions.error.sessionExpired": "Oturumunuz sona erdi; yeniden giriş yapın.",
     "monitorForm.actions.error.tooMany": "Çok fazla hatalı deneme yapıldı. Biraz sonra tekrar deneyin.",
@@ -362,6 +364,8 @@ export const monitorForm = defineMessages(
     "monitorForm.actions.error.cluster": "The cluster could not be reached: {message}",
     "monitorForm.actions.error.forbidden": "You are not allowed to do this.",
     "monitorForm.actions.error.forbiddenDetail": "Not allowed: {message}",
+    "monitorForm.actions.error.targetScope":
+      "This target is outside the namespaces in your scope. You can monitor only the Service or pod addresses (service.namespace.svc) of namespaces you can see; a cluster-internal IP or short name is not accepted.",
     "monitorForm.actions.error.notFound": "Not found, or you have no access to this record.",
     "monitorForm.actions.error.sessionExpired": "Your session has expired; sign in again.",
     "monitorForm.actions.error.tooMany": "Too many failed attempts. Try again in a little while.",

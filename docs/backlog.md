@@ -1537,16 +1537,19 @@ anahtarı kimlik taşımaz (kabul ölçütünde yoktu). Tetikleyici: Latin dış
 bir kurulum adı ya da ortak PagerDuty servisinde test bildirimlerinin
 kurulumlar arasında çakışması.
 
-## Kullanıcı başına hedef kısıtı (SSRF/keşif)
+## Kullanıcı başına hedef kısıtı (SSRF/keşif) — yapıldı
 
-2026-11-04'te ertelendi ([adr/0003-hedef-erisilebilirligi.md](adr/0003-hedef-erisilebilirligi.md), karar c; yetkili güvenlik değerlendirmesi). Giriş yapmış bir
-kullanıcı bugün politikanın izin verdiği her adrese monitor ya da kanal
-webhook'u kurabiliyor; a (deny-CIDR belgesi) ve b (`UPTIME_CHECK_SHOW_VALUE`)
-yapıldı. Kalan: bir kullanıcının yalnızca rolüne ya da namespace'lerine uygun
-adreslere hedef kurabilmesi. Yetki modelinin her okuyucusuna dokunur, L
-boyutlu; cluster-native izlemenin meşru kullanımını bozmamalı. Tetikleyici:
-aynı cluster'da birbirine güvenmeyen kullanıcılar ya da çok kiracılı bir
-kurulum. Ara önlem: `UPTIME_TARGET_DENY_CIDRS`.
+2026-11-04'te ertelenmişti ([adr/0003-hedef-erisilebilirligi.md](adr/0003-hedef-erisilebilirligi.md), karar c; yetkili güvenlik değerlendirmesi); a (deny-CIDR
+belgesi) ve b (`UPTIME_CHECK_SHOW_VALUE`) o turda yapıldı. **Sprint 5'te (0.47.0,
+[#84](https://github.com/yusufceng/Kubeat/issues/84)) tamamlandı:** kapsamı
+sınırlı bir kullanıcı cluster içi bir hedefe (monitor ya da kanal webhook'u)
+yalnızca adından okunan namespace'i (`servis.namespace.svc`) kapsamındaysa
+ulaşabilir; API sunucusu, başka ekiplerin Service'leri ve namespace'i
+okunamayan çıplak ClusterIP/pod IP'leri reddedilir. Her namespace'i gören
+kullanıcı ve cluster dışı hedefler değişmez (ADR-0003 c, README "Hedef
+politikası", [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)).
+Deny-CIDR derinlemesine savunma olarak kalır (cross-tenant'ı tek başına
+ayıramaz, çünkü ClusterIP aralığı paylaşılır).
 
 ## Giriş kilitlemesinin hizmet reddi riski (CWE-307)
 

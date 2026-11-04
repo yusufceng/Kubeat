@@ -183,15 +183,17 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   "Ağ erişimi", İzlenen namespace'ler; gerçek bir varsayılan-ret
   namespace'te koşulmadı, yukarıda "Hâlâ doğrulanmayanlar").
 - Hedef politikası yalnızca loopback, link-local (bulut metadata servisi) ve
-  multicast adreslerini kapatır; özel ağlar bilerek açıktır, yani monitor ya
-  da kanal düzenleyebilen biri cluster içindeki her servise istek
-  gönderebilir. Bunu `UPTIME_TARGET_DENY_CIDRS` daraltır; ama çok kiracılı
-  bir cluster'da API sunucusu ve ekip Service'leri meşru izlenenlerle aynı
-  ClusterIP aralığını paylaştığı için deny-CIDR cross-tenant erişimi
-  ayıramaz. Gerçek cross-tenant savunma kullanıcı başına (namespace/rol
-  bazlı) hedef kısıtıdır (ADR-0003 c, S64, sprint 5'in 3. maddesi,
+  multicast adreslerini kapatır; özel ağlar bilerek açıktır. 0.47.0'da
+  kullanıcı başına kapsam eklendi (ADR-0003 c, S64,
   [#84](https://github.com/yusufceng/Kubeat/issues/84),
-  [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)). Vekil
+  [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)): kapsamı
+  sınırlı bir kullanıcı artık yalnızca görebildiği namespace'lerin cluster içi
+  adreslerine (`servis.namespace.svc`) monitor ya da kanal webhook'u kurabilir;
+  API sunucusu, başka ekiplerin Service'leri ve namespace'i okunamayan çıplak
+  ClusterIP/pod IP'leri reddedilir. Kalan sınır: her namespace'i gören bir
+  kullanıcı (yönetici) her cluster içi adrese ulaşabilir ve deny-CIDR,
+  ClusterIP aralığını paylaştığı için bu kullanıcılar arasında cross-tenant'ı
+  ayıramaz — hassas aralıkları yine `UPTIME_TARGET_DENY_CIDRS` daraltır. Vekil
   (`HTTP_PROXY`) üzerinden giden istekte hedef backend'de çözülüp denetlenir,
   ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun ağına bağlıdır.
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye
