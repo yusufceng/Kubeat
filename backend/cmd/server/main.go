@@ -214,6 +214,7 @@ func main() {
 	}
 	sched := scheduler.New(db, checker.New(checker.Options{
 		InsecureSkipVerify: cfg.HTTPInsecureSkipVerify,
+		ShowValue:          cfg.CheckShowValue,
 		UserAgent:          userAgent,
 		BodyLimit:          int64(cfg.KeywordBodyLimit),
 		Pushes:             db,

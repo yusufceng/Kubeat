@@ -73,7 +73,7 @@ func ParseJSONPath(path string) ([]jsonStep, error) {
 
 // matchJSON looks up path in a JSON document and compares what it finds to
 // expected. It returns a description of the value on success.
-func matchJSON(document []byte, path, operator, expected string) (string, error) {
+func matchJSON(document []byte, path, operator, expected string, showValue bool) (string, error) {
 	steps, err := ParseJSONPath(path)
 	if err != nil {
 		return "", err
@@ -112,7 +112,16 @@ func matchJSON(document []byte, path, operator, expected string) (string, error)
 		return "", fmt.Errorf("json path %q: %w", path, err)
 	}
 	if !ok {
+		if !showValue {
+			// Hide what was found, so the response's data is not disclosed to
+			// the monitor's viewers; the path, operator and expected value are
+			// the viewer's own.
+			return "", fmt.Errorf("json path %q did not match %s %s", path, operator, expected)
+		}
 		return "", fmt.Errorf("json path %q is %s, expected %s %s", path, shownValue(found), operator, expected)
+	}
+	if !showValue {
+		return path + " matched", nil
 	}
 	return path + " = " + shownValue(found), nil
 }

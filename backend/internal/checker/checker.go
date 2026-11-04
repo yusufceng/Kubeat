@@ -37,7 +37,11 @@ type Options struct {
 	// InsecureSkipVerify disables TLS certificate verification for every
 	// check; monitors can also opt out individually.
 	InsecureSkipVerify bool
-	UserAgent          string
+	// ShowValue lets a JSON check repeat the value it found in its result
+	// and error. Off hides it, so a target's response data is not shown to
+	// the monitor's viewers.
+	ShowValue bool
+	UserAgent string
 	// BodyLimit is how much of a response body is read to look for a
 	// monitor's keyword or JSON value.
 	BodyLimit int64

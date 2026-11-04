@@ -167,7 +167,7 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 		}
 	}
 	if o.JSONPath != "" {
-		out.detail, out.err = matchJSON(content, o.JSONPath, o.JSONOperator, o.JSONExpected)
+		out.detail, out.err = matchJSON(content, o.JSONPath, o.JSONOperator, o.JSONExpected, c.opts.ShowValue)
 	}
 	return rec.finish(m, out, resp, nil)
 }

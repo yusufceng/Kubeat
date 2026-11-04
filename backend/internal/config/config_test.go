@@ -47,6 +47,7 @@ func TestLoadDefaults(t *testing.T) {
 		IncidentTimelineLimit: 100,
 
 		KeywordBodyLimit: 1 << 20,
+		CheckShowValue:   true,
 
 		MinCheckInterval: 5 * time.Second,
 		StatsWindow:      24 * time.Hour,

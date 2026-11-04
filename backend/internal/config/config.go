@@ -142,6 +142,10 @@ type Config struct {
 
 	HTTPInsecureSkipVerify bool // UPTIME_HTTP_INSECURE_SKIP_VERIFY
 	KeywordBodyLimit       int  // UPTIME_KEYWORD_BODY_LIMIT_BYTES
+	// CheckShowValue lets a JSON check repeat the value it found in a
+	// monitor's result and error. On by default; turn it off where a
+	// target's response may hold data the monitor's viewers should not see.
+	CheckShowValue bool // UPTIME_CHECK_SHOW_VALUE
 
 	// Where checks and notifications may not connect, beyond the built-in
 	// ranges (loopback, link-local with the cloud metadata services,
@@ -570,6 +574,9 @@ func Load() (Config, error) {
 			cfg.DiscoveryDefaultInterval, cfg.MinCheckIntervalExternal))
 	}
 	if cfg.HTTPInsecureSkipVerify, err = envBool("UPTIME_HTTP_INSECURE_SKIP_VERIFY", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.CheckShowValue, err = envBool("UPTIME_CHECK_SHOW_VALUE", true); err != nil {
 		return Config{}, err
 	}
 	if err := checkCIDRs("UPTIME_TARGET_DENY_CIDRS", cfg.TargetDenyCIDRs); err != nil {
