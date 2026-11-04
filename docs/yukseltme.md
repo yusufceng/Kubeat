@@ -41,48 +41,58 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.45'e
+### 0.42'den 0.46'ya
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
-   başarısız kanalları düzeltin ya da kapatın; özel bildirim ayarlarınız
-   varsa `UPTIME_NOTIFY_RETRY_MAX`'ın açılış doğrulamasından geçtiğini
-   denetleyin, geçmeyen değerle 0.43–0.45 backend'i açmaz; aynı
-   PagerDuty servisine bağlı birden çok kurulumu ayırın.
+   başarısız kanalları düzeltin ya da kapatın; aynı PagerDuty servisine
+   bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
+   0.46'ya geçen için uyarıya döner: 1 dakikadan ya da bir denemenin
+   süresinden kısa bir değer 0.46'da backend'i durdurmaz, alt sınıra
+   yükseltilir ve her açılışta `WARN` yazılır; değeri yine de düzeltin:
+   0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu ayarı
+   tanımaz).
 3. 0.44'ün adımları ("0.44'e yükseltme", Yapılacak): yedeği kapatmayı ya
    da `existingClaim`'e geçişi bu yükseltmeyle aynı adımda yapmayın; açık
    kesintilere bakın; `KubeatDown` susturma kuralını ekleyin;
    `backend.terminationGracePeriodSeconds`'ı `UPTIME_SHUTDOWN_TIMEOUT`'tan
-   en az 5 sn uzun tutun.
+   en az 5 sn uzun tutun; ServiceMonitor kapalıysa
+   `up{job="<release>-backend", namespace="<namespace>"}` serisini
+   toplayan bir scrape olsun; log alarmlarınız `check result dropped`
+   satırına bakıyorsa `batch insert failed`'a taşıyın.
 4. 0.45'in adımları ("0.45'e yükseltme", Yapılacak): `latest` etiketinden
    bir sürüm etiketine geçin; `KubeatNotificationsFailing`'in
    yönlendirmesini kanal etiketlerine göre ve `KubeatDown` susturma
    listesini güncelleyin.
-5. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti: yeni `kubeat.self`
-   alarmlarını ve `KubeatUnhealthy`'yi Alertmanager yönlendirmesine
-   ekleyin; kuralları kopyalıyorsanız 0.45'inkileri kopyalayın.
-6. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
+5. 0.46'nın adımları ("0.46'ya yükseltme", Yapılacak): açık PagerDuty
+   olaylarını kapatın; kuruluma `instanceName` verin; imajları
+   aynalıyorsanız docs/pilot.md'deki imzalı yola geçin.
+6. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46'da değişmedi: yeni
+   `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi Alertmanager
+   yönlendirmesine ekleyin; kuralları kopyalıyorsanız 0.46'nınkileri
+   kopyalayın (0.45'inkilerle aynı).
+7. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
    yerine `--reset-then-reuse-values`, Helm 3.14+):
 
    ```sh
-   helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.45.0 -f values.yaml
+   helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.46.0 -f values.yaml
    ```
 
-7. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye. Dönüşte
-   0.43–0.45'in yeniden denemesi, alarmları ve metrikleri kalkar; 0.42'nin
-   chart'ı PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları
-   yine siler.
+8. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
+   PagerDuty olaylarını kapatın. Dönüşte 0.43–0.46'nın yeniden denemesi,
+   kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
+   PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.45'e
+### 0.41'den 0.46'ya
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.45'e"deki adımlar.
+2. Sonra "0.42'den 0.46'ya"daki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
-0.43 ya da 0.44'ten gelirken başladığınız sürümden sonraki bölümleri
+0.43, 0.44 ya da 0.45'ten gelirken başladığınız sürümden sonraki bölümleri
 eskiden yeniye okuyun. 0.40 ya da öncesinden gelirken de öyle; şemayı
 yükselten 0.38, 0.39 ve 0.40'tan dönüş yalnızca yedekle olur.
 
@@ -113,14 +123,19 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
 
   Düzelttiğiniz kanalı test edin (`{"delivered": true}` dönmeli):
   `api channels/<id>/test -X POST`.
-- **Açık kesintiler** (0.44):
+- **Açık kesintiler** (0.44; 0.46'da PagerDuty kanalı varsa `&kind=down`
+  olmadan koşun: açık kesinti ve sertifika olayları PagerDuty'de açık
+  alarmlardır, yavaşlık alarmı olay değildir ve PagerDuty'de
+  `kubeat-…-slow-` anahtarıyla aranır; keşif monitor'ünün adı namespace'i
+  zaten taşır):
 
   ```sh
-  api 'incidents?state=open&kind=down' | jq -r '.[] | "\(.id)\t\(.monitor_namespace)/\(.monitor_name)\t\(.started_at)"'
+  api 'incidents?state=open&kind=down' | jq -r '.[] | "\(.id)\t\(.monitor_name)\t\(.started_at)"'
   ```
 
-- **Bildirim ayarları** (0.43). Çıktı boşsa varsayılanlar geçerlidir ve
-  açılış doğrulamasından geçer. Ayarlar backend Deployment'ından okunur,
+- **Bildirim ayarları** (0.43; 0.46'da kısa `UPTIME_NOTIFY_RETRY_MAX`
+  reddedilmez, alt sınıra yükseltilip `WARN` yazılır). Çıktı boşsa
+  varsayılanlar geçerlidir. Ayarlar backend Deployment'ından okunur,
   böylece kurulumu Helm de yapmış olsa Argo CD ya da OpenShift GitOps da
   (onlarda Helm release'i yoktur) aynı komut çalışır:
 
@@ -149,6 +164,109 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 0.46'ya yükseltme
+
+0.46 bildirimlere kurulum kimliğini ekler, ulaşılamayan bir insan kanalının
+makine kanallarını geciktirmesini bitirir ve yayımı CI'ı yeşil bir main
+commit'ine bağlar. Yükseltme notları, 0.38'den bu yana olanlar dahil,
+artık bu dosyadadır; README'de bağlantı kalır. Şema değişmez (26).
+
+### Yapılacak
+
+- Açık PagerDuty olaylarını yükseltmeden önce kapatın: 0.46 yeni olayları
+  kimlikli bir `dedup_key` ile açar (aşağıda "Davranış değişikliği").
+  Yükseltmeden önce açılmış bir olay sonradan hatırlatılır ya da yeniden
+  gönderilirse PagerDuty'de kimlikli ikinci bir alarm açılır; düzelme
+  ikisini de kapatır. Betik: "Açık kesintiler".
+- Kuruluma bir kimlik verin: `instanceName` (`UPTIME_INSTANCE_NAME`). Boşsa
+  `publicURL`'ün host'u, chart'ta o da yoksa Route ya da Ingress host'u
+  kullanılır; hiçbiri yoksa kurulum kimliksizdir. Route ya da Ingress host'u
+  olan kurulum values'a dokunmadan da 0.46'da kimlik alır ve PagerDuty
+  anahtarı değişir: ilk madde ona da geçerlidir.
+  Kimlik anahtara ASCII harf, rakam, nokta, tire ve alt çizgiyle girer;
+  Türkçe ve öteki aksanlı Latin harfleri en yakın ASCII harfe çevrilir
+  (`Üretim` → `Uretim`), öteki karakterlerin her dizisi tek tireye döner.
+  Backend açılışta kullanılan kimliği ve anahtardaki hâlini tek bir `INFO`
+  satırıyla loglar; anahtardaki hâl boşsa ya da kimlikten farklıysa (ör.
+  host'ta port varsa) satır `WARN`'dır.
+- Birden çok kurulumunuz aynı PagerDuty servisine bağlıysa ayrı servisleri
+  filonun tamamı 0.46'ya geçip her kurulum kimlik alana kadar koruyun: 0.45
+  ve öncesi de kimliksizdir, kimliksiz iki kurulumun aynı numaralı olayları
+  yine tek alarmda birleşir. Bu cümle 0.43 notundaki "aynı servise
+  bağlamayın" cümlesinin yerine geçer.
+- `UPTIME_NOTIFY_RETRY_MAX`'ı 1 dakikadan ya da bir denemenin süresinden
+  kısa verdiyseniz değeri alt sınıra yükseltin ya da `0` yapın: 0.46 böyle
+  bir değerle açılır ama her açılışta `WARN` yazar ve 0.45'e dönüşte backend
+  yine durur. Betik: "Bildirim ayarları".
+- İmajları ve chart'ı aynalıyorsanız docs/pilot.md'deki imzalı yola geçin:
+  `oras cp -r` imzaları, SBOM'ları ve provenance'ı kopyayla birlikte taşır
+  ve aynalanan kopya `cosign verify --trusted-root` ile ağsız doğrulanır;
+  imzasız `skopeo` yolu bir notta kaldı.
+
+### Davranış değişikliği
+
+- **Bildirimlerde kurulum kimliği.** PagerDuty `dedup_key`'i
+  `kubeat-<kimlik>-incident-<id>` ve `kubeat-<kimlik>-slow-<monitor id>`
+  olur. Backend'in açılışından önce açılmış bir olayın ya da yavaşlığın
+  düzelmesi kimlikli ve eski anahtarla iki istek olarak gider. Webhook
+  gövdesinde ve PagerDuty `custom_details`'te `instance` alanı gelir; kimlik
+  Slack ve Mattermost alt bilgisinde, Teams ve Google Chat kartında ve
+  e-posta gövdesinde görünür. E-posta konusu ve mesaj metinleri değişmez.
+- **Ulaşılamayan insan kanalı ötekileri bekletmez.** Ulaşılamayan ya da
+  meşgul bir insan kanalı (Slack, Teams, Mattermost, Google Chat, Telegram,
+  Discord, ntfy, Gotify, e-posta) artık webhook ve PagerDuty gibi yeniden
+  deneme zamanına kadar almıyor sayılır, `UPTIME_NOTIFY_GROUP_WAIT=0` iken
+  de: yeni bildirimler ve namespace grupları ona denenmez, bekletilir ve
+  kanal gelince bekleyenler kanalın sıradaki geçişinde gider. Reddeden
+  (4xx) kanal yine duraklamaz; `UPTIME_NOTIFY_RETRY_MAX=0` ile eskisi gibi
+  hiçbir kanal duraklamaz. 0.45'te insanların okuduğu kanal almıyor
+  sayılmıyordu: meşgul (429) kanalda yalnızca o mesaj bekliyor, öteki
+  mesajlar anında deneniyordu; birden çok namespace'e yayılan bir kesintide
+  ulaşılamayan bir e-posta relay'i ya da Slack, teslimat döngüsünü grup
+  başına bir deneme süresi (varsayılanlarla yaklaşık 25 sn) tutuyor ve bu
+  arada açılan kesintilerin PagerDuty ve webhook sayfalarını o kadar
+  geciktiriyordu. 0.46'da sayfa, kaç namespace düşmüş olursa olsun, en çok
+  bir deneme süresi bekler. Bedeli: kanal döndükten sonra ona giden yeni bir
+  mesaj en çok o anki bekleme süresi kadar gecikir (1, 2, 4… dk; üst sınır
+  `UPTIME_NOTIFY_RETRY_MAX`, varsayılan 15 dk). Kanalı düzenlemek ya da
+  kanal testi bekletmeyi kaldırmaz (test kuyruğu atlar); düzeltilmiş ayar
+  sıradaki geçişte kullanılır.
+- **Kuyruk gauge'u.** Yeni `kubeat_notification_queue_length` teslimat
+  kuyruğunda o an bekleyen bildirim sayısını gösterir; boşta 0'dır.
+- **Kısa `UPTIME_NOTIFY_RETRY_MAX` backend'i durdurmaz.** 1 dakikadan ya da
+  bir denemenin süresinden kısa bir değer alt sınıra yükseltilir ve
+  açılışta verilen ve kullanılan değerle bir `WARN` satırı yazılır.
+  0.43–0.45 böyle bir değerle açılmıyordu.
+- **Kurulum notları.** Davranış değişmez; `helm upgrade` notu heartbeat
+  için iki kopyalanabilir satır verir, PrometheusRule CRD'si yoksa (`helm
+  template`'te `--api-versions` verilmemişse de) kural seçeneğini önermez
+  ve README'nin operator'süz yoluna yollar, kurallar kapalıyken
+  heartbeat'in bildirim alamayan kanalı duymadığını söyler ve API
+  anahtarıyla backend port-forward satırlarını gösterir.
+- **Yayım kapısı.** Ürün değişmez; `v*` etiketinden yayım yalnızca
+  main'den ya da bir `release/v*` dalından erişilebilen ve CI'ın push
+  koşusunda beş zorunlu check'i yeşil olan bir commit'ten çıkar (CI
+  sürüyorsa kapı en çok 30 dakika bekler; düşerse hiçbir şey itilmemiştir).
+  GitHub Release metni sürümün bu dosyadaki bölümüne bağlanır.
+
+### Geri dönüş
+
+Şema 26: `helm rollback` ile 0.45.0'a dönülür. Önce açık PagerDuty
+olaylarını kapatın: 0.46'nın kimlikli anahtarıyla açılmış bir olay 0.45'in
+anahtarıyla kapanmaz. Dönüşte `instanceName` yok sayılır, webhook
+gövdesinden `instance` alanı ve kuyruk gauge'u kalkar, ulaşılamayan bir
+insan kanalı yine her yeni grupta denenir ve 0.46'nın `WARN`'la kabul
+ettiği kısa bir `UPTIME_NOTIFY_RETRY_MAX` backend'i yine durdurur (dönmeden
+önce değeri alt sınıra yükseltin ya da `0` yapın). Kimliği ya da
+`publicURL`'ü sonradan değiştirmek de PagerDuty anahtarını değiştirir: önce
+açık olayları kapatın.
+
+### Alarm kuralları: değişmedi
+
+Chart'ın PrometheusRule'u 0.45.0 ile aynıdır (13 kural); kopyalanan
+kuralların yenilenmesi gerekmez. Yeni `kubeat_notification_queue_length`
+gauge'u kurala bağlı değildir.
 
 ## 0.45'e yükseltme
 
@@ -340,7 +458,8 @@ değiştirir. Şema değişmez (26).
 - **PagerDuty.** Birden çok kurulumu aynı PagerDuty servisine bağlamayın:
   olay numaraları her kurulumda 1'den başlar, iki kurulumun aynı numaralı
   olayları tek alarmda birleşir ve birinin düzelmesi ötekini de kapatır.
-  Her kuruluma ayrı bir servis verin.
+  Her kuruluma ayrı bir servis verin (0.46'dan itibaren kurulum kimliği bu
+  birleşmeyi önler, "0.46'ya yükseltme").
 - **Alertmanager.** Kurallar açıksa yeni alarmları (aşağıda "Alarm
   kuralları") Alertmanager yönlendirme ve susturma kurallarınıza ekleyin.
 
