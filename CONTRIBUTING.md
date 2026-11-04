@@ -236,7 +236,8 @@ cosign, ORAS, registry ve govulncheck'i yükseltmek (yeni sürümlere
 [ORAS sürümlerinden](https://github.com/oras-project/oras/releases),
 [Docker Hub'daki `registry` imajından](https://hub.docker.com/_/registry) ve
 [pkg.go.dev](https://pkg.go.dev/golang.org/x/vuln?tab=versions)'den elle
-bakılır; Dependabot cosign'ı, ORAS'ı ve govulncheck'i görmez):
+bakılır; Dependabot cosign'ı, ORAS'ı, registry imajını ve govulncheck'i
+görmez):
 
 - **cosign.** `COSIGN_VERSION` ile `COSIGN_SHA256` birlikte değişir; sağlama
   toplamı o sürümün `cosign_checksums.txt` dosyasındaki `cosign-linux-amd64`
