@@ -735,6 +735,10 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
 	m.Enabled = true
+	if err := targetInScope(principal(r), m.Host()); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if err := req.checkOptions.apply(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -797,6 +801,10 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 	copy := requestOf(m)
 	if err := copy.validate(h.limits(), h.opts.DefaultFailureThreshold); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := targetInScope(principal(r), m.Host()); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 	h.storeMonitor(w, r, m)
@@ -976,6 +984,10 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Target != nil {
 		if err := workloadInScope(r, merged); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		if err := targetInScope(p, merged.monitor(current).Host()); err != nil {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}

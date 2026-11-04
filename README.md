@@ -610,8 +610,37 @@ ulaşır. Bulut metadata'sı ve loopback yerleşik olarak yasaktır ama cluster
 içi (RFC1918) adresler izleme için bilerek açıktır. Hassas ya da çok kiracılı
 bir cluster'da, kullanıcıların bir monitor'le yoklamaması gereken yönetim ve
 iç servis aralıklarını (API sunucusu, öteki ekiplerin Service'leri)
-`UPTIME_TARGET_DENY_CIDRS`'e ekleyin; böylece bir kullanıcı bir monitor ya da
-webhook'u o adreslere yöneltemez.
+`UPTIME_TARGET_DENY_CIDRS`'e ekleyin.
+
+**Kullanıcı başına kapsam.** Deny-CIDR kaba bir önlemdir: çok kiracılı bir
+cluster'da API sunucusu (OpenShift'te `172.30.0.1`) ve başka ekiplerin
+Service'leri meşru izlenenlerle aynı ClusterIP aralığını paylaştığı için,
+izlemeyi bozmayan bir deny-CIDR cross-tenant erişimi ayıramaz. Gerçek
+cross-tenant savunma, bir kullanıcının yalnızca **kapsamındaki**
+namespace'lere monitor ya da kanal webhook'u kurabilmesidir (ADR-0003 c):
+
+- Her namespace'i görebilen bir kullanıcı — yönetici, API token'ı ya da
+  kapsamı `*` olan bir editör — her hedefe ulaşır; tek kiracılı bir kurulum
+  değişmez.
+- Kapsamı bazı namespace'lerle sınırlı bir kullanıcı, cluster içi bir hedefe
+  (bkz. "Cluster içi ve dış hedef") yalnızca adından namespace'i okunabiliyor
+  ve bu namespace onun kapsamındaysa ulaşabilir: `api.odeme.svc`,
+  `api.odeme.svc.cluster.local` ve `10-0-0-1.odeme.pod.cluster.local` adları
+  `odeme` namespace'ini belirtir. Böylece başka bir ekibin Service'i ya da
+  API sunucusu reddedilir; kapsamı o namespace'i içeren bir kullanıcı için
+  başka namespace'teki bir Service'i bilerek izlemek ise çalışır.
+- Namespace'i adından okunamayan cluster içi bir adres — çıplak bir ClusterIP
+  ya da pod IP'si, Kubeat'in kendi namespace'indeki kısa bir Service adı
+  (`api`) — sınırlı bir kullanıcı için reddedilir; kullanıcı Service'i
+  `servis.namespace.svc` biçiminde adlandırmalı ya da bir yöneticiden
+  istemelidir.
+- Cluster dışı hedefler (genel internet, cluster dışındaki kurum ağı, bir
+  OpenShift Route'unun genel adı) eskisi gibi yalnızca hedef politikasına
+  tabidir; kapsam onları kısıtlamaz.
+- Kısıt hedef belirlenirken uygulanır (monitor/kanal oluşturma ve hedefini
+  değiştirme); var olan monitor'ler yükseltmede yeniden denetlenmez,
+  çalışmaya devam eder. Keşiften içe aktarma kullanıcının düzenleyebildiği
+  namespace'le sınırlı olduğu için zaten kapsam içindedir.
 
 ```
 # Aynı node'daki bir ajanın 127.0.0.1'deki ucunu kontrol etmek

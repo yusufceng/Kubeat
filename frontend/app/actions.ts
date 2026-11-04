@@ -391,10 +391,12 @@ async function describe(err: unknown): Promise<string> {
     if (err.status === 409) return t("monitorForm.actions.error.conflict");
     if (err.status === 400) return t("monitorForm.actions.error.invalid", { message: err.message });
     if (err.status === 502) return t("monitorForm.actions.error.cluster", { message: err.message });
-    if (err.status === 403)
+    if (err.status === 403) {
+      if (err.message.startsWith("the target is")) return t("monitorForm.actions.error.targetScope");
       return err.message.startsWith("you may")
         ? t("monitorForm.actions.error.forbidden")
         : t("monitorForm.actions.error.forbiddenDetail", { message: err.message });
+    }
     if (err.status === 404) return t("monitorForm.actions.error.notFound");
     if (err.status === 401) return t("monitorForm.actions.error.sessionExpired");
     // A password check refused: too many wrong ones, or too many at once

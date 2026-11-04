@@ -35,7 +35,7 @@ sınırlayacağımızdır.
 
 ## Karar
 
-**Şimdi (3), (4) sonraya.**
+**(a) ve (b) önce (0.46 turu, #80/#81); (c) ve (d) sprint 5'te (#84/#85).**
 
 - **(a)** `UPTIME_TARGET_DENY_CIDRS`'in rolü belgelendi: bir monitor ya da
   kanal webhook'u politikanın izin verdiği her adrese ulaşır; hassas ya da
@@ -44,11 +44,19 @@ sınırlayacağımızdır.
 - **(b)** `UPTIME_CHECK_SHOW_VALUE` (varsayılan `true`) eklendi. `false`
   iken JSON kontrolü yalnızca path'in eşleşip eşleşmediğini bildirir, bulunan
   değeri sonuç ve hataya yazmaz.
-- **(c)** Kullanıcı başına hedef kısıtı sprint 5'e ertelendi. Yetki modelinin
-  her okuyucusuna (`CanRead`/`CanEdit`, namespace süzgeci) dokunur ve
-  L boyutludur; cluster-native izlemenin meşru kullanımını (başka bir
-  namespace'teki bir Service'i bilerek izlemek) bozmadan yapılması tasarım
-  ister.
+- **(c)** Kullanıcı başına hedef kısıtı **yapıldı** (sprint 5, #84). Her
+  namespace'i gören bir kullanıcı (yönetici, API token'ı, kapsamı `*` olan
+  editör) her hedefe ulaşır; kapsamı sınırlı bir kullanıcı cluster içi bir
+  hedefe (`netguard.InCluster`) yalnızca adından okunan namespace'i
+  (`servis.namespace.svc`, pod adı; `netguard.Namespace`) kapsamındaysa
+  (`CanRead`) ulaşabilir. Çıplak bir ClusterIP/pod IP'si ya da Kubeat'in kendi
+  namespace'indeki kısa ad gibi namespace'i adından okunamayan cluster içi bir
+  adres, sınırlı bir kullanıcı için reddedilir; cluster dışı hedefler eskisi
+  gibi yalnızca hedef politikasına tabidir. Meşru cross-namespace izleme
+  (kapsamı o namespace'i içeren kullanıcı için) bozulmaz; kısıt hedef oluşturma
+  ve değiştirmede uygulanır, var olan monitor'ler yeniden denetlenmez. Monitor
+  API'si ile kanal webhook'u yolunu kapsar (`backend/internal/api`,
+  `backend/internal/netguard`).
 
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
@@ -76,5 +84,8 @@ sınırlayacağımızdır.
 - **Sonuç hatası adres taşımaz.** (d) ile başarısız bir kontrolün hatası iç
   cluster adresini (çözülen IP) artık sızdırmaz; tanı için gereken bağlanılan
   adres yalnızca belgelenmiş `diagnostics.address` alanında kalır.
-- **Kalan risk sprint 5'te.** (c) gelene kadar, aynı cluster'da birbirine
-  güvenmeyen kullanıcılar varsa deny-CIDR tek savunma hattıdır.
+- **Cross-tenant savunma (c).** Deny-CIDR, API sunucusu ve ekip Service'leri
+  meşru izlenenlerle aynı ClusterIP aralığını paylaştığı için cross-tenant
+  erişimi ayıramaz; gerçek savunma (c)'deki kullanıcı başına kapsamdır (README
+  "Hedef politikası"). Deny-CIDR ve `UPTIME_CHECK_SHOW_VALUE=false`
+  derinlemesine savunma olarak kalır.
