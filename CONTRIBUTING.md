@@ -48,6 +48,13 @@ ref yine oluşur); bir etiket sonradan kimse tarafından taşınamaz ve
 silinemez (ikinci kural seti "taşınmaz ve silinemez", bypass'sız). Kural
 seti `main`'i ve `release/v*` dallarını aynı biçimde korur.
 
+Deponun "Immutable releases" ayarı (Settings → General) açık tutulur:
+yayımlanmış bir GitHub Release'in adı, notu ve ekleri (SBOM'lar) sonradan
+kimse tarafından değiştirilemez ve silinemez. Etiket değişmezliğiyle
+birlikte bu, bir sürümün yayımlandıktan sonra olduğu gibi kaldığını söyler;
+yanlış bir sürüm geri alınmaz, yalnızca ileriye yeni bir yama sürümüyle
+düzeltilir (0.46.1 gibi). Ayarı yalnızca depo yöneticisi değiştirebilir.
+
 - Sürümler `main` üzerinde `vMAJOR.MINOR.PATCH` etiketiyle (SemVer) çıkar:
   `make release` etiketi `Makefile`'daki `VERSION` ile atar ve iter,
   [release.yml](.github/workflows/release.yml) imajları ve chart'ı imzalı ve
@@ -172,7 +179,24 @@ koşar:
    `Chart.yaml`'ı yükseltirken minor'ın bu biçimdeki bölümünü de yazar, yoksa
    `scripts/test-release-notes.sh` düşer.
 
-İş akışı düzeyindeki izinler `contents: read` ve `packages: write`'tır.
+İş akışı düzeyindeki varsayılan izin en küçük ayrıcalık ilkesiyle yalnızca
+`contents: read`'tir. Daha fazlası yalnızca gereken işte verilir:
+`packages: write` paketleri iten işlerde (`images`, `chart`) ve `sign`'da;
+`id-token: write` (keyless imza için) yalnızca `sign`'da; `contents: write`
+(GitHub Release'i açmak için) yalnızca `release`'te; `actions: read` (CI'ın
+koşularını okumak için) yalnızca `versions` (kapı) işinde. Paket iten işler
+(`images`, `chart`, `sign`) ve bütün sonraki işler `versions` kapısına
+`needs` ile bağlıdır: kapı düşmeden hiçbir şey itilmez.
+
+Üçüncü taraf GitHub action'ları (release.yml, ci.yml, security.yml) ve temel
+imajlar (backend/frontend Dockerfile'ları) taşınabilir bir etikete değil bir
+digest'e (`@sha256:...`) sabitlenir; okunabilirlik için sürüm etiketi yorumda
+ya da etiketle birlikte kalır. Dependabot bu digest'leri haftalık PR'larla
+günceller ([.github/dependabot.yml](.github/dependabot.yml): `github-actions`
+ve iki `docker` girdisi). release.yml'deki `registry` servis konteyneri de
+digest'e sabitlenir ama Dependabot onu görmez; cosign ve ORAS gibi elle
+yükseltilir ("Sabit araç sürümleri"). Böylece bir yayım tam olarak neyle
+kurulduğunu söyler ve bir etiketin sessizce taşınması yayımı etkilemez.
 
 Kapı düşerse hiçbir şey itilmemiştir:
 
@@ -216,7 +240,7 @@ paketlerine dokunmadan dener:
 | Helm 3 | v3.22.1 | ci.yml chart işinin ikinci koşusu ("chart (Helm 3)") |
 | cosign | v3.1.4 | release.yml `sign` ve `verify` işleri; `COSIGN_VERSION` ve `COSIGN_SHA256` |
 | ORAS | v1.3.6 | release.yml `verify` işi; `ORAS_VERSION` ve `ORAS_SHA256` |
-| registry (Distribution) | 2.8.3 | release.yml `verify` işinin servis konteyneri, `registry:2.8.3`; etiketle sabit |
+| registry (Distribution) | 2.8.3 | release.yml `verify` işinin servis konteyneri, `registry:2.8.3@sha256:...`; etiket ve digest'le sabit |
 | govulncheck | v1.9.0 | ci.yml `govulncheck` işi ve security.yml; `golang.org/x/vuln/cmd/govulncheck@<sürüm>` |
 
 Helm'i yükseltmek:
@@ -254,8 +278,11 @@ görmez):
   `oras_<sürüm>_linux_amd64.tar.gz` satırıdır. `oras cp -r` ORAS'ta hâlâ
   önizleme (Preview) olarak işaretli; ORAS'ın ya da registry imajının yeni
   sürümü, cosign gibi, sürüm PR'ından ayrı bir `chore(ci)` PR'ında bir kuru
-  denemeyle sınanır. README "İmzalarla aynalamak" ve docs/pilot.md'deki
-  `oras` komutları yeni sürümün bayraklarına karşı okunur.
+  denemeyle sınanır. registry imajı yükseltilirken etiketiyle birlikte
+  `@sha256:...` digest'i de güncellenir (digest'i okumanın bir yolu
+  `docker buildx imagetools inspect registry:<sürüm>`). README "İmzalarla
+  aynalamak" ve docs/pilot.md'deki `oras` komutları yeni sürümün bayraklarına
+  karşı okunur.
 - **govulncheck.** ci.yml'daki ve security.yml'daki `@vX.Y.Z` aynı PR'da
   yükseltilir. Yeni sürüm daha yeni bir Go isteyebilir (`go.mod`'undaki `go`
   satırı); CI Go'yu `backend/go.mod`'dan aldığı için gerekirse önce toolchain
