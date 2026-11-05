@@ -419,6 +419,7 @@ func main() {
 			Notifier:                 alerts,
 			Metrics:                  meter.Handler(),
 			MetricsToken:             cfg.MetricsToken,
+			SignIns:                  meter,
 			EmailEnabled:             senders.EmailEnabled(),
 			Discovery:                cluster,
 			Sync:                     sync,

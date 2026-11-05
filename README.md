@@ -1211,6 +1211,39 @@ için başka yollar önceden hazır tutulmalıdır:
 - Sayaç bellekte olduğundan backend'i yeniden başlatmak da kilitleri
   kaldırır.
 
+**Giriş gözlemlenebilirliği (metrik).** İstemciye verilen yanıt enum
+sızdırmamak için genel kaldığından (başarısız giriş hep 401 "kullanıcı adı ya
+da parola hatalı", throttle hep 429), bir dizin kesintisini bir parola
+spreyinden ya da kilitlenen `admin` anını yalnız yanıta bakarak ayırt
+edemezsiniz. Backend bunları `/metrics` üzerinde iki sayaçla gösterir (metrik
+anahtarıyla korunan yüzeyde, bkz. "Metrik anahtarı"); istemci yanıtı değişmez:
+
+- `kubeat_signin_failures_total{reason}` — başarısız parola girişleri,
+  nedenine göre: `wrong_password` (yerel bir hesabın parolası yanlış),
+  `rejected` (dizin reddetti, ya da adın burada hesabı yok veya başka yolla
+  giriyor), `directory_unreachable` (dizine ulaşılamadı). Dizin düşünce tüm
+  dizin/SSO kullanıcıları genel 401 alır ve bu sayaçta `directory_unreachable`
+  artar; gerçek neden ayrıca logdadır ("ldap sign-in failed"). Bu sırada yerel
+  `admin` ile girin.
+- `kubeat_signin_throttled_total{kind}` — throttle'ın 429 ile reddettiği
+  girişler: `source` (kaynak-ve-ad başına throttle, `UPTIME_LOGIN_MAX_FAILURES`)
+  ya da `account` (tüm kaynaklardaki gevşek ad tavanı,
+  `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`). `account` artışı, ADR-0004'ün bilerek
+  açık bıraktığı "dağıtık saldırıyla hesap kilitleniyor" anını görünür kılar.
+
+Her iki sayacın serisi açılışta 0'dan başlar, böylece ilk olayı `increase()`
+ile yakalarsınız; etiket değerleri kapalı bir kümeden gelir ve kullanıcı adı
+taşımaz (seriler sınırlı kalır). Chart hazır bir PrometheusRule getirmez (öz
+sağlık mantığına da bağlanmaz, S38); kendi Prometheus'unuzda şöyle
+alarmlayabilirsiniz:
+
+```
+# Dizine birkaç dakikadır ulaşılamıyor (tüm dizin/SSO girişleri 401)
+increase(kubeat_signin_failures_total{reason="directory_unreachable"}[5m]) > 0
+# Hesap tavanı tetiklendi: olası dağıtık tahmin / kilitlenen admin
+increase(kubeat_signin_throttled_total{kind="account"}[5m]) > 0
+```
+
 #### LDAP
 
 `UPTIME_LDAP_URL` ayarlandığında, yerel hesabı olmayan bir kullanıcı adı
@@ -1256,8 +1289,13 @@ UPTIME_LDAP_BIND_PASSWORD=...
 - Dizin kullanıcısı ilk girişte burada bir hesap edinir (kaynak `ldap`);
   rolü her girişte dizindeki gruplara göre yenilenir. Yönetici bu hesabı
   devre dışı bırakabilir ama rolünü ve parolasını değiştiremez.
-- Dizine ulaşılamazsa giriş "yanlış parola" değil, "dizine ulaşılamadı"
-  hatası verir.
+- Dizine ulaşılamazsa giriş, adın dizinde olup olmadığını ele vermemek için
+  (enum) ayrı bir "dizine ulaşılamadı" hatası vermez; yine genel "kullanıcı
+  adı ya da parola hatalı" (401) döner. Gerçek neden backend logundadır
+  ("ldap sign-in failed") ve
+  `kubeat_signin_failures_total{reason="directory_unreachable"}` sayacını
+  artırır (bkz. "Giriş gözlemlenebilirliği"); kesinti sürerken yerel `admin`
+  ile girilir.
 
 Gerçek bir dizine karşı test: `KUBEAT_TEST_LDAP=ldap://127.0.0.1:3893 go test
 ./internal/ldapauth/` (glauth ile; kullanıcılar `deploy/demo` altında değil,
@@ -2723,6 +2761,8 @@ yayınlar. Başlıcaları:
 | `kubeat_notification_queue_length` | Teslimat kuyruğunda o an bekleyen bildirim sayısı, her scrape'te kuyruktan okunur. Kuyruk en çok `UPTIME_NOTIFY_QUEUE_SIZE` tutar; doluyken gelen bildirim düşer (`kubeat_notifications_dropped_total`). Patlamada kısa süre yükselir; uzun süre yüksek kalması teslimat döngüsünün geride kaldığını söyler (bkz. "Alarm") |
 | `kubeat_channel_last_delivery_ok{channel,channel_type}` | Kanalın son teslimat denemesi başarılıysa 1, değilse 0; her scrape'te kanal satırındaki **Son gönderim**'den okunur. Kanal testi de deneme sayılır; yeniden başlatma ve kanalı düzenlemek değeri değiştirmez. Etkin ve en az bir kez denenmiş her kanal için; kanal adı `channel` etiketindedir |
 | `kubeat_channel_undelivered_outages{channel,channel_type}` | Kanalın almadığı ve yeniden gönderilmeyi bekleyen kesinti (`down`) bildirimi sayısı: reddettiği ya da ulaşılamayan, ve almıyor sayıldığı sürece bekletilenler; yoksa 0. Etkin ve en az bir kez denenmiş ya da böyle bir kesintisi bekleyen her kanal için (bkz. "Alarm") |
+| `kubeat_signin_failures_total{reason}` | Başarısız parola girişleri, nedenine göre: `wrong_password` (yerel hesabın parolası yanlış), `rejected` (dizin reddetti ya da adın burada hesabı yok/başka yolla giriyor), `directory_unreachable` (dizine ulaşılamadı). İstemci yanıtı hep genel 401'dir (enum açılmaz, #78); sayaç bir dizin kesintisini parola spreyinden ayırmaya yarar. Her reason serisi açılışta 0'dan başlar (bkz. "Hesaplar ve giriş" → "Giriş gözlemlenebilirliği") |
+| `kubeat_signin_throttled_total{kind}` | Throttle'ın 429 ile reddettiği girişler: `source` (kaynak-ve-ad başına, `UPTIME_LOGIN_MAX_FAILURES`) ya da `account` (tüm kaynaklardaki gevşek ad tavanı, `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`; ADR-0004'ün açık bıraktığı dağıtık kilidi görünür kılar). İstemci yanıtı değişmez; iki seri de açılışta 0'dan başlar |
 | `kubeat_backups_total{result}` | Yedek denemeleri, `ok` ya da `failed`; iki seri de açılışta 0'dan başlar |
 | `kubeat_backup_last_success_timestamp_seconds` | En yeni yedek kopyanın zamanı; yeniden başlatmada yedek dizinindeki en yeni dosyadan okunur (bkz. "Yedekleme ve geri yükleme") |
 | `kubeat_backup_last_failure_timestamp_seconds` | Son başarısız yedek denemesinin zamanı, süreç açıldığından beri; yoksa 0. Son başarılı kopyadan yeniyse yedekleme başarısızdır (`KubeatBackupFailing`) |

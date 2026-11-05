@@ -29,6 +29,8 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.NotificationAttempt("slack", false)
 	m.NotificationDropped()
 	m.Heartbeat(HeartbeatSent, time.Now())
+	m.SignInFailed(SignInWrongPassword)
+	m.SignInThrottled(ThrottleSource)
 	m.TargetThrottled("example.com")
 	m.Backup(true, time.Now())
 	m.Backup(false, time.Now())
@@ -174,6 +176,57 @@ func TestTargetThrottledBoundsHosts(t *testing.T) {
 	}
 	if _, ok := got["kubeat_target_throttled_total{host=late.example}"]; ok {
 		t.Error("a host past the bound got a label of its own")
+	}
+}
+
+// Sign-in failures and throttle refusals are counted apart by reason and
+// kind, and every series is there from the start at 0 so increase() sees the
+// first one. The reasons and kinds come from a closed set, so the series
+// stay bounded whatever a client sends.
+func TestSignInMetrics(t *testing.T) {
+	m := New("test")
+
+	// The series exist at 0 before anything is recorded.
+	got, err := m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"kubeat_signin_failures_total{reason=wrong_password}",
+		"kubeat_signin_failures_total{reason=rejected}",
+		"kubeat_signin_failures_total{reason=directory_unreachable}",
+		"kubeat_signin_throttled_total{kind=source}",
+		"kubeat_signin_throttled_total{kind=account}",
+	} {
+		if value, ok := got[key]; !ok || value != 0 {
+			t.Errorf("%s = %v (present: %v), want 0 at the start", key, value, ok)
+		}
+	}
+
+	m.SignInFailed(SignInWrongPassword)
+	m.SignInFailed(SignInWrongPassword)
+	m.SignInFailed(SignInRejected)
+	m.SignInFailed(SignInDirectoryUnreachable)
+	m.SignInThrottled(ThrottleSource)
+	m.SignInThrottled(ThrottleSource)
+	m.SignInThrottled(ThrottleSource)
+	m.SignInThrottled(ThrottleAccount)
+
+	got, err = m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{
+		"kubeat_signin_failures_total{reason=wrong_password}":        2,
+		"kubeat_signin_failures_total{reason=rejected}":              1,
+		"kubeat_signin_failures_total{reason=directory_unreachable}": 1,
+		"kubeat_signin_throttled_total{kind=source}":                 3,
+		"kubeat_signin_throttled_total{kind=account}":                1,
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("%s = %v, want %v", key, got[key], value)
+		}
 	}
 }
 

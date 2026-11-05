@@ -166,7 +166,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   (güvenilir-vekil allowlist backlog'da); S63
   ([#108](https://github.com/yusufceng/Kubeat/issues/108)) giriş/dizin ve
   throttle/lockout'u enum sızdırmayan `reason`/`kind` etiketli metriklerle
-  görünür kılar (nihai yazım sürüm sonrası).
+  (`kubeat_signin_failures_total{reason}`, `kubeat_signin_throttled_total{kind}`)
+  görünür kıldı; istemci yanıtı (401/429) değişmedi (nihai yazım sürüm sonrası).
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
   bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
   sınırını tanımaz; bu yüzden
