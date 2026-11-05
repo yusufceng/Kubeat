@@ -709,6 +709,18 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   Çözüm karar başına bir kez yapılır; adı o an ile kontrolün bağlandığı an arasında
   değişen bir hedef bu kapının dışındadır (DNS rebinding), bunun için deny-CIDR ve
   çok kiracılı kurulumda düzenli bir prova derinlemesine savunma olarak kalır.
+- **Kapsam ihlali denetimi (0.49).** Kapsamı sınırlı bir kullanıcının kapsam dışı
+  bir hedefe ya da düzenleyemediği bir namespace'e monitor veya kanal kurma/değiştirme
+  girişimi yalnızca reddedilmekle kalmaz, bir denetim kaydı bırakır: `login_failed`
+  gibi, `deny`/`target-scope` eylemiyle ve 90 gün saklanan denetim kaydında görünür
+  (yöneticiye açık; "Hesaplar ve giriş" denetim kaydı). Ayrıca
+  `kubeat_target_scope_denied_total{reason}` sayacı artar — `reason=target` hedef
+  kapsam dışıyken, `reason=namespace` kullanıcı o namespace'i düzenleyemiyorken.
+  İstemci yine yalnızca aynı genel 403'ü görür; denetim kaydı ve metrik `/metrics`
+  token'ıyla korunan yüzeyde kalır ve bir enum sızdırmaz. Böylece cross-tenant bir
+  erişim girişimi (başka ekibin Service'ine ya da API sunucusuna monitor/kanal) iz
+  bırakır ve SOC'a bağlanabilir. Yönetici ve kapsamı `*` olan kullanıcı sayaca ya da
+  denetim kaydına düşmez (onlar için red oluşmaz).
 - Cluster dışı hedefler (genel internet, cluster dışındaki kurum ağı, bir
   OpenShift Route'unun genel adı) eskisi gibi yalnızca hedef politikasına
   tabidir; kapsam onları kısıtlamaz.

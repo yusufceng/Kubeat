@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/alert"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -444,10 +445,12 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !principal(r).CanEditEach(namespaces) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, strings.Join(namespaces, ", "))
 		forbidden(w)
 		return
 	}
 	if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, principal(r), channelTargetHost(typ, target)); err != nil {
+		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, channelTargetHost(typ, target))
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -549,6 +552,7 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Target != nil {
 			if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, p, channelTargetHost(ch.Type, ch.Target)); err != nil {
+				h.auditScopeDenied(r, metrics.ScopeDeniedTarget, channelTargetHost(ch.Type, ch.Target))
 				writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 				return
 			}
@@ -560,6 +564,7 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !p.CanEditEach(ch.Namespaces) {
+			h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, strings.Join(ch.Namespaces, ", "))
 			forbidden(w)
 			return
 		}

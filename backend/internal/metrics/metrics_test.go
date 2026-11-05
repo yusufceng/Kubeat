@@ -32,6 +32,7 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.SignInFailed(SignInWrongPassword)
 	m.SignInThrottled(ThrottleSource)
 	m.TargetThrottled("example.com")
+	m.TargetScopeDenied(ScopeDeniedTarget)
 	m.Backup(true, time.Now())
 	m.Backup(false, time.Now())
 	m.LastBackup(time.Now())
@@ -226,6 +227,45 @@ func TestSignInMetrics(t *testing.T) {
 	for key, value := range want {
 		if got[key] != value {
 			t.Errorf("%s = %v, want %v", key, got[key], value)
+		}
+	}
+}
+
+// kubeat_target_scope_denied_total has a series per reason from the start, at
+// 0, and both reasons count on their own. The label set is fixed, so no other
+// series can appear.
+func TestTargetScopeDeniedCounter(t *testing.T) {
+	m := New("test")
+	got, err := m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace} {
+		key := "kubeat_target_scope_denied_total{reason=" + reason + "}"
+		if value, ok := got[key]; !ok || value != 0 {
+			t.Errorf("%s = %v (present: %v), want 0 at the start", key, value, ok)
+		}
+	}
+
+	m.TargetScopeDenied(ScopeDeniedTarget)
+	m.TargetScopeDenied(ScopeDeniedTarget)
+	m.TargetScopeDenied(ScopeDeniedNamespace)
+
+	got, err = m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_target_scope_denied_total{reason=target}"] != 2 {
+		t.Errorf("target = %v, want 2", got["kubeat_target_scope_denied_total{reason=target}"])
+	}
+	if got["kubeat_target_scope_denied_total{reason=namespace}"] != 1 {
+		t.Errorf("namespace = %v, want 1", got["kubeat_target_scope_denied_total{reason=namespace}"])
+	}
+	for key := range got {
+		if strings.HasPrefix(key, "kubeat_target_scope_denied_total") &&
+			key != "kubeat_target_scope_denied_total{reason=target}" &&
+			key != "kubeat_target_scope_denied_total{reason=namespace}" {
+			t.Errorf("unexpected scope-denial series %s", key)
 		}
 	}
 }

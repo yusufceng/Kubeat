@@ -41,6 +41,7 @@ type Metrics struct {
 	targetThrottled   *prometheus.CounterVec
 	signInFailures    *prometheus.CounterVec
 	signInThrottled   *prometheus.CounterVec
+	targetScopeDenied *prometheus.CounterVec
 
 	// hosts are the host labels targetThrottled has been given so far; past
 	// MaxThrottledHosts of them, a new host is counted as OtherHost.
@@ -63,6 +64,20 @@ const MaxThrottledHosts = 100
 
 // OtherHost is the host label of the hosts past MaxThrottledHosts.
 const OtherHost = "other"
+
+// Reasons for kubeat_target_scope_denied_total: why a scoped caller's
+// monitor or channel write was refused. The label set is fixed and small, so
+// the series cannot grow without bound, and it carries nothing a client could
+// not already tell from its own 403.
+const (
+	// ScopeDeniedTarget: the monitor's target host or the channel's delivery
+	// host is outside the caller's namespaces (a cross-tenant attempt at
+	// another team's Service or the API server; see api.targetInScope).
+	ScopeDeniedTarget = "target"
+	// ScopeDeniedNamespace: the caller may not edit in the namespace they
+	// aimed the monitor or channel at.
+	ScopeDeniedNamespace = "namespace"
+)
 
 // New returns Metrics with the Go runtime and process collectors registered.
 func New(version string) *Metrics {
@@ -136,6 +151,15 @@ func New(version string) *Metrics {
 		Name: "kubeat_signin_throttled_total",
 		Help: "Sign-ins the throttle refused with 429, by kind: \"source\" (the per-source-and-name throttle, UPTIME_LOGIN_MAX_FAILURES) or \"account\" (the looser per-name ceiling across all sources, UPTIME_LOGIN_ACCOUNT_MAX_FAILURES, which makes the distributed-guess lockout ADR-0004 leaves open visible). The client response is the same 429 for any key (the enum is never exposed, #78).",
 	}, []string{"kind"})
+	m.targetScopeDenied = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kubeat_target_scope_denied_total",
+		Help: "Monitor or channel writes a scoped caller was refused because the target or its namespace was outside their scope, by reason: \"target\" (the monitor's target host or a channel's delivery host is outside the caller's namespaces, a cross-tenant attempt at another team's Service or the API server) or \"namespace\" (the caller may not edit in the namespace they aimed at). Only a caller limited to some namespaces raises it; administrators and single-tenant installs never do. The refused request still gets the same 403, so this leaks nothing a client could not already tell.",
+	}, []string{"reason"})
+	// The series the audit and any alerting watch are there from the start,
+	// at 0, so a first denial reads as an increase, not a series appearing.
+	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace} {
+		m.targetScopeDenied.WithLabelValues(reason)
+	}
 	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_backup_last_success_timestamp_seconds",
 		Help: "When the newest database backup was taken: the last to succeed, or after a start the newest copy found in the backup directory; 0 while there is none.",
@@ -189,6 +213,7 @@ func New(version string) *Metrics {
 		m.backups, m.lastBackup, m.lastBackupFailure,
 		m.targetThrottled,
 		m.signInFailures, m.signInThrottled,
+		m.targetScopeDenied,
 		m.licenseExpiry,
 	)
 	return m
@@ -247,6 +272,15 @@ func (m *Metrics) TargetThrottled(host string) {
 	}
 	m.mu.Unlock()
 	m.targetThrottled.WithLabelValues(host).Inc()
+}
+
+// TargetScopeDenied records a monitor or channel write a scoped caller was
+// refused because the target host or the namespace it aimed at was outside
+// their scope. reason is ScopeDeniedTarget or ScopeDeniedNamespace.
+func (m *Metrics) TargetScopeDenied(reason string) {
+	if m != nil {
+		m.targetScopeDenied.WithLabelValues(reason).Inc()
+	}
 }
 
 // WatchHealth adds kubeat_self_healthy, read from healthy on every scrape: 1

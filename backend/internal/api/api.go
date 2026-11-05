@@ -231,6 +231,11 @@ type Options struct {
 	// meter served at Metrics. A nil one is valid and records nothing, so the
 	// client responses (a generic 401, a 429) are the whole story without it.
 	SignIns *metrics.Metrics
+	// Meter records what the handler does for /metrics; the same recorder
+	// Metrics serves. Nil records nothing (*metrics.Metrics is nil-safe), so
+	// a handler built without it, as some tests are, still works. It carries
+	// the scope-denial counter (TargetScopeDenied).
+	Meter *metrics.Metrics
 	// EmailEnabled says whether an SMTP server is configured; e-mail
 	// channels cannot be created without one.
 	EmailEnabled bool

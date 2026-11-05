@@ -163,6 +163,7 @@ export const auth = defineMessages(
     "audit.action.passwordChange": "parolasını değiştirdi",
     "audit.action.test": "test bildirimi gönderdi",
     "audit.action.monitorCreateThrottled": "monitor oluşturma sınırına takıldı",
+    "audit.action.deny": "reddedildi",
     "audit.object.monitor": "monitor",
     "audit.object.channel": "bildirim kanalı",
     "audit.object.maintenance": "bakım penceresi",
@@ -170,6 +171,7 @@ export const auth = defineMessages(
     "audit.object.statusPageUpdate": "durum sayfası duyurusu",
     "audit.object.user": "kullanıcı",
     "audit.object.ldapGroup": "LDAP grup eşlemesi",
+    "audit.object.targetScope": "kapsam dışı hedef",
     // The Kubeat Enterprise license.
     "users.provider.license": "Lisans gerekli",
     "users.sso.unlicensed":
@@ -357,6 +359,7 @@ export const auth = defineMessages(
     "audit.action.passwordChange": "changed their password",
     "audit.action.test": "sent a test notification",
     "audit.action.monitorCreateThrottled": "hit the monitor creation limit",
+    "audit.action.deny": "denied",
     "audit.object.monitor": "monitor",
     "audit.object.channel": "notification channel",
     "audit.object.maintenance": "maintenance window",
@@ -364,6 +367,7 @@ export const auth = defineMessages(
     "audit.object.statusPageUpdate": "status page update",
     "audit.object.user": "user",
     "audit.object.ldapGroup": "LDAP group mapping",
+    "audit.object.targetScope": "out-of-scope target",
     "users.provider.license": "Needs a license",
     "users.sso.unlicensed":
       "Set up, but signing in this way needs a Kubeat Enterprise license (sso). Until there is one, only local accounts can sign in.",

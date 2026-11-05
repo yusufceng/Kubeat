@@ -19,6 +19,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/guardrails"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -726,6 +727,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p := principal(r); !p.CanEdit(req.Namespace) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, req.Namespace)
 		scopeError(w, p)
 		return
 	}
@@ -736,6 +738,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
 	m.Enabled = true
 	if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, principal(r), m.Host()); err != nil {
+		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, m.Host())
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -789,6 +792,7 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	} else if !p.CanEdit(m.Namespace) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, m.Namespace)
 		scopeError(w, p)
 		return
 	}
@@ -804,6 +808,7 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, principal(r), m.Host()); err != nil {
+		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, m.Host())
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -906,6 +911,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !p.CanEdit(current.Namespace) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, current.Namespace)
 		scopeError(w, p)
 		return
 	}
@@ -988,11 +994,13 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, p, merged.monitor(current).Host()); err != nil {
+			h.auditScopeDenied(r, metrics.ScopeDeniedTarget, merged.monitor(current).Host())
 			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 			return
 		}
 	}
 	if merged.Namespace != current.Namespace && !p.CanEdit(merged.Namespace) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, merged.Namespace)
 		scopeError(w, p)
 		return
 	}
