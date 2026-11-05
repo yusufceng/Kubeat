@@ -686,11 +686,18 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     reddedilir.
   - **Egress ve DNS.** Bu kapsam çözümü yazma anında (oluşturma/değiştirme)
     backend'den bir DNS sorgusu yapar; hava boşluklu ya da egress'i kısıtlı bir
-    kurulumda backend pod'unun cluster DNS'ine (CoreDNS) erişimi olmalıdır (chart'ın
-    egress politikası bunu zaten açar, bkz. "Ağ erişimi"). Çözüm pod'un kendi
-    çözücüsünü ve arama alanlarını (`ndots`) kullanır — checker'ın hedefi bağlarken
-    kullanacağı çözümün aynısı — ve hedef politikasına tabi değildir.
-    `HTTP_PROXY`/`HTTPS_PROXY` verilse de kapsam çözümü yine backend'de yapılır,
+    kurulumda backend pod'unun cluster DNS'ine (CoreDNS) erişimi olmalıdır.
+    Chart'ın NetworkPolicy'si backend'in kendi çıkışını (egress) kısıtlamaz —
+    yalnızca backend'e gelen bağlantıları kısıtlar (bkz. "Ağ erişimi") — yani chart
+    kendi başına bir egress açmaz, varsayılan kurulumda çıkış zaten açıktır.
+    Egress'i varsayılan-reddet olan bir cluster'da (ör. hava boşluklu kurumsal
+    OpenShift) bu DNS erişimini chart değil, operatörün kendi cluster/namespace
+    egress politikası açmalıdır: o politika backend pod'undan cluster DNS'ine
+    (`kube-dns`/`openshift-dns`) izin vermelidir, aksi hâlde kapsamı sınırlı bir
+    kullanıcının meşru dış hedef oluşturması güvenli tarafta reddedilir. Çözüm
+    pod'un kendi çözücüsünü ve arama alanlarını (`ndots`) kullanır — checker'ın
+    hedefi bağlarken kullanacağı çözümün aynısı — ve hedef politikasına tabi
+    değildir. `HTTP_PROXY`/`HTTPS_PROXY` verilse de kapsam çözümü yine backend'de yapılır,
     vekile bırakılmaz: bir isteğin hedefi daha sonra vekilde çözülse bile kapsam
     kararı backend'in bu çözümüne dayanır.
   - **Red mesajı.** Kapsam dışı hedefin reddi, nedenini ayırt etmeyen tek genel bir
