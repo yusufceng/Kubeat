@@ -1,6 +1,8 @@
 package netguard
 
 import (
+	"context"
+	"net"
 	"net/netip"
 	"strings"
 )
@@ -48,19 +50,77 @@ func InCluster(host string) bool {
 		return false
 	}
 	if addr, err := netip.ParseAddr(host); err == nil {
-		plain := addr.Unmap().WithZone("")
-		for _, prefix := range clusterRanges {
-			if prefix.Contains(plain) {
-				return true
-			}
-		}
-		return false
+		return InClusterAddr(addr)
 	}
 	if !strings.Contains(host, ".") {
 		return true
 	}
 	for _, suffix := range clusterSuffixes {
 		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// InClusterAddr reports whether addr is in one of the ranges in-cluster
+// targets live in (the private ranges, the shared 100.64.0.0/10, loopback
+// and link-local; see clusterRanges). It is InCluster's test for an
+// address, exported so the dial-time scope check can apply it to an address
+// a name resolved to. An IPv4 address written as IPv6 (::ffff:10.0.0.1) is
+// taken as that IPv4 address, and a zone is dropped.
+func InClusterAddr(addr netip.Addr) bool {
+	plain := addr.Unmap().WithZone("")
+	if !plain.IsValid() {
+		return false
+	}
+	for _, prefix := range clusterRanges {
+		if prefix.Contains(plain) {
+			return true
+		}
+	}
+	return false
+}
+
+// Resolver looks up the IP addresses of a host name. *net.Resolver, and so
+// net.DefaultResolver, satisfies it; a test supplies its own.
+type Resolver interface {
+	LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
+}
+
+// ResolvesInCluster reports whether host, a monitor target's host name,
+// resolves to a cluster-internal address. It looks host up once through r
+// (net.DefaultResolver when r is nil) and reports true as soon as one answer
+// is in a cluster range, false when none is, the lookup fails, or host is
+// empty. A host that is already an address is classified without a lookup.
+//
+// This is the resolution the dial-time scope check is built on, for the
+// names InCluster classifies as external by their spelling. The lookup is
+// the backend's own, with the pod's search domains (ndots), so a two-label
+// short name such as "api.payments" that the resolver turns into
+// "api.payments.svc.cluster.local" is seen for the cluster address it
+// reaches, as is a public name that resolves to a cluster address
+// ("172-30-0-1.sslip.io"). The lookup is made once and the decision rests on
+// that one answer: a name whose answer changes between this lookup and the
+// dial a check makes later is beyond this gate (TOCTOU), which is why
+// ADR-0003 keeps the deny-CIDR and a mandatory multi-tenant proof.
+func ResolvesInCluster(ctx context.Context, r Resolver, host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "" {
+		return false
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return InClusterAddr(addr)
+	}
+	if r == nil {
+		r = net.DefaultResolver
+	}
+	addrs, err := r.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		if InClusterAddr(addr) {
 			return true
 		}
 	}

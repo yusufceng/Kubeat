@@ -67,6 +67,10 @@ func newTestAPIWith(t *testing.T, customize func(*Options)) (*httptest.Server, *
 
 		// Every feature on: these tests are about what the features do.
 		License: fullLicense{},
+		// No name resolves into the cluster unless a test says so: the scope
+		// check's dial-time lookup stays off the real network. A test that
+		// exercises it supplies its own resolver (see TestDialTimeTargetScope).
+		Resolver: fakeResolver(nil),
 	}
 	if customize != nil {
 		customize(&opts)

@@ -24,6 +24,7 @@ import {
   deleteStatusPage,
   deleteUser,
   type DnsOptions,
+  errorCode,
   type HttpOptions,
   importCandidates,
   missingFeature,
@@ -392,7 +393,7 @@ async function describe(err: unknown): Promise<string> {
     if (err.status === 400) return t("monitorForm.actions.error.invalid", { message: err.message });
     if (err.status === 502) return t("monitorForm.actions.error.cluster", { message: err.message });
     if (err.status === 403) {
-      if (err.message.startsWith("the target is")) return t("monitorForm.actions.error.targetScope");
+      if (errorCode(err) === "target_scope") return t("monitorForm.actions.error.targetScope");
       return err.message.startsWith("you may")
         ? t("monitorForm.actions.error.forbidden")
         : t("monitorForm.actions.error.forbiddenDetail", { message: err.message });

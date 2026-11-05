@@ -1559,10 +1559,11 @@ hedefe (çıplak ClusterIP, pod IP'si) monitor ya da kanal webhook'u kuramaz,
 çünkü kapsam denetimi hedefi bir namespace'e bağlayamaz. Gereksinim doğarsa
 ileride sınırlı kullanıcı için de servis adıyla (ClusterIP yerine) izleme
 açılabilir. Tetikleyici: çıplak ClusterIP ile cluster içi hedef izlemesi gereken
-sınırlı bir kullanıcının isteği. (Ayrı ve açık konu: iki etiketli kısa ad
-`servis.namespace` kapsam denetimini atlıyor — S64 takibi,
-[sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md) "Müşterilerin
-yeni bulguları" 1.)
+sınırlı bir kullanıcının isteği. (İlgili ayrı konu — iki etiketli kısa ad
+`servis.namespace` kapsam denetimini atlıyordu, S64 takibi — 0.48.0'da çözüm
+anında (dial-time) kapsam denetimiyle **kapatıldı**: S67,
+[#95](https://github.com/yusufceng/Kubeat/issues/95),
+[sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md); ADR-0003 c.)
 
 ## Giriş kilitlemesinin hizmet reddi riski (CWE-307)
 

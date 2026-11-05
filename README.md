@@ -618,7 +618,7 @@ Service'leri meşru izlenenlerle aynı ClusterIP aralığını paylaştığı i�
 izlemeyi bozmayan bir deny-CIDR cross-tenant erişimi ayıramaz. Cross-tenant
 erişimi asıl sınırlayan önlem, bir kullanıcının yalnızca **kapsamındaki**
 namespace'lere monitor ya da kanal webhook'u kurabilmesidir (ADR-0003 c;
-aşağıda "Sınır" notuyla birlikte):
+aşağıda "Çözüm anında denetim" notuyla birlikte):
 
 - Her namespace'i görebilen bir kullanıcı — yönetici, API token'ı ya da
   kapsamı `*` olan bir editör — her hedefe ulaşır; tek kiracılı bir kurulum
@@ -635,16 +635,18 @@ aşağıda "Sınır" notuyla birlikte):
   (`api`) — sınırlı bir kullanıcı için reddedilir; kullanıcı Service'i
   `servis.namespace.svc` biçiminde adlandırmalı ya da bir yöneticiden
   istemelidir.
-- **Sınır (0.47).** Bir cluster son ekiyle (`.svc`, `.svc.cluster.local`,
-  `.cluster.local`) bitmeyen iki etiketli bir kısa ad (`api.odeme`,
-  `kubernetes.default`) adından namespace okunabilse de şimdilik cluster
-  **dışı** sayılır ve kapsam onu kısıtlamaz; oysa backend pod'unun DNS arama
-  alanı (`ndots`) böyle bir adı cluster içindeki bir Service'e ya da API
-  sunucusuna çözebilir. Bu yüzden kapsam bu sürümde tek başına tam cross-tenant
-  yalıtımını garanti etmez. Bu biçimi de kapsayan düzeltme izlenir (ADR-0003,
-  [docs/backlog.md](docs/backlog.md)); o zamana dek çok kiracılı bir cluster'da
-  sınırlı kullanıcılara Service'i `servis.namespace.svc` tam biçiminde
-  adlandırmayı öğretin.
+- **Çözüm anında (dial-time) denetim (0.48).** Kapsam yalnızca adın yazılışına
+  bakmaz: adı cluster **dışı** görünen bir hedefi de çözer ve çözülen adres
+  cluster aralığındaysa, adında kapsama bağlanabilecek bir namespace
+  taşımadığı için sınırlı kullanıcı için reddeder. Böylece bir cluster son
+  ekiyle bitmeyen iki etiketli kısa ad (`api.odeme`, `kubernetes.default`;
+  pod'un DNS arama alanı `ndots` onu bir Service'e ya da API sunucusuna çözer)
+  ve iç adrese çözülen genel bir ad (`172-30-0-1.sslip.io`) da kapanır. Çözüm
+  kontrol anında bir kez yapılır; adı o an ile kontrolün bağlandığı an arasında
+  değişen bir hedef bu kapının dışındadır (DNS rebinding), bunun için deny-CIDR
+  ve çok kiracılı kurulumda düzenli bir prova derinlemesine savunma olarak
+  kalır. Çözüm yalnızca kapsamı sınırlı bir kullanıcının dış görünen hedefi
+  için yapılır; yönetici ve tek kiracılı kurulum bir ad çözmez.
 - Cluster dışı hedefler (genel internet, cluster dışındaki kurum ağı, bir
   OpenShift Route'unun genel adı) eskisi gibi yalnızca hedef politikasına
   tabidir; kapsam onları kısıtlamaz.

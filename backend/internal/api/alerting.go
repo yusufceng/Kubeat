@@ -447,8 +447,8 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		forbidden(w)
 		return
 	}
-	if err := targetInScope(principal(r), channelTargetHost(typ, target)); err != nil {
-		writeError(w, http.StatusForbidden, err.Error())
+	if err := targetInScope(r.Context(), h.opts.Resolver, principal(r), channelTargetHost(typ, target)); err != nil {
+		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
 	tags, err := channelTags(req.Tags)
@@ -547,8 +547,8 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.Target != nil {
-			if err := targetInScope(p, channelTargetHost(ch.Type, ch.Target)); err != nil {
-				writeError(w, http.StatusForbidden, err.Error())
+			if err := targetInScope(r.Context(), h.opts.Resolver, p, channelTargetHost(ch.Type, ch.Target)); err != nil {
+				writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 				return
 			}
 		}
