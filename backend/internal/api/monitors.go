@@ -735,7 +735,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
 	m.Enabled = true
-	if err := targetInScope(r.Context(), h.opts.Resolver, principal(r), m.Host()); err != nil {
+	if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, principal(r), m.Host()); err != nil {
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -803,7 +803,7 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := targetInScope(r.Context(), h.opts.Resolver, principal(r), m.Host()); err != nil {
+	if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, principal(r), m.Host()); err != nil {
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -987,7 +987,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
-		if err := targetInScope(r.Context(), h.opts.Resolver, p, merged.monitor(current).Host()); err != nil {
+		if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, p, merged.monitor(current).Host()); err != nil {
 			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 			return
 		}

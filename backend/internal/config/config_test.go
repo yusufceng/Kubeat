@@ -49,6 +49,8 @@ func TestLoadDefaults(t *testing.T) {
 		KeywordBodyLimit: 1 << 20,
 		CheckShowValue:   true,
 
+		TargetResolveTimeout: 5 * time.Second,
+
 		MinCheckInterval: 5 * time.Second,
 		StatsWindow:      24 * time.Hour,
 		MaxResults:       1000,

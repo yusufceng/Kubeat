@@ -260,7 +260,12 @@ type Options struct {
 	// Nil uses net.DefaultResolver, the pod's own resolver with its search
 	// domains, which is what a check would dial through.
 	Resolver netguard.Resolver
-	Logger   *slog.Logger
+	// ResolveTimeout bounds that lookup, so a slow or stuck resolver cannot
+	// hold a monitor or channel create or edit open to HTTPWriteTimeout
+	// (UPTIME_TARGET_RESOLVE_TIMEOUT). Zero leaves the lookup to the request
+	// context's own deadline.
+	ResolveTimeout time.Duration
+	Logger         *slog.Logger
 }
 
 // Revision identifies the shape of the API. Increase it whenever a response

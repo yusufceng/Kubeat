@@ -659,18 +659,49 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   (`api`) — sınırlı bir kullanıcı için reddedilir; kullanıcı Service'i
   `servis.namespace.svc` biçiminde adlandırmalı ya da bir yöneticiden
   istemelidir.
-- **Çözüm anında (dial-time) denetim (0.48).** Kapsam yalnızca adın yazılışına
-  bakmaz: adı cluster **dışı** görünen bir hedefi de çözer ve çözülen adres
-  cluster aralığındaysa, adında kapsama bağlanabilecek bir namespace
-  taşımadığı için sınırlı kullanıcı için reddeder. Böylece bir cluster son
-  ekiyle bitmeyen iki etiketli kısa ad (`api.odeme`, `kubernetes.default`;
-  pod'un DNS arama alanı `ndots` onu bir Service'e ya da API sunucusuna çözer)
-  ve iç adrese çözülen genel bir ad (`172-30-0-1.sslip.io`) da kapanır. Çözüm
-  kontrol anında bir kez yapılır; adı o an ile kontrolün bağlandığı an arasında
-  değişen bir hedef bu kapının dışındadır (DNS rebinding), bunun için deny-CIDR
-  ve çok kiracılı kurulumda düzenli bir prova derinlemesine savunma olarak
-  kalır. Çözüm yalnızca kapsamı sınırlı bir kullanıcının dış görünen hedefi
-  için yapılır; yönetici ve tek kiracılı kurulum bir ad çözmez.
+- **Çözüm anında (dial-time) denetim (0.48; çözüm hatasında güvenli taraf 0.49).**
+  Kapsam yalnızca adın yazılışına bakmaz: kapsamı sınırlı bir kullanıcı bir hedef
+  belirlediğinde (monitor/kanal oluşturma ya da hedefini değiştirme), adı cluster
+  **dışı** görünse de backend onu kendi çözücüsüyle çözer ve çözülen adres cluster
+  aralığındaysa, adında kapsama bağlanabilecek bir namespace taşımadığı için
+  reddeder. Böylece bir cluster son ekiyle bitmeyen iki etiketli kısa ad
+  (`api.odeme`, `kubernetes.default`; pod'un DNS arama alanı `ndots` onu bir
+  Service'e ya da API sunucusuna çözer) ve iç adrese çözülen genel bir ad
+  (`172-30-0-1.sslip.io`) da kapanır.
+
+  - **Çözüm hatasında güvenli taraf (0.49).** Adı dış görünen bir hedef yalnızca
+    **ispatlanabilir biçimde cluster dışına çözülürse** kabul edilir. Ad çözümü
+    hata ya da zaman aşımı verirse (CoreDNS kesintisi, SERVFAIL ya da NXDOMAIN)
+    adın dış olduğu kanıtlanamaz ve hedef, kapsamı sınırlı kullanıcı için
+    reddedilir. Böylece CoreDNS kesintisinde sınırlı bir kullanıcı dış görünen bir
+    adla (`api.odeme`) kapsam dışına monitor kurup, çözücü düzelince checker'ın onu
+    cluster içine bağlamasını sağlayamaz. Yönetici ve kapsamı `*` olan kullanıcı
+    bir ad çözmediği için etkilenmez; var olan monitor'ler çalışmaya devam eder
+    ("İzleme asla durmaz") — yalnız sınırlı kullanıcının yeni kapsam-dışı hedefi
+    reddedilir.
+  - **Zaman aşımı.** Çözüme ayrı bir sınır konur (`UPTIME_TARGET_RESOLVE_TIMEOUT`,
+    varsayılan 5 sn); yavaş ya da takılı bir çözücü bir oluşturma ya da değiştirmeyi
+    sunucunun yazma zaman aşımına (`UPTIME_HTTP_WRITE_TIMEOUT`, 2 dk) kadar
+    bekletemez, bu sürede çözülemeyen ad çözülememiş sayılıp güvenli tarafta
+    reddedilir.
+  - **Egress ve DNS.** Bu kapsam çözümü yazma anında (oluşturma/değiştirme)
+    backend'den bir DNS sorgusu yapar; hava boşluklu ya da egress'i kısıtlı bir
+    kurulumda backend pod'unun cluster DNS'ine (CoreDNS) erişimi olmalıdır (chart'ın
+    egress politikası bunu zaten açar, bkz. "Ağ erişimi"). Çözüm pod'un kendi
+    çözücüsünü ve arama alanlarını (`ndots`) kullanır — checker'ın hedefi bağlarken
+    kullanacağı çözümün aynısı — ve hedef politikasına tabi değildir.
+    `HTTP_PROXY`/`HTTPS_PROXY` verilse de kapsam çözümü yine backend'de yapılır,
+    vekile bırakılmaz: bir isteğin hedefi daha sonra vekilde çözülse bile kapsam
+    kararı backend'in bu çözümüne dayanır.
+  - **Red mesajı.** Kapsam dışı hedefin reddi, nedenini ayırt etmeyen tek genel bir
+    mesaj verir (hangi namespace olduğunu ya da adın iç adrese çözülüp çözülmediğini
+    söylemez); aksi hâlde sınırlı bir kullanıcı bu mesajla keyfî bir adın cluster
+    içine çözülüp çözülmediğini öğrenebilirdi (iç-adres oracle'ı). Arayüz bu reddi
+    makine-okur `target_scope` koduyla tanır.
+
+  Çözüm karar başına bir kez yapılır; adı o an ile kontrolün bağlandığı an arasında
+  değişen bir hedef bu kapının dışındadır (DNS rebinding), bunun için deny-CIDR ve
+  çok kiracılı kurulumda düzenli bir prova derinlemesine savunma olarak kalır.
 - Cluster dışı hedefler (genel internet, cluster dışındaki kurum ağı, bir
   OpenShift Route'unun genel adı) eskisi gibi yalnızca hedef politikasına
   tabidir; kapsam onları kısıtlamaz.
@@ -4138,6 +4169,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_CHECK_SHOW_VALUE` | `true` | JSON kontrolü bulduğu değeri sonuç ve hatada tekrarlar; hedefin yanıtı monitor'ü görenlerin görmemesi gereken veri taşıyabiliyorsa `false` yapın |
 | `UPTIME_TARGET_DENY_CIDRS` | – | Kontrollerin ve bildirimlerin bağlanmayacağı, yerleşik listeye (loopback, link-local, metadata, multicast) eklenen aralıklar; virgülle ayrılmış CIDR. Bkz. "Hedef politikası" |
 | `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
+| `UPTIME_TARGET_RESOLVE_TIMEOUT` | `5s` | Kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Bkz. "Hedef politikası" → "Çözüm anında denetim". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL` | `30s` | Hedefi cluster dışında olan bir monitor'un en kısa kontrol (ve tekrar) aralığı; `UPTIME_MIN_CHECK_INTERVAL`'dan kısa olamaz, `0` ayrı kural yok demektir. Bkz. "Hedef yükü" |
 | `UPTIME_TARGET_MAX_RATE` | `60` | Cluster dışındaki bir host'a tüm monitor'ların birlikte dakikada yapabileceği en fazla kontrol; fazlası sonraki tick'i bekler. `0` sınırsız |

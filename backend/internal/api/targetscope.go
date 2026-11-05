@@ -2,8 +2,8 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
@@ -27,6 +27,19 @@ type scopeRefusal struct{ msg string }
 
 func (e *scopeRefusal) Error() string { return e.msg }
 
+// scopeRefused is the single body message every scope refusal carries,
+// whatever the reason — a cluster-internal address whose namespace is not in
+// the caller's scope, an address or short name that carries no namespace at
+// all, an external-looking name that resolves into the cluster, or a name
+// the resolver could not answer for (an outage or a timeout; see
+// targetInScope). The reasons are deliberately not told apart in the body: a
+// message per reason would tell a scoped caller whether an arbitrary name
+// resolves into the cluster, or which namespace it lands in — an
+// internal-address oracle. The machine-readable codeTargetScope still rides
+// along, and the frontend maps it to its own help text, so collapsing the
+// wording changes nothing a client reads by code.
+const scopeRefused = "the target is outside your namespaces: a monitor's check or a channel's delivery may reach only a Service in a namespace you can read, named service.namespace.svc, or an address outside the cluster; ask an administrator for anything else"
+
 // targetInScope reports why host — a monitor's target host or a channel
 // webhook's host — is outside the caller's namespaces, or nil when the caller
 // may aim a check or a delivery at it. A non-nil error is a *scopeRefusal.
@@ -44,36 +57,47 @@ func (e *scopeRefusal) Error() string { return e.msg }
 //     through only when the namespace its name carries is one of theirs. The
 //     API server, another team's Service and a bare ClusterIP — which carries
 //     no namespace — are refused.
-//   - A host that is external by its name but resolves into the cluster now is
-//     refused outright: a two-label short name the pod's search domains turn
+//   - A host that is external by its name is let through only when it provably
+//     resolves to addresses outside the cluster. A name that resolves into the
+//     cluster is refused — a two-label short name the pod's search domains turn
 //     into a Service ("api.payments", "kubernetes.default"), or a public name
-//     pointing at a cluster address ("172-30-0-1.sslip.io"). Its name carries
-//     no namespace the resolver honoured, so it cannot be attributed to the
-//     caller; name classification alone would miss it, which is why the
-//     resolved address decides (ADR-0003 c).
+//     pointing at a cluster address ("172-30-0-1.sslip.io") — because its name
+//     carries no namespace the resolver honoured, so it cannot be attributed to
+//     the caller. A name the resolver cannot answer for — a CoreDNS outage, a
+//     timeout, or an NXDOMAIN — is refused too: it cannot be proven external,
+//     and accepting it would leave the hole this closes, where a scoped caller
+//     registers an external-looking name during a resolver outage and the
+//     checker dials it into the cluster once the resolver recovers (ADR-0003 c,
+//     resolver-error fail-safe). The resolution is bounded by resolveTimeout
+//     (a few seconds) so a slow resolver does not hold a create or an edit open
+//     to the server's write timeout.
 //
 // An external target that resolves externally (the public Internet, the
 // company network outside the cluster, an OpenShift Route's public host) is
 // left to the target policy, unchanged. resolver is the backend's own
 // (net.DefaultResolver when nil); only a scoped caller's external-looking
 // name is resolved, so single-tenant installs and administrators never pay a
-// lookup.
-func targetInScope(ctx context.Context, resolver netguard.Resolver, p auth.Principal, host string) error {
+// lookup. A refusal carries the single generic scopeRefused message, so the
+// body does not become an internal-address oracle.
+func targetInScope(ctx context.Context, resolver netguard.Resolver, resolveTimeout time.Duration, p auth.Principal, host string) error {
 	if p.SeesAll() || host == "" {
 		return nil
 	}
 	if netguard.InCluster(host) {
-		ns, ok := netguard.Namespace(host)
-		if !ok {
-			return &scopeRefusal{"the target is a cluster-internal address whose namespace cannot be read from its name: name the Service as service.namespace.svc so its namespace can be checked against your scope, or ask an administrator"}
-		}
-		if !p.CanRead(ns) {
-			return &scopeRefusal{fmt.Sprintf("the target is in namespace %q, which is outside your namespaces", ns)}
+		if ns, ok := netguard.Namespace(host); !ok || !p.CanRead(ns) {
+			return &scopeRefusal{scopeRefused}
 		}
 		return nil
 	}
-	if netguard.ResolvesInCluster(ctx, resolver, host) {
-		return &scopeRefusal{"the target is an external name that resolves to a cluster-internal address; name the Service as service.namespace.svc so its namespace can be checked against your scope, or ask an administrator"}
+	// host is external by its spelling. Bound the resolution so a slow or
+	// stuck resolver cannot hold the request open to HTTPWriteTimeout.
+	if resolveTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, resolveTimeout)
+		defer cancel()
+	}
+	if inCluster, err := netguard.ResolvesInCluster(ctx, resolver, host); err != nil || inCluster {
+		return &scopeRefusal{scopeRefused}
 	}
 	return nil
 }

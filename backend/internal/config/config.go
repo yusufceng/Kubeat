@@ -170,6 +170,14 @@ type Config struct {
 	TargetDenyCIDRs  string // UPTIME_TARGET_DENY_CIDRS
 	TargetAllowCIDRs string // UPTIME_TARGET_ALLOW_CIDRS
 
+	// TargetResolveTimeout bounds the name lookup the per-user scope check
+	// makes when a scoped user aims a monitor or a channel webhook at an
+	// external-looking name (api.targetInScope, ADR-0003 c). It keeps a slow
+	// or stuck resolver from holding a create or an edit open to
+	// HTTPWriteTimeout; a lookup that does not finish in time is treated as
+	// unresolved, and the scoped user's target is refused on the safe side.
+	TargetResolveTimeout time.Duration // UPTIME_TARGET_RESOLVE_TIMEOUT
+
 	MinCheckInterval time.Duration // UPTIME_MIN_CHECK_INTERVAL
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
 	MaxResults       int           // UPTIME_MAX_RESULTS
@@ -417,6 +425,7 @@ func Load() (Config, error) {
 		{&cfg.HTTPReadTimeout, "UPTIME_HTTP_READ_TIMEOUT", 30 * time.Second},
 		{&cfg.HTTPWriteTimeout, "UPTIME_HTTP_WRITE_TIMEOUT", 2 * time.Minute},
 		{&cfg.HTTPIdleTimeout, "UPTIME_HTTP_IDLE_TIMEOUT", 2 * time.Minute},
+		{&cfg.TargetResolveTimeout, "UPTIME_TARGET_RESOLVE_TIMEOUT", 5 * time.Second},
 		{&cfg.SchedulerTick, "UPTIME_SCHEDULER_TICK", time.Second},
 		{&cfg.MaxJitter, "UPTIME_MAX_JITTER", 5 * time.Second},
 		{&cfg.ResultFlushInterval, "UPTIME_RESULT_FLUSH_INTERVAL", time.Second},

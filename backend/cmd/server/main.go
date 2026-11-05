@@ -383,6 +383,7 @@ func main() {
 			MinCheckInterval: cfg.MinCheckInterval,
 			StatsWindow:      cfg.StatsWindow,
 			MaxResults:       cfg.MaxResults,
+			ResolveTimeout:   cfg.TargetResolveTimeout,
 
 			MinCheckIntervalExternal: cfg.MinCheckIntervalExternal,
 			MaxMonitorsPerHost:       cfg.MaxMonitorsPerHost,

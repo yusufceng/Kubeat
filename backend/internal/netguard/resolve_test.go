@@ -60,7 +60,9 @@ func TestInClusterAddr(t *testing.T) {
 // and reports whether they reach a cluster address: the dial-time half of the
 // scope check (ADR-0003 c). The lookup carries the pod's search domains, so a
 // two-label short name the resolver turns into a Service, and a public name
-// that points at a cluster address, are both seen for where they land.
+// that points at a cluster address, are both seen for where they land. A
+// lookup that fails is reported as an error, not as "external", so the scope
+// check can refuse an unresolvable name on the safe side.
 func TestResolvesInCluster(t *testing.T) {
 	table := map[string][]netip.Addr{
 		// A two-label short name the pod's search domains (ndots) turn into a
@@ -75,21 +77,27 @@ func TestResolvesInCluster(t *testing.T) {
 		// one cluster answer is enough to refuse.
 		"rebind.example.com": addrsOf(t, "93.184.216.34", "10.1.2.3"),
 	}
-	for host, want := range map[string]bool{
-		"api.payments":                 true,
-		"kubernetes.default":           true,
-		"172-30-0-1.sslip.io":          true,
-		"status.example.com":           false,
-		"rebind.example.com":           true,
-		"does-not-resolve.example.com": false, // lookup fails -> not in cluster
-		"":                             false,
-		// An address needs no lookup.
-		"172.30.0.1": true,
-		"8.8.8.8":    false,
+	for host, want := range map[string]struct{ inCluster, wantErr bool }{
+		"api.payments":        {inCluster: true},
+		"kubernetes.default":  {inCluster: true},
+		"172-30-0-1.sslip.io": {inCluster: true},
+		"status.example.com":  {inCluster: false},
+		"rebind.example.com":  {inCluster: true},
+		// A lookup that fails is an error now, not a quiet "external": the
+		// name could not be resolved at all.
+		"does-not-resolve.example.com": {inCluster: false, wantErr: true},
+		"":                             {inCluster: false},
+		// An address needs no lookup and never errors.
+		"172.30.0.1": {inCluster: true},
+		"8.8.8.8":    {inCluster: false},
 	} {
 		r := &countingResolver{table: table}
-		if got := ResolvesInCluster(context.Background(), r, host); got != want {
-			t.Errorf("ResolvesInCluster(%q) = %v, want %v", host, got, want)
+		got, err := ResolvesInCluster(context.Background(), r, host)
+		if got != want.inCluster {
+			t.Errorf("ResolvesInCluster(%q) = %v, want %v", host, got, want.inCluster)
+		}
+		if (err != nil) != want.wantErr {
+			t.Errorf("ResolvesInCluster(%q) err = %v, wantErr %v", host, err, want.wantErr)
 		}
 		// Pinned (TOCTOU): a name is resolved exactly once per decision, an
 		// address not at all.
@@ -108,7 +116,7 @@ func TestResolvesInCluster(t *testing.T) {
 func TestResolvesInClusterNilResolver(t *testing.T) {
 	// A nil resolver falls back to net.DefaultResolver; an address is
 	// classified without touching it.
-	if !ResolvesInCluster(context.Background(), nil, "10.0.0.1") {
-		t.Error("ResolvesInCluster(nil, 10.0.0.1) = false, want true")
+	if in, err := ResolvesInCluster(context.Background(), nil, "10.0.0.1"); !in || err != nil {
+		t.Errorf("ResolvesInCluster(nil, 10.0.0.1) = (%v, %v), want (true, nil)", in, err)
 	}
 }
