@@ -41,14 +41,14 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.47'ye
+### 0.42'den 0.48'e
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
    başarısız kanalları düzeltin ya da kapatın; aynı PagerDuty servisine
    bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
    0.46'dan beri uyarıya döner: 1 dakikadan ya da bir denemenin
-   süresinden kısa bir değer 0.46 ve 0.47'de backend'i durdurmaz, alt
+   süresinden kısa bir değer 0.46, 0.47 ve 0.48'de backend'i durdurmaz, alt
    sınıra yükseltilir ve her açılışta `WARN` yazılır; değeri yine de
    düzeltin: 0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu
    ayarı tanımaz).
@@ -71,29 +71,33 @@ geri dönüş başladığınız sürüme olur.
    kullanıcılarınızın kapsam dışı iç hedeflerini gözden geçirin; başarısız
    kontrolün hata metnindeki çözülen IP'ye bakan alarm ya da panoyu
    `diagnostics.address`'e taşıyın.
-7. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46 ve 0.47'de
+7. 0.48'in adımları ("0.48'e yükseltme", Yapılacak): giriş bir vekilin
+   arkasındaysa `UPTIME_TRUST_PROXY_HOPS`'u ayarlayın; kapsamı sınırlı
+   kullanıcıların iç hedefleri artık çözüm anında da denetlenir (iki
+   etiketli kısa ad/genel ad boşluğu kapandı), gözden geçirin.
+8. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46, 0.47 ve 0.48'de
    değişmedi: yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi
    Alertmanager yönlendirmesine ekleyin; kuralları kopyalıyorsanız
-   0.47'ninkileri kopyalayın (0.45'inkilerle aynı).
-8. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
+   0.48'inkileri kopyalayın (0.45'inkilerle aynı).
+9. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
    yerine `--reset-then-reuse-values`, Helm 3.14+):
 
    ```sh
-   helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.47.0 -f values.yaml
+   helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.48.0 -f values.yaml
    ```
 
-9. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
-   PagerDuty olaylarını kapatın. Dönüşte 0.43–0.47'nin yeniden denemesi,
-   kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
-   PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
+10. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
+    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.48'in yeniden denemesi,
+    kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
+    PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.47'ye
+### 0.41'den 0.48'e
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.47'ye"deki adımlar.
+2. Sonra "0.42'den 0.48'e"deki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
 0.43, 0.44 ya da 0.45'ten gelirken başladığınız sürümden sonraki bölümleri
@@ -199,6 +203,89 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 0.48'e yükseltme
+
+0.48 kapsamı sınırlı bir kullanıcının iç hedeflerini çözüm anında denetler
+(iki etiketli kısa ad ve iç adrese çözülen genel adla kapsam aşımı kapanır),
+kanal geri geldiğinde susturulmuş bir monitor'ün gece bildirimi göndermesini
+önler ve kanal testi/kaydını duraklatmayı kaldırır, girişi hesap-başına sert
+kilit yerine kaynak adres başına throttle eder ve chart'a node yerleşimi ile
+frontend Service değerleri ekler. Şema değişmez (26).
+
+### Yapılacak
+
+- Giriş bir Ingress ya da yük dengeleyici arkasındaysa
+  `UPTIME_TRUST_PROXY_HOPS`'u gerçek vekil sayısına ayarlayın: 0.48 giriş
+  denemelerini kaynak adrese göre throttle eder ve adresi
+  `X-Forwarded-For`'un sonundan bu sayı kadar vekili atlayarak okur.
+  Ayarlanmazsa (varsayılan 0) tüm istekler tek bir vekil adresinden gelmiş
+  sayılır ve throttle tek paylaşılan bir kilide geriler (0.47'nin
+  hesap-başına kilidine yakın ama daha gevşek). Değeri chart'ta
+  `backend.extraEnv` ya da values ile verin.
+- Kapsamı sınırlı (yönetici olmayan, namespace listesi `*` olmayan)
+  kullanıcılarınız varsa: 0.48 bir hedefin adı "dış" görünse de onu
+  çözüm/bağlantı anında çözer ve çözülen adres cluster içindeyse ve
+  namespace'i adından okunamıyorsa sınırlı kullanıcı için reddeder. Böylece
+  `api.payments`, `kubernetes.default` gibi iki etiketli kısa adlar ve iç
+  adrese çözülen genel adlar da kapsam dışıysa reddedilir. Var olan
+  monitor'ler ve kanallar yeniden denetlenmez; yalnızca yeni hedef
+  oluşturma, klonlama ve hedef değiştirme kısıtlanır.
+- Hesap kilidine dayanan bir betiğiniz varsa gözden geçirin: 0.48 hesabı
+  kilitlemek yerine kaynağı throttle eder; gevşek bir hesap tavanı
+  (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, varsayılan 50, `0` kapatır) yalnız
+  çok yüksek sayıda başarısız denemede devreye girer.
+
+### Davranış değişikliği
+
+- **Kullanıcı başına hedef kapsamı çözüm anında denetlenir.** Kapsamı
+  sınırlı bir kullanıcı, adı "dış" görünse de iç adrese çözülen bir hedefe
+  (iki etiketli kısa ad, iç IP'ye bakan genel ad) kapsamı dışındaysa monitor
+  ya da kanal webhook'u kuramaz; çözümleme karar başına bir kez sabitlenir
+  (TOCTOU). Yönetici ve kapsamı `*` olan kullanıcı ile cluster dışı hedefler
+  değişmez. 403 gövdesine makine-okur bir `code` alanı eklendi; API revizyonu
+  30. ADR-0003 (c)'nin kalan boşluğu kapandı. Sınır: adın çözümle gerçek
+  bağlantı arasında değişmesi (DNS rebinding) API katmanında kapatılamaz;
+  deny-CIDR derinlemesine savunma olarak kalır.
+- **Giriş kaynak adrese göre throttle edilir.** 0.48 başarısız girişleri
+  hesabı kilitlemek yerine kaynak adrese göre throttle eder (CWE-307): bilinen
+  bir hesabı az istekle kilitleyip yöneticiyi dışarıda bırakma riski kalkar.
+  429 yanıtı `Retry-After` taşır. `UPTIME_TRUST_PROXY_HOPS` ve
+  `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` yukarıda "Yapılacak"ta; ADR-0004.
+- **Susturulmuş monitor ve kanal devamı.** Yeniden başlatmadan sonra kanal
+  geri geldiğinde bekleyen bir kesinti bildirimi artık bakım penceresini
+  gözetir (susturulmuş ya da bakımdaki monitor gece bildirimi göndermez).
+  Başarılı bir kanal testi ya da kanalı kaydetmek, duraklatılmış kanalın
+  duraklatmasını kaldırır ve bekleyenleri sıradaki geçişte öne alır. Yeni
+  `UPTIME_NOTIFY_HUMAN_RETRY_MAX` insanların okuduğu kanallara (Slack, Teams,
+  e-posta, Telegram, Discord, Mattermost, Google Chat, ntfy, Gotify) daha kısa
+  bir yeniden deneme üst sınırı tanır; webhook ve PagerDuty
+  `UPTIME_NOTIFY_RETRY_MAX`'ta kalır. Varsayılanı `0` =
+  `UPTIME_NOTIFY_RETRY_MAX`, yani ayarlanana dek davranış değişmez.
+- **Chart: node yerleşimi ve frontend Service değerleri.** backend ve
+  frontend için `nodeSelector`, `tolerations`, `priorityClassName` ve
+  `frontend.service.type`/`.annotations` değerleri eklendi; hepsinin
+  varsayılanı bugünkü davranışa eşittir (boş = ClusterIP, kısıtsız
+  scheduling), mevcut kurulumlar değişmeden yükselir. docs GKE'nin kendi
+  Ingress'iyle kurulumu, infra-node yerleşimini ve dolu veri diski için
+  platformdan bağımsız bir alarm yolunu (`kubelet_volume_stats_available_bytes`)
+  anlatır.
+
+### Geri dönüş
+
+Şema 26: `helm rollback` ile 0.47.0'a dönülür. Dönüşte kapsam denetimi yine
+yalnız adı "iç" görünen hedeflere uygulanır (iki etiketli kısa ad/genel ad
+boşluğu yeniden açılır), giriş yine hesap-başına kilitlenir
+(`UPTIME_TRUST_PROXY_HOPS` ve `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` yok sayılır),
+susturulmuş monitor'ün kanal dönüşündeki bildirimi yine bakımı gözetmez,
+`UPTIME_NOTIFY_HUMAN_RETRY_MAX` ile chart'ın yeni yerleşim değerleri yok
+sayılır (değerleri vermiş olmak zarar vermez).
+
+### Alarm kuralları: değişmedi
+
+Chart'ın PrometheusRule'u 0.47.0 ile aynıdır. Dolu veri diski için eklenen
+platformdan bağımsız alarm bir chart kuralı değil, docs'taki bir reçetedir
+(kendi Prometheus ya da Grafana Cloud kural deponuza eklersiniz).
 
 ## 0.47'ye yükseltme
 
