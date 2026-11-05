@@ -4,8 +4,8 @@
 SQLite'ın WAL dosyası var olan alanı yeniden kullandığından dolu bir veri
 volume'unda yazımlar bir süre düşmez, seyrek (az monitor'lü) bir kurulumda
 dolu disk uzun süre sessiz kalabilir; bu yüzden PVC doluluğunu izlemeyi
-platform alarmına bırakın (OpenShift'te `KubePersistentVolumeFillingUp`;
-`kubelet_volume_stats_*` ile `<release>-data` PVC'si).
+platform alarmına bırakın (platformdan bağımsız kural için aşağıda "Dolu veri
+volume'undan dönüş").
 
 Bu belge yedek kopyadan geri yüklemeyi, node kaybından ve dolu volume'dan
 dönüşü adım adım anlatır; ayrıca ne kadar veri kaybedilebileceğini (RPO),
@@ -198,9 +198,36 @@ yazıp SQLite'ı bozmasına yol açabileceğinden veri PVC'si için kullanılmam
 Veri volume'u dolunca kontrol sonuçları yazılamaz ve kaybolur (bellekte
 tutulmaz): olay açılmaz, bildirim gitmez. Baştaki uyarı burada da geçerli;
 öz-sağlık disk doluluğunu değil kaybolan sonuçları ölçtüğü için dolu disk, WAL
-var olan alanı kullandığı sürece bir süre sessiz kalır. PVC doluluğunu platform
-alarmı (OpenShift'te `KubePersistentVolumeFillingUp`, `kubelet_volume_stats_*`)
-dolmadan önce yakalamalıdır.
+var olan alanı kullandığı sürece bir süre sessiz kalır. PVC doluluğunu bir
+platform alarmı dolmadan önce yakalamalıdır.
+
+Bu alarm platformdan bağımsızdır. `KubePersistentVolumeFillingUp`
+[kubernetes-mixin](https://github.com/kubernetes-monitoring/kubernetes-mixin)
+kuralıdır: OpenShift user workload monitoring'de, kube-prometheus-stack'te ve
+GKE'de Grafana Cloud'un Kubernetes entegrasyonu (ya da Google Managed
+Prometheus'un kubernetes-mixin kuralları) ile hazır gelir; `<release>-data`
+PVC'sini `persistentvolumeclaim` etiketiyle kapsar. Hiçbiri yoksa aynı
+`kubelet_volume_stats_*` metriklerinden elle bir kural yazılır (eşik, mixin'in
+uyarı eşiği olan %15 boş alan):
+
+```yaml
+- alert: KubeatDataVolumeFillingUp
+  expr: |
+    kubelet_volume_stats_available_bytes{persistentvolumeclaim="kubeat-data"}
+      / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim="kubeat-data"}
+      < 0.15
+  for: 15m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Kubeat'in veri volume'u doluyor"
+```
+
+(kubernetes-mixin ayrıca `predict_linear` ile dört gün içinde dolacak
+volume'u da uyarır; yukarıdaki oran en küçük hâlidir.) `<release>` chart'ın
+release adıysa PVC adı `<release>-data`'dır; metrik sunulmuyorsa
+kube-state-metrics / kubelet volume metriklerinin scrape edildiğinden emin
+olun.
 
 Volume dolduğunda:
 

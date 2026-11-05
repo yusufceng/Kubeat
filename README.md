@@ -63,7 +63,7 @@ Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum"
 
 ## Cluster'a kurulum
 
-**Desteklenen sürümler:** OpenShift 4.14 ve üstü; gerçek cluster'da doğrulanan OpenShift 4.21 (Kubernetes 1.34).
+**Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı, GKE provası kullanıcıda.
 
 Her sürüm etiketi (`vX.Y.Z`) imajları `ghcr.io/yusufceng/kubeat-backend`
 ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
@@ -108,6 +108,12 @@ Backend cluster içinde çalıştığı için Service'ler DNS adlarıyla izleneb
   salt okunur kök dosya sistemiyle çalışabilir.
 - OpenShift'te `podSecurityContext` boş bırakılır ve `route.enabled=true`
   verilir; gerçek bir OpenShift 4.21'de doğrulandı.
+- Kubeat'i izlediği uygulamalardan ayrı bir node havuzunda (infra node)
+  çalıştırmak için `backend` ve `frontend` altında `nodeSelector`,
+  `tolerations` ve `priorityClassName` değerleri vardır; hepsi boşken pod'lar
+  0.47'deki gibi scheduler nereye koyarsa orada çalışır. Daha önce bunlar bir
+  post-render yamayla verilirdi, artık chart değeridir (bkz.
+  [values.yaml](deploy/helm/kubeat/values.yaml)).
 - Chart'ın ayrı değeri olmayan her ayar `backend.extraEnv` ve
   `frontend.extraEnv` altında ortam değişkeni olarak verilir — alarm
   davranışı da böyle ayarlanır (`UPTIME_REMINDER_INTERVAL`,
@@ -131,10 +137,28 @@ bakım penceresini tanımlayın (otomatik yükseltmeler çoğunlukla o saatlerde
 yapılır) ve aynı saatlere Kubeat'te bir bakım penceresi koyun (bkz. "Bakım
 pencereleri ve susturma"). GKE acil ve zorunlu yükseltmeleri pencere
 dışında da yapabilir, elle başlatılan yükseltme pencereye bakmaz; kalıcı
-önlem regional bir cluster'dır. GKE'nin kendi Ingress controller'ı
+önlem regional bir cluster'dır.
+
+GKE'de Ingress için iki yol vardır. **Önerilen yol ingress-nginx'tir:**
+yukarıdaki hızlı başlangıç komutu orada olduğu gibi çalışır
+(`--set ingress.className=nginx` ve cert-manager HTTP-01 ile sertifika).
+GKE'nin kendi (GCE) Ingress controller'ı iki noktada farklıdır:
 `ingressClassName`'e bakmaz, `kubernetes.io/ingress.class` annotation'ını
-okur: hızlı başlangıç komutunda `--set ingress.className=…` yerine
-`--set 'ingress.annotations.kubernetes\.io/ingress\.class=gce'` verin.
+okur; ve arkasındaki Service'in `NodePort` olmasını ya da container-native
+yük dengelemeli (NEG) bir `ClusterIP` olmasını ister (varsayılan `ClusterIP`
+GCE Ingress'in arkasında çalışmaz). GCE Ingress ile kurarken `--set
+ingress.className=…` yerine `--set
+'ingress.annotations.kubernetes\.io/ingress\.class=gce'` verin ve frontend
+Service'ini `--set frontend.service.type=NodePort` ile NodePort yapın; NEG
+yolu için bunun yerine `frontend.service.annotations`'a `cloud.google.com/neg:
+'{"ingress": true}'` ekleyin (bir values dosyasında). TLS için GCE Ingress
+çoğunlukla cert-manager HTTP-01 yerine bir `ManagedCertificate` ister; bunun
+ayrı bir annotation'ı (`networking.gke.io/managed-certificates`) ve cluster'da
+bir ManagedCertificate nesnesi gerekir. GCE Ingress sağlık kontrolünü kendi
+varsayılanıyla yapar; container-native modda pod'un hazırlık probe'unu
+(`/login`) kullanır. **GCE varyantı henüz gerçek bir GKE'de doğrulanmadı**
+(prova kullanıcıda, bkz. [yol haritası](docs/yol-haritasi.md#bilinen-sınırlar));
+doğrulanana kadar GKE'de ingress-nginx önerilir.
 
 **Yükseltme.** Sürümden sürüme yapılacaklar, davranış değişiklikleri, geri
 dönüş, alarm kurallarının değişip değişmediği, atlamalı yol ve yükseltmeden
@@ -1422,14 +1446,18 @@ CA); ikisi birlikte verilirse kurulum notları uyarır.
 
 0.45.0'dan beri her sürüm etiketi iki imajı ve chart'ı imzalı yayımlar;
 imajlar SBOM ve provenance taşır. 0.44.0 ve öncesi imzasızdır ve GitHub
-Release'leri yoktur. Açık bildirmek, hangi sürümün düzeltme aldığı ve kritik ya
-da yüksek açıklar için hedef süre: [SECURITY.md](SECURITY.md).
+Release'leri yoktur. 0.47.0'dan beri sürüm değişmezdir (Immutable Release),
+yayım iş akışındaki üçüncü taraf action'lar ve iki Dockerfile'ın taban
+imajları digest'e sabitlidir. Açık bildirmek, hangi sürümün düzeltme aldığı ve
+kritik ya da yüksek açıklar için hedef süre: [SECURITY.md](SECURITY.md).
 
 #### Derleme ve bağımlılıklar
 
 - Taban imajlar (`golang`, `ubi9/ubi-minimal`, `node`,
   `ubi9/nodejs-24-minimal`) `latest` gibi kayan etiketlerle değil, tam sürüm
-  etiketleriyle sabitlenir; bir sürümün neyle derlendiği böylece bellidir.
+  etiketine ek olarak digest'e (`etiket@sha256:…`) sabitlenir; bir sürümün tam
+  olarak neyle derlendiği böylece bellidir ve etiketin arkasındaki imaj
+  değişse de derleme değişmez.
 - Go sürümü `backend/go.mod`'daki `toolchain` satırıdır. CI onunla derler ve
   test eder; backend imajını derleyen `golang` imajı da aynı sürümdedir. İkisi
   birlikte yükseltilir.
@@ -2848,9 +2876,15 @@ kurmadan, Kubeat'in körleştiği cluster'ın kendi Alertmanager'ından
   kaybolan sonuçları ölçer: SQLite'ın WAL'ı var olan alanı kullandığından
   dolu bir volume'da yazımlar bir süre düşmeyebilir ve seyrek (az monitor'lü)
   bir kurulumda dolu disk uzun süre sessiz kalabilir, bu yüzden PVC doluluğunu
-  platform alarmına bırakın (OpenShift'te `KubePersistentVolumeFillingUp`;
-  `kubelet_volume_stats_*` ile `<release>-data` PVC'si;
-  [docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md)). Cluster'ın
+  platform alarmına bırakın. Bu alarm platformdan bağımsızdır:
+  `KubePersistentVolumeFillingUp` kubernetes-mixin'in kuralıdır ve OpenShift
+  user workload monitoring'de, kube-prometheus-stack'te ve GKE'de Grafana
+  Cloud'un Kubernetes entegrasyonu (ya da Google Managed Prometheus'un
+  kubernetes-mixin kuralları) ile hazır gelir; hiçbirinin bulunmadığı bir
+  yerde `kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes`
+  oranı üzerinden `<release>-data` PVC'si için elle bir kural yazılır
+  ([docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md), "Dolu veri
+  volume'undan dönüş" örneği verir). Cluster'ın
   tamamı ya da Prometheus'u düşerse bunları söyleyecek kimse kalmaz; o durumu yalnızca
   cluster dışındaki heartbeat duyurur. Bildirim alamayan kanalı yalnızca
   kurallar duyurur: `KubeatNotificationsFailing` kanal başına yanar (bkz.

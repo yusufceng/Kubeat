@@ -904,6 +904,17 @@ doluluğu için platform alarmına yönlendirsin (OpenShift'te
 `<release>-data` PVC'si). S41'in runbook'uyla (sprint 5 korumalı 1. madde)
 yazılır ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md), "Müşterilerin yeni bulguları" 3).
 
+Güncelleme (2026-11-05, S60 #97): dolu veri diski için platformdan bağımsız
+alarm yolu belgelendi (README "Hangi arızayı ne duyurur" ve runbook "Dolu veri
+volume'undan dönüş": `KubePersistentVolumeFillingUp` kubernetes-mixin kuralıdır
+ve OpenShift, kube-prometheus-stack ve GKE'de Grafana Cloud / Google Managed
+Prometheus ile gelir; yoksa `kubelet_volume_stats_*` oranından elle kural).
+PO kararıyla chart'ın kendi opsiyonel PVC-doluluk kuralını basması **eklenmedi**:
+platform zaten mixin kuralını taşıyor, chart'ın ikinci bir kural basması
+çiftleme riski taşır ve yalnız değerle kapatılabilir bir ek olsa bile değeri
+belgeyi aşmaz. Tetikleyici: mixin'i taşımayan bir platformda PVC alarmını chart
+değeriyle isteyen bir kullanıcı.
+
 ## Kaldırmaya karşı korumanın kalanları: Argo CD prune, PV düzeyi, prova kaydı
 
 2026-10-29'da ertelendi (S31'in kapsam dışı parçaları, #38). 0.44'ten beri
