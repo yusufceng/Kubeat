@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -41,6 +42,23 @@ func send(token, method, url, body string) (int, string) {
 	raw, _ := io.ReadAll(resp.Body)
 	_ = json.Unmarshal(raw, &answer)
 	return resp.StatusCode, answer.Error
+}
+
+// signInFrom signs in with the source address set in X-Forwarded-For, for
+// a handler that trusts one proxy hop; it returns the answer's status.
+func signInFrom(ip, base, username, password string) int {
+	req, err := http.NewRequest("POST", base+"/api/v1/auth/login",
+		strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
+	if err != nil {
+		return 0
+	}
+	req.Header.Set("X-Forwarded-For", ip)
+	resp, err := sendClient.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode
 }
 
 // burst sends n requests at once and counts the answers by status.
@@ -207,6 +225,73 @@ func TestMadeUpNamesFloodLocksNobodyOut(t *testing.T) {
 	addUser(t, base, "breakglass", store.RoleAdmin)
 	if _, code := signIn(t, base, "breakglass", "parola-123"); code != http.StatusOK {
 		t.Errorf("an administrator made with the API token: status = %d, want 200", code)
+	}
+}
+
+// The lock is per source, not per name: one address's wrong guesses
+// throttle only that address, and the legitimate owner signing in from
+// another address is never shut out, however many times a known name such
+// as "admin" was guessed from elsewhere (CWE-307).
+func TestSignInThrottleIsPerSourceIP(t *testing.T) {
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.TrustProxyHops = 1 // read the source from X-Forwarded-For
+	}) // three failures lock a source (default throttle), no account ceiling
+	base := srv.URL
+	doAs(t, "", "POST", base+"/api/v1/auth/setup", `{"username":"admin","password":"parola-123"}`, nil)
+
+	const attacker, owner = "203.0.113.1", "203.0.113.2"
+	for i := range 3 {
+		if code := signInFrom(attacker, base, "admin", "yanlis"); code != http.StatusUnauthorized {
+			t.Fatalf("attacker guess %d: status = %d, want 401", i+1, code)
+		}
+	}
+	// The attacker's own source is locked, and the 429 carries Retry-After.
+	req, _ := http.NewRequest("POST", base+"/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"yanlis"}`))
+	req.Header.Set("X-Forwarded-For", attacker)
+	resp, err := sendClient.Do(req)
+	if err != nil {
+		t.Fatalf("attacker after three guesses: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("the attacker after three guesses: status = %d, want 429 (only its own source is locked)", resp.StatusCode)
+	}
+	if after, err := strconv.Atoi(resp.Header.Get("Retry-After")); err != nil || after < 1 {
+		t.Errorf("Retry-After = %q, want a positive whole number of seconds", resp.Header.Get("Retry-After"))
+	}
+	if code := signInFrom(owner, base, "admin", "parola-123"); code != http.StatusOK {
+		t.Errorf("the admin's right password from another source: status = %d, want 200", code)
+	}
+}
+
+// Across sources a name has a loose, high ceiling so a distributed guess
+// cannot run forever: once it trips, even a fresh source with the right
+// password waits (the documented trade-off). A single source is held well
+// below it by the per-source throttle, so the owner's own mistakes never
+// reach it.
+func TestSignInAccountCeiling(t *testing.T) {
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.TrustProxyHops = 1
+		o.Throttle = &auth.Throttle{MaxFailures: 3, Lockout: time.Minute}
+		o.AccountThrottle = &auth.Throttle{MaxFailures: 5, Lockout: time.Minute}
+	})
+	base := srv.URL
+	doAs(t, "", "POST", base+"/api/v1/auth/setup", `{"username":"admin","password":"parola-123"}`, nil)
+
+	// Three wrong from one source (which locks that source), two from
+	// another: five failures across sources reach the account ceiling.
+	for i := range 3 {
+		if code := signInFrom("203.0.113.1", base, "admin", "yanlis"); code != http.StatusUnauthorized {
+			t.Fatalf("source 1 guess %d: status = %d, want 401", i+1, code)
+		}
+	}
+	for i := range 2 {
+		if code := signInFrom("203.0.113.2", base, "admin", "yanlis"); code != http.StatusUnauthorized {
+			t.Fatalf("source 2 guess %d: status = %d, want 401", i+1, code)
+		}
+	}
+	if code := signInFrom("203.0.113.3", base, "admin", "parola-123"); code != http.StatusTooManyRequests {
+		t.Errorf("a fresh source once the ceiling is reached: status = %d, want 429", code)
 	}
 }
 

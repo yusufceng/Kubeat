@@ -177,8 +177,19 @@ type Options struct {
 	Token string
 	// SessionTTL is how long a sign-in lasts; Throttle slows down password
 	// guessing; PasswordMinLength is the shortest password accepted.
+	//
+	// Throttle is the primary sign-in throttle, keyed per source address and
+	// name (see authLogin, throttle.go), and the one the status-page unlock
+	// and the password change use under keys of their own. AccountThrottle,
+	// when set, is a second, much looser ceiling on a name's failures across
+	// all sources, so a distributed guess cannot run forever; nil turns it
+	// off. TrustProxyHops is how many reverse proxies of your own stand in
+	// front, so the source address can be read from X-Forwarded-For; 0
+	// trusts no such header and uses the peer that connected.
 	SessionTTL        time.Duration
 	Throttle          *auth.Throttle
+	AccountThrottle   *auth.Throttle
+	TrustProxyHops    int
 	PasswordMinLength int
 	// LoginConcurrency bounds the bcrypt comparisons that run at once; zero
 	// means half the CPUs, at least one, and two with LDAP (see

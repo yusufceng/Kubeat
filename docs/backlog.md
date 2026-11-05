@@ -1609,6 +1609,12 @@ ara sinyali zaten var olduğu için). Bir ADR ile karar verilir (hesap-başına 
 kilitten IP-başına throttle'a geçiş, taviz ve XFF/vekil güveni). Ara önlem:
 güçlü parolalar ve `login_failed` denetim kaydının izlenmesi.
 
+Güncelleme (2026-11-05, 0.48): **çözüldü.** Kilit kaynak-adres bazlı throttle'a
+döndü (birincil kaynak-başına + gevşek hesap tavanı `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`,
+kaynak `UPTIME_TRUST_PROXY_HOPS` ile), karar [ADR-0004](adr/0004-giris-kilitleme-stratejisi.md).
+Kalan sınırlar (ingress arkasında vekil-hop ayarı, dağıtık tahminin hesap
+tavanını tetikleyebilmesi, tek-replica bellek) yol haritası "Bilinen sınırlar"da.
+
 ## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
 
 2026-11-04'te ertelendi (sprint 5 planı; [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)).

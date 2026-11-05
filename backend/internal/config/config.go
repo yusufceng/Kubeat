@@ -62,6 +62,21 @@ type Config struct {
 	// account here (local, or a directory or SSO user who signed in
 	// before); what is left out is counted in a warning.
 	LoginAuditPerMinute int // UPTIME_LOGIN_AUDIT_PER_MINUTE
+	// LoginAccountMaxFailures is a loose, very high ceiling on a name's
+	// failed sign-ins across all sources within the lockout period, kept so
+	// a large distributed guess cannot run forever. The per-source throttle
+	// (LoginMaxFailures) holds any one source well below it, so a legitimate
+	// owner's own mistakes never reach it. Zero turns the ceiling off,
+	// leaving only the per-source throttle.
+	LoginAccountMaxFailures int // UPTIME_LOGIN_ACCOUNT_MAX_FAILURES
+	// TrustProxyHops is how many reverse proxies of your own stand in front
+	// of the backend. The sign-in throttle and the audit log then read the
+	// client's address from X-Forwarded-For, trusting only the rightmost
+	// that many entries those proxies appended. Zero (the default) trusts no
+	// such header and uses the peer that connected; behind an ingress or a
+	// load balancer that is the proxy's own address, the same for every
+	// client, so set this to tell sources apart (CWE-307, ADR-0004).
+	TrustProxyHops int // UPTIME_TRUST_PROXY_HOPS
 
 	// LDAP; see ldapauth.Config. Empty LDAPURL means local accounts only.
 	LDAPURL                string        // UPTIME_LDAP_URL
@@ -606,6 +621,13 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.LoginConcurrency, err = envIntOrZero("UPTIME_LOGIN_CONCURRENCY", 0); err != nil {
+		return Config{}, err
+	}
+	// Both allow zero: the account ceiling off, no trusted proxy in front.
+	if cfg.LoginAccountMaxFailures, err = envIntOrZero("UPTIME_LOGIN_ACCOUNT_MAX_FAILURES", 50); err != nil {
+		return Config{}, err
+	}
+	if cfg.TrustProxyHops, err = envIntOrZero("UPTIME_TRUST_PROXY_HOPS", 0); err != nil {
 		return Config{}, err
 	}
 	if cfg.AllowPlaintextSecrets, err = envBool("UPTIME_ALLOW_PLAINTEXT_SECRETS", false); err != nil {
