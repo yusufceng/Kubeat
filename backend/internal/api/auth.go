@@ -473,9 +473,9 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	// source's failed guesses throttle only that source, not the name for
 	// everyone: the legitimate owner signing in from elsewhere is never
 	// locked out (CWE-307, ADR-0004).
-	key := signInIPKey(h.clientIP(r), req.Username)
-	acctKey := signInKey(req.Username)
 	now := time.Now().UTC()
+	key := signInIPKey(h.clientIP(r, now), req.Username)
+	acctKey := signInKey(req.Username)
 	// The attempt counts as a failure from here on, before the password is
 	// checked: parallel attempts cannot all be tried before the first
 	// failure is recorded. What turns out not to be a guess is taken back.

@@ -299,6 +299,9 @@ type handler struct {
 	failedLogins   *auditCap
 	// creations bounds the monitors one account creates in a minute.
 	creations *createLimiter
+	// proxyWarn warns, rate-limited, when X-Forwarded-For cannot be
+	// trusted for the sign-in throttle's source address (see clientIP).
+	proxyWarn *proxyWarn
 }
 
 // NewHandler returns the root HTTP handler of the server.
@@ -309,6 +312,7 @@ func NewHandler(opts Options) http.Handler {
 		directoryBinds: newSlots(directoryConcurrency, opts.LoginQueueWait),
 		failedLogins:   newAuditCap(opts.LoginAuditPerMinute, opts.Logger),
 		creations:      newCreateLimiter(opts.MonitorCreatePerMinute),
+		proxyWarn:      newProxyWarn(opts.Logger),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)

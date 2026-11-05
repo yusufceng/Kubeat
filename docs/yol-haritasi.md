@@ -159,8 +159,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   yüzeyine dokunduğu için S65'ten ayrılıp sprint 7'ye bırakıldı. Sprint 7
   (0.49.0) bu yüzeyi iki maddeyle ele alır: S72
   ([#106](https://github.com/yusufceng/Kubeat/issues/106)) `X-Forwarded-For`
-  görülürken `UPTIME_TRUST_PROXY_HOPS=0` iken açılış/çalışma WARN'ı verir ve
-  hops gerçek zincirden uzunsa görülen kaynağı güvenli adrese (peer) düşürür,
+  görülürken `UPTIME_TRUST_PROXY_HOPS=0` iken çalışma anında (dakika-sınırlı)
+  WARN verir ve hops gerçek zincirden uzunsa görülen kaynağı güvenli adrese
+  (peer) düşürür,
   paylaşılan NAT/vekil durumunu ve tavan ayarını ADR-0004/README'de açıklar
   (güvenilir-vekil allowlist backlog'da); S63
   ([#108](https://github.com/yusufceng/Kubeat/issues/108)) giriş/dizin ve

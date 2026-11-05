@@ -70,6 +70,44 @@ geriler (0.47.0 davranışı). Bu, mevcut vekil/`X-Forwarded-Proto` güveni
 (frontend `cookieSecure`) kararıyla aynı mantıktadır: başlığa yalnızca
 operatör açıkça güvenince güvenilir.
 
+**Sessiz etkisizliğe karşı uyarı ve güvenli-geriye düşüş (0.49).** Yayımlanmış
+bir DoS düzeltmesi operatör ayarı bilmediğinde sessizce etkisiz kalmamalıdır.
+0.49 iki durumu çalışma anında (dakikada en fazla bir kez, `clientIP`) loga
+WARN olarak yazar: (a) `X-Forwarded-For` geldiği hâlde `UPTIME_TRUST_PROXY_HOPS=0`
+— başlık varsa önde bir vekil vardır ama ona güvenilmiyor, throttle tek
+paylaşılan ada-başına kilide gerilemiştir; (b) `X-Forwarded-For` zinciri
+`UPTIME_TRUST_PROXY_HOPS`'tan kısa gelir — güvenilen hop sayısı gerçek vekil
+sayısından büyük ya da bir istek vekili atlıyordur. (b) durumunda görülen kaynak
+artık istemcinin ayarlayabileceği en soldaki girdiye (`chain[0]`) değil, hiçbir
+istemcinin denetlemediği eşe (peer) düşer: uydurma bir `X-Forwarded-For` ile ne
+her istekte taze bir kaynak gibi görünüp throttle atlanabilir ne de bir kurban
+kilitlenebilir. Yanıt hâlâ değişmez (genel 401/429).
+
+**Somut hop örnekleri.** Değer tam olarak önünüzdeki kendi vekillerinizin
+sayısıdır; girişe ulaşan her vekil `X-Forwarded-For`'a bir girdi ekler:
+
+- Düz OpenShift Route (HAProxy router): `1`.
+- Önünde WAF ya da harici yük dengeleyici olan OpenShift Route: router + o
+  katman, `2`.
+- GKE: Google Cloud yük dengeleyici (GCLB) + `ingress-nginx`, `2`; yalnız
+  Container-native LB/GCLB (ingress-nginx yoksa) `1`.
+
+**Paylaşılan kurumsal NAT/vekil.** `X-Forwarded-For` doğru okunsa bile, aynı
+kurumsal NAT ya da ileri vekil arkasındaki kullanıcılar aynı kaynak adresten
+görünür; kaynak-başına throttle onları ayırt edemez ve biri çok yanlış denerse
+o NAT'ın arkasındaki herkesin o ada girişi birlikte yavaşlar. Bu popülasyonda
+hesap tavanı (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`) NAT'lı kullanıcı sayısına
+göre ayarlanmalıdır (ya da `0` ile kapatılıp yalnız kaynak-başına throttle'a
+bırakılmalıdır). Kaynak-IP'ye dayanmayan gerçek bir ayrım (güvenilir-vekil IP
+allowlist) kod ve bu ADR'de değişim ister; şimdilik yön olarak backlog'da
+izlenir (`docs/backlog.md`, "Giriş throttle için güvenilir-vekil IP allowlist").
+
+Görülen kaynak adresini loga yazılan WARN satırından doğrulayın: yukarıdaki
+iki durumda satır, throttle'ın anahtarladığı eşi (`peer`) adıyla yazar; bu
+adres beklediğiniz vekil ya da istemci adresiyse `UPTIME_TRUST_PROXY_HOPS`
+doğru demektir. (Denetim kaydı ve istemci yanıtı kaynak adresini taşımaz, enum
+sızdırmamak için.)
+
 Yanıt değişmez: kilit 429 + `Retry-After` döner, enum sızdırmaz; başarısız
 denemeler ve adı kilitleyen ret yine denetim kaydına ve loga yazılır.
 
@@ -90,12 +128,17 @@ kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
   değil, en az `ceil(50/10)=5` ayrı kaynaktan 50 istekle. Tavanı düşürmek bu
   maliyeti düşürür ve meşru sahibin kilitlenme riskini artırır; `0` tavanı
   tümüyle kaldırıp dağıtık tahmini sınırsız bırakır.
-- **Vekil güveni.** `UPTIME_TRUST_PROXY_HOPS` gerçek vekil sayısından büyük
-  ayarlanırsa istemci `X-Forwarded-For` uydurarak her istekte taze bir kaynak
-  gibi görünüp throttle'ı atlatabilir; küçük ya da `0` ayarlanırsa (Ingress
-  arkasında) tüm istemciler vekilin tek adresini paylaşıp ada-başına tek bir
-  kilide geriler. Doğru değer tam olarak önünüzdeki kendi vekillerinizin
-  sayısıdır.
+- **Vekil güveni.** Doğru değer tam olarak önünüzdeki kendi vekillerinizin
+  sayısıdır. `0` ayarlanırsa (Ingress arkasında) tüm istemciler vekilin tek
+  adresini paylaşıp ada-başına tek bir kilide geriler; 0.49 bu durumu, başlık
+  geldiği hâlde güvenilmediğinde, çalışma anında WARN'lar (yukarıda). Değer
+  gerçek vekil sayısından büyükse, 0.47–0.48'de istemci `X-Forwarded-For`
+  uydurarak her istekte taze bir kaynak gibi görünüp throttle'ı atlatabiliyor
+  ya da bir kurbanı kilitleyebiliyordu; 0.49'da zincir hop'tan kısa gelince
+  görülen kaynak istemci-kontrollü en soldaki girdiye değil eşe (peer) düşer ve
+  WARN verilir, bu yüzden uydurma başlık ne throttle'ı atlatır ne de kurbanı
+  kilitler (yalnızca o NAT/eş paylaşılan bir kilide geriler). Yanlış ayarın
+  maliyeti böylece "bypass" değil "tek paylaşılan kilit"tir.
 - **Tek replica.** Sayaç bellektedir; backend yeniden başlayınca ya da başka
   replicada sıfırlanır. Çok replicalı dağıtık throttle yol haritasında bilinen
   sınırdır.
