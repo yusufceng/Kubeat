@@ -90,9 +90,19 @@ type Resolver interface {
 
 // ResolvesInCluster reports whether host, a monitor target's host name,
 // resolves to a cluster-internal address. It looks host up once through r
-// (net.DefaultResolver when r is nil) and reports true as soon as one answer
-// is in a cluster range, false when none is, the lookup fails, or host is
-// empty. A host that is already an address is classified without a lookup.
+// (net.DefaultResolver when r is nil) and returns one of three outcomes:
+//
+//   - (true, nil)  host is, or resolves to, a cluster address: one of the
+//     answers is in a cluster range (or host is already such an address).
+//   - (false, nil) host is, or resolves only to, addresses outside the
+//     cluster, or host is empty.
+//   - (false, err) the lookup failed — a resolver outage, a timeout or an
+//     NXDOMAIN — so whether host reaches the cluster could not be decided.
+//     The caller must not read this as "external": the dial-time scope check
+//     treats it as unsafe (ADR-0003 c, resolver-error fail-safe).
+//
+// A host that is already an address is classified without a lookup and never
+// returns an error.
 //
 // This is the resolution the dial-time scope check is built on, for the
 // names InCluster classifies as external by their spelling. The lookup is
@@ -104,27 +114,27 @@ type Resolver interface {
 // that one answer: a name whose answer changes between this lookup and the
 // dial a check makes later is beyond this gate (TOCTOU), which is why
 // ADR-0003 keeps the deny-CIDR and a mandatory multi-tenant proof.
-func ResolvesInCluster(ctx context.Context, r Resolver, host string) bool {
+func ResolvesInCluster(ctx context.Context, r Resolver, host string) (bool, error) {
 	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
 	if host == "" {
-		return false
+		return false, nil
 	}
 	if addr, err := netip.ParseAddr(host); err == nil {
-		return InClusterAddr(addr)
+		return InClusterAddr(addr), nil
 	}
 	if r == nil {
 		r = net.DefaultResolver
 	}
 	addrs, err := r.LookupNetIP(ctx, "ip", host)
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, addr := range addrs {
 		if InClusterAddr(addr) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // Namespace returns the Kubernetes namespace a cluster-internal target names,

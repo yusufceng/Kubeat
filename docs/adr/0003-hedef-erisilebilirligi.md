@@ -80,6 +80,35 @@ sınırlayacağımızdır.
   (daha uzun asgari aralık, host tavanı), cross-tenant ihlali değil. Kiracı
   sınırı kapsam denetimidir (`api.targetInScope`).
 
+  **Çözüm hatasında güvenli taraf (0.49, #107).** 0.48'in çözüm-anı denetimi,
+  ad çözümü hata ya da zaman aşımı verince (CoreDNS kesintisi, SERVFAIL,
+  NXDOMAIN) adı sessizce "dış" varsayıp hedefi kabul ediyordu
+  (`netguard.ResolvesInCluster` hata → `false` → `api.targetInScope` → `nil`):
+  kapsamı sınırlı bir kullanıcı CoreDNS kesintisinde `api.payments` gibi dış
+  görünen bir adla monitor kurabiliyor, kayıt kalıyor ve çözücü düzelince checker
+  onu cluster içine bağlıyordu (var olan monitor'ler yeniden denetlenmez,
+  `checker.go` değişmedi). 0.49'da bu fail-open kapatıldı: kapsamı sınırlı bir
+  çağıran için adı dış görünen bir hedef yalnızca **ispatlanabilir biçimde
+  cluster dışı bir adrese çözülürse** kabul edilir; çözüm hata ya da zaman aşımı
+  verirse ad dış kanıtlanamadığı için güvenli tarafta reddedilir. Yönetici ve
+  kapsamı `*` olan kullanıcı çözüm yapmadığı için etkilenmez. Çözüme ayrı bir
+  zaman aşımı kondu (`UPTIME_TARGET_RESOLVE_TIMEOUT`, varsayılan 5 sn) ki yavaş
+  ya da takılı bir çözücü bir oluşturma/değiştirmeyi sunucunun yazma zaman
+  aşımına (`UPTIME_HTTP_WRITE_TIMEOUT`, 2 dk) kadar bekletmesin. Red mesajı tek
+  genel bir metne indirildi (`api.scopeRefused`): önceki üç ayrı mesaj
+  (namespace adını ya da "iç adrese çözülüyor"u söyleyen) sınırlı kullanıcıya bir
+  adın iç adrese çözülüp çözülmediğini ya da hangi namespace'e düştüğünü açık
+  eden bir iç-adres oracle'ıydı; makine-okur `target_scope` kodu ve iki dilli
+  arayüz mesajı korunur.
+
+  **Bilinçli taviz.** CoreDNS kesintisinde kapsamı sınırlı bir kullanıcı dış
+  görünen yeni bir monitor ya da kanal webhook'u kuramaz (hedef gerçekte dış
+  olsa da, kesinti boyunca); bu, kesinti anında sessiz bir cross-tenant
+  kapsam-aşımına izin vermektense yeni kurulumu bekletmeyi yeğleyen bilinçli bir
+  seçimdir (işaretle-ve-izin bypass'ı açık bırakacağı için seçilmedi). Var olan
+  monitor'ler çalışmaya devam eder ("İzleme asla durmaz"); yalnız sınırlı
+  kullanıcının yeni kapsam-dışı create'i reddedilir.
+
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
   monitor'ü okuyabilen herkese döner ve aksi hâlde bir iç cluster adresini
@@ -123,3 +152,12 @@ sınırlayacağımızdır.
   `backend/internal/api`). Kalan artık yalnızca DNS rebinding penceresidir
   (adın çözümle dial arasında değişmesi); bunun için deny-CIDR ve çok kiracılı
   prova derinlemesine savunmadır.
+- **Çözüm hatasında kapalı (0.49).** 0.48'in çözüm-anı denetimi çözüm hata ya da
+  zaman aşımı verince hedefi sessizce kabul ediyordu (fail-open); 0.49'da kapsam
+  denetimi çözüm hatasında da kapalı kalır: kapsamı sınırlı bir kullanıcı CoreDNS
+  kesintisinde dış görünen bir adla kapsam dışına monitor ya da kanal kuramaz,
+  yalnız ispatlanabilir biçimde cluster dışına çözülen ad kabul edilir. Çözüme
+  `UPTIME_TARGET_RESOLVE_TIMEOUT` (varsayılan 5 sn) sınırı kondu ve iç-adres reddi
+  tek genel mesaja indirilerek iç-adres oracle'ı daraltıldı. Yönetici ve kapsamı
+  `*` olan kullanıcı etkilenmez. Bilinçli taviz yukarıda (c), "Çözüm hatasında
+  güvenli taraf".

@@ -67,10 +67,13 @@ func newTestAPIWith(t *testing.T, customize func(*Options)) (*httptest.Server, *
 
 		// Every feature on: these tests are about what the features do.
 		License: fullLicense{},
-		// No name resolves into the cluster unless a test says so: the scope
-		// check's dial-time lookup stays off the real network. A test that
-		// exercises it supplies its own resolver (see TestDialTimeTargetScope).
-		Resolver: fakeResolver(nil),
+		// Names resolve externally by default, as most of a scoped user's
+		// targets do; no name lands in the cluster unless a test says so, and
+		// the lookup never touches the real network. A test that exercises
+		// the dial-time scope check, the resolver-error fail-safe or the
+		// resolve timeout supplies its own resolver (see TestDialTimeTargetScope,
+		// TestTargetScopeResolverFailSafe, TestTargetScopeResolveTimeout).
+		Resolver: externalResolver{},
 	}
 	if customize != nil {
 		customize(&opts)

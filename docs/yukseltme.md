@@ -192,7 +192,11 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   > fazladan işaretler ve iç adrese çözülen genel bir adı (`172-30-0-1.sslip.io`)
   > ad biçiminden göremez. 0.48'de asıl denetim sunucudadır: backend adı kendi
   > çözücüsüyle çözüp kararı verir (bkz. README "Hedef politikası" → "Çözüm
-  > anında denetim").
+  > anında denetim"). 0.49'da bu denetim çözüm hata ya da zaman aşımı verince de
+  > kapalı kalır (CoreDNS kesintisinde fail-open kapandı): kapsamı sınırlı bir
+  > kullanıcı yalnızca ispatlanabilir biçimde cluster dışına çözülen bir ad
+  > belirleyebilir, çözüme `UPTIME_TARGET_RESOLVE_TIMEOUT` (varsayılan 5 sn)
+  > sınırı kondu. Var olan monitor'ler çalışmaya devam eder.
 
 - **30 saniyeden sık monitor'lar ve kotalar** (0.41). Hedefi cluster
   dışında olanlar 30 saniye kuralına girer:

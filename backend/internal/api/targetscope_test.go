@@ -7,13 +7,15 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
 // fakeResolver answers the dial-time scope check from a fixed table; an
-// unknown name does not resolve. Used as the test API's resolver so a scope
-// check never touches the real network.
+// unknown name does not resolve (NXDOMAIN). Used by a test that needs some
+// names to land in the cluster and others to fail, so a scope check never
+// touches the real network.
 type fakeResolver map[string][]netip.Addr
 
 func (f fakeResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, error) {
@@ -22,6 +24,35 @@ func (f fakeResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Ad
 		return addrs, nil
 	}
 	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+// externalResolver is the test API's default resolver: every name resolves to
+// one external address (203.0.113.10, TEST-NET-3), as most of a scoped user's
+// targets do. It lets an ordinary external-target create work without each
+// test declaring a resolver; a test that needs a name to land in-cluster, to
+// fail, or to time out supplies its own (fakeResolver, failingResolver,
+// blockingResolver).
+type externalResolver struct{}
+
+func (externalResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return []netip.Addr{netip.MustParseAddr("203.0.113.10")}, nil
+}
+
+// failingResolver answers every name with a resolver error, as a CoreDNS
+// outage or a SERVFAIL would; it never returns an address.
+type failingResolver struct{}
+
+func (failingResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, error) {
+	return nil, &net.DNSError{Err: "server misbehaving", Name: host, IsTemporary: true}
+}
+
+// blockingResolver never answers until the context is cancelled, so the
+// resolve deadline (Options.ResolveTimeout) is what ends the lookup.
+type blockingResolver struct{}
+
+func (blockingResolver) LookupNetIP(ctx context.Context, _, _ string) ([]netip.Addr, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func ipList(t *testing.T, ips ...string) []netip.Addr {
@@ -153,9 +184,15 @@ func TestDialTimeTargetScope(t *testing.T) {
 	if code := doAs(t, token, "POST", base+"/api/v1/monitors", monitor("public", "https://status.example.com/"), nil); code != http.StatusCreated {
 		t.Errorf("an external target that resolves externally: status = %d", code)
 	}
-	// A name that does not resolve at all is not a cluster target either.
-	if code := doAs(t, token, "POST", base+"/api/v1/monitors", monitor("unresolved", "https://nowhere.example.net/"), nil); code != http.StatusCreated {
-		t.Errorf("a name that does not resolve: status = %d", code)
+	// A name the resolver cannot answer for (here NXDOMAIN) can no longer be
+	// proven external, so a scoped user's target is refused on the safe side
+	// (resolver-error fail-safe, ADR-0003 c), with code target_scope.
+	var unresolved errorBody
+	if code := doAsError(t, token, "POST", base+"/api/v1/monitors", monitor("unresolved", "https://nowhere.example.net/"), &unresolved); code != http.StatusForbidden {
+		t.Errorf("a name that does not resolve: status = %d, want 403", code)
+	}
+	if unresolved.Code != codeTargetScope {
+		t.Errorf("unresolved: code = %q, want %q", unresolved.Code, codeTargetScope)
 	}
 	// A Service in a readable namespace, named in .svc form, still works: the
 	// dial-time check does not narrow legitimate cross-namespace monitoring.
@@ -179,5 +216,89 @@ func TestDialTimeTargetScope(t *testing.T) {
 	// the dial-time check is only for scoped users.
 	if code := do(t, "POST", base+"/api/v1/monitors", monitor("admin-reaches", "https://api.payments/"), nil); code != http.StatusCreated {
 		t.Errorf("administrator at a two-label cluster name: status = %d", code)
+	}
+}
+
+// A scoped user's external-looking target is refused when the resolver cannot
+// answer (a CoreDNS outage, a SERVFAIL, an NXDOMAIN): a name that would
+// resolve externally in normal times cannot be proven external during the
+// outage, and accepting it would leave the fail-open this closes — a scoped
+// user registers an external-looking name while the resolver is down and the
+// checker dials it into the cluster once the resolver recovers (ADR-0003 c,
+// resolver-error fail-safe). An administrator is unaffected: the scope check
+// never resolves for a caller who sees every namespace. The refusal carries
+// the single generic message, so its body is not an internal-address oracle.
+func TestTargetScopeResolverFailSafe(t *testing.T) {
+	srv, _ := newTestAPIWith(t, func(o *Options) { o.Resolver = failingResolver{} })
+	base := srv.URL
+	addUser(t, base, "dev", store.RoleEditor, "shop")
+	token, code := signIn(t, base, "dev", "parola-123")
+	if code != http.StatusOK {
+		t.Fatalf("sign in: %d", code)
+	}
+	monitor := func(name, target string) string {
+		return monitorJSON(name, "http", target, `"namespace":"shop"`)
+	}
+
+	var problem errorBody
+	if code := doAsError(t, token, "POST", base+"/api/v1/monitors", monitor("outage", "https://status.example.com/"), &problem); code != http.StatusForbidden {
+		t.Errorf("scoped create during a resolver outage: status = %d, want 403", code)
+	}
+	if problem.Code != codeTargetScope {
+		t.Errorf("outage: code = %q, want %q", problem.Code, codeTargetScope)
+	}
+	// The body is the single generic message: it tells the caller nothing
+	// about whether the name resolves into the cluster, or into which
+	// namespace, so the refusal is not an internal-address oracle.
+	if problem.Error != scopeRefused {
+		t.Errorf("outage body = %q, want the generic scope message", problem.Error)
+	}
+	for _, leak := range []string{"resolve", "cluster-internal", "namespace \""} {
+		if strings.Contains(problem.Error, leak) {
+			t.Errorf("scope refusal body leaks %q: %q", leak, problem.Error)
+		}
+	}
+
+	// A channel webhook is held to the same fail-safe.
+	ch := `{"name":"hook","type":"webhook","target":"https://hook.example.com/x","namespaces":["shop"]}`
+	if code := doAs(t, token, "POST", base+"/api/v1/channels", ch, nil); code != http.StatusForbidden {
+		t.Errorf("scoped channel webhook during a resolver outage: status = %d, want 403", code)
+	}
+
+	// An administrator (sees all) never resolves, so the outage does not
+	// touch them.
+	if code := do(t, "POST", base+"/api/v1/monitors", monitor("admin", "https://status.example.com/"), nil); code != http.StatusCreated {
+		t.Errorf("administrator during a resolver outage: status = %d, want 201", code)
+	}
+}
+
+// A slow resolver does not hold a scoped user's create open to the server's
+// write timeout: Options.ResolveTimeout bounds the lookup, the lookup ends in
+// a deadline error, and the target is refused on the safe side.
+func TestTargetScopeResolveTimeout(t *testing.T) {
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.Resolver = blockingResolver{}
+		o.ResolveTimeout = 50 * time.Millisecond
+	})
+	base := srv.URL
+	addUser(t, base, "dev", store.RoleEditor, "shop")
+	token, code := signIn(t, base, "dev", "parola-123")
+	if code != http.StatusOK {
+		t.Fatalf("sign in: %d", code)
+	}
+
+	start := time.Now()
+	var problem errorBody
+	if code := doAsError(t, token, "POST", base+"/api/v1/monitors",
+		monitorJSON("slow", "http", "https://status.example.com/", `"namespace":"shop"`), &problem); code != http.StatusForbidden {
+		t.Errorf("scoped create with a slow resolver: status = %d, want 403", code)
+	}
+	if problem.Code != codeTargetScope {
+		t.Errorf("slow resolver: code = %q, want %q", problem.Code, codeTargetScope)
+	}
+	// The resolve deadline (50ms), not the 2-minute write timeout, bounds the
+	// request; a generous ceiling keeps this from flaking on a busy runner.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("create took %s; the resolve deadline did not bound it", elapsed)
 	}
 }
