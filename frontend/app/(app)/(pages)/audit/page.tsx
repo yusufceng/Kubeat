@@ -23,6 +23,7 @@ const actionLabels: Record<string, string> = {
   password_change: "audit.action.passwordChange",
   test: "audit.action.test",
   monitor_create_throttled: "audit.action.monitorCreateThrottled",
+  deny: "audit.action.deny",
 };
 
 const objectLabels: Record<string, string> = {
@@ -34,6 +35,7 @@ const objectLabels: Record<string, string> = {
   user: "audit.object.user",
   ldap_group: "audit.object.ldapGroup",
   incident_note: "audit.object.incidentNote",
+  "target-scope": "audit.object.targetScope",
 };
 
 async function Audit() {
@@ -131,6 +133,7 @@ const actionLooks: Record<string, { icon: React.ReactNode; tone?: string }> = {
   setup: { icon: <PlusIcon /> },
   password_change: { icon: <LockIcon /> },
   test: { icon: <BellIcon /> },
+  deny: { icon: <WarningIcon />, tone: "pg-audit-down" },
 };
 
 export const generateMetadata = titled("nav.audit");

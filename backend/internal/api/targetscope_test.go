@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -300,5 +301,151 @@ func TestTargetScopeResolveTimeout(t *testing.T) {
 	// request; a generous ceiling keeps this from flaking on a busy runner.
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("create took %s; the resolve deadline did not bound it", elapsed)
+	}
+}
+
+// auditDenials returns the audit log's deny rows (S68), read from the store
+// so the handler's page limit (MaxResults) does not hide one.
+func auditDenials(t *testing.T, db *store.SQLite) []store.AuditEntry {
+	t.Helper()
+	entries, err := db.ListAudit(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("list audit: %v", err)
+	}
+	var out []store.AuditEntry
+	for _, e := range entries {
+		if e.Action == "deny" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// A scoped user's refused cross-tenant write leaves a trace an operator can
+// read: a deny/target-scope audit row, beside login_failed, and a bump of
+// kubeat_target_scope_denied_total by reason — target for a target host
+// outside the scope, namespace for a namespace the caller cannot edit. The
+// legitimate in-scope create is not counted, and the client response is the
+// unchanged 403, so neither the log nor the metric is an enumeration oracle
+// (S68, #109).
+func TestScopeDenialAuditedAndCounted(t *testing.T) {
+	meter := metrics.New("test")
+	srv, db := newTestAPIWith(t, func(o *Options) { o.Meter = meter })
+	base := srv.URL
+	addUser(t, base, "dev", store.RoleEditor, "shop")
+	token, code := signIn(t, base, "dev", "parola-123")
+	if code != http.StatusOK {
+		t.Fatalf("sign in: %d", code)
+	}
+	monitor := func(name, target, ns string) string {
+		return monitorJSON(name, "http", target, `"namespace":"`+ns+`"`)
+	}
+
+	// A monitor at a target outside the scope (the API server by its .svc
+	// name): reason target.
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors", monitor("apiserver", "https://kubernetes.default.svc/healthz", "shop"), nil); code != http.StatusForbidden {
+		t.Fatalf("out-of-scope target: status = %d, want 403", code)
+	}
+	// A channel webhook at another team's Service: reason target too.
+	hook := `{"name":"hook","type":"webhook","target":"https://hooks.payments.svc/x","namespaces":["shop"]}`
+	if code := doAs(t, token, "POST", base+"/api/v1/channels", hook, nil); code != http.StatusForbidden {
+		t.Fatalf("out-of-scope channel target: status = %d, want 403", code)
+	}
+	// A monitor in a namespace the user cannot edit: reason namespace.
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors", monitor("other", "https://status.example.com/", "payments"), nil); code != http.StatusForbidden {
+		t.Fatalf("out-of-scope namespace: status = %d, want 403", code)
+	}
+	// A legitimate in-scope create still works and is no denial.
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors", monitor("ok", "https://status.example.com/", "shop"), nil); code != http.StatusCreated {
+		t.Fatalf("in-scope create: status = %d, want 201", code)
+	}
+
+	// Each denial left a deny/target-scope row, by the user who tried.
+	denials := auditDenials(t, db)
+	if len(denials) != 3 {
+		t.Fatalf("deny audit rows = %d (%v), want 3", len(denials), denials)
+	}
+	var sawTargetSummary, sawNamespaceSummary bool
+	for _, d := range denials {
+		if d.ObjectType != "target-scope" {
+			t.Errorf("deny row object_type = %q, want target-scope", d.ObjectType)
+		}
+		if d.Username != "dev" {
+			t.Errorf("deny row username = %q, want dev", d.Username)
+		}
+		if strings.HasPrefix(d.Summary, "target ") {
+			sawTargetSummary = true
+		}
+		if strings.HasPrefix(d.Summary, "namespace ") {
+			sawNamespaceSummary = true
+		}
+	}
+	if !sawTargetSummary || !sawNamespaceSummary {
+		t.Errorf("deny summaries missing a reason: target=%v namespace=%v (%v)", sawTargetSummary, sawNamespaceSummary, denials)
+	}
+
+	// The counter rose once per reason: two targets, one namespace.
+	got, err := meter.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_target_scope_denied_total{reason=target}"] != 2 {
+		t.Errorf("reason=target = %v, want 2", got["kubeat_target_scope_denied_total{reason=target}"])
+	}
+	if got["kubeat_target_scope_denied_total{reason=namespace}"] != 1 {
+		t.Errorf("reason=namespace = %v, want 1", got["kubeat_target_scope_denied_total{reason=namespace}"])
+	}
+}
+
+// An administrator and a single-tenant install never raise a scope denial:
+// the counter stays at 0 and the audit log gets no deny row, because
+// targetInScope lets every target through for a caller who sees all.
+func TestScopeDenialNotRaisedForAdmin(t *testing.T) {
+	meter := metrics.New("test")
+	srv, db := newTestAPIWith(t, func(o *Options) { o.Meter = meter })
+	base := srv.URL
+
+	// The service token sees all: a cluster-internal target is created.
+	if code := do(t, "POST", base+"/api/v1/monitors", monitorJSON("apiserver", "http", "https://kubernetes.default.svc/healthz", `"namespace":"ops"`), nil); code != http.StatusCreated {
+		t.Fatalf("administrator at a cluster target: status = %d, want 201", code)
+	}
+	if rows := auditDenials(t, db); len(rows) != 0 {
+		t.Errorf("administrator left %d deny rows, want 0", len(rows))
+	}
+	got, err := meter.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_target_scope_denied_total{reason=target}"] != 0 || got["kubeat_target_scope_denied_total{reason=namespace}"] != 0 {
+		t.Errorf("administrator raised the scope-denial counter: %v",
+			map[string]float64{
+				"target":    got["kubeat_target_scope_denied_total{reason=target}"],
+				"namespace": got["kubeat_target_scope_denied_total{reason=namespace}"],
+			})
+	}
+}
+
+// The deny audit summary is written in the install's language, like the
+// sign-in phrases: with UPTIME_LANGUAGE=tr a scoped target refusal reads in
+// Turkish. The action and object codes stay fixed (deny/target-scope); the
+// frontend translates those on its own.
+func TestScopeDenialSummaryLocalised(t *testing.T) {
+	srv, db := newTestAPIWith(t, func(o *Options) { o.Language = "tr" })
+	base := srv.URL
+	addUser(t, base, "dev", store.RoleEditor, "shop")
+	token, code := signIn(t, base, "dev", "parola-123")
+	if code != http.StatusOK {
+		t.Fatalf("sign in: %d", code)
+	}
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors",
+		monitorJSON("apiserver", "http", "https://kubernetes.default.svc/healthz", `"namespace":"shop"`), nil); code != http.StatusForbidden {
+		t.Fatalf("out-of-scope target: status = %d, want 403", code)
+	}
+	denials := auditDenials(t, db)
+	if len(denials) != 1 {
+		t.Fatalf("deny rows = %d, want 1", len(denials))
+	}
+	if d := denials[0]; d.Action != "deny" || d.ObjectType != "target-scope" || !strings.Contains(d.Summary, "namespace'lerinizin dışında") {
+		t.Errorf("tr deny row = %+v, want deny/target-scope with a Turkish summary", d)
 	}
 }

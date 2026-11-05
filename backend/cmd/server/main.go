@@ -418,6 +418,7 @@ func main() {
 			OIDCDefaultNamespaces:    splitList(cfg.OIDCDefaultNamespaces),
 			Notifier:                 alerts,
 			Metrics:                  meter.Handler(),
+			Meter:                    meter,
 			MetricsToken:             cfg.MetricsToken,
 			SignIns:                  meter,
 			EmailEnabled:             senders.EmailEnabled(),

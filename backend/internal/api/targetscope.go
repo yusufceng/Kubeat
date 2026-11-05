@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -116,4 +119,32 @@ func channelTargetHost(typ store.ChannelType, target string) string {
 		}
 	}
 	return ""
+}
+
+// Audit summaries for a refused cross-tenant write (S68), localised like the
+// other fixed audit phrases (auditTR). %s is the target host or the namespace
+// the caller aimed at, outside their scope; the action and object
+// ("deny"/"target-scope") carry the rest.
+const (
+	scopeDeniedTargetText    = "target %s is outside your namespaces"
+	scopeDeniedNamespaceText = "namespace %s is outside the namespaces you may edit"
+)
+
+// auditScopeDenied records a cross-tenant write a scoped caller was refused —
+// a monitor or a channel aimed at a target host outside their namespaces
+// (metrics.ScopeDeniedTarget), or created or edited in a namespace they may
+// not change (metrics.ScopeDeniedNamespace). It writes an audit entry, beside
+// login_failed, so a SOC sees the attempt over the 90-day window — before, a
+// refusal left only a 403 and no trace — and counts it in
+// kubeat_target_scope_denied_total for alerting. detail names the target or
+// the namespace for the log. The client still gets the very same 403 with the
+// same generic body: the response is written by the caller and left untouched,
+// so neither the log nor the metric tells a client anything new.
+func (h *handler) auditScopeDenied(r *http.Request, reason, detail string) {
+	phrase := scopeDeniedTargetText
+	if reason == metrics.ScopeDeniedNamespace {
+		phrase = scopeDeniedNamespaceText
+	}
+	h.audit(r, "deny", "target-scope", 0, fmt.Sprintf(h.auditText(phrase), detail))
+	h.opts.Meter.TargetScopeDenied(reason)
 }

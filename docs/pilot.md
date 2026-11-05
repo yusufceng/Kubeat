@@ -312,6 +312,7 @@ sonuna not edilir. Ölçülen şey ürünün bugünkü hali olmalı.
 | Kesintiler, süreleri, MTTR | Raporlar → 7 gün → "CSV indir" |
 | Haftanın olayları ve kaçının gerçek olduğu | Olaylar → 7 gün süzgeci; her olayı ekiple "gerçek miydi?" diye işaretleyin |
 | Kim ne eklemiş, ne silmiş | Denetim kaydı |
+| Kapsam/yetki dışı hedef kurma girişimi (cross-tenant) | Denetim kaydında `deny`/`target-scope` satırları (kapsamı sınırlı kullanıcının başka ekibin Service'ine ya da API sunucusuna monitor/kanal kurma denemesi); Prometheus varsa `kubeat_target_scope_denied_total{reason}` (`reason=target` hedef kapsam dışı, `reason=namespace` düzenleme yetkisi yok) |
 | Bildirim teslim oranı | Bildirimler → "Son gönderim"; Prometheus varsa `kubeat_notifications_total` |
 | Başarısız girişler ve dizin kesintisi | Prometheus varsa `kubeat_signin_failures_total{reason}` (dizin düşünce `directory_unreachable` artar; tüm dizin/SSO girişleri genel 401 görür ve bu sırada yerel `admin` ile girilir, neden ayrıca logda) ve `kubeat_signin_throttled_total{kind}` (kaynak/hesap kilidi); `/metrics` anahtarıyla korunur |
 
