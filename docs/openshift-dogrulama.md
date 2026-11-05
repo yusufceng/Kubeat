@@ -13,7 +13,7 @@ Hepsi bir öğleden sonraya sığar.
 
 ## Ön koşullar
 
-**Desteklenen sürümler:** OpenShift 4.14 ve üstü; gerçek cluster'da doğrulanan OpenShift 4.21 (Kubernetes 1.34).
+**Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı, GKE provası kullanıcıda.
 
 - Bu sürümlerden biri (ROSA, ARO, OCP on AWS/EKS fark etmez);
   `cluster-admin` yetkisi. Kubeat'in kendisi cluster-admin istemez; kurulum

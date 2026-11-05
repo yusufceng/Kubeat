@@ -293,6 +293,65 @@ instance "instanceName given" '"prod-eu"' --set instanceName=prod-eu
 instance "instanceName with a Route" '"prod-eu"' "${ROUTE[@]}" --set instanceName=prod-eu
 instance "instanceName with a space" '"Prod EU"' --set-string 'instanceName=Prod EU'
 
+# Where the pods run and how the frontend Service is exposed, for an infra
+# node pool (nodeSelector, tolerations, priorityClassName) and for GKE's own
+# Ingress (the frontend Service's type and annotations). All off by default,
+# so the render is the same as up to 0.47; a value upgraded with
+# --reuse-values from before them renders as null, which the chart reads as
+# unset too.
+# placement NAME FILE has|lacks TEXT VALUES...: the manifest from
+# templates/FILE rendered with these values has TEXT, or lacks it.
+placement() {
+  local name="$1" file="$2" want="$3" text="$4"
+  shift 4
+  if ! helm template kubeat "$CHART" --show-only "templates/$file" "$@" >"$WORK/placement" 2>"$WORK/err"; then
+    failed "$name: refused: $(cat "$WORK/err")"
+    return
+  fi
+  if grep -qF -- "$text" "$WORK/placement"; then
+    [ "$want" = has ] || failed "$name: $file has \"$text\""
+  else
+    [ "$want" = lacks ] || failed "$name: $file lacks \"$text\""
+  fi
+}
+for file in backend.yaml frontend.yaml; do
+  comp="${file%.yaml}"
+  placement "no placement $comp" "$file" lacks "nodeSelector:"
+  placement "no placement $comp" "$file" lacks "tolerations:"
+  placement "no placement $comp" "$file" lacks "priorityClassName:"
+  placement "no placement from older values $comp" "$file" lacks "nodeSelector:" \
+    --set "$comp.nodeSelector=null" --set "$comp.tolerations=null" --set "$comp.priorityClassName=null"
+  placement "$comp nodeSelector" "$file" has "kubeat.io/role: infra" --set-json "$comp.nodeSelector={\"kubeat.io/role\":\"infra\"}"
+  placement "$comp tolerations" "$file" has "key: dedicated" \
+    --set-json "$comp.tolerations=[{\"key\":\"dedicated\",\"operator\":\"Equal\",\"value\":\"infra\",\"effect\":\"NoSchedule\"}]"
+  placement "$comp priorityClassName" "$file" has "priorityClassName: system-cluster-critical" --set "$comp.priorityClassName=system-cluster-critical"
+done
+# The frontend Service: no type (ClusterIP) and no annotations by default, a
+# NodePort or a ClusterIP with a NEG annotation for GKE's own Ingress. The
+# Service's type is a line of its own at the top of spec; a deeper type: (the
+# container's seccompProfile) is not it.
+# serviceType WANT VALUES...: whether the frontend Service sets its own type.
+serviceType() {
+  local want="$1"
+  shift
+  if ! helm template kubeat "$CHART" --show-only templates/frontend.yaml "$@" >"$WORK/placement" 2>"$WORK/err"; then
+    failed "Service type: refused: $(cat "$WORK/err")"
+    return
+  fi
+  if grep -qE '^  type:' "$WORK/placement"; then
+    [ "$want" = set ] || failed "Service type: set, want $want"
+  else
+    [ "$want" = unset ] || failed "Service type: unset, want $want"
+  fi
+}
+serviceType unset
+serviceType unset --set frontend.service=null
+serviceType set --set frontend.service.type=NodePort
+placement "Service type NodePort" frontend.yaml has "type: NodePort" --set frontend.service.type=NodePort
+placement "no Service annotations" frontend.yaml lacks "cloud.google.com/neg:"
+placement "Service annotation" frontend.yaml has "cloud.google.com/neg:" \
+  --set-json 'frontend.service.annotations={"cloud.google.com/neg":"{\"ingress\": true}"}'
+
 # Kubeat's own failures: the install notes warn while neither a heartbeat
 # nor the alert rules would tell of them, and say when no backups are taken.
 UNHEARD="nobody hears when Kubeat itself fails"

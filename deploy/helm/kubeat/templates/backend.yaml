@@ -73,6 +73,17 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       # Lets in-flight checks stop, the last results be written and the
       # notifications still waiting be sent (UPTIME_SHUTDOWN_TIMEOUT). Came
       # after 0.37.0: dig takes the default of values.yaml (_helpers.tpl).

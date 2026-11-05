@@ -28,6 +28,17 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.frontend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       containers:
         - name: frontend
           image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag | default .Chart.AppVersion }}"
@@ -99,7 +110,14 @@ metadata:
   labels:
     {{- include "kubeat.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend
+  {{- with dig "service" "annotations" (dict) .Values.frontend }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
+  {{- with dig "service" "type" "" .Values.frontend }}
+  type: {{ . }}
+  {{- end }}
   selector:
     {{- include "kubeat.selector" . | nindent 4 }}
     app.kubernetes.io/component: frontend

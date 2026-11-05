@@ -125,6 +125,21 @@ backend:
   # for checks of targets signed by an internal CA.
   extraVolumes: []
   extraVolumeMounts: []
+  # Where the backend pod runs, for a cluster that keeps Kubeat off the nodes
+  # that run the applications (a dedicated infra node pool). All empty by
+  # default: the pod runs wherever the scheduler puts it, as up to 0.47.
+  # nodeSelector matches node labels; tolerations let the pod onto tainted
+  # nodes; priorityClassName names a PriorityClass so the pod is not the first
+  # evicted under node pressure. Up to 0.47 these were applied with an Argo CD
+  # post-render patch; now they are chart values (README, "Cluster'a kurulum").
+  nodeSelector: {}
+    # kubeat.io/role: infra
+  tolerations: []
+    # - key: dedicated
+    #   operator: Equal
+    #   value: infra
+    #   effect: NoSchedule
+  priorityClassName: ""   # e.g. system-cluster-critical
 
 frontend:
   replicas: 1
@@ -163,6 +178,21 @@ frontend:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # Where the frontend pod runs; empty by default, like backend.nodeSelector,
+  # backend.tolerations and backend.priorityClassName above.
+  nodeSelector: {}
+  tolerations: []
+  priorityClassName: ""
+  # The frontend Service, which the Route or Ingress sends to. Empty type is a
+  # ClusterIP, as up to 0.47. GKE's own (GCE) Ingress needs the Service it
+  # points at to be a NodePort, or a ClusterIP with container-native load
+  # balancing (NEG): set the type and the annotation its Ingress needs here,
+  # e.g. type NodePort, or annotations cloud.google.com/neg: '{"ingress":
+  # true}' with the GCE Ingress (README, "GKE"). An ingress-nginx or OpenShift
+  # Route install leaves both empty.
+  service:
+    type: ""
+    annotations: {}
 
 # Secrets under GitOps. The chart generates four Secrets on the first
 # install and keeps them across upgrades by reading them back from the
