@@ -146,9 +146,12 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   denemeyle `UPTIME_LOGIN_LOCKOUT` süresince kilitleyebilir; IP bazlı sınır
   yoktur. Kilitli bir hesap için API anahtarı, SSO ya da backend'i yeniden
   başlatmak kalır (README, "Kilitli hesaba girmek"). Kaynak IP başına kademeli
-  throttle'a geçme (CWE-307, S65) sprint 6'ya, S63 ile birlikte ertelendi
-  ([backlog](backlog.md) "Giriş kilitlemesinin hizmet reddi riski");
-  ara önlem bu satırdaki kullanıcı-adı bazlı kilittir.
+  throttle'a geçme (CWE-307, S65) sprint 6'da ele alınıyor
+  ([#98](https://github.com/yusufceng/Kubeat/issues/98),
+  [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)); dizin
+  erişilebilirlik metriği (S63) aynı `auth.go`/Throttle yüzeyine dokunduğu için
+  S65'ten ayrılıp sprint 7'ye bırakıldı. Ara önlem bu satırdaki kullanıcı-adı
+  bazlı kilittir.
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
   bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
   sınırını tanımaz; bu yüzden
@@ -193,7 +196,14 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   ClusterIP/pod IP'leri reddedilir. Kalan sınır: her namespace'i gören bir
   kullanıcı (yönetici) her cluster içi adrese ulaşabilir ve deny-CIDR,
   ClusterIP aralığını paylaştığı için bu kullanıcılar arasında cross-tenant'ı
-  ayıramaz — hassas aralıkları yine `UPTIME_TARGET_DENY_CIDRS` daraltır. Vekil
+  ayıramaz — hassas aralıkları yine `UPTIME_TARGET_DENY_CIDRS` daraltır.
+  0.47'nin kalan boşluğu: kapsamı sınırlı bir kullanıcı cluster son ekiyle
+  bitmeyen iki etiketli kısa adla (`servis.namespace`, ör. `kubernetes.default`,
+  `api.payments`) denetimi atlayabiliyor (pod'un DNS arama alanı onu iç
+  servise/API sunucusuna çözüyor); bu boşluk sprint 6'da çözüm anında
+  (dial-time) kapsam denetimiyle kapatılıyor (S67,
+  [#95](https://github.com/yusufceng/Kubeat/issues/95),
+  [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)). Vekil
   (`HTTP_PROXY`) üzerinden giden istekte hedef backend'de çözülüp denetlenir,
   ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun ağına bağlıdır.
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye

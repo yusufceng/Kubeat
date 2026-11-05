@@ -31,7 +31,11 @@ sonunda bakar ve yön verir.
 2. **Analiz**: BA bulguları birleştirir, hikâyelere çevirir, kabul
    ölçütlerini ve kapsam dışını yazar, ilke ve ADR çakışmalarını işaretler.
    Kurulum notlarına (NOTES) dokunan hikâyede, NOTES'un gösterdiği README
-   bölümünde önerdiği değerin geçmesi kabul ölçütüdür.
+   bölümünde önerdiği değerin geçmesi kabul ölçütüdür. Cross-tenant ya da
+   SSRF gibi güvenlik maddelerinde kabul ölçütü ve reviewer sorusu ad
+   çözümünün biçimlerini tek tek sayar (çıplak IP, kısa ad, iki etiketli
+   `servis.namespace`, tam `.svc`/FQDN, API sunucusu adı) ve pod'un DNS arama
+   alanını (`ndots`) hesaba katar; negatif testler bu biçimleri içerir.
 3. **Öncelik**: PO sprint hedefini, en çok dört maddelik sıralı listeyi ve
    gerekçeli "yapılmayacaklar"ı verir. Bir hikâyenin bilinen yan etkisi
    sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
@@ -77,7 +81,11 @@ sonunda bakar ve yön verir.
    sonraki sprintin keşfi bu listenin sonucuyla ve koşulmayan maddeleriyle
    başlar. Bir hikâye bir müşterinin asıl kurulum ya da aynalama yolunu
    belgeliyorsa o yol ya CI'da koşar ya da bu listeye zorunlu prova olarak
-   yazılır; "isteğe bağlı" yalnızca yan yollar içindir.
+   yazılır; "isteğe bağlı" yalnızca yan yollar içindir. Gerçek ya da çok
+   kiracılı cluster isteyen bir güvenlik iddiası da aynıdır: sandbox provası
+   sürümden önce zorunlu prova olarak planlanır (yalnız `go test` yetmez) ya
+   da sürüm metni iddiayı temkinli yazar ("ana vektörler kapandı, prova
+   kullanıcıda"); plan iddiayı tek sürümde "tam kapandı" gibi sunmaz.
 
 Ret alan bir madde en çok üç düzeltme turu görür. Dördüncü inceleme
 sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
@@ -163,7 +171,9 @@ Etiketler: `ready-for-agent` ve `bug` / `enhancement` / `documentation`.
   ile ve bir kez `-cpu=1` ile koşar; reviewer bunu raporda arar.
 - Kabul ölçütleri reviewer tarafından diff üzerinden doğrulandı.
 - README, docs ve iki dil güncel; yeni ayar varsa README tablosu,
-  `.env.example` ve chart values de.
+  `.env.example` ve chart values de. Davranış ya da yayım değiştiren maddenin
+  belge kabul ölçütü kullanıcının okuduğu yüzeyi (README) de sayar, yalnız
+  CONTRIBUTING ya da iç belgeyi değil.
 - Ertelenen parçalar backlog'da, yol haritası satırı güncel.
 - Davranış değiştiren madde, developer raporunda sprint dosyasının
   "Yükseltme notu" başlığına bir cümle verir. Sürüm PR'ı yükseltme

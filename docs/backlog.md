@@ -1573,11 +1573,17 @@ bırakabiliyor; tam da izlemeye en çok ihtiyaç duyulan anda. Düzeltme kaynak 
 başına kademeli throttle'a geçmek ve hesabı sert kilitlememektir; bu, auth'ta
 güvenlik tavizi olan bir tasarım değişikliğidir (IP throttle dağıtık tahmine
 daha zayıf, ama meşru kullanıcıyı kilitlemez) ve aceleye getirilmemeli. Bugünkü
-risk sınırlı ve kendiliğinden geçen 15 dakikalık bir kilit. Tetikleyici:
-sprint 6, S63 ile birlikte (sprint 5 güvenlik kapasitesi S64'e gitti ve S65
-S63 ile aynı `auth.go`/Throttle yüzeyine dokunduğu için verilmiş karar
-sprint 6'ya ertelendi, [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)); bir ADR ile karar verilir. Ara önlem: güçlü parolalar ve
-`login_failed` denetim kaydının izlenmesi.
+risk sınırlı ve kendiliğinden geçen 15 dakikalık bir kilit.
+
+Güncelleme (2026-11-05, sprint 6 planı; [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)):
+sprint 6'ya **alındı** (S65, [#98](https://github.com/yusufceng/Kubeat/issues/98)),
+gerçek bir DoS açığı olduğu ve aynı sprintte public GKE Ingress belgelenirken
+(S3+S60) yöneticiyi dışarıda bırakan kilidi açık tutmak tutarsız olduğu için.
+S63 (dizin erişilebilirlik metriği) aynı `auth.go`/Throttle yüzeyine dokunduğu
+için S65'ten ayrıldı ve sprint 7'ye bırakıldı (rebase churn'ünü önlemek ve S63'ün
+ara sinyali zaten var olduğu için). Bir ADR ile karar verilir (hesap-başına sert
+kilitten IP-başına throttle'a geçiş, taviz ve XFF/vekil güveni). Ara önlem:
+güçlü parolalar ve `login_failed` denetim kaydının izlenmesi.
 
 ## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
 
@@ -1594,3 +1600,76 @@ sertleştirme bloğunun örneklenmesi. 0.46.0 için geçici "bilinen-açık" sat
 yazılmaz: 0.46.1 + advisory kullanıcıda bekliyor ve 0.47.0 fixleri zaten
 taşıyacak. Tetikleyici: ilk gerçek internete açık (GKE Ingress) çok kiracılı
 kurulum ya da bir güvenlik incelemesi.
+
+Güncelleme (2026-11-05, sprint 6 planı; [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)):
+tetikleyici büyük ölçüde karşılandı — Müşteri A'nın güvenlik ekibi incelemesi
+ve 30 cluster / 60 ekip yaygınlaştırma kararı güvenlik incelemesi bağlamını
+sağladı. Yine de liste S67 (iki etiketli ad + dial-time kapsam, #95) kapsam
+sınırı metnini değiştireceği için **S67'den sonra** yazılmalı; kapasite gereği
+bir sprint kaydı. **Güçlü sprint-7 adayı**, S67 merge sonrası alınır.
+
+## Kapsam/yetki dışı hedef reddini denetim kaydına ve metriğe yazmak (S68)
+
+2026-11-05'te sprint 7 kuyruğuna alındı (sprint 6 planı; [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)).
+SRE orta + Müşteri A önemli: `targetInScope` reddi (`monitors.go:738,806,990` ve
+`alerting.go:450,550`) yalnız 403 ile `writeError`'dan çıkıyor; `h.audit` yalnız
+başarıda çağrılıyor ve `metrics.go`'da kapsam/forbidden sayacı yok. Müşteri A:
+"Bir ekibin başka ekibin Service'ine ya da API sunucusuna monitor/kanal kurma
+GİRİŞİMİNİ 90 günlük denetim kaydında görmek ve SOC'a alarm bağlamak istiyorum."
+`login_failed` denetleniyorken bu denetlenmiyor. İş: kapsam dışı hedef reddi (ve
+ilgili CanEdit reddi) bir denetim satırı (`deny`/`target-scope`) üretir ve reason
+etiketli bir sayaç (`kubeat_target_scope_denied_total{reason}`) eklenir; istemci
+yanıtı yine 403. Gözlemlenebilirlik, savunmanın kendisi değil. Tetikleyici:
+S67 merge sonrası (`targetscope.go`'ya S67 ağır dokunuyor ve iki etiketli ad S67
+kapanana kadar denetime hiç girmiyor, metrik ancak S67'den sonra tam anlamlı);
+sprint 7'de S67 yerleşince alınır.
+
+## 0.47.0'ın güvenlik sürümü olduğunu ve eski minor'ların açık kaldığını belgelemek (S69)
+
+2026-11-05'te sprint 7 kuyruğuna alındı (sprint 6 planı; [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)).
+Ece yüksek, S boyutlu pure docs: "0.46.0'daki bir operatör olarak hangi
+yükseltmenin güvenlik için acil olduğunu README/SECURITY/yükseltme notundan
+anlamak istiyorum." 0.47.0 #77-81 Strix düzeltmelerini (palette sızıntısı, giriş
+enum, iç IP maskesi, SSRF deny-CIDR) kamuya açıyor ama hiçbir belge 0.47.0'ı
+güvenlik sürümü olarak adlandırmıyor (SECURITY.md genel "son minor'a yükseltin"
+diyor, `docs/yukseltme.md` "0.47'ye yükseltme" güvenlik düzeltmesinden söz etmiyor).
+İş: `docs/yukseltme.md` ve SECURITY.md'ye 0.47.0'ın güvenlik düzeltmelerini kamuya
+açtığı, eski minor'ların açık olduğu ve 0.46.1'in yalnız 0.46 hattına geri taşıma
+olduğu cümleleri. Dörtlü cap ve öncelik kuralı gereği gerçek DoS fix (S65) öne
+geçti; 0.46.1 + advisory kullanıcıda ve advisory bunu kısmen duyuracak. Metin
+advisory çıkmadan da doğru olmalı. Tetikleyici: sprint 7'de ilk doküman dokunuşuna
+katlanacak S boyutlu iş.
+
+## Kaldır+yeniden kurulumda kimlik Secret'larının sahiplenilmesini ve rotasyonun etkisizliğini belgelemek (S70)
+
+2026-11-05'te ertelendi (sprint 6 planı; [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)).
+SRE/Ece orta, yalnız belge: 0.47.0'da `keepOnUninstall` varsayılan `true`
+(`values.yaml:70,287`) kaldırmada admin/API/metrik Secret'larını ve veri PVC'sini
+bırakıyor; aynı adla yeniden kurulum eski parola/token'ları sessizce sahipleniyor.
+SRE: "Yönetici parolası/token sızarsa kaldırıp yeniden kurarak temiz, döndürülmüş
+kimliğe dönmek istiyorum" ama uninstall+install rotasyon sanılıyor, token/parola
+değişmiyor; `yol-haritasi.md` "token rotasyonu" yalnız `UPTIME_SECRET_KEY`'i anıyor
+(165-167). Ece: temiz sıfırlama beklerken eski kimlik/veri geliyor ve GKE'de iki PD
+ücret yazıyor. İş yalnız belge (S39 keep davranışı değişmez, sprint 4 kararı):
+README "Güvenlik"/rotasyon ve `docs/yedek-geri-yukleme.md`'ye "kimlik döndürmek
+için ilgili Secret'ı elle silip/düzenleyip yeniden oluşturun; uninstall+install
+rotasyon değildir", NOTES.txt'e temiz sıfırlama (`keepOnUninstall=false`) cümlesi.
+Müşteriyi engellemiyor, aciliyeti düşük. Tetikleyici: gerçek yeniden kurulumda
+sahiplenme provası (kullanıcıda) ya da bir sonraki rotasyon/belge turu; herhangi
+bir yedek-geri-yukleme/NOTES dokunuşuna katlanabilir.
+
+## Başarısız kontrol hatasında yalnız iç cluster adresini maskelemek, public hedef IP'sini açık bırakmak (S71)
+
+2026-11-05'te ertelendi (sprint 6 planı; [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)).
+Ece "hoş olur", Müşteri A ilgisiz: `addrmask.Mask` her IPv4/köşeli-IPv6 adresini
+maskeliyor (`addrmask.go:15-22`, ayrım yok), oysa belgelenen amaç yalnız iç cluster
+adresini gizlemek (README "Başarısız kontrolün ayrıntıları"); public hedefin
+`dial tcp <public-ip>:443` hatası da `[address hidden]` oluyor, güvenlik kazancı
+yok. Ece: "GKE'den kendi public SaaS URL'lerimi izliyorum; bir kontrol düşünce
+bildirimdeki hatada çözülen IP'yi hızlıca görmek istiyorum." İş: maskeleme yalnız
+`netguard.InCluster` olan (iç) adreslere uygulanır; public bir hedefin IP'si hata
+metninde kalır; ADR-0003 (d) ve README "Başarısız kontrolün ayrıntıları" bugün
+"çözülen IPv4/IPv6 adresleri de maskelenir" diyen ayrımsız metni düzeltir.
+`diagnostics.address` (ip:port) belgelenmiş tanı alanı olarak açık kalır (ADR-0003 d).
+Düşük öncelik, PO kararı; ADR-0003 (d) güncellemesi ister. Tetikleyici: herhangi
+bir addrmask/ADR-0003 (d) dokunuşuna katlanabilir; bağımsız slot şişme olur.
