@@ -164,6 +164,12 @@ type Options struct {
 	// notification the receiver did not take.
 	RetryMax time.Duration
 	RetryFor time.Duration
+	// HumanRetryMax is a shorter cap for the channels people read (not
+	// webhook or PagerDuty): their attempts again back off to it at most, and
+	// wait out a refusal for it, so that a stale page does not reach a chat
+	// long after the outage. Zero, the default, leaves them on RetryMax. It
+	// does not turn the attempts off for them; RetryMax alone does that.
+	HumanRetryMax time.Duration
 	// Language the notifications are written in; English when empty.
 	Language string
 	// PublicURL is Kubeat's address as its users reach it, for the links
@@ -200,6 +206,11 @@ type Engine struct {
 	sender Sender
 	opts   Options
 	queue  chan Notification
+	// resume carries the IDs of channels a test or a save said are reachable
+	// again (Resume): the loop lifts their pause and brings forward what
+	// waits for them (schedule.resume). Buffered and sent to without
+	// blocking, so the API never waits on the loop.
+	resume chan int64
 	// owed is what the channels with a delay or a repeat interval are
 	// still owed about the open outages; only Run's goroutine touches it.
 	owed *schedule
@@ -217,7 +228,8 @@ type Engine struct {
 
 // New returns an Engine. Run must be started for notifications to be sent.
 func New(st Store, sender Sender, opts Options) *Engine {
-	return &Engine{store: st, sender: sender, opts: opts, queue: make(chan Notification, opts.QueueSize), owed: newSchedule(),
+	return &Engine{store: st, sender: sender, opts: opts, queue: make(chan Notification, opts.QueueSize),
+		resume: make(chan int64, max(opts.QueueSize, 1)), owed: newSchedule(),
 		now: time.Now, started: time.Now().Truncate(time.Millisecond), halt: context.Background()}
 }
 
@@ -595,6 +607,13 @@ func (e *Engine) Run(ctx context.Context) {
 		case n := <-e.queue:
 			add(n)
 			rearm()
+		case chID := <-e.resume:
+			// A channel test or save said the channel is reachable again:
+			// lift its pause and send what waited for it now.
+			if e.owed.resume(chID, e.now()) {
+				flush(false)
+			}
+			rearm()
 		case <-timer.C:
 			flush(false)
 			rearm()
@@ -602,6 +621,9 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 	}
 	timer.Stop()
+	// Resumes that arrived take effect before the drain, so what waited for
+	// a channel just confirmed reachable goes out now.
+	e.applyResumes()
 	// Shutting down: the groups people wait for go first, ahead of the
 	// queue, whose channels software reads may be slow to answer; then
 	// what is queued, the groups it makes and what is owed by then, as
@@ -625,6 +647,34 @@ func (e *Engine) Run(ctx context.Context) {
 	if left > 0 {
 		e.opts.Logger.Warn("shutting down: notifications not sent within UPTIME_SHUTDOWN_TIMEOUT; the outages among them are sent at the next start",
 			"count", left)
+	}
+}
+
+// Resume tells the delivery loop a channel is reachable again — a channel
+// test just succeeded, or the channel was saved — so that it lifts the
+// channel's pause and brings forward the outages that waited for it
+// (schedule.resume), rather than letting them sit out the back-off. Safe to
+// call from any goroutine; it never blocks, and a resume lost to a full
+// buffer only leaves the channel to its own next retry, no worse than
+// before.
+func (e *Engine) Resume(channelID int64) {
+	select {
+	case e.resume <- channelID:
+	default:
+	}
+}
+
+// applyResumes drains the resume signals waiting now and lifts each
+// channel's pause, bringing forward what waits for it (schedule.resume).
+// Only Run's goroutine calls it, so the schedule stays single-writer.
+func (e *Engine) applyResumes() {
+	for {
+		select {
+		case chID := <-e.resume:
+			e.owed.resume(chID, e.now())
+		default:
+			return
+		}
 	}
 }
 
@@ -1023,10 +1073,17 @@ func (e *Engine) sendWithRetry(ctx context.Context, ch store.Channel, n Notifica
 	}
 }
 
-// SendOnce makes a single delivery attempt, bounded by SendTimeout. An
-// attempt already under way is not cut short by shutdown.
+// SendOnce makes a single delivery attempt, bounded by SendTimeout, and
+// skips the delivery queue so a channel test does not wait behind the
+// outages. An attempt already under way is not cut short by shutdown. A
+// test that succeeds resumes the channel (Resume): the receiver answered,
+// so what waited for it need not sit out the back-off.
 func (e *Engine) SendOnce(ctx context.Context, ch store.Channel, n Notification) error {
-	return e.sendWithin(context.WithoutCancel(ctx), ch, n)
+	err := e.sendWithin(context.WithoutCancel(ctx), ch, n)
+	if err == nil {
+		e.Resume(ch.ID)
+	}
+	return err
 }
 
 // sendWithin makes a single delivery attempt within ctx and SendTimeout.

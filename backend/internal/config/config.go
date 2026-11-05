@@ -219,6 +219,11 @@ type Config struct {
 	// with a warning (see Load).
 	NotifyRetryMax time.Duration // UPTIME_NOTIFY_RETRY_MAX; 0 = off
 	NotifyRetryFor time.Duration // UPTIME_NOTIFY_RETRY_FOR; 0 = the end is not sent again
+	// NotifyHumanRetryMax is a shorter cap than NotifyRetryMax for the
+	// channels people read, so that a stale page does not reach a chat long
+	// after the outage; 0, the default, leaves them on NotifyRetryMax. Like
+	// it, a value under the floor is raised to it with a warning (see Load).
+	NotifyHumanRetryMax time.Duration // UPTIME_NOTIFY_HUMAN_RETRY_MAX; 0 = same as UPTIME_NOTIFY_RETRY_MAX
 
 	// A Prometheus-compatible server (on OpenShift, Thanos Querier) from
 	// which pod CPU and memory usage is read; off while the URL is empty.
@@ -542,19 +547,31 @@ func Load() (Config, error) {
 	if cfg.NotifyRetryMax, err = envDurationOrZero("UPTIME_NOTIFY_RETRY_MAX", 15*time.Minute); err != nil {
 		return Config{}, err
 	}
+	if cfg.NotifyHumanRetryMax, err = envDurationOrZero("UPTIME_NOTIFY_HUMAN_RETRY_MAX", 0); err != nil {
+		return Config{}, err
+	}
 	// The wait between the attempts starts at a minute and is capped by
 	// RETRY_MAX; a cap under a minute, or under the length of one attempt
 	// (its tries and the pauses between them), would send to a channel that
 	// is down without a pause. A shorter cap is raised to that floor and
 	// said, not refused: a value an earlier version took, or one that
 	// longer attempts have since overtaken, must not keep the monitoring
-	// from starting. Only this setting is raised; the others are refused.
+	// from starting. Only these two settings are raised; the others are refused.
 	attempt := time.Duration(cfg.NotifyAttempts) * (cfg.NotifyTimeout + cfg.NotifyRetryDelay)
-	if floor := max(time.Minute, attempt); cfg.NotifyRetryMax > 0 && cfg.NotifyRetryMax < floor {
+	floor := max(time.Minute, attempt)
+	if cfg.NotifyRetryMax > 0 && cfg.NotifyRetryMax < floor {
 		cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("UPTIME_NOTIFY_RETRY_MAX (%s) is shorter than 1m or one attempt, "+
 			"UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY) = %s: raised to %s; "+
 			"set it to that or longer, or to 0 to send nothing again", cfg.NotifyRetryMax, attempt, floor))
 		cfg.NotifyRetryMax = floor
+	}
+	// The shorter cap for the channels people read has the same floor; 0
+	// leaves them on RETRY_MAX.
+	if cfg.NotifyHumanRetryMax > 0 && cfg.NotifyHumanRetryMax < floor {
+		cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("UPTIME_NOTIFY_HUMAN_RETRY_MAX (%s) is shorter than 1m or one attempt, "+
+			"UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY) = %s: raised to %s; "+
+			"set it to that or longer, or to 0 to use UPTIME_NOTIFY_RETRY_MAX", cfg.NotifyHumanRetryMax, attempt, floor))
+		cfg.NotifyHumanRetryMax = floor
 	}
 	if cfg.NotifyRetryFor, err = envDurationOrZero("UPTIME_NOTIFY_RETRY_FOR", time.Hour); err != nil {
 		return Config{}, err

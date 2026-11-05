@@ -559,6 +559,35 @@ func TestNotifyRetryMaxIsRaisedToItsFloor(t *testing.T) {
 	}
 }
 
+// HUMAN_RETRY_MAX, the shorter cap for the channels people read, defaults to
+// 0 (the same as RETRY_MAX), is refused when negative or not a duration, and
+// is raised to the same floor as RETRY_MAX when set shorter.
+func TestNotifyHumanRetryMax(t *testing.T) {
+	load := func(value string) (time.Duration, []string, error) {
+		t.Helper()
+		t.Setenv("UPTIME_NOTIFY_HUMAN_RETRY_MAX", value)
+		cfg, err := Load()
+		return cfg.NotifyHumanRetryMax, cfg.Warnings, err
+	}
+	for value, want := range map[string]time.Duration{"": 0, "0": 0, "0s": 0, "3m": 3 * time.Minute, "2m": 2 * time.Minute} {
+		if got, warnings, err := load(value); err != nil || got != want || len(warnings) != 0 {
+			t.Errorf("UPTIME_NOTIFY_HUMAN_RETRY_MAX=%q: %s, warnings %q, %v; want %s and none", value, got, warnings, err, want)
+		}
+	}
+	for _, bad := range []string{"-1m", "soon"} {
+		if _, _, err := load(bad); err == nil {
+			t.Errorf("UPTIME_NOTIFY_HUMAN_RETRY_MAX=%q was accepted", bad)
+		}
+	}
+	// A value under the floor (1m with the default attempt) is raised with a
+	// warning that names it and the floor, as RETRY_MAX is.
+	got, warnings, err := load("30s")
+	if err != nil || got != time.Minute || len(warnings) != 1 ||
+		!strings.Contains(warnings[0], "UPTIME_NOTIFY_HUMAN_RETRY_MAX (30s)") || !strings.Contains(warnings[0], "raised to 1m0s") {
+		t.Errorf("UPTIME_NOTIFY_HUMAN_RETRY_MAX=30s: %s, warnings %q, %v; want 1m and one warning", got, warnings, err)
+	}
+}
+
 // The name of the installation in notifications: as given, or else the
 // host of the public address, or none.
 func TestInstanceName(t *testing.T) {

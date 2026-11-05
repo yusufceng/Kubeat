@@ -1288,3 +1288,144 @@ func TestAHeldBackSlownessNotificationGivesWayToANewerOne(t *testing.T) {
 		t.Errorf("%d notes left waiting, want none", n)
 	}
 }
+
+// After a restart, an outage a channel did not take is not sent again while
+// its monitor is in maintenance: retryUndelivered respects the window as the
+// owed outages do (TestRestartKeepsAnOutageSilencedInMaintenance), so a
+// channel coming back to a monitor still under maintenance does not wake
+// people with a stale page. (S27, the night notification Ece paid for.)
+func TestARestartDoesNotResendAnOutageInMaintenance(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook without a delay
+	f.useClock()
+	f.retrying(15*time.Minute, time.Hour)
+	f.sender.fail("ops", 1)
+	f.check(false) // 0:30: the outage opens and ops does not take it
+	f.flush()
+	if got := f.sender.log(); got != "" {
+		t.Fatalf("before the restart: %q, want nothing taken", got)
+	}
+	// A maintenance window opens over the monitor, and the process restarts
+	// in it.
+	f.maintain(time.Hour)
+	f.restart()
+	f.flush()
+	if got := f.sender.log(); got != "" {
+		t.Fatalf("in maintenance after the restart: %q, want the stale outage silenced", got)
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries queued in maintenance, want none", n)
+	}
+	// Were it not in maintenance the restart would send it again
+	// (TestARestartSendsAnOutageNotTakenAgain).
+}
+
+// A paused channel is sent nothing until its retry falls due; a successful
+// channel test (SendOnce) says the channel is reachable again and brings
+// that retry forward, so the pending outage goes out at once rather than
+// after the back-off (#62). The test itself still skips the delivery queue.
+func TestAChannelTestResumesAPausedChannel(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook, takes everything
+	f.useClock()
+	f.retrying(15*time.Minute, time.Hour)
+	chat := f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	f.sender.fail("chat", 1)
+	f.check(false) // 0:30: the outage opens; chat does not take it and is paused
+	f.flush()
+	if got := f.sender.log(); got != "ops:down" {
+		t.Fatalf("at the outage: %q, want ops told and chat paused", got)
+	}
+	if !f.engine.owed.failing[chat.ID] {
+		t.Fatal("chat not paused after it took none")
+	}
+	if n := len(f.engine.owed.retries); n != 1 || !f.engine.owed.retries[0].due.After(f.clock) {
+		t.Fatalf("retries = %+v, want chat's one due later", f.engine.owed.retries)
+	}
+
+	// The user tests the channel and it answers now: the test lifts the
+	// pause and brings the pending outage forward, with the clock unmoved.
+	if err := f.engine.SendOnce(context.Background(), chat, Notification{Event: EventTest}); err != nil {
+		t.Fatalf("channel test: %v", err)
+	}
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,chat:test,chat:down" {
+		t.Errorf("after the test: %q, want chat:test then the pending outage brought forward", got)
+	}
+	if f.engine.owed.failing[chat.ID] {
+		t.Error("chat still paused after a successful test")
+	}
+	if n := len(f.engine.owed.retries); n != 0 {
+		t.Errorf("%d retries after chat took the outage, want none", n)
+	}
+}
+
+// Saving a channel resumes it the same way the API does (Engine.Resume,
+// called after create and update): a channel the user re-saved after fixing
+// it has its pending outages brought forward rather than left to the
+// back-off. A failed test does not resume the channel.
+func TestResumeBringsForwardAPausedChannelsOutage(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook
+	f.useClock()
+	f.retrying(15*time.Minute, time.Hour)
+	chat := f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	f.sender.fail("chat", 2) // the outage and a failed test both do not reach it
+	f.check(false)
+	f.flush()
+	if !f.engine.owed.failing[chat.ID] || len(f.engine.owed.retries) != 1 {
+		t.Fatalf("chat not paused with one retry: failing=%v retries=%d", f.engine.owed.failing[chat.ID], len(f.engine.owed.retries))
+	}
+	due := f.engine.owed.retries[0].due
+
+	// A failed test leaves the pause and the back-off as they were.
+	if err := f.engine.SendOnce(context.Background(), chat, Notification{Event: EventTest}); err == nil {
+		t.Fatal("the test was expected to fail")
+	}
+	f.flush()
+	if !f.engine.owed.failing[chat.ID] {
+		t.Error("a failed test lifted the pause")
+	}
+	if got := f.engine.owed.retries[0].due; !got.Equal(due) {
+		t.Errorf("a failed test moved the retry to %s, want it at %s", got.Sub(f.clock), due.Sub(f.clock))
+	}
+
+	// Saving the channel resumes it: the pending outage goes in the next pass.
+	f.engine.Resume(chat.ID)
+	f.flush()
+	if got := f.sender.log(); got != "ops:down,chat:down" {
+		t.Errorf("after the save: %q, want the pending outage brought forward", got)
+	}
+	if f.engine.owed.failing[chat.ID] || len(f.engine.owed.retries) != 0 {
+		t.Errorf("chat not resumed: failing=%v retries=%d", f.engine.owed.failing[chat.ID], len(f.engine.owed.retries))
+	}
+}
+
+// HumanRetryMax caps the back-off of the channels people read: a chat's wait
+// doubles 1m, 2m, then holds at HumanRetryMax, not the 15m RetryMax a
+// webhook reaches (TestTheWaitDoublesUpToTheCap), so a stale page does not
+// reach a chat long after the outage. Zero, the default, leaves them on
+// RetryMax, as every other retry test runs. The channels software read are
+// untouched: retryCap returns RetryMax for them.
+func TestHumanRetryMaxCapsTheBackOffOfTheChannelsPeopleRead(t *testing.T) {
+	f := newFixture(t, 1, 1) // "ops", a webhook, takes the outage
+	f.useClock()
+	f.retrying(15*time.Minute, time.Hour)
+	f.engine.opts.HumanRetryMax = 2 * time.Minute
+	f.addChannel(store.Channel{Name: "chat", Type: store.ChannelSlack, Target: "http://unused"})
+	f.sender.fail("chat", 10) // chat does not answer for the length of the test
+	f.check(false)
+	f.flush()
+	if got := f.sender.log(); got != "ops:down" {
+		t.Fatalf("at the outage: %q, want ops told and chat paused", got)
+	}
+	ctx := context.Background()
+	for i, wait := range []time.Duration{time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute} {
+		if n := len(f.engine.owed.retries); n != 1 {
+			t.Fatalf("after %d failed attempts: %d retries, want chat's one", i+1, n)
+		}
+		r := f.engine.owed.retries[0]
+		if r.channel.Name != "chat" || !r.due.Equal(f.clock.Add(wait)) || r.attempts != i+1 {
+			t.Fatalf("after %d failed attempts: %s due in %s with %d attempts, want chat due in %s", i+1, r.channel.Name, r.due.Sub(f.clock), r.attempts, wait)
+		}
+		f.clock = r.due
+		f.engine.deliverOwed(ctx)
+	}
+}

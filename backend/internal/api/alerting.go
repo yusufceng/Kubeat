@@ -480,6 +480,7 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.audit(r, "create", "channel", c.ID, fmt.Sprintf("%s (%s)", c.Name, c.Type))
+	h.resumeChannel(c.ID)
 	writeJSON(w, http.StatusCreated, toChannelResponse(c))
 }
 
@@ -602,7 +603,18 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, err)
 	default:
 		h.audit(r, "update", "channel", updated.ID, updated.Name)
+		h.resumeChannel(updated.ID)
 		writeJSON(w, http.StatusOK, toChannelResponse(updated))
+	}
+}
+
+// resumeChannel lifts a saved channel's delivery pause, so what waited for a
+// channel the user has just fixed goes out at once rather than after the
+// back-off (alert.Engine.Resume). A handler built without a notifier (some
+// tests) does nothing.
+func (h *handler) resumeChannel(id int64) {
+	if h.opts.Notifier != nil {
+		h.opts.Notifier.Resume(id)
 	}
 }
 
