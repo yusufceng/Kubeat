@@ -985,6 +985,19 @@ Almıyor sayılan kanala bekletilen hatırlatma, sertifika ve yavaşlık
 bildirimlerinin sayısı hâlâ yalnızca `notifications held back` log
 satırında; o kısım bu maddede kalır, tetikleyicisi değişmedi.
 
+4. köşe kapandı (S27, #96): yeniden başlatmada monitor bakımdaysa teslim
+edilememiş kesinti artık yeniden gönderilmez (`retryUndelivered`
+`InMaintenance`'a bakar), gece bildirimi gitmez; mevcut maintenance testleri
+(S25/S26) geçer. Kuyruk en yüksek değeri (high-water) metriği
+(`kubeat_notification_queue_length_max`, Müşteri A'nın kuyruk doluluğu gauge
+önerisi, scrape'ler arası ani dolmayı yakalardı) S27'nin kapsamında "sığarsa"
+sayıldı ama bu sürüme alınmadı: `kubeat_notification_queue_length` anlık
+değeri çoğu durumu gösteriyor ve high-water, motorun her geçişte örnekleyip
+scrape'te sıfırlayan yeni bir durumunu ister. Bu maddede kalır; tetikleyici
+`metrics`/`alert` paketine sonraki gözlemlenebilirlik dokunuşu ya da pilotta
+ani kuyruk dolması görülmesi. Bekletilen hatırlatma/sertifika/yavaşlık
+sayısı da bu maddede.
+
 ## Duyurulan bakımı durum sayfası ve rapor uptime'ından ayırmak
 
 2026-10-29'da ertelendi (S45,
