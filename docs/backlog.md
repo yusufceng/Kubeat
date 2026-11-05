@@ -1551,6 +1551,19 @@ politikası", [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)
 Deny-CIDR derinlemesine savunma olarak kalır (cross-tenant'ı tek başına
 ayıramaz, çünkü ClusterIP aralığı paylaşılır).
 
+## Sınırlı kullanıcının çıplak ClusterIP ile cluster içi hedef izlemesi
+
+2026-11-04'te bilerek kapatıldı (S64, [#84](https://github.com/yusufceng/Kubeat/issues/84)):
+kapsamı sınırlı bir kullanıcı, adından namespace'i okunamayan bir cluster içi
+hedefe (çıplak ClusterIP, pod IP'si) monitor ya da kanal webhook'u kuramaz,
+çünkü kapsam denetimi hedefi bir namespace'e bağlayamaz. Gereksinim doğarsa
+ileride sınırlı kullanıcı için de servis adıyla (ClusterIP yerine) izleme
+açılabilir. Tetikleyici: çıplak ClusterIP ile cluster içi hedef izlemesi gereken
+sınırlı bir kullanıcının isteği. (Ayrı ve açık konu: iki etiketli kısa ad
+`servis.namespace` kapsam denetimini atlıyor — S64 takibi,
+[sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md) "Müşterilerin
+yeni bulguları" 1.)
+
 ## Giriş kilitlemesinin hizmet reddi riski (CWE-307)
 
 2026-11-04'te ertelendi (yetkili güvenlik değerlendirmesi). Giriş kilitlemesi

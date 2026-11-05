@@ -86,6 +86,15 @@ sınırlayacağımızdır.
   adres yalnızca belgelenmiş `diagnostics.address` alanında kalır.
 - **Cross-tenant savunma (c).** Deny-CIDR, API sunucusu ve ekip Service'leri
   meşru izlenenlerle aynı ClusterIP aralığını paylaştığı için cross-tenant
-  erişimi ayıramaz; gerçek savunma (c)'deki kullanıcı başına kapsamdır (README
-  "Hedef politikası"). Deny-CIDR ve `UPTIME_CHECK_SHOW_VALUE=false`
-  derinlemesine savunma olarak kalır.
+  erişimi ayıramaz; erişimi asıl sınırlayan (c)'deki kullanıcı başına
+  kapsamdır (README "Hedef politikası"). Deny-CIDR ve
+  `UPTIME_CHECK_SHOW_VALUE=false` derinlemesine savunma olarak kalır.
+- **Kapsamın kalan boşluğu (0.47).** Kapsam, hedefi `netguard.InCluster` ile
+  adından sınıflar; bir cluster son ekiyle bitmeyen iki etiketli kısa ad
+  (`api.odeme`, `kubernetes.default`) cluster dışı sayılır ve kapsam onu
+  kısıtlamaz, oysa backend pod'unun DNS arama alanı (`ndots`) onu cluster
+  içindeki bir Service'e ya da API sunucusuna çözebilir. Bu yüzden (c) ana
+  vektörleri (çıplak ClusterIP, kısa ad, tam `.svc`/FQDN, API sunucusunun
+  `.svc` adı) kapsar ama 0.47'de tek başına tam cross-tenant yalıtımı sağlamaz.
+  İki etiketli kısa adın kapsanması ve çözüm biçiminin hesaba katılması
+  docs/backlog.md'de izlenir (sprint 6 adayı).
