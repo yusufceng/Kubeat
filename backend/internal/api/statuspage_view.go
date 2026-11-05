@@ -286,7 +286,7 @@ func (h *handler) unlockStatusPage(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	attempt, lockedFor, ok := h.opts.Throttle.Begin(key, now)
 	if !ok {
-		writeError(w, http.StatusTooManyRequests, tooManyAttempts(lockedFor))
+		tooManyAttempts(w, lockedFor)
 		return
 	}
 	undo := func() { h.opts.Throttle.Undo(key, now) }

@@ -103,10 +103,12 @@ func TestLoadDefaults(t *testing.T) {
 		PasswordMinLength: 8,
 		AuditRetention:    90 * 24 * time.Hour,
 
-		LoginThrottleMaxKeys: 100000,
-		LoginConcurrency:     0, // half the CPUs
-		LoginQueueWait:       3 * time.Second,
-		LoginAuditPerMinute:  60,
+		LoginThrottleMaxKeys:    100000,
+		LoginConcurrency:        0, // half the CPUs
+		LoginQueueWait:          3 * time.Second,
+		LoginAuditPerMinute:     60,
+		LoginAccountMaxFailures: 50,
+		// TrustProxyHops defaults to 0: no trusted proxy, use the peer.
 
 		LDAPUserFilter:       "(uid={username})",
 		LDAPDisplayNameAttr:  "cn",

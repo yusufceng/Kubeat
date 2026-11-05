@@ -993,11 +993,36 @@ olamaz: `admin`, `administrator`, `password`, `changeme`, `kubeat`,
 hesapta, kullanıcı oluştururken, parola sıfırlarken ya da değiştirirken ve
 `UPTIME_ADMIN_PASSWORD`'da.
 
-**Deneme sınırı.** Bir kullanıcı adı için `UPTIME_LOGIN_LOCKOUT` (15 dk)
-içinde `UPTIME_LOGIN_MAX_FAILURES` (10) hatalı denemeden sonra giriş o ad
-için kapanır; süre dolana kadar doğru parola da reddedilir (429). Deneme,
-parola denetlenmeden önce sayılır: aynı anda gönderilen istekler de sınırı
-aşamaz. Dizine ulaşılamaması ya da devre dışı bir hesabın doğru parolası
+**Deneme sınırı.** Giriş denemeleri kaynak adrese göre sınırlanır: bir
+kullanıcı adı için **tek bir kaynaktan** `UPTIME_LOGIN_LOCKOUT` (15 dk)
+içinde `UPTIME_LOGIN_MAX_FAILURES` (10) hatalı denemeden sonra o kaynağın o
+ada yönelik girişleri kapanır; süre dolana kadar o kaynaktan doğru parola da
+reddedilir (429 + `Retry-After`). Kilit kaynağa bağlı olduğundan, adını bilen
+biri bir hesabı — her zaman var olan `admin` dahil — herkes için kilitleyemez:
+meşru sahip başka bir adresten girmeye devam eder (CWE-307,
+[ADR-0004](docs/adr/0004-giris-kilitleme-stratejisi.md)).
+
+Buna ek olarak bir adın **tüm kaynaklardaki** başarısızlıkları için gevşek,
+çok yüksek bir tavan vardır (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, 50; `0`
+kapatır): dağıtık bir tahmin (çok sayıda IP) sonsuza dek süremesin diye. Tek
+bir kaynak birincil sınırla (10) bu tavanın çok altında tutulduğundan meşru
+sahibin kendi hataları tavana ulaşmaz; tavan ancak çok sayıda ayrı kaynaktan
+gelen toplam denemeyle tetiklenir ve o zaman hesap, meşru sahip dahil, kilit
+süresince kilitlenir (ADR-0004 "Sonuçlar", kabul edilen taviz).
+
+Kaynak adresi `UPTIME_TRUST_PROXY_HOPS` ile belirlenir: önünüzdeki kendi
+vekillerinizin (Ingress, Route, yük dengeleyici) sayısı. `0` (varsayılan)
+hiçbir `X-Forwarded-For` başlığına güvenmez ve bağlanan eşi (peer) kullanır.
+Bir vekil arkasında eş hep vekilin tek adresidir, tüm istemciler için aynı; o
+yüzden **internete açık bir girişte bu değeri gerçek vekil sayısına ayarlayın**,
+yoksa throttle kaynakları ayırt edemez ve tek bir paylaşılan, ada-başına kilide
+geriler (0.47.0 davranışı). `N` ayarlandığında istemci `X-Forwarded-For`'un
+sağdan N girdisine (vekillerinizin eklediği) göre okunur; solundaki girdiler
+(istemcinin uydurabileceği) yok sayılır. Değeri gerçek vekil sayısından büyük
+ayarlamak başlığın uydurulmasına izin verir.
+
+Deneme, parola denetlenmeden önce sayılır: aynı anda gönderilen istekler de
+sınırı aşamaz. Dizine ulaşılamaması ya da devre dışı bir hesabın doğru parolası
 deneme sayılmaz; dizindeki parolası doğru olup burada rolü olmayan birinin
 girişi ise sayılır. Parola değiştirirken sorulan mevcut parola da aynı sınırla,
 ayrı bir sayaçla korunur. Sayaç backend belleğindedir, yeniden başlatınca
@@ -1067,10 +1092,15 @@ gizleyemez.
 kayıtta `api-token` olarak görünür. Arayüz artık bu anahtarı kullanmaz;
 her isteği kullanıcının oturumuyla yapar.
 
-**Kilitli hesaba girmek.** Kilit kullanıcı adına göredir: adını bilen biri
-bir hesabı hatalı denemelerle, örneğin her zaman var olan `admin`'i,
-kilitleyebilir. Kilit sürerken açık oturumlar çalışmaya devam eder. Başka
-yollar önceden hazır tutulmalıdır:
+**Kilitli hesaba girmek.** Kilit artık kaynak adrese göredir (CWE-307,
+[ADR-0004](docs/adr/0004-giris-kilitleme-stratejisi.md)): adını bilen biri tek
+bir kaynaktan bir hesabı, örneğin her zaman var olan `admin`'i, herkes için
+kilitleyemez; meşru sahip başka bir adresten girmeye devam eder. Yine de bir
+hesap tümüyle kilitlenebilir — kendi adresinizden art arda yanlış yazdığınızda
+(`UPTIME_LOGIN_MAX_FAILURES`), ya da çok sayıda ayrı kaynaktan gelen dağıtık
+bir tahmin hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, varsayılan 50)
+tetiklediğinde. Kilit sürerken açık oturumlar çalışmaya devam eder. Bu durumlar
+için başka yollar önceden hazır tutulmalıdır:
 
 - API anahtarı (`UPTIME_API_TOKEN`; chart onu `<release>-api-token`
   Secret'ında üretir) deneme sınırına takılmaz ve yönetici yetkisiyle
@@ -3985,7 +4015,9 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_METRICS_TOKEN` | – | `/metrics`'in istediği anahtar (`Authorization: Bearer ...`; API anahtarı da geçer); boşsa `/metrics` herkese açıktır |
 | `UPTIME_ADMIN_PASSWORD_RESET` | `false` | `admin` parolasını `UPTIME_ADMIN_PASSWORD` değerine çeker; bir kez kullanılır |
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
-| `UPTIME_LOGIN_MAX_FAILURES` | `10` | Bir kullanıcı adını kilitleyen hatalı deneme sayısı |
+| `UPTIME_LOGIN_MAX_FAILURES` | `10` | Tek bir kaynak adresin bir kullanıcı adına yönelik girişlerini kilitleyen hatalı deneme sayısı (kaynak-başına; CWE-307, ADR-0004) |
+| `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` | `50` | Bir adın tüm kaynaklardaki hatalı denemeleri için gevşek, çok yüksek tavan; dağıtık tahmini sınırlar, meşru sahibi kendi hatalarıyla kilitlemez. `0` kapatır (yalnız kaynak-başına throttle kalır) |
+| `UPTIME_TRUST_PROXY_HOPS` | `0` | Önünüzdeki kendi vekillerinizin sayısı; kaynak adresi `X-Forwarded-For`'un sağdan bu kadar girdisinden okunur. `0` başlığa güvenmez, bağlanan eşi kullanır. Ingress/yük dengeleyici arkasında kaynakları ayırt etmek için ayarlanmalı (bkz. "Hesaplar ve giriş") |
 | `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi; denemesi bundan eski adlar bu aralıkla sayaçtan silinir |
 | `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu, kilitli olmayan en fazla kullanıcı adı; doluyken yeni bir ad, en az denenmiş adlardan en uzun süredir denenmeyenin yerini alır, kilitli adlar unutulmaz. Aynı zamanda sürmekte olan (sağlayıcıya gidip henüz dönmemiş) SSO girişlerinin en fazla sayısı; aşılınca en eskileri unutulur |
 | `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan bcrypt karşılaştırması sayısı; `0` CPU sayısının yarısı, en az 1, LDAP açıkken en az 2 (her dizin girişi de bir karşılaştırma harcar). Dizine bağlanmaların ayrı sırası vardır (aynı anda 16) |

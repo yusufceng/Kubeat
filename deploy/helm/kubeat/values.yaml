@@ -99,6 +99,13 @@ backend:
     # UPTIME_NOTIFY_RETRY_FOR: 1h      # the end of an outage is sent again for this long at most; "0" does not send it again
     # UPTIME_NOTIFY_QUEUE_SIZE: "1000" # notifications waiting for delivery; at least the number of monitors, or an outage of them all overflows it (the backend warns once when more are enabled); 1000 take about 1 MiB of memory, 2 MiB full
     # UPTIME_SHUTDOWN_TIMEOUT: 10s     # stopping waits this long for open requests and for the notifications still waiting; keep terminationGracePeriodSeconds 5s longer
+    # Sign-in throttle, keyed per source address + name so one source cannot
+    # lock a name out for everyone (CWE-307, ADR-0004). Behind an ingress set
+    # the hop count, or every client looks like the ingress and the throttle
+    # falls back to one shared per-name lock.
+    # UPTIME_TRUST_PROXY_HOPS: "1"              # reverse proxies of your own in front; source read from the rightmost this many X-Forwarded-For entries (0: trust none, use the peer)
+    # UPTIME_LOGIN_MAX_FAILURES: "10"           # per-source failures that lock a source's attempts at a name
+    # UPTIME_LOGIN_ACCOUNT_MAX_FAILURES: "50"   # loose, very high ceiling on a name's failures across all sources; 0 turns it off
     # UPTIME_RECOVERY_THRESHOLD: "1"
     # UPTIME_DEFAULT_FAILURE_THRESHOLD: "3"
     # UPTIME_CERT_WARNING: 336h

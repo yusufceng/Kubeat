@@ -141,17 +141,22 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   "Dolu veri volume'undan dönüş"te ([backlog](backlog.md) "Dolan veri
   volume'u: büyütme, kotaya göre saklama, yazılamayan sonuçlar").
 - Giriş kilidi sayacı backend belleğindedir; yeniden başlatınca sıfırlanır.
-  Tek replica olduğu için şimdilik sorun değildir. Kilit kullanıcı adına
-  göredir: adını bilen biri bir hesabı `UPTIME_LOGIN_MAX_FAILURES` yanlış
-  denemeyle `UPTIME_LOGIN_LOCKOUT` süresince kilitleyebilir; IP bazlı sınır
-  yoktur. Kilitli bir hesap için API anahtarı, SSO ya da backend'i yeniden
-  başlatmak kalır (README, "Kilitli hesaba girmek"). Kaynak IP başına kademeli
-  throttle'a geçme (CWE-307, S65) sprint 6'da ele alınıyor
-  ([#98](https://github.com/yusufceng/Kubeat/issues/98),
-  [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)); dizin
-  erişilebilirlik metriği (S63) aynı `auth.go`/Throttle yüzeyine dokunduğu için
-  S65'ten ayrılıp sprint 7'ye bırakıldı. Ara önlem bu satırdaki kullanıcı-adı
-  bazlı kilittir.
+  Tek replica olduğu için şimdilik sorun değildir; çok replicalı dağıtık
+  throttle için paylaşılan durum yoktur. 0.48'de kilit kullanıcı-adı bazlı
+  sert kilitten kaynak-adres bazlı throttle'a döndü (CWE-307, S65,
+  [#98](https://github.com/yusufceng/Kubeat/issues/98),
+  [ADR-0004](adr/0004-giris-kilitleme-stratejisi.md)): adını bilen biri tek bir
+  kaynaktan bir hesabı herkes için kilitleyemez, meşru sahip başka bir adresten
+  girer. Kalan sınırlar: (a) kaynak adresi bir Ingress/yük dengeleyici
+  arkasında ancak `UPTIME_TRUST_PROXY_HOPS` gerçek vekil sayısına ayarlanınca
+  doğru okunur, yoksa tüm istemciler vekilin tek adresini paylaşıp ada-başına
+  tek bir kilide geriler; (b) çok sayıda ayrı kaynaktan gelen dağıtık bir
+  tahmin, gevşek hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, 50)
+  tetikleyip hesabı yine kilitleyebilir (kabul edilen taviz; tek kaynaktan ~15
+  istek yerine en az beş kaynaktan ~50). Kilitli bir hesap için API anahtarı,
+  SSO ya da backend'i yeniden başlatmak kalır (README, "Kilitli hesaba
+  girmek"). Dizin erişilebilirlik metriği (S63) aynı `auth.go`/Throttle
+  yüzeyine dokunduğu için S65'ten ayrılıp sprint 7'ye bırakıldı.
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
   bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
   sınırını tanımaz; bu yüzden

@@ -469,17 +469,38 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w, "invalid username or password")
 		return
 	}
-	key := signInKey(req.Username)
+	// The throttle is keyed on the source address and the name, so that one
+	// source's failed guesses throttle only that source, not the name for
+	// everyone: the legitimate owner signing in from elsewhere is never
+	// locked out (CWE-307, ADR-0004).
+	key := signInIPKey(h.clientIP(r), req.Username)
+	acctKey := signInKey(req.Username)
 	now := time.Now().UTC()
 	// The attempt counts as a failure from here on, before the password is
 	// checked: parallel attempts cannot all be tried before the first
 	// failure is recorded. What turns out not to be a guess is taken back.
 	attempt, locked, ok := h.opts.Throttle.Begin(key, now)
 	if !ok {
-		writeError(w, http.StatusTooManyRequests, tooManyAttempts(locked))
+		tooManyAttempts(w, locked)
 		return
 	}
-	undo := func() { h.opts.Throttle.Undo(key, now) }
+	// A loose, very high ceiling on a name's failures across all sources,
+	// so a large distributed guess cannot run forever. A single source is
+	// held well below it by the per-source throttle above, so the owner's
+	// own mistakes never reach it; it is off (nil) when the ceiling is zero.
+	if h.opts.AccountThrottle != nil {
+		if _, acctLocked, acctOK := h.opts.AccountThrottle.Begin(acctKey, now); !acctOK {
+			h.opts.Throttle.Undo(key, now)
+			tooManyAttempts(w, acctLocked)
+			return
+		}
+	}
+	undo := func() {
+		h.opts.Throttle.Undo(key, now)
+		if h.opts.AccountThrottle != nil {
+			h.opts.AccountThrottle.Undo(acctKey, now)
+		}
+	}
 
 	user, err := h.opts.Store.GetUserByUsername(r.Context(), req.Username)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -500,7 +521,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !right {
-			h.loginFailed(w, r, req.Username, wrongPassword, attempt, known)
+			h.loginFailed(w, r, key, req.Username, wrongPassword, attempt, known)
 			return
 		}
 	case h.ldap() != nil && (!known || user.Source == store.UserLDAP):
@@ -512,7 +533,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, ldapauth.ErrInvalidCredentials) {
-			h.loginFailed(w, r, req.Username, rejectedByDirectory, attempt, known)
+			h.loginFailed(w, r, key, req.Username, rejectedByDirectory, attempt, known)
 			return
 		}
 		if err != nil {
@@ -537,7 +558,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			// counts as a failure all the same: anyone in the directory
 			// could otherwise write an audit row a request, and never lock.
 			h.opts.Logger.Info("sign-in refused", "user", req.Username, "reason", "no role", "attempt", attempt)
-			h.auditRefusal(r.Context(), req.Username, store.AuditEntry{
+			h.auditRefusal(r.Context(), key, req.Username, store.AuditEntry{
 				Action: "login_denied", ObjectType: "user", ObjectID: user.ID, Summary: req.Username + ": " + err.Error(),
 			}, attempt, true)
 			writeError(w, http.StatusForbidden, err.Error())
@@ -559,7 +580,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		if known {
 			failure = passwordElsewhere
 		}
-		h.loginFailed(w, r, req.Username, failure, attempt, known)
+		h.loginFailed(w, r, key, req.Username, failure, attempt, known)
 		return
 	}
 	if !user.Enabled {
@@ -568,6 +589,9 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.opts.Throttle.Reset(key)
+	if h.opts.AccountThrottle != nil {
+		h.opts.AccountThrottle.Reset(acctKey)
+	}
 	h.signIn(w, r, user, "login")
 }
 
@@ -610,13 +634,23 @@ func (h *handler) askDirectory(ctx context.Context, username, password string) (
 	return h.opts.LDAP.Authenticate(ctx, username, password)
 }
 
-// signInKey is the throttle's key for the sign-ins of a username: the same
-// whatever the case it is typed in, as the account's name is.
+// signInKey is a username as the sign-in throttle keys it: the same
+// whatever the case it is typed in, as the account's name is. It is the
+// per-account ceiling's key on its own, and the name part of the primary
+// per-source key (signInIPKey).
 func signInKey(username string) string { return strings.ToLower(username) }
 
-// tooManyAttempts is the answer for a key the throttle refuses.
-func tooManyAttempts(locked time.Duration) string {
-	return fmt.Sprintf("too many failed attempts; try again in %d minutes", int(locked.Minutes())+1)
+// tooManyAttempts answers a request the throttle refuses: 429 with a
+// Retry-After header, in whole seconds, and the same wait in the body. The
+// answer is the same for any key, so it tells a username apart from a
+// password no more than a wrong password does (enum-safe, #78).
+func tooManyAttempts(w http.ResponseWriter, locked time.Duration) {
+	secs := int((locked + time.Second - 1) / time.Second) // round up
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeError(w, http.StatusTooManyRequests, fmt.Sprintf("too many failed attempts; try again in %d minutes", int(locked.Minutes())+1))
 }
 
 // auditText writes a fixed audit phrase in the install's language; what it
@@ -664,9 +698,9 @@ const (
 // flood of made-up names must not hide the guesses at one of them. Those
 // of a name without one, made up or only in the directory, count against
 // the cap: anyone can cause them.
-func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, username, why string, attempt int, known bool) {
+func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, key, username, why string, attempt int, known bool) {
 	h.opts.Logger.Info("sign-in refused", "user", username, "reason", why, "attempt", attempt)
-	h.auditRefusal(r.Context(), username, store.AuditEntry{Username: username, Action: "login_failed", Summary: h.auditText(why)},
+	h.auditRefusal(r.Context(), key, username, store.AuditEntry{Username: username, Action: "login_failed", Summary: h.auditText(why)},
 		attempt, !known)
 	unauthorized(w, "invalid username or password")
 }
@@ -679,8 +713,8 @@ func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, username, 
 // than LoginAuditPerMinute refusals a minute are written in all: a flood
 // of guesses at made-up names must not bury what else the log holds. The
 // row is written also when the client is gone by then.
-func (h *handler) auditRefusal(ctx context.Context, username string, e store.AuditEntry, attempt int, capped bool) {
-	first := h.opts.Throttle.First(signInKey(username), e.Action)
+func (h *handler) auditRefusal(ctx context.Context, key, username string, e store.AuditEntry, attempt int, capped bool) {
+	first := h.opts.Throttle.First(key, e.Action)
 	locks := attempt >= h.opts.Throttle.MaxFailures
 	if !first && !locks {
 		return
@@ -857,7 +891,7 @@ func (h *handler) authPassword(w http.ResponseWriter, r *http.Request) {
 	key := "pw:" + strconv.FormatInt(u.ID, 10)
 	now := time.Now().UTC()
 	if _, locked, ok := h.opts.Throttle.Begin(key, now); !ok {
-		writeError(w, http.StatusTooManyRequests, tooManyAttempts(locked))
+		tooManyAttempts(w, locked)
 		return
 	}
 	right, err := h.checkPassword(r.Context(), u.PasswordHash, req.CurrentPassword)
