@@ -15,6 +15,7 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -490,6 +491,109 @@ func TestPasswordChangeIsThrottled(t *testing.T) {
 	// Signing in is a matter of its own.
 	if _, code := signIn(t, base, "yusuf", "yeni-parola-1"); code != http.StatusOK {
 		t.Errorf("sign in while password changes are locked: status = %d, want 200", code)
+	}
+}
+
+// Every refused sign-in is counted by why it failed, while the client is
+// told no more than "invalid username or password" whatever the reason: the
+// operator can tell a directory outage from guessing from the metric, not
+// the answer (the enum is never exposed, #78).
+func TestSignInFailureMetricsByReason(t *testing.T) {
+	directory := &fakeLDAP{users: map[string]struct {
+		password string
+		groups   []string
+	}{"ayse": {"s3cret", []string{"cn=admins,dc=example,dc=com"}}}}
+	meter := metrics.New("test")
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.LDAP, o.LDAPDefaultRole, o.SignIns = directory, store.RoleAdmin, meter
+		// High, so these failures count without locking a key: the reasons,
+		// not the throttle, are what this test is about.
+		o.Throttle = &auth.Throttle{MaxFailures: 20, Lockout: time.Minute}
+	})
+	base := srv.URL
+	doAs(t, "", "POST", base+"/api/v1/auth/setup", `{"username":"admin","password":"parola-123"}`, nil)
+
+	const generic = "invalid username or password"
+	for _, tc := range []struct {
+		name, username, password string
+	}{
+		{"a local account's wrong password", "admin", "yanlis"},
+		{"the directory refusing the credentials", "ayse", "yanlis"},
+		{"a name the directory does not know", "nobody", "whatever"},
+	} {
+		if code, msg := send("", "POST", base+"/api/v1/auth/login",
+			fmt.Sprintf(`{"username":%q,"password":%q}`, tc.username, tc.password)); code != http.StatusUnauthorized || msg != generic {
+			t.Errorf("%s: %d %q, want 401 %q", tc.name, code, msg, generic)
+		}
+	}
+	// The directory being unreachable is answered the very same way.
+	directory.down = true
+	if code, msg := send("", "POST", base+"/api/v1/auth/login", `{"username":"ayse","password":"s3cret"}`); code != http.StatusUnauthorized || msg != generic {
+		t.Errorf("directory unreachable: %d %q, want 401 %q", code, msg, generic)
+	}
+	directory.down = false
+
+	got, err := meter.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{
+		"kubeat_signin_failures_total{reason=wrong_password}":        1,
+		"kubeat_signin_failures_total{reason=rejected}":              2,
+		"kubeat_signin_failures_total{reason=directory_unreachable}": 1,
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("%s = %v, want %v", key, got[key], value)
+		}
+	}
+}
+
+// A sign-in the throttle refuses is counted by kind: the per-source throttle
+// ("source") and the looser per-account ceiling ("account"), the admin-lockout
+// moment ADR-0004 leaves open. The client gets the same 429 for either.
+func TestSignInThrottleMetricsByKind(t *testing.T) {
+	meter := metrics.New("test")
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.TrustProxyHops = 1 // read the source from X-Forwarded-For
+		o.Throttle = &auth.Throttle{MaxFailures: 3, Lockout: time.Minute}
+		o.AccountThrottle = &auth.Throttle{MaxFailures: 5, Lockout: time.Minute}
+		o.SignIns = meter
+	})
+	base := srv.URL
+	doAs(t, "", "POST", base+"/api/v1/auth/setup", `{"username":"admin","password":"parola-123"}`, nil)
+
+	const src1, src2, src3 = "203.0.113.1", "203.0.113.2", "203.0.113.3"
+	for i := range 3 { // three failures lock src1
+		if code := signInFrom(src1, base, "admin", "yanlis"); code != http.StatusUnauthorized {
+			t.Fatalf("src1 guess %d: status = %d, want 401", i+1, code)
+		}
+	}
+	// src1 is locked: the per-source throttle refuses, counted as "source".
+	if code := signInFrom(src1, base, "admin", "yanlis"); code != http.StatusTooManyRequests {
+		t.Fatalf("src1 after three guesses: status = %d, want 429", code)
+	}
+	// Two more from another source reach the per-account ceiling (five).
+	for i := range 2 {
+		if code := signInFrom(src2, base, "admin", "yanlis"); code != http.StatusUnauthorized {
+			t.Fatalf("src2 guess %d: status = %d, want 401", i+1, code)
+		}
+	}
+	// A fresh source, even with the right password, is now refused by the
+	// account ceiling, counted as "account".
+	if code := signInFrom(src3, base, "admin", "parola-123"); code != http.StatusTooManyRequests {
+		t.Fatalf("src3 once the ceiling is reached: status = %d, want 429", code)
+	}
+
+	got, err := meter.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["kubeat_signin_throttled_total{kind=source}"] != 1 {
+		t.Errorf("kind=source = %v, want 1", got["kubeat_signin_throttled_total{kind=source}"])
+	}
+	if got["kubeat_signin_throttled_total{kind=account}"] != 1 {
+		t.Errorf("kind=account = %v, want 1", got["kubeat_signin_throttled_total{kind=account}"])
 	}
 }
 

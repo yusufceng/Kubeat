@@ -13,6 +13,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/discovery"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -225,6 +226,11 @@ type Options struct {
 	// bearer token a scrape must present; the service token is accepted too.
 	Metrics      http.Handler
 	MetricsToken string
+	// SignIns records sign-in failures and throttle refusals for the operator
+	// (kubeat_signin_failures_total, kubeat_signin_throttled_total); the same
+	// meter served at Metrics. A nil one is valid and records nothing, so the
+	// client responses (a generic 401, a 429) are the whole story without it.
+	SignIns *metrics.Metrics
 	// EmailEnabled says whether an SMTP server is configured; e-mail
 	// channels cannot be created without one.
 	EmailEnabled bool

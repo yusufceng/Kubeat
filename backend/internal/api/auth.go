@@ -15,6 +15,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
 	"github.com/yusufceng/Kubeat/backend/internal/license"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/oidcauth"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -481,6 +482,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	// failure is recorded. What turns out not to be a guess is taken back.
 	attempt, locked, ok := h.opts.Throttle.Begin(key, now)
 	if !ok {
+		h.opts.SignIns.SignInThrottled(metrics.ThrottleSource)
 		tooManyAttempts(w, locked)
 		return
 	}
@@ -491,6 +493,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	if h.opts.AccountThrottle != nil {
 		if _, acctLocked, acctOK := h.opts.AccountThrottle.Begin(acctKey, now); !acctOK {
 			h.opts.Throttle.Undo(key, now)
+			h.opts.SignIns.SignInThrottled(metrics.ThrottleAccount)
 			tooManyAttempts(w, acctLocked)
 			return
 		}
@@ -544,7 +547,10 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			// away while the directory was down. The real reason is logged for
 			// the operator; a local account still signs in, and the directory's
 			// own users wait the outage out. The attempt is undone, so an
-			// outage does not count toward a lockout.
+			// outage does not count toward a lockout. The operator tells the
+			// outage from guessing by the metric and the logged reason, not
+			// by the answer.
+			h.opts.SignIns.SignInFailed(metrics.SignInDirectoryUnreachable)
 			h.opts.Logger.Error("ldap sign-in failed", "user", req.Username, "error", err)
 			unauthorized(w, "invalid username or password")
 			return
@@ -685,6 +691,18 @@ const (
 	passwordElsewhere = "the account has no password here"
 )
 
+// signInFailureReason buckets a password sign-in failure into the fixed
+// reasons of kubeat_signin_failures_total: a local account's wrong password,
+// or else a rejection (the directory refused the credentials, the name has no
+// account here, or it signs in another way). The directory-unreachable reason
+// is recorded where the directory errors, not through loginFailed.
+func signInFailureReason(why string) string {
+	if why == wrongPassword {
+		return metrics.SignInWrongPassword
+	}
+	return metrics.SignInRejected
+}
+
 // loginFailed answers as for any wrong password: nothing in the answer
 // tells a username apart from a password. The throttle counted the
 // attempt when it began; attempt is its number in the lockout period.
@@ -699,6 +717,7 @@ const (
 // of a name without one, made up or only in the directory, count against
 // the cap: anyone can cause them.
 func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, key, username, why string, attempt int, known bool) {
+	h.opts.SignIns.SignInFailed(signInFailureReason(why))
 	h.opts.Logger.Info("sign-in refused", "user", username, "reason", why, "attempt", attempt)
 	h.auditRefusal(r.Context(), key, username, store.AuditEntry{Username: username, Action: "login_failed", Summary: h.auditText(why)},
 		attempt, !known)

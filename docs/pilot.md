@@ -313,6 +313,7 @@ sonuna not edilir. Ölçülen şey ürünün bugünkü hali olmalı.
 | Haftanın olayları ve kaçının gerçek olduğu | Olaylar → 7 gün süzgeci; her olayı ekiple "gerçek miydi?" diye işaretleyin |
 | Kim ne eklemiş, ne silmiş | Denetim kaydı |
 | Bildirim teslim oranı | Bildirimler → "Son gönderim"; Prometheus varsa `kubeat_notifications_total` |
+| Başarısız girişler ve dizin kesintisi | Prometheus varsa `kubeat_signin_failures_total{reason}` (dizin düşünce `directory_unreachable` artar; tüm dizin/SSO girişleri genel 401 görür ve bu sırada yerel `admin` ile girilir, neden ayrıca logda) ve `kubeat_signin_throttled_total{kind}` (kaynak/hesap kilidi); `/metrics` anahtarıyla korunur |
 
 API, Route'tan değil cluster içinden erişilir (README "API"); betikle toplamak için
 `oc -n kubeat port-forward svc/kubeat-backend 18080:8080` ve

@@ -39,6 +39,8 @@ type Metrics struct {
 	lastBackupFailure prometheus.Gauge
 	licenseExpiry     prometheus.Gauge
 	targetThrottled   *prometheus.CounterVec
+	signInFailures    *prometheus.CounterVec
+	signInThrottled   *prometheus.CounterVec
 
 	// hosts are the host labels targetThrottled has been given so far; past
 	// MaxThrottledHosts of them, a new host is counted as OtherHost.
@@ -126,6 +128,14 @@ func New(version string) *Metrics {
 		Help: "Waits begun by checks whose target host, a host their last check landed on, or an address it reached, had reached its checks-per-minute ceiling (UPTIME_TARGET_MAX_RATE, UPTIME_CLUSTER_TARGET_MAX_RATE, UPTIME_TARGET_ADDRESS_MAX_RATE): one per wait, however many ticks it lasts, by the monitor's host; hosts past the first 100 are counted as \"other\".",
 	}, []string{"host"})
 	m.hosts = make(map[string]bool)
+	m.signInFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kubeat_signin_failures_total",
+		Help: "Refused password sign-ins, by why they failed: \"wrong_password\" (a local account's password was wrong), \"rejected\" (the directory refused the credentials, or the name has no account here or signs in another way), \"directory_unreachable\" (the directory could not be reached). The client is told only \"invalid username or password\" whatever the reason (the enum is never exposed, #78); the label lets an operator tell a directory outage from a password spray from behind the metrics token.",
+	}, []string{"reason"})
+	m.signInThrottled = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kubeat_signin_throttled_total",
+		Help: "Sign-ins the throttle refused with 429, by kind: \"source\" (the per-source-and-name throttle, UPTIME_LOGIN_MAX_FAILURES) or \"account\" (the looser per-name ceiling across all sources, UPTIME_LOGIN_ACCOUNT_MAX_FAILURES, which makes the distributed-guess lockout ADR-0004 leaves open visible). The client response is the same 429 for any key (the enum is never exposed, #78).",
+	}, []string{"kind"})
 	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_backup_last_success_timestamp_seconds",
 		Help: "When the newest database backup was taken: the last to succeed, or after a start the newest copy found in the backup directory; 0 while there is none.",
@@ -145,6 +155,15 @@ func New(version string) *Metrics {
 	}
 	for _, ok := range []bool{true, false} {
 		m.backups.WithLabelValues(resultLabel(ok, "ok", "failed"))
+	}
+	// The sign-in series are there from the start, at 0, so an operator can
+	// alert on increase() and see the first failure or lockout (as for the
+	// backup and notification counters above).
+	for _, reason := range []string{SignInWrongPassword, SignInRejected, SignInDirectoryUnreachable} {
+		m.signInFailures.WithLabelValues(reason)
+	}
+	for _, kind := range []string{ThrottleSource, ThrottleAccount} {
+		m.signInThrottled.WithLabelValues(kind)
 	}
 
 	m.licenseExpiry = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -169,9 +188,46 @@ func New(version string) *Metrics {
 		m.heartbeats, m.lastHeartbeat,
 		m.backups, m.lastBackup, m.lastBackupFailure,
 		m.targetThrottled,
+		m.signInFailures, m.signInThrottled,
 		m.licenseExpiry,
 	)
 	return m
+}
+
+// Sign-in failure reasons: the fixed values of the reason label of
+// kubeat_signin_failures_total. They come from this closed set and never
+// carry a username, so the series stay bounded and nothing a client sends
+// can grow them.
+const (
+	SignInWrongPassword        = "wrong_password"
+	SignInRejected             = "rejected"
+	SignInDirectoryUnreachable = "directory_unreachable"
+)
+
+// Sign-in throttle kinds: the fixed values of the kind label of
+// kubeat_signin_throttled_total. ThrottleSource is the per-source-and-name
+// throttle, ThrottleAccount the looser per-name ceiling across all sources
+// (the admin-lockout moment ADR-0004 leaves open).
+const (
+	ThrottleSource  = "source"
+	ThrottleAccount = "account"
+)
+
+// SignInFailed records a refused sign-in by why it failed (a SignIn* reason).
+// The client is told no more than "invalid username or password" (#78); the
+// counter is what lets an operator tell a directory outage from guessing.
+func (m *Metrics) SignInFailed(reason string) {
+	if m != nil {
+		m.signInFailures.WithLabelValues(reason).Inc()
+	}
+}
+
+// SignInThrottled records a sign-in the throttle refused with 429, by kind
+// (ThrottleSource or ThrottleAccount).
+func (m *Metrics) SignInThrottled(kind string) {
+	if m != nil {
+		m.signInThrottled.WithLabelValues(kind).Inc()
+	}
 }
 
 // TargetThrottled records a check of a monitor of host that began to wait
