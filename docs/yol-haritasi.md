@@ -156,7 +156,16 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   istek yerine en az beş kaynaktan ~50). Kilitli bir hesap için API anahtarı,
   SSO ya da backend'i yeniden başlatmak kalır (README, "Kilitli hesaba
   girmek"). Dizin erişilebilirlik metriği (S63) aynı `auth.go`/Throttle
-  yüzeyine dokunduğu için S65'ten ayrılıp sprint 7'ye bırakıldı.
+  yüzeyine dokunduğu için S65'ten ayrılıp sprint 7'ye bırakıldı. Sprint 7
+  (0.49.0) bu yüzeyi iki maddeyle ele alır: S72
+  ([#106](https://github.com/yusufceng/Kubeat/issues/106)) `X-Forwarded-For`
+  görülürken `UPTIME_TRUST_PROXY_HOPS=0` iken açılış/çalışma WARN'ı verir ve
+  hops gerçek zincirden uzunsa görülen kaynağı güvenli adrese (peer) düşürür,
+  paylaşılan NAT/vekil durumunu ve tavan ayarını ADR-0004/README'de açıklar
+  (güvenilir-vekil allowlist backlog'da); S63
+  ([#108](https://github.com/yusufceng/Kubeat/issues/108)) giriş/dizin ve
+  throttle/lockout'u enum sızdırmayan `reason`/`kind` etiketli metriklerle
+  görünür kılar (nihai yazım sürüm sonrası).
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
   bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
   sınırını tanımaz; bu yüzden
@@ -213,7 +222,15 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   ve çok kiracılı prova kullanıcıdadır — deny-CIDR ve prova derinlemesine
   savunmadır. Vekil (`HTTP_PROXY`) üzerinden giden istekte hedef backend'de
   çözülüp denetlenir, ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun
-  ağına bağlıdır.
+  ağına bağlıdır. Sprint 7 (0.49.0) bu yüzeyi iki maddeyle ele alır: S77
+  ([#107](https://github.com/yusufceng/Kubeat/issues/107)) kapsam denetimini
+  DNS/çözüm hatasında sınırlı kullanıcı için güvenli tarafa alır (reddeder),
+  çözüme ayrı zaman aşımı koyar ve iç-adres oracle'ını daraltır; S68
+  ([#109](https://github.com/yusufceng/Kubeat/issues/109)) kapsam/yetki dışı
+  hedef reddini bir denetim satırı (`deny`/`target-scope`) ve `reason` etiketli
+  sayaçla görünür kılar. Kapsam daralınca var olan monitor'lerin yeniden
+  denetlenmemesi (S73) açık sınır olarak kalır, backlog'da izlenir (nihai yazım
+  sürüm sonrası).
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye
   `kubeat.io/monitor` annotation'ı eklenir.
 - Annotation eşitlemesi her turda Service, Pod, EndpointSlice, Ingress,

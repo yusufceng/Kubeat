@@ -1718,3 +1718,32 @@ metninde kalır; ADR-0003 (d) ve README "Başarısız kontrolün ayrıntıları"
 `diagnostics.address` (ip:port) belgelenmiş tanı alanı olarak açık kalır (ADR-0003 d).
 Düşük öncelik, PO kararı; ADR-0003 (d) güncellemesi ister. Tetikleyici: herhangi
 bir addrmask/ADR-0003 (d) dokunuşuna katlanabilir; bağımsız slot şişme olur.
+
+## Giriş throttle için güvenilir-vekil IP allowlist (yalnız kaynak-IP'ye dayanmayan ayrım)
+
+2026-11-05'te eklendi (sprint 7 planı; [sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
+S72'nin (giriş throttle vekil/NAT takibi, [#106](https://github.com/yusufceng/Kubeat/issues/106))
+açık sorusunun ertelenen parçası: paylaşılan kurumsal NAT/vekil arkasında aynı
+kaynak adresini paylaşan kullanıcıları gerçekten ayıran çözüm (güvenilir aralık
+allowlist'i ya da kaynak-IP'ye ek bir ayrım) kod + ADR-0004 değişimi ister ve S72
+kapasitesine sığmaz. S72 bu turda NAT durumunu ve `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`
+tavanını ADR-0004/README'de açıklar ve yön olarak allowlist'i bırakır; iş buradan
+izlenir. Tetikleyici: NAT'lı popülasyonda gözlenmiş kilitlenme ya da ayrı kapasite.
+
+## Kapsam daralınca var olan monitor/kanal hedeflerini kapsama karşı yeniden denetlemek (S73)
+
+2026-11-05'te sprint 8 kuyruğuna alındı (sprint 7 planı; [sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
+Sprint 6'da "backlog'da izlenir" denen Müşteri A bulgusu (önemli): kapsam yalnız
+oluştur/değiştir anında denetleniyor; rol/LDAP grubu/takım değişimiyle kapsamı
+daralan kullanıcı eski hedefini (artık göremediği ekibin Service'i) izlemeye devam
+ediyor. `checker.go`'da kapsam referansı yok, README.md:653-656 ve ADR-0003:57-58
+"kısıt yalnız oluştur/değiştirde uygulanır, var olan monitor'ler yeniden
+denetlenmez" diyor. İş: kapsam daralınca (ya da düzenli turda) var olan monitor/kanal
+hedefleri kapsama karşı yeniden değerlendirilir; kapsam dışına düşenler işaretlenir
+ve denetime/metriğe düşer ("izleme asla durmaz": varsayılan işaretle+raporla,
+duraklat/zorlama ayrı ADR kararı). S77 (çözüm-anı fail-open kapanışı,
+[#107](https://github.com/yusufceng/Kubeat/issues/107)) ile aynı "kapsam tek
+seferlik denetleniyor" kökünden olduğundan S77'nin defense-in-depth tamamlayıcısı.
+L ve ADR-0003:57-58 bilinçli kararını açtığı için PO/ADR kararı gerektirir.
+Tetikleyici: S77 merge sonrası ve gerçek çok kiracılı prova tanımlanınca sprint 8'in
+kesin adayı.
