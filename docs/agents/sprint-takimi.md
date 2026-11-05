@@ -35,7 +35,11 @@ sonunda bakar ve yön verir.
    SSRF gibi güvenlik maddelerinde kabul ölçütü ve reviewer sorusu ad
    çözümünün biçimlerini tek tek sayar (çıplak IP, kısa ad, iki etiketli
    `servis.namespace`, tam `.svc`/FQDN, API sunucusu adı) ve pod'un DNS arama
-   alanını (`ndots`) hesaba katar; negatif testler bu biçimleri içerir.
+   alanını (`ndots`) hesaba katar; negatif testler bu biçimleri içerir. Opt-in
+   bir ayara bağlı güvenlik düzeltmesinde kabul ölçütü ya varsayılanın güvenli
+   olmasını ya da ayar eksik/çelişkiliyken (ör. `X-Forwarded-For` gelirken
+   `hops=0`) açılış ya da çalışma anında bir WARN verilmesini sayar: yayımlanmış
+   bir güvenlik düzeltmesi, "izleme asla durmaz" gibi, sessizce etkisiz kalmamalı.
 3. **Öncelik**: PO sprint hedefini, en çok dört maddelik sıralı listeyi ve
    gerekçeli "yapılmayacaklar"ı verir. Bir hikâyenin bilinen yan etkisi
    sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
@@ -45,7 +49,11 @@ sonunda bakar ve yön verir.
    sprintte aynı dosyaya yazan maddeler komşu satıra değil kendi alt
    başlığına ya da satırına yazar (git'in üç satırlık bağlamı bitişik
    değişiklikleri çakıştırır); PMO planda bu riski dosya ve bölüm adıyla
-   işaretler.
+   işaretler. Davranış değiştiren bir madde bir yüzeyde (ör.
+   `auth.go`/`throttle.go`, `targetscope.go`) bilinen bir sınır bırakıyorsa, o
+   sınırın takibi ve gözlemlenebilirliği aynı yüzeyde ard arda (sıralı merge)
+   planlanır ve sınır plan aşamasında "sonraki sprint" ya da "kullanıcıda kalan"
+   olarak açık kayda geçer.
 5. **Geliştirme** (paralel, ayrı worktree): her developer bir issue'yu kendi
    dalında yapar, test eder, commit'ler; push etmez. Release manager
    teslimatın başında sandbox oturumunu denetler; düşmüşse kullanıcıdan
@@ -85,7 +93,11 @@ sonunda bakar ve yön verir.
    kiracılı cluster isteyen bir güvenlik iddiası da aynıdır: sandbox provası
    sürümden önce zorunlu prova olarak planlanır (yalnız `go test` yetmez) ya
    da sürüm metni iddiayı temkinli yazar ("ana vektörler kapandı, prova
-   kullanıcıda"); plan iddiayı tek sürümde "tam kapandı" gibi sunmaz.
+   kullanıcıda"); plan iddiayı tek sürümde "tam kapandı" gibi sunmaz. Bu prova
+   iki sprint üst üste kullanıcıda kaldıysa plan onu ajan-içi koşulabilir bir
+   benzetim olarak tanımlamayı değerlendirir (minikube'da iki namespace +
+   sınırlı kullanıcı + gerçek çözüm yolu, `--context minikube`); yoksa iddia
+   hiç "doğrulandı" olmaz.
 
 Ret alan bir madde en çok üç düzeltme turu görür. Dördüncü inceleme
 sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
