@@ -1616,6 +1616,20 @@ kaynak `UPTIME_TRUST_PROXY_HOPS` ile), karar [ADR-0004](adr/0004-giris-kilitleme
 Kalan sınırlar (ingress arkasında vekil-hop ayarı, dağıtık tahminin hesap
 tavanını tetikleyebilmesi, tek-replica bellek) yol haritası "Bilinen sınırlar"da.
 
+## Durum sayfası kilidi ve parola değiştirme throttle'larının CWE-307 benzeri yüzeyleri
+
+2026-11-05'te ertelendi (S65, [#98](https://github.com/yusufceng/Kubeat/issues/98)
+developer kararı). S65 giriş yolunu hesap-başına sert kilitten kaynak-adres bazlı
+throttle'a çevirdi, ama durum sayfası kilidini açma (status-page unlock) ve parola
+değiştirme akışlarının kendi throttle'ları aynı turda ele alınmadı; yalnız ortak
+429 yanıtına `Retry-After` başlığı eklendi (davranış tutarlılığı). Bu yüzeyler de
+giriş gibi kaynak yerine yalnız gizli değere göre kilitlenebiliyorsa benzer bir
+hizmet reddi riski taşıyabilir. İş gerekirse ayrı bir madde: her yüzeyin
+throttle'ını giriş gibi kaynak-adres bazlı yapmak ve ADR-0004 kararını bu yüzeylere
+genişletmek. Tetikleyici: bu yüzeylerden birinde giriş-kilidi benzeri bir DoS
+gözlemi ya da bir güvenlik incelemesi; herhangi bir `throttle.go`/`auth.go`
+dokunuşuna katlanabilir.
+
 ## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
 
 2026-11-04'te ertelendi (sprint 5 planı; [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)).
