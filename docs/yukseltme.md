@@ -223,6 +223,22 @@ frontend Service değerleri ekler. Şema değişmez (26).
   sayılır ve throttle tek paylaşılan bir kilide geriler (0.47'nin
   hesap-başına kilidine yakın ama daha gevşek). Değeri chart'ta
   `backend.extraEnv` ya da values ile verin.
+
+  **Somut hop sayısı** (girişe ulaşan her vekil `X-Forwarded-For`'a bir girdi
+  ekler): düz OpenShift Route (HAProxy router) `1`; önünde WAF/harici yük
+  dengeleyici olan Route `2`; GKE'de GCLB + `ingress-nginx` `2`, yalnız
+  GCLB/Container-native LB (ingress-nginx yoksa) `1`.
+
+  **Görülen kaynağı doğrulayın.** 0.49'dan itibaren yanlış ayar sessizce etkisiz
+  kalmaz: `X-Forwarded-For` geldiği hâlde `UPTIME_TRUST_PROXY_HOPS=0` iken ve
+  zincir ayarlanan hop sayısından kısa geldiğinde backend loga dakikada en fazla
+  bir kez WARN yazar ve bu satır throttle'ın anahtarladığı adresi (eş) adıyla
+  verir. Girişi bir kez yanlış deneyip logdaki WARN satırındaki adresin
+  beklediğiniz vekil ya da istemci adresi olduğunu doğrulayın; değilse hop
+  sayısını düzeltin. 0.49'da hop sayısı gerçek zincirden uzunsa görülen kaynak,
+  istemcinin uydurabileceği en soldaki girdiye değil, bağlanan eşe (peer) düşer:
+  fazla ayar artık "başlık uydurulabilir" değil "tek paylaşılan kilit" maliyeti
+  taşır (ADR-0004).
 - Kapsamı sınırlı (yönetici olmayan, namespace listesi `*` olmayan)
   kullanıcılarınız varsa: 0.48 bir hedefin adı "dış" görünse de onu
   çözüm/bağlantı anında çözer ve çözülen adres cluster içindeyse ve

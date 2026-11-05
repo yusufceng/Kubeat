@@ -1,9 +1,13 @@
 package api
 
 import (
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 // clientIP is the address a sign-in comes from. It keys the sign-in
@@ -22,22 +26,87 @@ import (
 // every client, so TrustProxyHops must be set or the throttle cannot tell
 // sources apart and falls back to one shared, per-name lock (README,
 // "Hesaplar ve giriş").
-func (h *handler) clientIP(r *http.Request) string {
+//
+// A published source-address throttle must not go silently ineffective when
+// it is left unconfigured behind a proxy, so clientIP warns (rate-limited,
+// see proxyWarn) when the configuration cannot be trusted: an
+// X-Forwarded-For arriving while TrustProxyHops is 0, and a forwarded chain
+// shorter than the trusted hops. In the second case it also keeps to the
+// safe side, falling back to the peer rather than to a client-settable
+// entry (see below). now is the request's clock, threaded in so the
+// rate-limiting is testable.
+func (h *handler) clientIP(r *http.Request, now time.Time) string {
 	peer := hostOnly(r.RemoteAddr)
+	xff := forwardedFor(r.Header.Values("X-Forwarded-For"))
 	if h.opts.TrustProxyHops <= 0 {
+		if len(xff) > 0 {
+			// A proxy in front set X-Forwarded-For, but we are told to trust
+			// none of it (the default), so the throttle sees the one peer
+			// address for every client and falls back to a single shared,
+			// per-name lock: the published DoS fix is silently ineffective
+			// here. Warn, naming the address keyed on so the operator can
+			// see it is the proxy's, but keep to the peer, since the header
+			// is a client's to forge without a trusted proxy to vouch for it.
+			h.proxyWarn.warn(now, "xff-hops-zero",
+				fmt.Sprintf("X-Forwarded-For seen but UPTIME_TRUST_PROXY_HOPS=0: the sign-in throttle keys on the "+
+					"peer %q for every client and falls back to one shared per-name lock; set it to the number of "+
+					"your own reverse proxies (README, \"Hesaplar ve giriş\")", peer))
+		}
 		return peer
 	}
 	// The chain from the client (leftmost) to us: the entries the proxies
 	// appended to X-Forwarded-For, then the peer that connected (our
 	// nearest proxy).
-	chain := append(forwardedFor(r.Header.Values("X-Forwarded-For")), peer)
+	chain := append(xff, peer)
 	i := len(chain) - 1 - h.opts.TrustProxyHops
 	if i < 0 {
-		// Fewer entries than trusted hops, so a client sent fewer than
-		// expected: the leftmost is as far back as the chain reaches.
-		i = 0
+		// The forwarded chain is shorter than the hops we trust, so no
+		// trusted proxy appended its leftmost entry: it is a client's to
+		// set. Reading it would let an attacker spoof a fresh source each
+		// request (slipping the throttle) or forge a victim's address (to
+		// lock them out). Fall back to the peer, which no client controls,
+		// and warn that the hop count is too high for this request, or a
+		// proxy is being bypassed.
+		h.proxyWarn.warn(now, "xff-hops-too-high",
+			fmt.Sprintf("X-Forwarded-For has fewer entries than UPTIME_TRUST_PROXY_HOPS=%d: the forwarded chain is "+
+				"shorter than the trusted hops, so the source falls back to the peer %q rather than a "+
+				"client-settable entry; set UPTIME_TRUST_PROXY_HOPS to the real number of your own reverse proxies, "+
+				"or a proxy is being bypassed (README, \"Hesaplar ve giriş\")", h.opts.TrustProxyHops, peer))
+		return peer
 	}
 	return chain[i]
+}
+
+// proxyWarn logs a message about the X-Forwarded-For configuration at most
+// once a minute per key, so that a flood of requests each meeting the same
+// misconfiguration leaves one line a minute in the log, not one a request.
+// A nil receiver and a nil logger log nothing, which keeps the warning out
+// of handlers built by hand in tests. It is safe for concurrent use.
+type proxyWarn struct {
+	logger *slog.Logger
+	mu     sync.Mutex
+	last   map[string]time.Time
+}
+
+// newProxyWarn returns a proxyWarn that logs to logger.
+func newProxyWarn(logger *slog.Logger) *proxyWarn {
+	return &proxyWarn{logger: logger, last: make(map[string]time.Time)}
+}
+
+// warn logs msg under key, unless the same key was logged less than a
+// minute before now.
+func (p *proxyWarn) warn(now time.Time, key, msg string) {
+	if p == nil || p.logger == nil {
+		return
+	}
+	p.mu.Lock()
+	if last, ok := p.last[key]; ok && now.Sub(last) < time.Minute {
+		p.mu.Unlock()
+		return
+	}
+	p.last[key] = now
+	p.mu.Unlock()
+	p.logger.Warn(msg)
 }
 
 // forwardedFor flattens X-Forwarded-For, which may arrive as one line of

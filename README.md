@@ -1044,8 +1044,44 @@ yüzden **internete açık bir girişte bu değeri gerçek vekil sayısına ayar
 yoksa throttle kaynakları ayırt edemez ve tek bir paylaşılan, ada-başına kilide
 geriler (0.47.0 davranışı). `N` ayarlandığında istemci `X-Forwarded-For`'un
 sağdan N girdisine (vekillerinizin eklediği) göre okunur; solundaki girdiler
-(istemcinin uydurabileceği) yok sayılır. Değeri gerçek vekil sayısından büyük
-ayarlamak başlığın uydurulmasına izin verir.
+(istemcinin uydurabileceği) yok sayılır.
+
+**Değer tam olarak önünüzdeki kendi vekillerinizin sayısıdır.** Girişe ulaşan
+her vekil `X-Forwarded-For`'a bir girdi ekler:
+
+- Düz OpenShift Route (HAProxy router): `1`.
+- Önünde WAF ya da harici bir yük dengeleyici olan OpenShift Route: router + o
+  katman, `2`.
+- GKE: Google Cloud yük dengeleyici (GCLB) + `ingress-nginx`, `2`; yalnız
+  GCLB/Container-native LB (ingress-nginx yoksa) `1`.
+
+**Yanlış ayar sessizce etkisiz kalmaz (0.49).** Giriş, yayımlanmış bir DoS
+düzeltmesi olduğu için ayar eksik ya da fazla olduğunda loga dakikada en fazla
+bir kez WARN yazılır:
+
+- `X-Forwarded-For` geldiği hâlde `UPTIME_TRUST_PROXY_HOPS=0` ise (önde bir
+  vekil var ama güvenilmiyor): throttle tek paylaşılan ada-başına kilide
+  gerilemiştir; WARN, anahtarlanan eş adresini yazar.
+- `X-Forwarded-For` zinciri `UPTIME_TRUST_PROXY_HOPS`'tan kısa gelirse (hop
+  sayısı gerçek vekil sayısından büyük ya da bir istek vekili atlıyor): görülen
+  kaynak artık istemcinin ayarlayabileceği en soldaki girdiye değil, hiçbir
+  istemcinin denetlemediği eşe (peer) düşer. Böylece uydurma bir
+  `X-Forwarded-For` ile ne her istekte taze bir kaynak gibi görünüp throttle
+  atlanabilir ne de bir kurban kilitlenebilir; o eş/NAT yalnızca paylaşılan bir
+  kilide geriler.
+
+Görülen kaynak adresinin beklediğiniz değer olduğunu bu WARN satırından
+doğrulayın (denetim kaydı ve istemci yanıtı enum sızdırmamak için adresi
+taşımaz).
+
+**Paylaşılan kurumsal NAT ya da ileri vekil.** `X-Forwarded-For` doğru okunsa
+bile, aynı kurumsal NAT ya da ileri vekil arkasındaki kullanıcılar aynı kaynak
+adresten görünür; kaynak-başına throttle onları ayırt edemez ve biri çok yanlış
+denerse o NAT'ın arkasındaki herkesin o ada girişi birlikte yavaşlar. Böyle bir
+popülasyonda hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`) NAT'lı
+kullanıcı sayısına göre yükseltin ya da `0` ile kapatıp yalnız kaynak-başına
+throttle'a bırakın. Kaynak-IP'ye dayanmayan gerçek bir ayrım (güvenilir-vekil
+IP allowlist) daha büyük bir iştir ve yön olarak izlenir (ADR-0004).
 
 Deneme, parola denetlenmeden önce sayılır: aynı anda gönderilen istekler de
 sınırı aşamaz. Dizine ulaşılamaması ya da devre dışı bir hesabın doğru parolası
