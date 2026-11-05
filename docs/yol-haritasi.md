@@ -202,15 +202,18 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   kullanıcı (yönetici) her cluster içi adrese ulaşabilir ve deny-CIDR,
   ClusterIP aralığını paylaştığı için bu kullanıcılar arasında cross-tenant'ı
   ayıramaz — hassas aralıkları yine `UPTIME_TARGET_DENY_CIDRS` daraltır.
-  0.47'nin kalan boşluğu: kapsamı sınırlı bir kullanıcı cluster son ekiyle
-  bitmeyen iki etiketli kısa adla (`servis.namespace`, ör. `kubernetes.default`,
-  `api.payments`) denetimi atlayabiliyor (pod'un DNS arama alanı onu iç
-  servise/API sunucusuna çözüyor); bu boşluk sprint 6'da çözüm anında
-  (dial-time) kapsam denetimiyle kapatılıyor (S67,
+  0.47'nin iki etiketli kısa ad boşluğu 0.48.0'da kapatıldı (S67,
   [#95](https://github.com/yusufceng/Kubeat/issues/95),
-  [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)). Vekil
-  (`HTTP_PROXY`) üzerinden giden istekte hedef backend'de çözülüp denetlenir,
-  ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun ağına bağlıdır.
+  [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)): kapsam
+  denetimi artık adı dış görünen bir hedefi de çözer (çözüm/bağlantı anında,
+  dial-time) ve çözülen adres cluster aralığındaysa sınırlı kullanıcı için
+  reddeder; iki etiketli kısa ad (`kubernetes.default`, `api.payments`) ve iç
+  adrese çözülen genel ad (`172-30-0-1.sslip.io`) de kapanır. Kalan: adı çözümle
+  bağlantı arasında değişen hedef (DNS rebinding, TOCTOU) bu kapının dışındadır
+  ve çok kiracılı prova kullanıcıdadır — deny-CIDR ve prova derinlemesine
+  savunmadır. Vekil (`HTTP_PROXY`) üzerinden giden istekte hedef backend'de
+  çözülüp denetlenir, ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun
+  ağına bağlıdır.
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye
   `kubeat.io/monitor` annotation'ı eklenir.
 - Annotation eşitlemesi her turda Service, Pod, EndpointSlice, Ingress,

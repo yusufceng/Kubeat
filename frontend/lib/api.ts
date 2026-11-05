@@ -8,7 +8,7 @@ import { sessionToken } from "@/lib/session";
  * The backend API revision this frontend was written against; see Revision in
  * the backend's api package. Raise both together.
  */
-export const REQUIRED_API_REVISION = 29;
+export const REQUIRED_API_REVISION = 30;
 
 export type Health = {
   status: string;
@@ -510,6 +510,17 @@ export function missingFeature(err: unknown): LicenseFeature | null {
   if (!(err instanceof ApiError) || err.status !== 402) return null;
   const feature = (err.body as { feature?: string } | undefined)?.feature;
   return licenseFeatures.find((f) => f === feature) ?? null;
+}
+
+/**
+ * The machine-readable `code` the backend put in an error body, for the few
+ * refusals mapped by code rather than by their wording (a target-scope
+ * refusal is `target_scope`); null when there is none.
+ */
+export function errorCode(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const code = (err.body as { code?: unknown } | undefined)?.code;
+  return typeof code === "string" && code !== "" ? code : null;
 }
 
 /** A non-2xx answer from the backend. */

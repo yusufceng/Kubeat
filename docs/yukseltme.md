@@ -159,19 +159,36 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   api status-pages | jq length
   ```
 
-- **Kapsam dışı iç hedefler** (0.47). Kapsamı sınırlı kullanıcılar ve
-  cluster içi görünen hedefli monitor'ler; 0.47'de bu kullanıcılar
-  kapsamları dışındaki iç hedefleri artık yeniden oluşturamaz ya da
-  değiştiremez. Var olanlar çalışmaya devam eder, bu yalnızca gözden
+- **Kapsam dışı iç hedefler** (0.47, 0.48'de genişledi). Kapsamı sınırlı
+  kullanıcılar ve cluster içi görünen hedefli monitor'ler; 0.47'de bu
+  kullanıcılar kapsamları dışındaki iç hedefleri artık yeniden oluşturamaz
+  ya da değiştiremez, 0.48'de bu adı dış görünse de iç adrese çözülen
+  hedefleri (iki etiketli `servis.namespace` kısa adı, iç adrese çözülen
+  genel ad) de kapsar. Var olanlar çalışmaya devam eder, bu yalnızca gözden
   geçirmedir (hangi monitor'ün hangi kullanıcıya ait olduğunu birlikte
   değerlendirin):
 
   ```sh
   api users | jq -r '.[] | select(.role != "admin" and ((.namespaces // []) | index("*") | not))
     | "\(.username)\t\((.namespaces // []) | join(","))"'
-  api monitors | jq -r '.[] | select(.target | test("\\.svc(\\.|:|/|$)|\\.cluster\\.local"))
+  api monitors | jq -r '
+    .[]
+    | (.target | sub("^[a-z0-9+.-]+://"; "") | split("/")[0] | split(":")[0] | ascii_downcase) as $h
+    | select(
+        ($h | test("\\.svc$|\\.svc\\.|\\.cluster\\.local$"))        # Service/pod adı
+        or ($h | test("^(10|127)\\.|^192\\.168\\.|^172\\.(1[6-9]|2[0-9]|3[01])\\.|^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\."))  # ClusterIP/pod IP
+        or ($h | test("^[^.]+$"))                                   # noktasız kısa ad
+        or ($h | test("^[^.]+\\.[^.]+$"))                           # iki etiketli kısa ad
+      )
     | "\(.id)\t\(.namespace)\t\(.target)"'
   ```
+
+  > Bu sorgu bir **inceleme yardımıdır**, kesin değildir: iki etiketli bir
+  > genel adı (`status.example.com` değil ama `durum.example`) iç sanıp
+  > fazladan işaretler ve iç adrese çözülen genel bir adı (`172-30-0-1.sslip.io`)
+  > ad biçiminden göremez. 0.48'de asıl denetim sunucudadır: backend adı kendi
+  > çözücüsüyle çözüp kararı verir (bkz. README "Hedef politikası" → "Çözüm
+  > anında denetim").
 
 - **30 saniyeden sık monitor'lar ve kotalar** (0.41). Hedefi cluster
   dışında olanlar 30 saniye kuralına girer:

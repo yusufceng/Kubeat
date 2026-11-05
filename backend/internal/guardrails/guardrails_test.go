@@ -77,3 +77,26 @@ func TestMinIntervalFor(t *testing.T) {
 		t.Error("External misclassified a target")
 	}
 }
+
+// The load guardrails classify a target by its name as written, on purpose,
+// and keep doing so after the dial-time scope check (S67, ADR-0003 c). A
+// two-label short name such as "api.payments" that the pod's search domains
+// turn into a Service is External here, because these rules protect other
+// systems from Kubeat's load and resolving a name on this path would make the
+// class depend on an answer a zone owner controls. The tenant boundary is the
+// scope check (api.targetInScope), not these ceilings: misclassifying an
+// in-cluster name as external is only more restrictive (a longer minimum
+// interval, the per-host cap), never a cross-tenant breach. A *.svc name,
+// whose namespace is written, stays in-cluster.
+func TestExternalIsNameAsWritten(t *testing.T) {
+	for _, host := range []string{"api.payments", "kubernetes.default", "status.example.com"} {
+		if !External(store.Monitor{Type: store.MonitorHTTP, Target: "https://" + host + "/"}) {
+			t.Errorf("External(%q) = false, want true (name as written)", host)
+		}
+	}
+	for _, host := range []string{"api.payments.svc", "api.payments.svc.cluster.local", "api", "10.0.0.1"} {
+		if External(store.Monitor{Type: store.MonitorHTTP, Target: "https://" + host + "/"}) {
+			t.Errorf("External(%q) = true, want false (cluster name or address)", host)
+		}
+	}
+}

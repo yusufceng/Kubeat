@@ -600,6 +600,29 @@ func TestTickHoldsClusterHostsToTheirOwnCeiling(t *testing.T) {
 	}
 }
 
+// The host ceilings classify a key by its name as written, on purpose, and
+// keep doing so after the dial-time scope check (S67, ADR-0003 c). A
+// two-label short name such as "api.payments" that the pod's search domains
+// turn into a Service is held to the external ceiling, because these ceilings
+// protect other systems from Kubeat's load, not tenants from each other, and
+// resolving a name on the scheduler's hot path would make the class depend on
+// an answer a zone owner controls. The resolved address a check reaches is a
+// key too, and it is classified by range, so the Service's own ClusterIP
+// still lands on the cluster ceiling once a check has reached it.
+func TestClassLimiterKeysOnNameAsWritten(t *testing.T) {
+	c := newClassLimiters(5, 10)
+	for _, key := range []string{"api.payments", "kubernetes.default", "status.example.com"} {
+		if c.of(key) != c.external {
+			t.Errorf("of(%q) is not the external ceiling (name as written)", key)
+		}
+	}
+	for _, key := range []string{"api.payments.svc", "api", "172.30.44.9", "10.0.0.1"} {
+		if c.of(key) != c.cluster {
+			t.Errorf("of(%q) is not the cluster ceiling", key)
+		}
+	}
+}
+
 // A check held back by the ceiling is not a result, let alone a failed
 // one: the target was not asked. The monitor whose check ran first gets
 // the host's only token of the minute, the other waits.

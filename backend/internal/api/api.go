@@ -13,6 +13,7 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/discovery"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -253,14 +254,20 @@ type Options struct {
 	// License turns on the Kubeat Enterprise features; nil is the
 	// community edition.
 	License License
-	Logger  *slog.Logger
+	// Resolver resolves a target host name for the dial-time scope check,
+	// so a scoped user cannot aim a monitor or a channel webhook at a
+	// cluster address through an external-looking name (see targetInScope).
+	// Nil uses net.DefaultResolver, the pod's own resolver with its search
+	// domains, which is what a check would dial through.
+	Resolver netguard.Resolver
+	Logger   *slog.Logger
 }
 
 // Revision identifies the shape of the API. Increase it whenever a response
 // gains something the frontend depends on, and raise the frontend's required
 // revision in the same change; a frontend talking to an older backend can
 // then say so instead of failing on a missing field.
-const Revision = 29
+const Revision = 30
 
 // Health is the response body of the health endpoint.
 type Health struct {
@@ -418,6 +425,10 @@ func (h *handler) health(w http.ResponseWriter, _ *http.Request) {
 
 type errorBody struct {
 	Error string `json:"error"`
+	// Code is a machine-readable tag for the few refusals the frontend maps
+	// to its own message instead of showing the text: a target-scope refusal
+	// (codeTargetScope). Empty for everything else.
+	Code string `json:"code,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -428,6 +439,12 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, errorBody{Error: msg})
+}
+
+// writeErrorCode answers with a message and a machine-readable code, for a
+// refusal the frontend maps by code rather than by its wording.
+func writeErrorCode(w http.ResponseWriter, status int, msg, code string) {
+	writeJSON(w, status, errorBody{Error: msg, Code: code})
 }
 
 // internalError logs err and answers 500 without leaking its text.

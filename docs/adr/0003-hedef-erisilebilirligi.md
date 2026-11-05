@@ -35,7 +35,8 @@ sınırlayacağımızdır.
 
 ## Karar
 
-**(a) ve (b) önce (0.46 turu, #80/#81); (c) ve (d) sprint 5'te (#84/#85).**
+**(a) ve (b) önce (0.46 turu, #80/#81); (c) ve (d) sprint 5'te (#84/#85);
+(c)'nin kalan boşluğu çözüm anında denetimle sprint 6'da (0.48, #95).**
 
 - **(a)** `UPTIME_TARGET_DENY_CIDRS`'in rolü belgelendi: bir monitor ya da
   kanal webhook'u politikanın izin verdiği her adrese ulaşır; hassas ya da
@@ -57,6 +58,27 @@ sınırlayacağımızdır.
   ve değiştirmede uygulanır, var olan monitor'ler yeniden denetlenmez. Monitor
   API'si ile kanal webhook'u yolunu kapsar (`backend/internal/api`,
   `backend/internal/netguard`).
+
+  **Çözüm anında (dial-time) denetim (0.48, #95).** (c) hedefi 0.47'de yalnız
+  adından (`netguard.InCluster`) sınıflıyordu; bir cluster son ekiyle bitmeyen
+  iki etiketli kısa ad (`api.payments`, `kubernetes.default`) ya da iç adrese
+  çözülen genel bir ad (`172-30-0-1.sslip.io`) "dış" sayılıp denetimi atlıyordu,
+  oysa pod'un DNS arama alanı (`ndots`) onu iç Service'e ya da API sunucusuna
+  çözüyordu (aşağıda "Kapsamın kalan boşluğu"). 0.48'de kapsam denetimi, adı dış
+  görünen bir hedefi çözer (`netguard.ResolvesInCluster`, backend'in kendi
+  çözücüsüyle, bir kez): çözülen adres cluster aralığındaysa, adında kapsama
+  bağlanabilecek bir namespace taşımadığı için sınırlı kullanıcı için reddedilir.
+  Yalnız ad-sınıflama yaması (iki etiketli adı `InCluster`'a eklemek) yetmezdi —
+  iç adrese çözülen genel adı kaçırırdı. Çözümleme kontrol anında bir kez yapılır
+  ve karar o yanıta dayanır; adı bu çözümle kontrol anı arasında değişen (DNS
+  rebinding) bir hedef bu kapının dışındadır (TOCTOU). Bu kalan boşluk için
+  deny-CIDR ve çok kiracılı prova derinlemesine savunma olarak kalır. Yük
+  korumaları (`guardrails.External`, scheduler host tavanları) bilinçli olarak
+  adı yazıldığı gibi sınıflamayı sürdürür: bunlar kiracı sınırı değil yük
+  korumasıdır, çözümlemeyi zamanlayıcının sıcak yoluna taşımak sınıfı bir zone
+  sahibinin eline bırakırdı ve iç bir adı dış saymak yalnızca daha kısıtlayıcıdır
+  (daha uzun asgari aralık, host tavanı), cross-tenant ihlali değil. Kiracı
+  sınırı kapsam denetimidir (`api.targetInScope`).
 
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
@@ -89,12 +111,15 @@ sınırlayacağımızdır.
   erişimi ayıramaz; erişimi asıl sınırlayan (c)'deki kullanıcı başına
   kapsamdır (README "Hedef politikası"). Deny-CIDR ve
   `UPTIME_CHECK_SHOW_VALUE=false` derinlemesine savunma olarak kalır.
-- **Kapsamın kalan boşluğu (0.47).** Kapsam, hedefi `netguard.InCluster` ile
-  adından sınıflar; bir cluster son ekiyle bitmeyen iki etiketli kısa ad
-  (`api.odeme`, `kubernetes.default`) cluster dışı sayılır ve kapsam onu
-  kısıtlamaz, oysa backend pod'unun DNS arama alanı (`ndots`) onu cluster
-  içindeki bir Service'e ya da API sunucusuna çözebilir. Bu yüzden (c) ana
-  vektörleri (çıplak ClusterIP, kısa ad, tam `.svc`/FQDN, API sunucusunun
-  `.svc` adı) kapsar ama 0.47'de tek başına tam cross-tenant yalıtımı sağlamaz.
-  İki etiketli kısa adın kapsanması ve çözüm biçiminin hesaba katılması
-  docs/backlog.md'de izlenir (sprint 6 adayı).
+- **Kapsamın kalan boşluğu (0.47) — kapatıldı (0.48).** 0.47'de kapsam hedefi
+  yalnız `netguard.InCluster` ile adından sınıflıyordu; bir cluster son ekiyle
+  bitmeyen iki etiketli kısa ad (`api.odeme`, `kubernetes.default`) cluster dışı
+  sayılıp denetimi atlıyordu, oysa backend pod'unun DNS arama alanı (`ndots`) onu
+  cluster içindeki bir Service'e ya da API sunucusuna çözebiliyordu. 0.48'de
+  (yukarıda "Çözüm anında denetim", #95) kapsam denetimi adı dış görünen hedefi
+  çözer ve çözülen adres cluster aralığındaysa sınırlı kullanıcı için reddeder;
+  iki etiketli kısa ad, iç adrese çözülen genel ad ve TOCTOU biçimleri negatif
+  testlerle tek tek kapsanır (`backend/internal/netguard`,
+  `backend/internal/api`). Kalan artık yalnızca DNS rebinding penceresidir
+  (adın çözümle dial arasında değişmesi); bunun için deny-CIDR ve çok kiracılı
+  prova derinlemesine savunmadır.
