@@ -152,6 +152,7 @@ func main() {
 		SendTimeout:       cfg.NotifyTimeout,
 		RetryMax:          cfg.NotifyRetryMax,
 		RetryFor:          cfg.NotifyRetryFor,
+		HumanRetryMax:     cfg.NotifyHumanRetryMax,
 		GroupWait:         cfg.NotifyGroupWait,
 		Language:          cfg.Language,
 		PublicURL:         cfg.PublicURL,

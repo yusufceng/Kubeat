@@ -3397,11 +3397,14 @@ almıyor sayılmaz (bkz. yukarıda "Reddetti").
   kanalın sıradaki yeniden deneme geçişini bekler. Kanal dönünce yeni
   kesinti sayfası da, Slack ya da e-posta mesajı da en çok kanalın o anki
   bekleme süresi kadar gecikir; üst sınır `UPTIME_NOTIFY_RETRY_MAX`
-  (varsayılan 15 dk). Kanalı düzenlemek ya da kanal testi duraklatmayı
-  kaldırmaz (test kuyruğu atlar); düzeltilmiş ayar sıradaki geçişte
-  kullanılır. Kanalın reddettiği bir bildirimin
-  `UPTIME_NOTIFY_RETRY_MAX` beklemesi kanalın geçişi sayılmaz: kanal yine
-  kendi yeniden denemesinin zamanında denenir.
+  (varsayılan 15 dk), insanların okuduğu kanallar için
+  `UPTIME_NOTIFY_HUMAN_RETRY_MAX` ile ayrıca kısaltılabilir (aşağıya bkz.).
+  Başarılı bir kanal testi ya da kanalı kaydetmek o kanalın duraklatmasını
+  kaldırır: bekleyen kesintiler kanalın sıradaki geçişinde öne alınarak,
+  beklemeyi doldurmadan gider. Kanal testi yine test kuyruğunu atlar ve tek
+  deneme yapar; başarısız bir test duraklatmayı kaldırmaz. Kanalın
+  reddettiği bir bildirimin `UPTIME_NOTIFY_RETRY_MAX` beklemesi kanalın
+  geçişi sayılmaz: kanal yine kendi yeniden denemesinin zamanında denenir.
 - Geçişte kanalın daha az reddettiği bildirimler önce denenir (hatırlatma
   kendi kesintisinden sonra) ve geçiş ulaşılamayan ya da meşgul ilk
   bildirimde durur: ölü bir kanal geçiş başına bir kez denenir. Tek bir
@@ -3456,6 +3459,13 @@ almıyor sayılmaz (bkz. yukarıda "Reddetti").
 - Deneme listesi bellektedir: backend yeniden başlayınca açık kesintilerin
   hangi kanallara teslim edilemediğine bildirim kaydından bakılır ve o
   kanallara hemen yeniden gönderilir.
+- Monitor o anda bakımdaysa teslim edilememiş kesinti yeniden
+  gönderilmez: bakım penceresi onu, gecikmesi bakımda dolan bir kesintiyi
+  sustururken olduğu gibi susturur. Böylece bir kanal, hâlâ bakımdaki bir
+  monitor'a yeniden başlatmadan sonra dönünce bayat bir sayfayla kimseyi
+  gece uyandırmaz. Pencere geçtikten sonra kesinti hâlâ açıksa sonraki
+  yeniden başlatma onu gönderir (düzelme bakımda da gider, kesinti gibi
+  susturulmaz).
 - Kayıtta hiç denemesi olmayan açık kesinti de gönderilir: yeniden
   başlatma onu kuyrukta, grup beklemesinde ya da almıyor sayılan bir
   kanalın listesinde yakalamıştır. Gecikmesiz kanallara hemen gider
@@ -3482,6 +3492,23 @@ başlatmada hiç denenmemiş kesinti yine bir kez gönderilir).
 varsayılanlarla 30 sn). Daha kısa bir değer backend'i durdurmaz: bu sınıra
 yükseltilir ve backend açılışta verilen ve kullanılan değeri bir `WARN`
 satırıyla loglar (0.45'e kadar reddediliyor, backend başlamıyordu).
+
+İnsanların okuduğu kanal (Slack, Teams, e-posta, Telegram…) nöbetsiz bir
+ekibin ana kanalıysa, kanal bir süre ulaşılamayıp döndüğünde bayat bir
+sayfanın geç gelmesi can sıkar. İki seçenek var:
+
+- **Yalnız o kanallar için ayrı, daha kısa üst sınır.**
+  `UPTIME_NOTIFY_HUMAN_RETRY_MAX`'ı 2–5 dakikaya çekin: insanların okuduğu
+  kanalların yeniden deneme beklemesi en çok o kadar katlanır, yazılımın
+  okuduğu webhook ve PagerDuty ise `UPTIME_NOTIFY_RETRY_MAX`'ta (varsayılan
+  15 dk) kalır; bir ITSM/çağrı entegrasyonu bayat bir kaydı kaybetmez. `0`
+  (varsayılan) o kanalları da `UPTIME_NOTIFY_RETRY_MAX`'ta bırakır, davranış
+  değişmez. Alt sınır `UPTIME_NOTIFY_RETRY_MAX`'ınkiyle aynıdır (1 dk ve bir
+  deneme süresi); daha kısası ona yükseltilir ve bir `WARN` loglanır.
+- **Tüm kanallar için tek üst sınır.** Webhook/PagerDuty kullanmıyorsanız
+  `UPTIME_NOTIFY_RETRY_MAX`'ı 2–5 dakikaya kısaltmak da aynı işi görür.
+
+Her iki ayarda da alt sınır 1 dakika ve bir deneme süresidir.
 Ayrıştırılamayan ya da negatif bir değer yine reddedilir.
 
 #### Kapanış
@@ -4070,6 +4097,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_TIMEOUT` | `5s` | Tek bir kısa tekrarın zaman aşımı |
 | `UPTIME_NOTIFY_QUEUE_SIZE` | `1000` | Teslimat döngüsünün önünde bekleyebilecek en fazla bildirim sayısı. Döngü bir bildirimi tüm kanallara aynı anda gönderir ve yalnızca en yavaş kanalın denemeleri kadar bekler; bu sırada gelenler burada birikir (o an bekleyenleri `kubeat_notification_queue_length` gösterir), kuyruk doluysa düşer ve `kubeat_notifications_dropped_total` artar. En az monitor sayısı kadar olmalıdır: tüm monitor'ların birlikte düştüğü bir kesintinin bildirimleri sığar. Varsayılanı `UPTIME_MAX_MONITORS`'ınki kadardır ve ondan türetilmez; etkin monitor sayısı kuyruğu aşınca backend bir kez `WARN` loglar. 1000'lik kuyruk ≈ 1 MiB, doluyken ≈ 1,7 MiB bellek tutar |
 | `UPTIME_NOTIFY_RETRY_MAX` | `15m` | Kanalın almadığı kesinti (`down`, `up`) bildiriminin yeniden denenme aralığının üst sınırı: alıcıya ulaşılamadığında aralık 1 dakikadan başlar, her başarısız denemede ikiye katlanır; reddedilen (4xx) bildirim doğrudan bu aralıkla, meşgul (429) alıcıya `Retry-After` kadar sonra (en çok bu kadar) denenir; `down` olay kapanana kadar denenir (bkz. "Alarm"). `0` yeniden denemeyi kapatır. Alt sınırı `1m` ve bir denemenin süresidir (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`): daha kısası bu sınıra yükseltilir ve backend açılışta verilen ve kullanılan değeri `WARN` olarak loglar |
+| `UPTIME_NOTIFY_HUMAN_RETRY_MAX` | `0` | İnsanların okuduğu kanallar (Slack, Teams, e-posta, Telegram, Discord…) için `UPTIME_NOTIFY_RETRY_MAX`'tan daha kısa bir üst sınır: bu kanalların yeniden deneme beklemesi en çok bu kadar katlanır ve reddi bu kadar bekler, yazılımın okuduğu webhook ve PagerDuty ise `UPTIME_NOTIFY_RETRY_MAX`'ta kalır; böylece nöbetsiz bir ekibin ana Slack kanalına bayat bir sayfa geç gelmez. `0` (varsayılan) o kanalları da `UPTIME_NOTIFY_RETRY_MAX`'ta bırakır (davranış değişmez); yeniden denemeyi kapatmaz (onu `UPTIME_NOTIFY_RETRY_MAX=0` yapar). Alt sınırı `UPTIME_NOTIFY_RETRY_MAX`'ınkiyle aynıdır: daha kısası ona yükseltilir ve bir `WARN` loglanır |
 | `UPTIME_NOTIFY_RETRY_FOR` | `1h` | Düzelme (`up`) bildiriminin ilk başarısız denemeden itibaren en çok ne kadar süre yeniden deneneceği (almıyor sayılan bir kanal için bekletilen düzelmede süre ilk denemeyle başlar); `0` düzelmeyi yeniden denemez |
 | `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz. `UPTIME_OIDC_REDIRECT_URL` boşsa SSO dönüş adresi de bundan türetilir |
 | `UPTIME_INSTANCE_NAME` | – | Kurulum kimliği: birden çok kurulumun paylaştığı alıcılar için bildirimlerde bu kurulumun adı. PagerDuty `dedup_key`'inde ve `custom_details`'inde, webhook gövdesinin `instance` alanında, Slack ve Mattermost alt bilgisinde, Teams ve Google Chat kartında ve e-posta gövdesinde görünür. Boşsa `UPTIME_PUBLIC_URL`'ün host'u (varsa portuyla), ikisi de yoksa kimlik yok. Chart'ta `instanceName`. Değiştirmeden önce açık PagerDuty olaylarını kapatın (bkz. "Bildirim kanalları", **Kurulum kimliği**) |

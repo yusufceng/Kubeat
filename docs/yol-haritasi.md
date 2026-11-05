@@ -248,8 +248,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   bekletilir; meşgul ve reddeden alıcıya kısa tekrar yapılmaz. 4xx dönen
   kanal canlıdır ve duraklamaz: öteki bildirimler beklemeden gider; kanal
   düzeltilince reddedilmiş bildirim sıradaki denemesini (en çok
-  `UPTIME_NOTIFY_RETRY_MAX`) bekler, düzenleme denemeyi öne almaz. Bunun
-  iki bedeli var: geçici bir 4xx (alıcı yeniden yayımlanırken 404) de
+  `UPTIME_NOTIFY_RETRY_MAX`) bekler; başarılı bir kanal testi ya da kanalı
+  kaydetmek bu beklemeyi öne alır (bekleyenler kanalın sıradaki geçişinde
+  gider). Bunun iki bedeli var: geçici bir 4xx (alıcı yeniden yayımlanırken 404) de
   reddetme sayılır ve o bildirimi `UPTIME_NOTIFY_RETRY_MAX` kadar
   geciktirir; her şeyi reddeden bir makine kanalı (süresi dolmuş token,
   kaldırılmış alıcı) bekleyen her bildirim için `UPTIME_NOTIFY_RETRY_MAX`'ta
@@ -264,6 +265,11 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   yeniden deneme zamanına bekletir, gruplama kapalıyken
   (`UPTIME_NOTIFY_GROUP_WAIT=0`) de: kanal dönünce yeni mesajı en çok o
   anki bekleme süresi kadar (üst sınır `UPTIME_NOTIFY_RETRY_MAX`) gecikir.
+  Başarılı bir kanal testi ya da kanalı kaydetmek bu duraklatmayı kaldırır
+  ve bekleyenleri sıradaki geçişte öne alır. İnsanların okuduğu kanalların
+  üst sınırı `UPTIME_NOTIFY_HUMAN_RETRY_MAX` ile ayrıca kısaltılabilir
+  (varsayılan `0` = `UPTIME_NOTIFY_RETRY_MAX`; webhook ve PagerDuty hep
+  `UPTIME_NOTIFY_RETRY_MAX`'ta kalır).
   Yeniden denenmeyen bir bildirimin (hatırlatma, sertifika, yavaşlık)
   ilk denemesinde ulaşamadığı kanal, yeniden denenecek başka bir bildirimi
   yoksa bekletilmez: birden çok namespace'te aynı anda gelen böyle grupların
@@ -280,7 +286,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   beklemesinde kalanlar) dahil, bildirim kaydından kurulur (kaydı
   `UPTIME_DELIVERY_RETENTION` ile silinmiş açık kesinti bir kez daha
   gider); bekleyen düzelme bildirimi düşer, kanal almadan yeni bir kesinti
-  açılırsa da düşer.
+  açılırsa da düşer. Yeniden başlatmada monitor o anda bakımdaysa teslim
+  edilememiş kesinti yeniden gönderilmez: bakım penceresi onu, gecikmesi
+  bakımda dolan bir kesintiyi sustururken olduğu gibi susturur (gece
+  bildirimi gitmez).
   Kapanışta insan kanallarının grupları kuyruktan önce gider ve kapanışın
   tümü `UPTIME_SHUTDOWN_TIMEOUT` ile sınırlıdır; yetişmeyen düzelme
   bildirimi kaybolur. Teslim edilemeyen bildirimlerin ayrı bir görünümü

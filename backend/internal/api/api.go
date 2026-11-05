@@ -113,9 +113,14 @@ type Sync interface {
 	Status() discovery.Status
 }
 
-// Notifier sends a single notification to a channel, without retries.
+// Notifier sends a single notification to a channel, without retries, and
+// lifts a channel's delivery pause once it is reachable again (Resume).
 type Notifier interface {
 	SendOnce(ctx context.Context, ch store.Channel, n alert.Notification) error
+	// Resume tells the delivery loop a channel is reachable again — it was
+	// saved, or a test reached it — so what waited for it goes out without
+	// sitting out the back-off.
+	Resume(channelID int64)
 }
 
 // Options configures the API handler.

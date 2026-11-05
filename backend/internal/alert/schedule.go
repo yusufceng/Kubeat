@@ -177,6 +177,30 @@ func (s *schedule) dropRetry(r *retry) {
 	}
 }
 
+// resume lifts a channel's pause and brings forward what still waits for
+// it, so that a channel the user has just fixed — a test that succeeded, or
+// the channel saved (Engine.Resume) — does not leave the pending outages
+// sitting out the back-off: the receiver answered. A note not attempted yet
+// counts its RetryFor from the pass it now goes in, as a held note does
+// (retryLater, deliverOwed). A refusal's wait is brought forward too: a
+// receiver that refused and now answers is fixed. It reports whether
+// anything changed, so the loop flushes only when it must.
+func (s *schedule) resume(channelID int64, now time.Time) bool {
+	changed := s.failing[channelID]
+	delete(s.failing, channelID)
+	for _, r := range s.retries {
+		if r.channel.ID != channelID || !r.due.After(now) {
+			continue
+		}
+		r.due = now
+		if !r.tried {
+			r.since = now
+		}
+		changed = true
+	}
+	return changed
+}
+
 // supersede drops the notes about the notification's monitors still held
 // back for the channel that n, newer, takes the place of (supersedes): a
 // reminder, as a newer reminder does in a group (dropStaleReminders), or
@@ -371,6 +395,21 @@ func (e *Engine) pausing() bool {
 	return e.opts.RetryMax > 0
 }
 
+// retryCap is how long a channel's attempts again back off to at most, and
+// how long it waits out a refusal: HumanRetryMax for the channels people
+// read when it is set, so that a stale page does not reach a chat long
+// after the outage (README "Alarm"), and RetryMax for the channels software
+// reads and whenever HumanRetryMax is zero, the default. The attempts are
+// on or off by RetryMax alone (retries, pausing): a shorter human cap only
+// shortens the back-off, it does not turn the attempts off for the channels
+// people read.
+func (e *Engine) retryCap(ch store.Channel) time.Duration {
+	if !machine(ch.Type) && e.opts.HumanRetryMax > 0 {
+		return e.opts.HumanRetryMax
+	}
+	return e.opts.RetryMax
+}
+
 // paused returns the retry that a channel waits for when its last pass
 // stopped at a failure that did not reach it or a busy answer: the first
 // of its retries still to come, those waiting out a refusal aside. Until
@@ -419,12 +458,15 @@ func (e *Engine) retryLater(failures []failed) {
 	held := make(map[string]int)
 	for _, f := range failures {
 		r := f.retry
+		// How far this channel's wait backs off, and how long it waits out a
+		// refusal: shorter for a channel people read when HumanRetryMax is set.
+		retryMax := e.retryCap(f.channel)
 		switch {
 		case f.held && r != nil:
 			if f.class == busy {
 				r.due = now.Add(f.wait)
 			} else {
-				r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
+				r.due, r.wait = now.Add(r.wait), min(r.wait*2, retryMax)
 			}
 			if !r.tried {
 				r.since = r.due
@@ -432,8 +474,8 @@ func (e *Engine) retryLater(failures []failed) {
 		case f.held:
 			// Not attempted: it goes with what the channel waits for, or,
 			// when nothing else waits, it starts the wait.
-			wait := min(retryBase, e.opts.RetryMax)
-			due, next := now.Add(wait), min(wait*2, e.opts.RetryMax)
+			wait := min(retryBase, retryMax)
+			due, next := now.Add(wait), min(wait*2, retryMax)
 			if p := e.paused(f.channel, now); p != nil {
 				due, next = p.due, p.wait
 			}
@@ -447,7 +489,7 @@ func (e *Engine) retryLater(failures []failed) {
 				if f.note.Event == EventReminder || slowness(f.note.Event) {
 					e.owed.supersede(f.channel.ID, f.note)
 				}
-				r = e.owed.addRetry(f.channel, f.note, now, now, min(retryBase, e.opts.RetryMax))
+				r = e.owed.addRetry(f.channel, f.note, now, now, min(retryBase, retryMax))
 				r.once = !e.retries(f.note)
 			}
 			r.due, r.tried, r.refused = now.Add(f.wait), true, false
@@ -456,14 +498,14 @@ func (e *Engine) retryLater(failures []failed) {
 			e.gaveUp(f.channel, f.note, "not taken when attempted")
 			continue
 		case r != nil && f.class == refused:
-			r.due, r.wait = now.Add(e.opts.RetryMax), e.opts.RetryMax
+			r.due, r.wait = now.Add(retryMax), retryMax
 		case r != nil:
-			r.due, r.wait = now.Add(r.wait), min(r.wait*2, e.opts.RetryMax)
+			r.due, r.wait = now.Add(r.wait), min(r.wait*2, retryMax)
 		case e.retries(f.note) && f.class == refused:
-			r = e.owed.addRetry(f.channel, f.note, now, now.Add(e.opts.RetryMax), e.opts.RetryMax)
+			r = e.owed.addRetry(f.channel, f.note, now, now.Add(retryMax), retryMax)
 		case e.retries(f.note):
-			wait := min(retryBase, e.opts.RetryMax)
-			r = e.owed.addRetry(f.channel, f.note, now, now.Add(wait), min(wait*2, e.opts.RetryMax))
+			wait := min(retryBase, retryMax)
+			r = e.owed.addRetry(f.channel, f.note, now, now.Add(wait), min(wait*2, retryMax))
 		default:
 			e.gaveUp(f.channel, f.note, "")
 			continue
@@ -903,9 +945,21 @@ func (e *Engine) restore(ctx context.Context) {
 // sent again; a channel that does not listen for outages opening was
 // sent nothing; and when the log cannot be read, the channel counts as
 // having taken it, as it would without the log: a page too few rather
-// than one too many.
+// than one too many. An outage whose monitor is in maintenance now is not
+// sent again either: the window silences it as it would a delayed outage
+// whose delay passes in maintenance (deliverOwed), so that a channel
+// coming back after a restart to a monitor still under maintenance does
+// not wake people with a stale page. When the store cannot say whether the
+// monitor is in maintenance, it is not: the outage is sent, as it is
+// without a window (silenced).
 func (e *Engine) retryUndelivered(ctx context.Context, ch store.Channel, n Notification, now time.Time) {
 	if e.opts.RetryMax <= 0 || !ch.Wants(EventDown.Kind()) || e.owed.hasRetry(ch.ID, EventDown, n.Incident.ID) {
+		return
+	}
+	if quiet, err := e.store.InMaintenance(ctx, n.Monitor, now); err != nil {
+		e.opts.Logger.Error("maintenance not read; the outage is sent again", "channel", ch.Name, "monitor", n.Monitor.Name, "error", err)
+	} else if quiet {
+		e.opts.Logger.Info("outage not sent again after the restart: its monitor is in maintenance", "channel", ch.Name, "monitor", n.Monitor.Name)
 		return
 	}
 	delivered, err := e.store.Delivered(ctx, n.Incident.ID, ch.ID, string(EventDown))
@@ -916,7 +970,7 @@ func (e *Engine) retryUndelivered(ctx context.Context, ch store.Channel, n Notif
 	if delivered {
 		return
 	}
-	e.owed.addRetry(ch, n, now, now, min(retryBase, e.opts.RetryMax))
+	e.owed.addRetry(ch, n, now, now, min(retryBase, e.retryCap(ch)))
 	e.opts.Logger.Warn("notification to be sent again after the restart", "channel", ch.Name, "event", n.Event, "monitor", n.Monitor.Name)
 }
 
