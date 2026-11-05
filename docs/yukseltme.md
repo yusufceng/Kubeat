@@ -41,7 +41,7 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.48'e
+### 0.42'den 0.49'e
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
@@ -75,29 +75,35 @@ geri dönüş başladığınız sürüme olur.
    arkasındaysa `UPTIME_TRUST_PROXY_HOPS`'u ayarlayın; kapsamı sınırlı
    kullanıcıların iç hedefleri artık çözüm anında da denetlenir (iki
    etiketli kısa ad/genel ad boşluğu kapandı), gözden geçirin.
-8. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46, 0.47 ve 0.48'de
-   değişmedi: yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi
-   Alertmanager yönlendirmesine ekleyin; kuralları kopyalıyorsanız
-   0.48'inkileri kopyalayın (0.45'inkilerle aynı).
-9. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
-   yerine `--reset-then-reuse-values`, Helm 3.14+):
+8. 0.49'un adımları ("0.49'a yükseltme", Yapılacak): `UPTIME_TRUST_PROXY_HOPS`'u
+   somut hop sayısına göre gözden geçirin (güvenilemeyen `X-Forwarded-For`'da
+   artık çalışma anında `WARN` gelir); egress'i varsayılan-reddet olan bir
+   cluster'da backend'in cluster DNS'ine (kube-dns/openshift-dns) egress'ine
+   izin verin, yoksa kapsamı sınırlı kullanıcıların dış hedef create'i güvenli
+   tarafta reddedilir.
+9. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46–0.49'da değişmedi:
+   yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi Alertmanager
+   yönlendirmesine ekleyin; kuralları kopyalıyorsanız 0.48'inkileri kopyalayın
+   (0.49'da değişmedi, 0.45'inkilerle aynı).
+10. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
+    yerine `--reset-then-reuse-values`, Helm 3.14+):
 
-   ```sh
-   helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.48.0 -f values.yaml
-   ```
+    ```sh
+    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0 -f values.yaml
+    ```
 
-10. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
-    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.48'in yeniden denemesi,
+11. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
+    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.49'in yeniden denemesi,
     kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
     PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.48'e
+### 0.41'den 0.49'e
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.48'e"deki adımlar.
+2. Sonra "0.42'den 0.49'e"deki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
 0.43, 0.44 ya da 0.45'ten gelirken başladığınız sürümden sonraki bölümleri
@@ -207,6 +213,70 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 0.49'a yükseltme
+
+0.49, 0.48'de yayımlanan giriş throttle'ını gerçek vekil/NAT topolojisinde
+savunulur kılar (güvenilemeyen `X-Forwarded-For` yapılandırmasında artık uyarır
+ve güvenli tarafa düşer) ve 0.48'in çözüm anında kapsam denetimini DNS hatasında
+güvenli tarafa alır (CoreDNS kesintisinde fail-open kapanır, çözüme ayrı bir
+zaman aşımı konur). Ayrıca giriş/dizin erişilebilirliğini, giriş throttle/
+lockout'unu ve kapsam dışı hedef reddini operatöre metrik ve denetim kaydıyla
+görünür kılar. Şema değişmez (26); hiçbir madde yeni zorunlu ayar getirmez.
+
+### Yapılacak
+
+- **Giriş bir vekilin arkasındaysa `UPTIME_TRUST_PROXY_HOPS`'u somut hop sayısına
+  göre gözden geçirin.** 0.49, `X-Forwarded-For` görülürken `hops=0` iken ve
+  ayarlanan hop sayısı gerçek zincirden kısa/uzun geldiğinde çalışma anında
+  dakika-sınırlı bir `WARN` yazar (satır anahtarlanan adresi de verir; görülen
+  kaynağı bu satırdan doğrulayın). Somut sayılar: OpenShift Route tek başına 1,
+  önünde kurumsal WAF/LB varsa 2; GKE'de GCLB + ingress-nginx 2, yalnız GCLB 1.
+  Paylaşılan kurumsal NAT/vekil arkasında aynı kaynak adresi birçok kullanıcı
+  için tektir; o popülasyonda `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`'ı daha yüksek
+  tutmayı değerlendirin (güvenilir-vekil IP allowlist yol haritasında).
+- **Egress'i varsayılan-reddet olan (hava boşluklu) bir cluster'da backend
+  pod'unun cluster DNS'ine (kube-dns/openshift-dns) egress'ine izin verin.**
+  0.49'da kapsamı sınırlı bir kullanıcının dış görünüşlü hedef oluşturması ya da
+  değiştirmesi yazma anında bir DNS sorgusu yapar; chart'ın NetworkPolicy'si
+  egress'i açmaz (yalnız Ingress). İzin yoksa bu kullanıcıların meşru dış hedef
+  create'leri güvenli tarafta reddedilir (admin, `*` kapsamlı kullanıcılar ve tek
+  kiracılı kurulumlar etkilenmez). Çözüm zaman aşımını
+  `UPTIME_TARGET_RESOLVE_TIMEOUT` ile ayarlayabilirsiniz (varsayılan 5 sn).
+- İsteğe bağlı: yeni `kubeat_signin_failures_total{reason}`,
+  `kubeat_signin_throttled_total{kind}` ve
+  `kubeat_target_scope_denied_total{reason}` serilerini Prometheus'unuzda bir
+  alarma bağlayın (README "Hesaplar ve giriş" örnek PromQL'i). Seriler `/metrics`
+  token'lı yüzeyde kalır ve enum sızdırmaz.
+
+### Davranış değişikliği
+
+- Giriş: `X-Forwarded-For` görülürken `UPTIME_TRUST_PROXY_HOPS=0` iken ya da XFF
+  zinciri ayarlanan hop sayısından kısa geldiğinde backend çalışma anında
+  dakika-sınırlı bir `WARN` yazar; hops gerçek zincirden uzunsa görülen kaynak
+  istemci-kontrollü en soldaki girdi yerine bağlanan eşe (peer) düşer. Böylece
+  uydurma bir XFF ile throttle atlanamaz ya da bir kurban kilitlenemez; yanlış
+  ayarın maliyeti "bypass" değil "tek paylaşılan kilit"tir.
+- Hedef kapsamı: kapsamı sınırlı bir kullanıcı için ad çözümü hata, zaman aşımı
+  ya da NXDOMAIN verince dış görünüşlü hedef artık reddedilir (önce sessizce
+  kabul ediliyordu); iç adrese çözülen hedefin 403 metni tek genel mesaja
+  indirildi. Admin, `*` kapsamlı kullanıcılar ve tek kiracılı kurulum etkilenmez.
+- Gözlem (davranış değil): kapsam/yetki dışı hedef reddi artık bir denetim satırı
+  (`deny`/`target-scope`, 90 gün, yöneticiye açık) ve
+  `kubeat_target_scope_denied_total{reason}` sayacı üretir; istemciye dönen 403
+  ve başarılı yol değişmez.
+
+### Geri dönüş
+
+Şema aynı (26), `helm rollback` ile 0.48.0'a. Dönüşte giriş `WARN`'ı ve
+güvenli-fallback, kapsam denetiminin DNS-hatası reddi,
+`UPTIME_TARGET_RESOLVE_TIMEOUT` ve yeni metrik/denetim kayıtları kalkar.
+
+### Alarm kuralları: değişmedi
+
+Chart'ın PrometheusRule'u değişmedi; yeni metrikler için bir alarm eklemek
+isterseniz README "Hesaplar ve giriş"teki örnek PromQL'i kendi Alertmanager
+yönlendirmenize ekleyin.
 
 ## 0.48'e yükseltme
 
