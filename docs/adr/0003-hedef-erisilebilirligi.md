@@ -36,7 +36,9 @@ sınırlayacağımızdır.
 ## Karar
 
 **(a) ve (b) önce (0.46 turu, #80/#81); (c) ve (d) sprint 5'te (#84/#85);
-(c)'nin kalan boşluğu çözüm anında denetimle sprint 6'da (0.48, #95).**
+(c)'nin kalan boşluğu çözüm anında denetimle sprint 6'da (0.48, #95); çözüm
+hatasında güvenli taraf sprint 7'de (0.49, #107), vekilli topolojideki
+daraltması sprint 8'de (0.50, #121).**
 
 - **(a)** `UPTIME_TARGET_DENY_CIDRS`'in rolü belgelendi: bir monitor ya da
   kanal webhook'u politikanın izin verdiği her adrese ulaşır; hassas ya da
@@ -107,7 +109,46 @@ sınırlayacağımızdır.
   kapsam-aşımına izin vermektense yeni kurulumu bekletmeyi yeğleyen bilinçli bir
   seçimdir (işaretle-ve-izin bypass'ı açık bırakacağı için seçilmedi). Var olan
   monitor'ler çalışmaya devam eder ("İzleme asla durmaz"); yalnız sınırlı
-  kullanıcının yeni kapsam-dışı create'i reddedilir.
+  kullanıcının yeni kapsam-dışı create'i reddedilir. Bu taviz bir **kesinti
+  anı** için tartıldı; kalıcı vekilli topoloji için aşağıdaki daraltma geçerlidir.
+
+  **Vekilli topolojide NXDOMAIN (0.50, #121).** Hava boşluklu ya da egress'i
+  kısıtlı bir kurumda pod'lar dış adları kalıcı olarak çözemez; çözümü ve
+  bağlantıyı cluster dışındaki kurumsal vekil yapar (`HTTPS_PROXY`, `NO_PROXY`).
+  0.49'un fail-safe'i bu topolojide kapsamı sınırlı kullanıcının bütün dış HTTP
+  monitor ve webhook'larını yerel NXDOMAIN'e bakarak reddediyor, her deneme de
+  sahte bir cross-tenant denetim satırı (`deny`/`target-scope`, `reason=target`)
+  bırakıyordu. PO kararı S77'nin kararını açıkça daraltır: **vekile gidecek bir
+  hedefte yerel NXDOMAIN bir kapsam sinyali değildir**, çünkü isteği backend
+  değil vekil çözer ve bağlar. 0.50'de opt-in `UPTIME_TARGET_SCOPE_TRUST_PROXY`
+  (varsayılan `false`) açıkken, kapsam çözümü yalnız NXDOMAIN verirse ve istek
+  vekile gidiyorsa hedef reddedilmez. Vekile gidip gitmediği checker'ın ve
+  kanalların kullandığı `http.ProxyFromEnvironment` kararıyla aynıdır
+  (`netguard.Proxied`, `NO_PROXY` dahil); yalnız HTTP/HTTPS (anahtar kelime ve
+  JSON dahil), WebSocket monitor'leri ve webhook türü kanallar vekile gider.
+  Çözüm yine yapılır ve karar o yanıta dayanır:
+  - cluster içine çözülen ad (iki etiketli `api.payments`, `kubernetes.default`,
+    iç adrese çözülen genel ad), SERVFAIL, REFUSED ve zaman aşımı yine
+    reddedilir; fail-safe korunur;
+  - `NO_PROXY`'ye uyan ad ve doğrudan bağlanan türler (TCP, DNS, gRPC, ping,
+    veritabanı, `each_pod`) istisna almaz;
+  - adından cluster içi olan biçimler (çıplak ClusterIP, kısa ad, `.svc`/FQDN,
+    API sunucusu adı) zaten çözüme gelmeden ad-sınıflamayla karar bulur.
+
+  Çözümü tamamen atlamak (Müşteri A'nın önerisi) seçilmedi: var olan
+  monitor'ler yeniden denetlenmediği için (S73) `NO_PROXY` ya da vekil sonradan
+  değişirse kayıtlı hedef ileride cluster içine çözülmeye başlayabilir. Ayarın
+  otomatik açılması da seçilmedi: vekilin cluster dışında olduğunu yalnız
+  operatör bilir. **Şart: vekil cluster dışında olmalı**, cluster'ın adlarını
+  çözememeli ve ClusterIP/pod adreslerine ulaşamamalı. Cluster içindeki bir vekil
+  cluster DNS'ini ve kendi arama alanlarını kullanır: backend'de bugün NXDOMAIN
+  alan bir ad (Service'i sonradan oluşturulan `api.payments`, vekilin kendi
+  namespace'ine göre çözülen bir ad) vekilde ClusterIP'ye çözülüp oraya
+  bağlanabilir; böyle bir kurulumda ayar kapalı kalır. Vekil verilmiş ve ayar
+  kapalıyken backend açılışta bir kez `WARN` yazar. Kalan sınırlar: cluster DNS'i
+  dış adlara NXDOMAIN değil SERVFAIL ya da zaman aşımıyla yanıt veriyorsa ayar
+  yardım etmez ve bu red denetimde gerçek bir cross-tenant reddinden ayrılmaz
+  (S82); gerçek hava boşluklu cluster provası kullanıcıdadır.
 
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
@@ -161,3 +202,7 @@ sınırlayacağımızdır.
   tek genel mesaja indirilerek iç-adres oracle'ı daraltıldı. Yönetici ve kapsamı
   `*` olan kullanıcı etkilenmez. Bilinçli taviz yukarıda (c), "Çözüm hatasında
   güvenli taraf".
+- **Vekilli topolojide daraltma (0.50).** Cluster dışındaki bir vekile giden
+  HTTP isteğinde yerel NXDOMAIN, opt-in `UPTIME_TARGET_SCOPE_TRUST_PROXY` ile
+  kapsam reddi sayılmaz; cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine
+  reddedilir (yukarıda (c), "Vekilli topolojide NXDOMAIN").

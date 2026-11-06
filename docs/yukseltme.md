@@ -299,6 +299,15 @@ görünür kılar. Şema değişmez (26); hiçbir madde yeni zorunlu ayar getirm
   ya da NXDOMAIN verince dış görünüşlü hedef artık reddedilir (önce sessizce
   kabul ediliyordu); iç adrese çözülen hedefin 403 metni tek genel mesaja
   indirildi. Admin, `*` kapsamlı kullanıcılar ve tek kiracılı kurulum etkilenmez.
+- **Bilinen sınır: vekilli kurulumda dış hedef.** Dış adları yalnız kurumsal vekilin
+  çözdüğü (`HTTPS_PROXY`, `NO_PROXY`; backend'in çözücüsünde NXDOMAIN) bir kurulumda
+  kapsamı sınırlı kullanıcının bu adlara HTTP/WebSocket monitor'ü ve webhook türü
+  kanalı da reddedilir. Her deneme bir `deny`/`target-scope` satırı ve
+  `reason=target` sayımı bırakır; bu bir cross-tenant girişimi değildir. 0.49'da
+  geçici yol: hedefi yönetici kurar ya da keşiften içe aktarılır. 0.50'de opt-in
+  `UPTIME_TARGET_SCOPE_TRUST_PROXY` (yalnız vekil cluster dışındaysa) bu reddi
+  kaldırır ([#121](https://github.com/yusufceng/Kubeat/issues/121); README "Hedef
+  politikası" → "Vekilli kurulum").
 - Gözlem (davranış değil): kapsam/yetki dışı hedef reddi artık bir denetim satırı
   (`deny`/`target-scope`, 90 gün, yöneticiye açık) ve
   `kubeat_target_scope_denied_total{reason}` sayacı üretir; istemciye dönen 403
