@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
+import { withFrontendToken } from "@/lib/frontend-token";
 import { incidentQueryParams } from "@/lib/api";
 import { filterToQuery, parseIncidentFilter } from "@/lib/incident-filter";
 import { sessionToken } from "@/lib/session";
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
   try {
     const res = await fetch(`${config.backendUrl}/api/v1/incidents?${params}`, {
       cache: "no-store",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: withFrontendToken({ Authorization: `Bearer ${token}` }, config.frontendToken),
       signal: AbortSignal.timeout(config.backendTimeoutMs),
     });
     const headers = new Headers({ "Content-Type": res.headers.get("Content-Type") ?? "application/json" });

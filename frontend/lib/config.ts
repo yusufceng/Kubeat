@@ -1,5 +1,6 @@
 // Server-side settings of the frontend, read from the environment.
 import "server-only";
+import { frontendToken } from "@/lib/frontend-token";
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const n = Number(value);
@@ -77,6 +78,13 @@ function dayList(value: string | undefined, fallback: string): number[] {
 
 export const config = {
   backendUrl: process.env.BACKEND_URL ?? "http://localhost:8080",
+  /**
+   * The secret every request to the backend carries in X-Frontend-Token
+   * (lib/frontend-token.ts): the backend's UPTIME_FRONTEND_TOKEN, by which
+   * it tells this UI from other peers and reads X-Forwarded-For only from
+   * it. Empty when unset or when a header cannot carry it as it is.
+   */
+  frontendToken: frontendToken(process.env.FRONTEND_TOKEN),
   /** The language for visitors whose browser asks for none we have: "en" or "tr". */
   defaultLocale: (process.env.DEFAULT_LOCALE === "tr" ? "tr" : "en") as "en" | "tr",
   /**

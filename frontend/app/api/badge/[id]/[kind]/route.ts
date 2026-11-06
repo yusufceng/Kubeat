@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
+import { withFrontendToken } from "@/lib/frontend-token";
 
 /**
  * A monitor's badge (an SVG image) for a README or a wiki, served without a
@@ -12,6 +13,7 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/badge/[i
   try {
     const res = await fetch(target, {
       cache: "no-store",
+      headers: withFrontendToken(undefined, config.frontendToken),
       signal: AbortSignal.timeout(config.backendTimeoutMs),
     });
     const headers = new Headers({ "Content-Type": res.headers.get("Content-Type") ?? "application/json" });

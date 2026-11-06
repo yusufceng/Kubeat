@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { seeOther } from "@/app/auth/see-other";
 import { config } from "@/lib/config";
+import { withFrontendToken } from "@/lib/frontend-token";
 import { setOidcState } from "@/lib/session";
 
 /**
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
     const callback = new URL("/auth/callback", request.url).toString();
     const res = await fetch(`${config.backendUrl}/api/v1/auth/oidc/start?redirect=${encodeURIComponent(callback)}`, {
       cache: "no-store",
+      headers: withFrontendToken(undefined, config.frontendToken),
       signal: AbortSignal.timeout(config.backendTimeoutMs),
     });
     if (!res.ok) return unavailable();
