@@ -148,8 +148,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   [ADR-0004](adr/0004-giris-kilitleme-stratejisi.md)): adını bilen biri tek bir
   kaynaktan bir hesabı herkes için kilitleyemez, meşru sahip başka bir adresten
   girer. Kalan sınırlar: (a) kaynak adresi bir Ingress/yük dengeleyici
-  arkasında ancak `UPTIME_TRUST_PROXY_HOPS` gerçek vekil sayısına ayarlanınca
-  doğru okunur, yoksa tüm istemciler vekilin tek adresini paylaşıp ada-başına
+  arkasında ancak `UPTIME_TRUST_PROXY_HOPS` arayüzün önündeki vekillerin
+  `X-Forwarded-For`'a yazdığı girdi sayısına (hiçbiri yazmıyorsa `1`;
+  0.48–0.49'da "gerçek vekil sayısı") ayarlanınca doğru okunur, yoksa tüm
+  istemciler vekilin tek adresini paylaşıp ada-başına
   tek bir kilide geriler; (b) çok sayıda ayrı kaynaktan gelen dağıtık bir
   tahmin, gevşek hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, 50)
   tetikleyip hesabı yine kilitleyebilir (kabul edilen taviz; tek kaynaktan ~15
@@ -179,7 +181,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   yeniden türetildi (README "Hesaplar ve giriş"; hiçbir satır henüz bu yolda
   ölçülmedi, sandbox Route provası sürümden sonra). Chart varsayılanı 0 kaldı;
   kurulum notu Route/Ingress açıkken değeri önerir. Kalanlar: hops>0 iken cluster
-  içindeki bir pod backend'e doğrudan ya da arayüz Service'i üzerinden uydurma
+  içindeki bir pod backend'e doğrudan ya da arayüz Service'i üzerinden (arayüz
+  `NodePort` ise node portuna node üzerinden gelen bir istemci de) uydurma
   `X-Forwarded-For` ile kaynak seçebiliyor (backend'e doğrudan geleni
   `networkPolicy.enabled` kapatır; S79
   [#119](https://github.com/yusufceng/Kubeat/issues/119) `X-Forwarded-For`'a

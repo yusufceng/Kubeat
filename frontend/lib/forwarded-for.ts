@@ -11,8 +11,10 @@
  * pass on the X-Forwarded-For the request came with, as it came: nothing
  * is added, dropped or reordered, since the hop count in the README is
  * worked out for exactly this. Next.js writes the header with its own peer
- * when no proxy in front did, and leaves one a proxy wrote alone. This has
- * no imports, so that the tests run it as it is.
+ * when the request came without one, and leaves one a proxy, or a client,
+ * wrote alone: so a hop count of 1 with no proxy in front holds only while
+ * the UI is reached by a port-forward, not exposed directly. This has no
+ * imports, so that the tests run it as it is.
  */
 
 /**

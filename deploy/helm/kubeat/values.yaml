@@ -112,7 +112,10 @@ backend:
     # header 2; GKE ingress-nginx (L4 LoadBalancer, externalTrafficPolicy:
     # Local, default settings) 1; L7 GCLB + ingress-nginx with
     # use-forwarded-headers and compute-full-forwarded-for 3; GKE's own GCE
-    # Ingress 2. Above 0 turn networkPolicy.enabled on, or any pod can reach
+    # Ingress 2. The 1 with none holds for a port-forward only: Next.js keeps
+    # a header a client sent, so with frontend.service.type LoadBalancer or
+    # NodePort and no such proxy in front keep 0, a shared lock rather than a
+    # bypass. Above 0 turn networkPolicy.enabled on, or any pod can reach
     # the backend with an X-Forwarded-For of its own. A misconfigured value is
     # warned (rate-limited): X-Forwarded-For seen while 0, or a chain shorter
     # than the hops (which then safely falls back to the peer); a value too

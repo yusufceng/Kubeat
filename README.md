@@ -1117,8 +1117,9 @@ başlıktan okunur:
 - Arayüz giriş, parola değiştirme ve durum sayfası kilidi isteklerinde
   tarayıcı isteğinin `X-Forwarded-For` başlığını backend'e **aynen** taşır:
   girdi eklemez, silmez, sırasını değiştirmez; başlık yoksa eklemez.
-- Önde başlığı yazan bir vekil yoksa (port-forward) Next.js başlığı kendi
-  gördüğü eşle yazar; bir vekilin yazdığı başlığa dokunmaz.
+- Önde başlığı yazan bir vekil yoksa (port-forward) ve istemci de başlık
+  göndermediyse Next.js başlığı kendi gördüğü eşle yazar. Gelen bir başlığa,
+  bir vekilin ya da istemcinin yazdığına, dokunmaz.
 - Arayüz böylece backend'e en yakın vekilin yerini alır: kendisi bir girdi
   yazmaz ve sayılmaz.
 - Parola değiştirme ve durum sayfası kilidinin sayaçları bugün kaynağa göre
@@ -1126,10 +1127,11 @@ başlıktan okunur:
 
 **Vekil-hop rehberi.** Değer, arayüzün önündeki vekillerinizin
 `X-Forwarded-For`'a yazdığı girdi sayısıdır; hiçbiri yazmıyorsa `1`'dir (girdiyi
-Next.js yazar). Backend zinciri "başlıktaki girdiler + arayüz pod'u" olarak görür
-ve istemciyi sağdan o kadar girdi geriden okur. Değerler vekillerin belgelenmiş
-varsayılan davranışından türetildi; "Ölçüm" sütunu değerin arayüz yolunda
-(tarayıcı → vekil → arayüz → backend) ölçülüp ölçülmediğini yazar:
+Next.js yazar; yalnız port-forward'da, aşağıdaki ilk madde). Backend zinciri
+"başlıktaki girdiler + arayüz pod'u" olarak görür ve istemciyi sağdan o kadar
+girdi geriden okur. Değerler vekillerin belgelenmiş varsayılan davranışından
+türetildi; "Ölçüm" sütunu değerin arayüz yolunda (tarayıcı → vekil → arayüz →
+backend) ölçülüp ölçülmediğini yazar:
 
 | Kurulum | Değer | Başlıktaki girdiler, soldan (yazan) | Ölçüm |
 | --- | --- | --- | --- |
@@ -1142,6 +1144,16 @@ varsayılan davranışından türetildi; "Ölçüm" sütunu değerin arayüz yol
 
 Dikkat edilecekler:
 
+- `1` (vekilsiz) yalnız arayüze, başlığı yazan ya da değiştiren bir vekilden
+  geçmeden hiçbir güvenilmeyen istemci ulaşamıyorsa geçerlidir (port-forward).
+  Next.js istemcinin gönderdiği başlığa dokunmaz: arayüz Service'ini önünde
+  böyle bir vekil olmadan doğrudan dışarı açtıysanız (`frontend.service.type`
+  `LoadBalancer` ya da `NodePort`) değer `0` kalmalıdır. `1` verilirse her
+  istemci başlığı kendisi yazıp her denemede kaynağını seçer: kaynak-başına
+  sınır atlanır (yalnız hesap tavanı kalır) ve adresi bilinen bir kurban
+  kilitlenebilir. `0`'da WARN sürer, çünkü throttle gerçekten tek paylaşılan
+  kilittedir; kaynakları ayırmak için arayüzün önüne başlığı yazan bir vekil
+  (Route, Ingress) koyun.
 - Vekilsiz kurulumda `0` bırakılırsa aşağıdaki WARN düşer, çünkü Next.js
   başlığı her istekte yazar; port-forward'da bütün istemciler zaten tek
   kaynaktır (`127.0.0.1`), pratik bir fark yoktur.
@@ -1160,10 +1172,13 @@ Dikkat edilecekler:
   "zincir kısa" WARN'ı düşer. Bu beklenen durumdur.
 - Değer `0`'dan büyükken cluster içindeki bir pod backend'e ya da arayüze
   doğrudan bağlanıp kendi yazdığı bir `X-Forwarded-For` ile kaynağını
-  seçebilir. Backend'e doğrudan geleni `networkPolicy.enabled=true` kapatır
-  (backend'e yalnız arayüz, Prometheus ve `networkPolicy.backendIngressFrom`
-  bağlanır; push işlerine etkisi "Ağ erişimi"nde). Arayüz Service'ine doğrudan
-  gelen uydurma başlık bugün kapanmaz (bilinen sınır,
+  seçebilir. Arayüz `NodePort` ise (ör. GCE Ingress için) node portuna yük
+  dengeleyiciyi atlayıp node üzerinden gelen bir istemci de (aynı VPC'deki bir
+  makine gibi) böyledir. Backend'e doğrudan geleni `networkPolicy.enabled=true`
+  kapatır (backend'e yalnız arayüz, Prometheus ve
+  `networkPolicy.backendIngressFrom` bağlanır; push işlerine etkisi "Ağ
+  erişimi"nde). Arayüz Service'ine ya da node portuna doğrudan gelen uydurma
+  başlık bugün kapanmaz (bilinen sınır,
   [#119](https://github.com/yusufceng/Kubeat/issues/119)).
 
 Chart'ın varsayılanı `0`'dır. `route.enabled` ya da `ingress.enabled` açıkken
@@ -1171,7 +1186,11 @@ kurulum notu (NOTES) değerin `0` kaldığını söyler ve yukarıdaki satırlar
 giriş türüne uyanları önerir: Route için `1` (önünde başlığı yazan bir WAF ya da
 L7 yük dengeleyiciyle `2`); Ingress için `ingress-nginx` varsayılanlarıyla `1`,
 GCE Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`. Ağ politikası
-kapalıysa `networkPolicy.enabled=true`'yu da önerir. Değeri
+kapalıysa `networkPolicy.enabled=true`'yu da önerir ve açmadan önce "Ağ
+erişimi"ni okumanızı söyler: politika açılınca başka namespace'lerdeki push
+işleri arayüze göndermelidir, OpenShift dışında `networkPolicy.metricsFrom`
+Prometheus'unuzun namespace'ini seçmelidir (yoksa push monitor'leri yanlış
+DOWN düşer, scrape kesilir). Değeri
 `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` ile verin.
 
 **Görülen kaynağı doğrulamak.** Her başarısız giriş backend loguna bilgi
@@ -1187,7 +1206,10 @@ kubectl -n kubeat logs deploy/kubeat-backend | grep 'sign-in refused'
 - `source` sizin adresinizse (tarayıcınızın internete çıktığı adres) değer
   doğrudur.
 - Bir vekilin (WAF, yük dengeleyici, GCLB) adresiyse değer eksiktir: o
-  katmanın yazdığı girdi kadar artırın.
+  katmanın yazdığı girdi kadar artırın. Önde L7 GCLB ve varsayılan ayarlı
+  `ingress-nginx` varken `source` GCLB vekiliyse artırmak işe yaramaz
+  (`ingress-nginx` GCLB'nin girdilerini siler): tablodaki iki ayarı açıp `3`
+  verin.
 - Arayüz pod'unun adresiyse değer `0`'dır ya da fazladır; ikisinde de
   aşağıdaki iki WARN'dan biri de düşer.
 - Bir node'un adresiyse önde başlığı yazmayan bir L4 katmanı vardır (yukarıda).
@@ -4321,7 +4343,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
 | `UPTIME_LOGIN_MAX_FAILURES` | `10` | Tek bir kaynak adresin bir kullanıcı adına yönelik girişlerini kilitleyen hatalı deneme sayısı (kaynak-başına; CWE-307, ADR-0004) |
 | `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` | `50` | Bir adın tüm kaynaklardaki hatalı denemeleri için gevşek, çok yüksek tavan; dağıtık tahmini sınırlar, meşru sahibi kendi hatalarıyla kilitlemez. `0` kapatır (yalnız kaynak-başına throttle kalır) |
-| `UPTIME_TRUST_PROXY_HOPS` | `0` | Önünüzdeki kendi vekillerinizin sayısı; kaynak adresi `X-Forwarded-For`'un sağdan bu kadar girdisinden okunur. `0` başlığa güvenmez, bağlanan eşi kullanır. Ingress/yük dengeleyici arkasında kaynakları ayırt etmek için ayarlanmalı (bkz. "Hesaplar ve giriş") |
+| `UPTIME_TRUST_PROXY_HOPS` | `0` | Arayüzün önündeki vekillerinizin `X-Forwarded-For`'a yazdığı girdi sayısı; hiçbiri yazmıyorsa ve arayüze yalnız port-forward ile ulaşılıyorsa `1` (girdiyi Next.js yazar), arayüz Service'i doğrudan dışarı açıksa `0` kalır. Kaynak adres başlığın sağdan bu kadar girdisinden okunur; `0` başlığa güvenmez, eşi kullanır (arayüzden gelen girişte arayüz pod'u). Değerler: "Hesaplar ve giriş", "Vekil-hop rehberi" |
 | `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi; denemesi bundan eski adlar bu aralıkla sayaçtan silinir |
 | `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu, kilitli olmayan en fazla kullanıcı adı; doluyken yeni bir ad, en az denenmiş adlardan en uzun süredir denenmeyenin yerini alır, kilitli adlar unutulmaz. Aynı zamanda sürmekte olan (sağlayıcıya gidip henüz dönmemiş) SSO girişlerinin en fazla sayısı; aşılınca en eskileri unutulur |
 | `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan bcrypt karşılaştırması sayısı; `0` CPU sayısının yarısı, en az 1, LDAP açıkken en az 2 (her dizin girişi de bir karşılaştırma harcar). Dizine bağlanmaların ayrı sırası vardır (aynı anda 16) |

@@ -242,8 +242,15 @@ görünür kılar. Şema değişmez (26); hiçbir madde yeni zorunlu ayar getirm
   olan Route `2`, GKE `ingress-nginx` (L4 LoadBalancer, `externalTrafficPolicy:
   Local`, varsayılan ayarlar) `1`, önde L7 GCLB + `ingress-nginx`
   (`use-forwarded-headers` ve `compute-full-forwarded-for`) `3`, GKE'nin kendi
-  Ingress'i (GCE) `2`; hiçbiri henüz ölçülmedi. 0.49'da kalırken kilitli bir
-  hesap için README "Kilitli hesaba girmek" yolları geçerlidir.
+  Ingress'i (GCE) `2`; hiçbiri henüz ölçülmedi. 0.50'ye geçerken 0.48–0.49
+  rehberiyle verilmiş değerleri gözden geçirin (düz Route `1` ve WAF'lı Route
+  `2` aynı kalır): GKE'nin kendi Ingress'i (yalnız GCLB) `1` → `2`; GCLB +
+  `ingress-nginx` yalnız `use-forwarded-headers` ve `compute-full-forwarded-for`
+  açıksa `3`, varsayılanlarla `1` (kaynak o zaman GCLB vekilidir; istemciyi
+  ayırmak için iki ayarı açın). Eksik değer `WARN` vermez ve 0.49'da görülen
+  "zincir kısa" `WARN`'ı kaybolur; doğruluğu `sign-in refused` satırının
+  `source` alanından denetleyin. 0.49'da kalırken kilitli bir hesap için README
+  "Kilitli hesaba girmek" yolları geçerlidir.
 - **Giriş bir vekilin arkasındaysa `UPTIME_TRUST_PROXY_HOPS`'u somut hop sayısına
   göre gözden geçirin.** 0.49, `X-Forwarded-For` görülürken `hops=0` iken ve
   ayarlanan hop sayısı gerçek zincirden kısa/uzun geldiğinde çalışma anında

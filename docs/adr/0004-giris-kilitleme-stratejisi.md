@@ -59,10 +59,12 @@ dağıtık bir tahmin sonsuza dek süremesin. Birincil throttle (varsayılan 10)
 bir kaynağı tavanın çok altında tuttuğundan, meşru sahibin kendi hataları bu
 tavana ulaşmaz.
 
-Kaynak adresi `UPTIME_TRUST_PROXY_HOPS` ile belirlenir: önünüzdeki kendi
-vekillerinizin sayısı. `0` (varsayılan) hiçbir `X-Forwarded-For` başlığına
-güvenmez ve bağlanan eşi kullanır; `N` ise istemciyi `X-Forwarded-For`'un
-sağdan N girdisini (vekillerinizin eklediği) güvenerek, solundaki (istemcinin
+Kaynak adresi `UPTIME_TRUST_PROXY_HOPS` ile belirlenir: arayüzün önündeki
+vekillerin `X-Forwarded-For`'a yazdığı girdi sayısı, hiçbiri yazmıyorsa `1`
+(aşağıda "Arayüz yolu (0.50)"; 0.48–0.49'da tanım "önünüzdeki kendi
+vekillerinizin sayısı" idi). `0` (varsayılan) hiçbir `X-Forwarded-For`
+başlığına güvenmez ve bağlanan eşi kullanır; `N` ise istemciyi
+`X-Forwarded-For`'un sağdan N girdisini (vekillerinizin eklediği) güvenerek, solundaki (istemcinin
 uydurabileceği) girdileri yok sayarak okur. Bir Ingress/yük dengeleyici
 arkasında eş hep vekilin adresidir; o yüzden kaynakları ayırt etmek için bu
 değer ayarlanmalıdır, yoksa throttle tek bir paylaşılan, ad-başına kilide
@@ -76,7 +78,7 @@ bir DoS düzeltmesi operatör ayarı bilmediğinde sessizce etkisiz kalmamalıd�
 WARN olarak yazar: (a) `X-Forwarded-For` geldiği hâlde `UPTIME_TRUST_PROXY_HOPS=0`
 — başlık varsa önde bir vekil vardır ama ona güvenilmiyor, throttle tek
 paylaşılan ada-başına kilide gerilemiştir; (b) `X-Forwarded-For` zinciri
-`UPTIME_TRUST_PROXY_HOPS`'tan kısa gelir — güvenilen hop sayısı gerçek vekil
+`UPTIME_TRUST_PROXY_HOPS`'tan kısa gelir — güvenilen hop sayısı gerçek girdi
 sayısından büyük ya da bir istek vekili atlıyordur. (b) durumunda görülen kaynak
 artık istemcinin ayarlayabileceği en soldaki girdiye (`chain[0]`) değil, hiçbir
 istemcinin denetlemediği eşe (peer) düşer: uydurma bir `X-Forwarded-For` ile ne
@@ -90,11 +92,17 @@ backend'e `X-Forwarded-For` olmadan iletiyordu; bu yüzden kaynak-başına throt
 tarayıcı yolunda, hop değeri ne olursa olsun, ad-başına tek paylaşılan kilide
 geriliyor ve yukarıdaki (a) uyarısı bu yolda hiç düşmüyordu (bilinen sınır).
 0.50'de arayüz bu üç çağrıda gelen başlığı **aynen** taşır (girdi eklemez,
-silmez; başlık yoksa eklemez). Next.js başlığı, önde onu yazan bir vekil yoksa
-kendi eşiyle doldurur ve var olana eklemez. Server action soket eşini
+silmez; başlık yoksa eklemez). Next.js başlığı, gelen istekte yoksa (önde onu
+yazan bir vekil de istemci de yazmadıysa) kendi eşiyle doldurur ve var olana
+eklemez. Server action soket eşini
 okuyamadığı için arayüzün kendi gördüğü eşi eklemesi seçilmedi (backlog). Arayüz
 böylece backend'e en yakın vekilin yerini alır; değer, arayüzün önündeki
 vekillerin `X-Forwarded-For`'a yazdığı girdi sayısıdır, hiçbiri yazmıyorsa `1`.
+Next.js istemcinin gönderdiği başlığa da dokunmadığı için `1` (vekilsiz) yalnız
+arayüze başlığı yazan ya da değiştiren bir vekilden geçmeden hiçbir güvenilmeyen
+istemci ulaşamıyorsa (port-forward) geçerlidir; arayüz Service'i doğrudan
+dışarı açıksa (LoadBalancer, NodePort) değer `0` kalır, ki yanlış ayarın
+maliyeti bypass değil tek paylaşılan kilit olsun.
 
 **Somut hop örnekleri.** Arayüz yoluna göre türetildi; hiçbiri henüz bu yolda
 ölçülmedi (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
@@ -160,13 +168,15 @@ kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
   değil, en az `ceil(50/10)=5` ayrı kaynaktan 50 istekle. Tavanı düşürmek bu
   maliyeti düşürür ve meşru sahibin kilitlenme riskini artırır; `0` tavanı
   tümüyle kaldırıp dağıtık tahmini sınırsız bırakır.
-- **Vekil güveni.** Doğru değer tam olarak önünüzdeki kendi vekillerinizin
-  sayısıdır. `0` ayarlanırsa (Ingress arkasında) tüm istemciler vekilin tek
-  adresini paylaşıp ada-başına tek bir kilide geriler; 0.49 bu durumu, başlık
-  geldiği hâlde güvenilmediğinde, çalışma anında WARN'lar (yukarıda). Değer
-  gerçek vekil sayısından büyükse, 0.47–0.48'de istemci `X-Forwarded-For`
-  uydurarak her istekte taze bir kaynak gibi görünüp throttle'ı atlatabiliyor
-  ya da bir kurbanı kilitleyebiliyordu; 0.49'da zincir hop'tan kısa gelince
+- **Vekil güveni.** Doğru değer tam olarak arayüzün önündeki vekillerin
+  `X-Forwarded-For`'a yazdığı girdi sayısıdır, hiçbiri yazmıyorsa `1`
+  (0.48–0.49'da "önünüzdeki kendi vekillerinizin sayısı"). `0` ayarlanırsa
+  (Ingress arkasında) tüm istemciler vekilin tek adresini paylaşıp ada-başına
+  tek bir kilide geriler; 0.49 bu durumu, başlık geldiği hâlde
+  güvenilmediğinde, çalışma anında WARN'lar (yukarıda). Değer bu sayıdan
+  büyükse, 0.47–0.48'de istemci `X-Forwarded-For` uydurarak her istekte taze
+  bir kaynak gibi görünüp throttle'ı atlatabiliyor ya da bir kurbanı
+  kilitleyebiliyordu; 0.49'da zincir hop'tan kısa gelince
   görülen kaynak istemci-kontrollü en soldaki girdiye değil eşe (peer) düşer ve
   WARN verilir, bu yüzden uydurma başlık ne throttle'ı atlatır ne de kurbanı
   kilitler (yalnızca o NAT/eş paylaşılan bir kilide geriler). Yanlış ayarın
@@ -174,10 +184,12 @@ kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
 - **Cluster içinden uydurma başlık.** Değer `0`'dan büyükken backend
   `X-Forwarded-For`'a bağlanan eşe bakmadan güvenir: cluster içindeki bir pod
   backend'e doğrudan ya da 0.50'den beri arayüz Service'i üzerinden (arayüz
-  başlığı aynen taşır) kendi yazdığı bir başlıkla bağlanıp kaynağını seçebilir.
-  Backend'e doğrudan geleni `networkPolicy.enabled=true` kapatır; arayüze
-  doğrudan gelen bugün açıktır. İkisi S79'da
-  ([#119](https://github.com/yusufceng/Kubeat/issues/119)) ele alınır.
+  başlığı aynen taşır) kendi yazdığı bir başlıkla bağlanıp kaynağını seçebilir;
+  arayüz `NodePort` ise (ör. GCE Ingress için) node portuna yük dengeleyiciyi
+  atlayıp node üzerinden gelen bir istemci de. Backend'e doğrudan geleni
+  `networkPolicy.enabled=true` kapatır; arayüze doğrudan gelen bugün açıktır.
+  İkisi S79'da ([#119](https://github.com/yusufceng/Kubeat/issues/119)) ele
+  alınır.
 - **Tek replica.** Sayaç bellektedir; backend yeniden başlayınca ya da başka
   replicada sıfırlanır. Çok replicalı dağıtık throttle yol haritasında bilinen
   sınırdır.
