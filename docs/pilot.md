@@ -386,7 +386,11 @@ KUBECTL=oc NS=<namespace> RELEASE=kubeat sh -s <<'EOF'
 ```
 
 - `NS`, sandbox'ta kendi namespace'inizdir; `RELEASE` chart'ın release
-  adıdır (`kubeat-backend` ve `kubeat-secret-key` adlarının ön eki).
+  adıdır (`kubeat-backend` adının ön eki). Blok anahtarı chart'ın ürettiği
+  `<release>-secret-key` Secret'ından okur; kurulum
+  `secretKey.existingSecret` ile yapıldıysa (ör. runbook'taki yeni kuruluma
+  geri yüklemeden sonra `kubeat-restored-key`) ilk satıra `SECRET=<ad>`
+  ekleyin.
 - Backend pod'u yoksa (sandbox uyutmuşsa) önce
   `oc -n <namespace> scale deploy/kubeat-backend --replicas=1` ve
   `oc -n <namespace> rollout status deploy/kubeat-backend`.
@@ -417,8 +421,8 @@ Ekiple son görüşme, üç karar sorusu:
 - Lisans süresi ve kapsamı sözleşmeye göre yenilenir.
 
 **Durdur** kararı verildiyse, veriyi saklamak istiyorsanız kaldırmadan önce
-son yedeği ve anahtarı dışarı alın (yukarıdaki "Yükseltmeden önce yedek"
-bloğu bunu doğrulayarak yapar; README "Yedekleme ve geri yükleme").
+son yedeği ve anahtarı dışarı alın (yukarıda "Yükseltmeden önce yedek";
+oradaki blok bunu doğrulayarak yapar; README "Yedekleme ve geri yükleme").
 Kopyalama komutları backend Deployment'ı üzerinden çalışır ve kaldırmayla o
 da gider. Sonra:
 

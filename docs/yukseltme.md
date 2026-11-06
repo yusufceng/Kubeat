@@ -27,7 +27,10 @@ cluster dışına alın ve kopyayı pod'daki dosyaya karşı doğrulayın:
 Blok kopyayı `exec` üzerinden 512 KiB'lik parçalarla alır; her parçayı ve
 tüm dosyayı pod'daki sha256 ile, başlığı `SQLite format 3` ile karşılaştırır.
 Backend imajında `tar` gerekmez; blok `kubectl` ile de `oc` ile de
-(`KUBECTL=oc`) çalışır. **"yedek doğrulandı" demiyorsa yükseltmeyin.** Düz
+(`KUBECTL=oc`) çalışır. Anahtar `secretKey.existingSecret` ile verildiyse
+ilk satıra o Secret'ın adını ekleyin (`SECRET=<ad>`); yoksa blok anahtarı
+bulamaz ve "yedek doğrulandı" demez. **"yedek doğrulandı" demiyorsa
+yükseltmeyin.** Düz
 `exec … cat` ile alınmış bir kopya (0.49 ve öncesinin belgesindeki yol)
 doğrulanmamıştır ve sessizce kesilmiş olabilir; ona güvenerek yükseltmeyin.
 

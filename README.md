@@ -3468,11 +3468,15 @@ adım adım anlatır:
 
 - Yedek kopyaları cluster dışına almak: 512 KiB'lik parçalarla, parça başına
   ve tüm dosya için sha256 ile ve `SQLite format 3` başlık denetimiyle;
-  `kubectl` ve `oc` ile aynı blok. Blok "yedek doğrulandı" demiyorsa kopya
-  geçersizdir.
+  `kubectl` ve `oc` ile aynı blok; anahtar `secretKey.existingSecret` ile
+  verildiyse bloğa o Secret'ın adı verilir. Blok "yedek doğrulandı"
+  demiyorsa kopya geçersizdir.
 - Bir yardımcı pod ile adım adım geri yükleme (aynı kurulumda ve cluster ya
-  da namespace kaybında). Bilgisayardaki kopya pod'da sha256'sı ve başlığı
-  tutmadan veritabanının yerine konmaz.
+  da namespace kaybında). Bilgisayardaki kopya önce yerelde (SQLite
+  başlığı, başlıktaki boyut ve dışarı almada yanına yazılan sha256), sonra
+  pod'da (sha256 ve başlık) doğrulanmadan veritabanının yerine konmaz;
+  sha256'sı yanında olmayan eski bir kopya yalnız açık onayla
+  (`DOGRULAMASIZ=1`) yüklenir.
 - Node kaybından ve dolu volume'dan dönüş, geri yüklemeden önce susturma ile
   GitOps self-heal, geri yükleme pod'unun fsGroup/UID'i, RPO/RTO hedefleri
   ve prova kaydı.
