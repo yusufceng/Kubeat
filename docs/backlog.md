@@ -1805,6 +1805,14 @@ Tetikleyici: S79 merge edildikten sonra NAT'lı bir popülasyonda gözlenen
 kilitlenme. Cluster dışındaki güvenilir vekiller için CIDR listesi ayrı maddede
 ("XFF güveni için cluster dışındaki güvenilir vekillerin CIDR listesi").
 
+Güncelleme (2026-11-07, S79 teslimatı; [#119](https://github.com/yusufceng/Kubeat/issues/119)):
+ilk dilim yapıldı. hops>0 iken backend `X-Forwarded-For`'u yalnız arayüzün
+sırrını (`X-Frontend-Token`; `UPTIME_FRONTEND_TOKEN`/`FRONTEND_TOKEN`, chart
+`<release>-frontend-token`) sunan istekte okur; arayüz Service'ine doğrudan
+geleni isteğe bağlı `frontend.networkPolicy.enabled` kapatır. ADR-0004 "Güvenilir
+eş: arayüz (0.50)". Bu madde artık yalnız kaynak-IP'ye dayanmayan NAT ayrımını
+izler; tetikleyici değişmedi.
+
 ## Kapsam daralınca var olan monitor/kanal hedeflerini kapsama karşı yeniden denetlemek (S73)
 
 2026-11-05'te sprint 8 kuyruğuna alındı (sprint 7 planı; [sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).

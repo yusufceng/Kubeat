@@ -1,7 +1,7 @@
 # ADR-0004: Giriş kilitlemesini kaynak IP-başına throttle'a çevirmek
 
 - Durum: Kabul
-- Tarih: 2026-11-05
+- Tarih: 2026-11-05 (güncelleme 2026-11-07: "Güvenilir eş: arayüz (0.50)")
 
 ## Bağlam
 
@@ -107,6 +107,51 @@ istemci ulaşamıyorsa (port-forward) geçerlidir; arayüz Service'i doğrudan
 dışarı açıksa (LoadBalancer, NodePort) değer `0` kalır, ki yanlış ayarın
 maliyeti bypass değil tek paylaşılan kilit olsun.
 
+**Güvenilir eş: arayüz (0.50).** Güvenilir-vekil allowlist'inin ilk dilimi
+karar olur: `UPTIME_TRUST_PROXY_HOPS` `0`'dan büyükken backend
+`X-Forwarded-For`'u yalnız arayüzden gelen istekte okur. 0.49'a kadar başlığa
+bağlanan eşe bakmadan güveniyordu; cluster'daki her pod backend Service'ine
+uydurma bir başlıkla bağlanıp her denemede yeni bir kaynak gösterebiliyor, tek
+pod'dan kaynak-başına sınırı atlayıp hesap tavanını (50) doldurarak `admin`'i
+herkese kilitleyebiliyordu.
+
+- **Arayüz bir sırla tanınır, adresle değil.** Pod adresleri tek bir pod ağı
+  CIDR'ından dağıtılır; bir CIDR listesi arayüz pod'unu saldırgan pod'dan
+  ayıramaz. Arayüz backend'e yaptığı her istekte paylaşılan bir sırrı
+  `X-Frontend-Token` başlığıyla gönderir (arayüzde `FRONTEND_TOKEN`, backend'de
+  `UPTIME_FRONTEND_TOKEN`); chart onu `<release>-frontend-token` Secret'ında
+  öteki anahtarlar gibi üretir ve korur (`frontendToken.existingSecret`,
+  `backend.persistence.keepOnUninstall`). Backend değeri sabit zamanlı
+  karşılaştırır; başlık yoksa, yanlışsa ya da birden fazla geldiyse eş
+  güvenilmez. Arayüz tarayıcıdan aynı adla gelen başlığı taşımaz; sır loga
+  yazılmaz.
+- **Güvenilmeyen eşte kaynak eştir.** Başlık ne yazarsa yazsın (tek değer,
+  virgüllü liste, çok satır, IPv6, port'lu ya da çöp) throttle bağlanan eşe
+  anahtarlanır ve dakikada en fazla bir kez WARN düşer. Tek bir pod
+  denemelerini uydurma kaynaklara yayamaz: kendi adresinde
+  `UPTIME_LOGIN_MAX_FAILURES`'ta durur, hesap tavanına ulaşamaz.
+- **Ayar eksikse güvenli taraf.** Değer `0`'dan büyük ama sır tanımsızsa
+  backend açılışta bir kez ve çalışma anında dakikada bir WARN yazar ve
+  başlığa hiçbir eşten güvenmez: her tarayıcı arayüz pod'una anahtarlanır.
+  Bu yanlış ayarın maliyeti "bypass" değil "tek paylaşılan kilit"tir; izleme
+  durmaz.
+- **Arayüz Service'i ayrı bir politikayla kapanır.** Arayüz gelen başlığı
+  aynen taşıdığından arayüz Service'ine doğrudan gelen bir pod'un uydurma
+  başlığı backend'e arayüzden gelmiş gibi ulaşır. Chart bunun için ayrı bir
+  anahtarla (`frontend.networkPolicy.enabled`, varsayılan kapalı) yalnız router'a
+  ya da ingress controller'a (ve `frontend.networkPolicy.from`'a) izin veren bir
+  arayüz politikası sunar. Anahtar `networkPolicy.enabled`'a bağlanmadı: o
+  politika açıkken başka namespace'lerin push işleri arayüze gönderir ve yalnız
+  router'a izin veren bir politika onları keserdi. Router'ın namespace seçicisi
+  de platforma göre değişir (OpenShift'te
+  `policy-group.network.openshift.io/ingress`, `ingress-nginx`'te kendi
+  namespace'i, GCE Ingress'te yük dengeleyicinin aralıkları); varsayılan açık
+  olsa kurulumları kırardı.
+- **Seçilmeyenler.** Cluster dışındaki güvenilir vekiller için CIDR listesi
+  (backend'e doğrudan bağlanan meşru bir dış vekil kanıtı yok; ayar sayısı
+  küçük kalsın) ve arayüzün kendi gördüğü eşi başlığa eklemesi (server action
+  soket eşini okuyamıyor, özel sunucu ister): ikisi de backlog'da.
+
 **Somut hop örnekleri.** Arayüz yoluna göre türetildi; hiçbiri henüz bu yolda
 ölçülmedi (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
 
@@ -139,9 +184,11 @@ görünür; kaynak-başına throttle onları ayırt edemez ve biri çok yanlış
 o NAT'ın arkasındaki herkesin o ada girişi birlikte yavaşlar. Bu popülasyonda
 hesap tavanı (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`) NAT'lı kullanıcı sayısına
 göre ayarlanmalıdır (ya da `0` ile kapatılıp yalnız kaynak-başına throttle'a
-bırakılmalıdır). Kaynak-IP'ye dayanmayan gerçek bir ayrım (güvenilir-vekil IP
-allowlist) kod ve bu ADR'de değişim ister; şimdilik yön olarak backlog'da
-izlenir (`docs/backlog.md`, "Giriş throttle için güvenilir-vekil IP allowlist").
+bırakılmalıdır). Allowlist'in ilk dilimi (başlığa yalnız arayüzden güvenmek)
+0.50'de karar oldu (yukarıda "Güvenilir eş: arayüz"); NAT arkasındaki
+kullanıcıları kaynak-IP'ye dayanmadan ayırmak kod ve bu ADR'de yine değişim
+ister ve backlog'da izlenir (`docs/backlog.md`, "Giriş throttle için
+güvenilir-vekil IP allowlist").
 
 Görülen kaynak adresi, ayar doğruyken de, her başarısız girişin
 `sign-in refused` log satırındaki `source` alanından doğrulanır (0.50); 0.49'da
@@ -190,18 +237,23 @@ kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
   değerin maliyeti paylaşılan kilit, fazla değerinki bypass'tır; emin
   değilseniz küçük değeri seçip `source` alanıyla doğrulayın. Arayüz yolunda
   "zincir kısa" WARN'ı sürüyorsa değer fazladır.
-- **Cluster içinden uydurma başlık.** Değer `0`'dan büyükken backend
-  `X-Forwarded-For`'a bağlanan eşe bakmadan güvenir: cluster içindeki bir pod
-  backend'e doğrudan ya da 0.50'den beri arayüz Service'i üzerinden (arayüz
-  başlığı aynen taşır) kendi yazdığı bir başlıkla bağlanıp kaynağını seçebilir;
-  arayüz `NodePort` ise (ör. GCE Ingress için) node portuna yük dengeleyiciyi
-  atlayıp node üzerinden gelen bir istemci de. Backend'e doğrudan geleni
-  `networkPolicy.enabled=true` kapatır; arayüze doğrudan gelen bugün açıktır.
-  İkisi S79'da ([#119](https://github.com/yusufceng/Kubeat/issues/119)) ele
-  alınır.
+- **Cluster içinden uydurma başlık.** 0.49'a kadar backend değer `0`'dan
+  büyükken `X-Forwarded-For`'a bağlanan eşe bakmadan güveniyordu. 0.50'de
+  ([#119](https://github.com/yusufceng/Kubeat/issues/119)) başlık yalnız
+  arayüzün sırrını sunan istekte okunur: backend'e doğrudan gelen pod kendi
+  adresine anahtarlanır. Kalan sınır: arayüz politikası
+  (`frontend.networkPolicy.enabled`) kapalıyken cluster içindeki bir pod arayüz
+  Service'ine (arayüz `NodePort` ise node portuna yük dengeleyiciyi atlayıp
+  node üzerinden gelen bir istemci de) kendi yazdığı bir başlıkla bağlanıp
+  kaynağını seçebilir; arayüz başlığı aynen taşır. Kurulum notu Route ya da
+  Ingress açıkken bunu söyler. Sır sızarsa (Secret'ı okuyabilen biri) aynı
+  sınır backend'e doğrudan da açılır; Secret'ı silip `helm upgrade` ve iki
+  Deployment'ı yeniden başlatmak sırrı döndürür.
 - **Tek replica.** Sayaç bellektedir; backend yeniden başlayınca ya da başka
   replicada sıfırlanır. Çok replicalı dağıtık throttle yol haritasında bilinen
   sınırdır.
 - **Geri alma.** Yalnız davranış/ayar değişikliğidir, şema değişmez (26);
   `helm rollback` ile 0.47.0'a (kullanıcı-adı bazlı kilit) dönülebilir. Yeni
-  ayarlar kaldırılınca varsayılanlar devreye girer.
+  ayarlar kaldırılınca varsayılanlar devreye girer. 0.50'den 0.49'a dönüşte
+  `<release>-frontend-token` Secret'ı yetim kalır, zararsızdır; başlığa yine
+  eşe bakılmadan güvenilir.

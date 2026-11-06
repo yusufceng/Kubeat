@@ -184,16 +184,22 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   güvenli tarafa düşmez: başlığa ekleyen bir vekilin (Route, GCLB) arkasında
   istemci başlığı uzatıp kaynağını seçebilir ve WARN düşmez (0.49'da arayüz
   yolunda kaynak eşe düşüyordu); README ve kurulum notu emin olunmayan durumda
-  küçük değeri önerir. Kalanlar: hops>0 iken cluster
-  içindeki bir pod backend'e doğrudan ya da arayüz Service'i üzerinden (arayüz
-  `NodePort` ise node portuna node üzerinden gelen bir istemci de) uydurma
-  `X-Forwarded-For` ile kaynak seçebiliyor (backend'e doğrudan geleni
-  `networkPolicy.enabled` kapatır; S79
-  [#119](https://github.com/yusufceng/Kubeat/issues/119) `X-Forwarded-For`'a
-  yalnız arayüzden güvenmek); parola değiştirme ve durum sayfası kilidi başlığı
-  alıyor ama sayaçları henüz kaynağa göre değil (S76, sprint 9). Paylaşılan
-  kurumsal NAT ayrımı backlog'da ([backlog](backlog.md) "Giriş throttle için
-  güvenilir-vekil IP allowlist").
+  küçük değeri önerir. S79
+  ([#119](https://github.com/yusufceng/Kubeat/issues/119), 0.50.0) hops>0 iken
+  `X-Forwarded-For`'u yalnız arayüzün sırrını (`X-Frontend-Token`; chart
+  `<release>-frontend-token`) sunan istekte okur: backend'e doğrudan gelen pod
+  uydurma başlıkla kaynak seçemez, kendi adresine anahtarlanır ve hesap
+  tavanını dolduramaz; sır tanımsızsa açılışta WARN düşer ve başlığa hiçbir
+  eşten güvenilmez (ADR-0004 "Güvenilir eş: arayüz", allowlist'in ilk dilimi).
+  Kalanlar: isteğe bağlı arayüz politikası (`frontend.networkPolicy.enabled`,
+  varsayılan kapalı) kapalıyken cluster içindeki bir pod arayüz Service'i
+  üzerinden (arayüz `NodePort` ise node portuna node üzerinden gelen bir istemci
+  de) uydurma `X-Forwarded-For` ile kaynak seçebiliyor; politikanın router ve
+  ingress controller seçicileri hiçbir platformda ölçülmedi, cluster içi
+  uydurma başlık provası sürümden sonra (sandbox); parola değiştirme ve durum
+  sayfası kilidi başlığı alıyor ama sayaçları henüz kaynağa göre değil (S76,
+  sprint 9). Paylaşılan kurumsal NAT ayrımı backlog'da ([backlog](backlog.md)
+  "Giriş throttle için güvenilir-vekil IP allowlist").
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
   bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
   sınırını tanımaz; bu yüzden
