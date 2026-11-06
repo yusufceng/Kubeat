@@ -140,11 +140,18 @@ daraltması sprint 8'de (0.50, #121).**
     sondaki noktaların hepsi atılır. Rakamlardan oluşan ama adres gibi
     yazılmamış host (`172.30.1`, `0xac.0x1e.0.1`) sınırlı kullanıcı için
     reddedilir, çünkü vekil ve glibc onu bir adres okur, Go'nun çözücüsü ise
-    yok sayar ve okuyucular bazı biçimlerde (`010`) anlaşamaz. Sonunda nokta
-    olan bir ad istisna almaz: `NO_PROXY` adı yazıldığı gibi eşler. İlk turda
-    `api.payments.svc..`, `172.30.0.1..` ve `172.30.1` gibi yazımlar Go
+    yok sayar ve okuyucular bazı biçimlerde (`010`) anlaşamaz. ASCII olmayan
+    host sınırlı kullanıcı için reddedilir; uluslararası ad `xn--` biçiminde
+    yazılır. Vekil ve `NO_PROXY` eşlemesi host'u önce IDNA ile okur (yumuşak
+    tire U+00AD ve sıfır genişlikli boşluk U+200B silinir, U+3002, U+FF0E ve
+    U+FF61 nokta olur), Go'nun çözücüsü ise böyle bir adı sorgusuz NXDOMAIN
+    sayar; HTTP/WebSocket monitor'leri ve öteki webhook türleri zaten ASCII
+    ister, ntfy kanalının URL'si istemiyordu. Sonunda nokta olan bir ad istisna
+    almaz: `NO_PROXY` adı yazıldığı gibi eşler. İnceleme turlarında
+    `api.payments.svc..`, `172.30.0.1..` ve `172.30.1` gibi yazımlar ve ntfy
+    kanalında yumuşak tireli ya da Unicode noktalı `kubernetes.default` Go
     çözücüsünden sorgusuz bir NXDOMAIN alıp `NO_PROXY`'yi atladığı için
-    istisnadan geçiyordu (inceleme bulgusu); bu okuma onu kapatır.
+    istisnadan geçiyordu (inceleme bulguları); bu okuma onları kapatır.
 
   Çözümü tamamen atlamak (Müşteri A'nın önerisi) seçilmedi: var olan
   monitor'ler yeniden denetlenmediği için (S73) `NO_PROXY` ya da vekil sonradan

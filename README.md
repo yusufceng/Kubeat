@@ -664,8 +664,11 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   (`api.odeme.svc..` `api.odeme.svc`'dir, `172.30.0.1..` çıplak ClusterIP'dir).
   Rakamlardan oluşan ama adres gibi yazılmamış bir host (`172.30.1`,
   `0xac.0x1e.0.1`, `2887647233`; vekil ve glibc üçünü de `172.30.0.1` okur)
-  sınırlı kullanıcı için reddedilir; adres `172.30.0.1` gibi yazılır. Denetim
-  satırı host'u bu tek yazılışla kaydeder.
+  sınırlı kullanıcı için reddedilir; adres `172.30.0.1` gibi yazılır. ASCII
+  olmayan host sınırlı kullanıcı için reddedilir; uluslararası ad `xn--`
+  biçiminde yazılır (vekil böyle bir host'u IDNA ile okur: yumuşak tire ve
+  sıfır genişlikli boşluk silinir, `。`, `．`, `｡` nokta olur). Denetim satırı
+  host'u bu tek yazılışla kaydeder.
 - **Çözüm anında (dial-time) denetim (0.48; çözüm hatasında güvenli taraf 0.49).**
   Kapsam yalnızca adın yazılışına bakmaz: kapsamı sınırlı bir kullanıcı bir hedef
   belirlediğinde (monitor/kanal oluşturma ya da hedefini değiştirme), adı cluster
@@ -744,8 +747,9 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       - cluster içi biçimler, eskisi gibi adlarındaki namespace'e göre: çıplak
         ClusterIP (`172.30.0.0/16` gibi bir `NO_PROXY` aralığında da), kısa ad
         (`api`), başka namespace'in `.svc` ya da tam adı, API sunucusunun
-        adları; sondaki noktalarla ya da rakamla yazılmış hâlleri de
-        (`kubernetes.default.svc..`, `172.30.1`; yukarıda "Host'un yazılışı");
+        adları; sondaki noktalarla, rakamla ya da ASCII olmayan karakterle
+        yazılmış hâlleri de (`kubernetes.default.svc..`, `172.30.1`,
+        `kubernetes.default` ardından yumuşak tire; yukarıda "Host'un yazılışı");
       - sonunda nokta olan bir ad (`durum.saglayici.example.`): `NO_PROXY` adı
         yazıldığı gibi eşler, bu yüzden böyle bir ad istisna almaz; ad noktasız
         yazılır.
