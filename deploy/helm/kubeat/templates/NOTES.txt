@@ -91,7 +91,9 @@ Upgrade with it, e.g.
 With UPTIME_TRUST_PROXY_HOPS above 0, also set
   --set networkPolicy.enabled=true
 or any pod in the cluster can reach the backend with an X-Forwarded-For of
-its own and pick the address its sign-ins count against.
+its own and pick the address its sign-ins count against. First see README
+"Ağ erişimi": push jobs in other namespaces must send to the frontend, and
+outside OpenShift set networkPolicy.metricsFrom to your Prometheus namespace.
 {{- end }}
 {{- end }}
 {{- if and (or .Values.oidc.issuer .Values.ldap.url) (not .Values.license.existingSecret) }}

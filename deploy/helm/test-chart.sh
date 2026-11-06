@@ -247,17 +247,25 @@ THROTTLE="Sign-in throttle:"
 HOPS_ZERO="UPTIME_TRUST_PROXY_HOPS is 0"
 SET_HOPS="--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1"
 NEEDS_POLICY="--set networkPolicy.enabled=true"
+# Turning the policy on cuts push jobs sending to the backend from other
+# namespaces, and outside OpenShift the Prometheus scrape: the notes say so.
+POLICY_PUSH='"Ağ erişimi": push jobs in other namespaces must send to the frontend'
+POLICY_METRICS="outside OpenShift set networkPolicy.metricsFrom to your Prometheus namespace"
 INGRESS=(--set ingress.enabled=true)
 notes "Route, hops unset" says "$HOPS_ZERO" "${ROUTE[@]}"
 notes "Route, hops unset" says "a plain Route: 1; a Route behind a WAF" "${ROUTE[@]}"
 notes "Route, hops unset" omits "ingress-nginx" "${ROUTE[@]}"
 notes "Route, hops unset" says "$SET_HOPS" "${ROUTE[@]}"
 notes "Route, hops unset" says "$NEEDS_POLICY" "${ROUTE[@]}"
+notes "Route, hops unset" says "$POLICY_PUSH" "${ROUTE[@]}"
+notes "Route, hops unset" says "$POLICY_METRICS" "${ROUTE[@]}"
 notes "Ingress, hops unset" says "$HOPS_ZERO" "${INGRESS[@]}"
 notes "Ingress, hops unset" says "ingress-nginx with its default settings: 1; GKE's own Ingress (GCE): 2;" "${INGRESS[@]}"
 notes "Ingress, hops unset" says "use-forwarded-headers and compute-full-forwarded-for: 3" "${INGRESS[@]}"
 notes "Ingress, hops unset" omits "a plain Route" "${INGRESS[@]}"
 notes "Ingress, hops unset" says "$NEEDS_POLICY" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "$POLICY_PUSH" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "$POLICY_METRICS" "${INGRESS[@]}"
 notes "neither Route nor Ingress" omits "$THROTTLE"
 notes "neither Route nor Ingress, policy off" omits "$NEEDS_POLICY"
 notes "Route, hops 0 given" says "$HOPS_ZERO" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=0
@@ -269,6 +277,7 @@ notes "Route, hops 1, policy on" omits "$THROTTLE" "${ROUTE[@]}" \
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1 --set networkPolicy.enabled=true
 notes "Route, hops unset, policy on" says "$HOPS_ZERO" "${ROUTE[@]}" --set networkPolicy.enabled=true
 notes "Route, hops unset, policy on" omits "$NEEDS_POLICY" "${ROUTE[@]}" --set networkPolicy.enabled=true
+notes "Route, hops unset, policy on" omits "$POLICY_PUSH" "${ROUTE[@]}" --set networkPolicy.enabled=true
 
 # The license: mounted whole, so that a renewed Secret reaches the file.
 helm template kubeat "$CHART" --set license.existingSecret=kubeat-license >"$WORK/license.yaml" 2>"$WORK/err" ||
