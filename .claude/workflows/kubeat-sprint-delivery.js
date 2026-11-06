@@ -42,7 +42,7 @@ const REVIEW = {
   required: ['verdict', 'acceptance', 'findings', 'tests_run', 'notes'],
 }
 
-const rules = `Kurallar: docs/agents/sprint-takimi.md'yi oku. Kullanıcıya soru soramazsın; belirsizlikte en küçük makul yorumu uygula ve raporda işaretle. kubectl, helm install/upgrade, oc, minikube yok; cluster ve sandbox yok; gizli değer yok; backend ya da frontend'i çalıştırma, yalnızca test ve build. gh yalnızca okuma için (gh issue view). Push, PR, merge yapma. Çıktın Türkçe; sonucu şemaya göre döndür.
+const rules = `Kurallar: docs/agents/sprint-takimi.md'yi oku. Kullanıcıya soru soramazsın; belirsizlikte en küçük makul yorumu uygula ve raporda işaretle. kubectl, helm install/upgrade, oc, minikube yok; cluster ve sandbox yok; kubectl/oc/helm'i taklit eden test düzeneğinde önce KUBECONFIG'i boş bir tuzak dosyasına çevir ve 'command -v kubectl oc helm' sahteleri göstermeden test koşma; gizli değer yok; backend ya da frontend'i çalıştırma, yalnızca test ve build. gh yalnızca okuma için (gh issue view). Push, PR, merge yapma. Çıktın Türkçe; sonucu şemaya göre döndür.
 Sprint dosyası: ${A.sprintFile} (PO kararları, sıra, bağımlılıklar ve riskler orada). Hikâyeler (kabul ölçütleri, kapsam dışı, dosyalar): ${A.storiesFile} içinde "id" alanıyla.`
 
 const testing = `Dokunduğun alanların testlerini koş: backend \`cd backend && gofmt -l . && go vet ./... && go test -race ./...\`; frontend \`cd frontend && npm ci && npm run lint && npm test && npm run build\`; chart \`helm lint deploy/helm/kubeat && deploy/helm/test-chart.sh\`; .github/workflows değiştiyse YAML'ı \`python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]))' <dosya>\` ile ayrıştır ve adımları tek tek oku (iş akışı ancak etiketle ya da PR'da koşar; doğrulanamayanı user_checks'e yaz).`

@@ -43,6 +43,10 @@ oku; ilkeler, sınırlar ve tamamlanma tanımı orada. Tek bir issue üzerinde
 
 - `kubectl`, `helm upgrade/install`, `oc`, `minikube` yok; cluster'a
   dokunma. Backend ya da frontend'i çalıştırma; yalnızca test ve build.
+- Bir test düzeneği `kubectl`/`oc`/`helm`'i taklit ediyorsa önce
+  `export KUBECONFIG=<boş tuzak dosyası>` yapar ve `command -v kubectl oc helm`
+  sahteleri göstermeden hiçbir test koşmaz; sahte çalıştırılabilir değilse çağrı
+  gerçek binary'ye ve kullanıcının varsayılan bağlamına düşer (2026-11-07'de oldu).
 - Gizli değer okuma ve yazdırma yok; `.dev/`, `~/.kube`, anahtar zinciri
   yasak. Lokal bir port gerekirse 18300–18399.
 - Kod, yorumlar, commit İngilizce; kullanıcıya görünen metin iki dilde;
