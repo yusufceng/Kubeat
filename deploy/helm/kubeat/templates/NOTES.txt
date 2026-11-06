@@ -61,6 +61,39 @@ reach it with a port-forward and the API token (README, "API"):
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-backend 8090:8080
   TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ include "kubeat.apiTokenSecret" . }} -o jsonpath='{.data.token}' | base64 -d)
   curl -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors
+{{- /*
+The sign-in throttle's source address behind the Route or Ingress: the
+values README "Hesaplar ve giriş" gives, and the network policy that
+keeps pods from choosing their own source once the header is trusted.
+*/}}
+{{- $hops := toString (dig "extraEnv" "UPTIME_TRUST_PROXY_HOPS" "0" .Values.backend) }}
+{{- if and (or .Values.route.enabled .Values.ingress.enabled) (or (eq $hops "0") (not .Values.networkPolicy.enabled)) }}
+
+Sign-in throttle: failed sign-ins are counted per client address, which
+the backend reads from the X-Forwarded-For the UI passes on.
+{{- if eq $hops "0" }}
+UPTIME_TRUST_PROXY_HOPS is 0, so it trusts none of it: every browser counts
+as the UI pod, one shared lock per name, and the backend log warns. Set it
+to the X-Forwarded-For entries your proxies in front of the UI write
+(README, "Hesaplar ve giriş", has the values and how to check them):
+{{- if .Values.route.enabled }}
+  a plain Route: 1; a Route behind a WAF or L7 load balancer that writes
+  X-Forwarded-For: 2
+{{- else }}
+  ingress-nginx with its default settings: 1; GKE's own Ingress (GCE): 2;
+  an L7 Google Cloud load balancer in front of ingress-nginx with
+  use-forwarded-headers and compute-full-forwarded-for: 3
+{{- end }}
+Upgrade with it, e.g.
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
+{{- end }}
+{{- if not .Values.networkPolicy.enabled }}
+With UPTIME_TRUST_PROXY_HOPS above 0, also set
+  --set networkPolicy.enabled=true
+or any pod in the cluster can reach the backend with an X-Forwarded-For of
+its own and pick the address its sign-ins count against.
+{{- end }}
+{{- end }}
 {{- if and (or .Values.oidc.issuer .Values.ldap.url) (not .Values.license.existingSecret) }}
 
 Signing in through LDAP or OIDC needs a Kubeat Enterprise license
