@@ -66,7 +66,7 @@ The sign-in throttle's source address behind the Route or Ingress: the
 values README "Hesaplar ve giriş" gives, and the network policy that
 keeps pods from choosing their own source once the header is trusted.
 */}}
-{{- $hops := toString (dig "extraEnv" "UPTIME_TRUST_PROXY_HOPS" "0" .Values.backend) }}
+{{- $hops := dig "extraEnv" "UPTIME_TRUST_PROXY_HOPS" "" .Values.backend | default "0" | toString }}
 {{- if and (or .Values.route.enabled .Values.ingress.enabled) (or (eq $hops "0") (not .Values.networkPolicy.enabled)) }}
 
 Sign-in throttle: failed sign-ins are counted per client address, which

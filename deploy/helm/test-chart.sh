@@ -261,6 +261,7 @@ notes "Ingress, hops unset" says "$NEEDS_POLICY" "${INGRESS[@]}"
 notes "neither Route nor Ingress" omits "$THROTTLE"
 notes "neither Route nor Ingress, policy off" omits "$NEEDS_POLICY"
 notes "Route, hops 0 given" says "$HOPS_ZERO" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=0
+notes "Ingress, hops empty" says "$HOPS_ZERO" "${INGRESS[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=
 notes "Route, hops 1" omits "$HOPS_ZERO" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 notes "Route, hops 1" says "$NEEDS_POLICY" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 notes "Ingress, hops 2 as a number" omits "$HOPS_ZERO" "${INGRESS[@]}" --set backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
