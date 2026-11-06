@@ -261,6 +261,8 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, sched
 	// Hand the due monitors to the workers, waiting for a free one for as
 	// long as this tick lasts. Giving up the moment the queue is full would
 	// cap throughput at one queue-full per tick however fast the checks are.
+	// The deadline bounds only that wait: while the queue has room a check
+	// goes in, however long the tick has already run.
 	deadline := time.NewTimer(s.opts.Tick)
 	defer deadline.Stop()
 
@@ -279,23 +281,31 @@ dispatch:
 		}
 		s.unthrottle(m.ID)
 		retry := s.start(m.ID)
+		// A place in the queue is taken first, without waiting: a select
+		// that also offered an expired deadline would pick one of the two
+		// at random, and could leave due checks for the next tick while
+		// the queue has room.
 		select {
 		case jobs <- m:
-			// An early retry leaves the monitor's place in its cycle alone.
-			if !now.Before(sc.next) {
-				sc.next = nextAfter(sc.next, sc.interval, now)
+		default:
+			select {
+			case jobs <- m:
+			case <-deadline.C:
+				// The workers were busy for the whole tick; the rest stay
+				// due and go first on the next one.
+				s.abandon(m.ID, retry)
+				s.release(m.ID, taken, now)
+				s.opts.Metrics.DispatchSkipped(len(due) - i)
+				break dispatch
+			case <-ctx.Done():
+				s.abandon(m.ID, retry)
+				s.release(m.ID, taken, now)
+				return
 			}
-		case <-deadline.C:
-			// The workers were busy for the whole tick; the rest stay due
-			// and go first on the next one.
-			s.abandon(m.ID, retry)
-			s.release(m.ID, taken, now)
-			s.opts.Metrics.DispatchSkipped(len(due) - i)
-			break dispatch
-		case <-ctx.Done():
-			s.abandon(m.ID, retry)
-			s.release(m.ID, taken, now)
-			return
+		}
+		// An early retry leaves the monitor's place in its cycle alone.
+		if !now.Before(sc.next) {
+			sc.next = nextAfter(sc.next, sc.interval, now)
 		}
 	}
 

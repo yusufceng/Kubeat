@@ -509,6 +509,88 @@ func TestThroughputIsNotCappedByQueueSizePerTick(t *testing.T) {
 	}
 }
 
+// overdue returns n monitors due a minute apart, and their schedules, so
+// that monitor 1 is the most overdue at t0.
+func overdue(n int, t0 time.Time) ([]store.Monitor, map[int64]*schedule) {
+	var ms []store.Monitor
+	schedules := make(map[int64]*schedule)
+	for id := int64(1); id <= int64(n); id++ {
+		ms = append(ms, monitor(id, time.Hour))
+		schedules[id] = &schedule{interval: time.Hour, next: t0.Add(-time.Duration(n+1-int(id)) * time.Minute)}
+	}
+	return ms, schedules
+}
+
+// A tick that has run past its length still queues every due check while
+// the queue has room: the deadline bounds the wait for a free worker, not
+// the dispatch itself, so a slow tick leaves no check for the next one
+// while workers are idle, and counts none as skipped.
+func TestTickQueuesEveryDueCheckWhileTheQueueHasRoom(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0)
+	ms, schedules := overdue(50, t0)
+	st := &fakeStore{}
+	st.setMonitors(ms...)
+	opts := testOptions()
+	opts.Tick = time.Nanosecond // the deadline is over before the first check is handed out
+	opts.Metrics = metrics.New("test")
+	s := New(st, nil, opts)
+	jobs := make(chan store.Monitor, len(ms))
+
+	s.tick(context.Background(), t0, false, schedules, jobs)
+	if got := drain(jobs); len(got) != len(ms) {
+		t.Errorf("queued %d of %d due checks with room for all of them: %v", len(got), len(ms), got)
+	}
+	gathered, _ := opts.Metrics.Gather()
+	if skipped := gathered["kubeat_scheduler_dispatch_skipped_total"]; skipped != 0 {
+		t.Errorf("dispatch_skipped = %v with room in the queue, want 0", skipped)
+	}
+}
+
+// While the queue stays full, the end of the tick still stops the dispatch:
+// the checks not handed out are counted as skipped, stay due and are not
+// marked running, and go first on the next tick.
+func TestTickLeavesTheRestDueWhenTheQueueStaysFull(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0)
+	ms, schedules := overdue(5, t0)
+	st := &fakeStore{}
+	st.setMonitors(ms...)
+	opts := testOptions()
+	opts.Tick = time.Nanosecond // no worker frees a place before the deadline
+	opts.Metrics = metrics.New("test")
+	s := New(st, nil, opts)
+	jobs := make(chan store.Monitor, 2)
+	skipped := func() float64 {
+		gathered, _ := opts.Metrics.Gather()
+		return gathered["kubeat_scheduler_dispatch_skipped_total"]
+	}
+
+	s.tick(context.Background(), t0, false, schedules, jobs)
+	if got := drain(jobs); len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("queued %v, want [1 2]: the most overdue, as many as the queue holds", got)
+	}
+	if got := skipped(); got != 3 {
+		t.Errorf("dispatch_skipped = %v, want 3", got)
+	}
+	for id := int64(3); id <= 5; id++ {
+		if s.inFlight[id] {
+			t.Errorf("monitor %d is marked running although it was not handed out", id)
+		}
+		if next := schedules[id].next; next.After(t0) {
+			t.Errorf("monitor %d moved on to %s although it was not handed out", id, next.Sub(t0))
+		}
+	}
+
+	// Monitors 1 and 2 are still running; of the rest the most overdue go
+	// first.
+	s.tick(context.Background(), t0.Add(time.Second), false, schedules, jobs)
+	if got := drain(jobs); len(got) != 2 || got[0] != 3 || got[1] != 4 {
+		t.Errorf("next tick queued %v, want [3 4]", got)
+	}
+	if got := skipped(); got != 4 {
+		t.Errorf("dispatch_skipped after the next tick = %v, want 4", got)
+	}
+}
+
 func TestStartupSpreadsMonitorsOverTheirInterval(t *testing.T) {
 	st := &fakeStore{}
 	var ms []store.Monitor
