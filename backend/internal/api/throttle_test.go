@@ -47,6 +47,12 @@ func TestClientIP(t *testing.T) {
 	}
 }
 
+// proxyWarnHint is the value both X-Forwarded-For warnings ask for: README's
+// proxy-hop guide counts the entries the proxies in front of the UI write
+// (1 with none), not the proxies, since the UI passes the header on and
+// takes the place of the proxy nearest to the backend.
+const proxyWarnHint = "the X-Forwarded-For entries your proxies in front of the UI write, 1 with none"
+
 // A published source-address throttle must not go silently ineffective, so
 // clientIP warns when X-Forwarded-For cannot be trusted: an X-Forwarded-For
 // arriving while the header is trusted none (hops 0), and a forwarded chain
@@ -92,6 +98,11 @@ func TestClientIPWarns(t *testing.T) {
 		}
 		if !strings.Contains(logs.String(), "UPTIME_TRUST_PROXY_HOPS=2") || !strings.Contains(logs.String(), "level=WARN") {
 			t.Errorf("want a WARN naming the configured hops, got %q", logs.String())
+		}
+		// The value it asks for is the guide's: the entries the proxies in
+		// front of the UI write, not a count of proxies.
+		if !strings.Contains(logs.String(), proxyWarnHint) {
+			t.Errorf("want the WARN to ask for %q, got %q", proxyWarnHint, logs.String())
 		}
 	})
 
@@ -267,6 +278,11 @@ func TestSignInThroughFrontend(t *testing.T) {
 		if !strings.Contains(got, "level=WARN") || !strings.Contains(got, "UPTIME_TRUST_PROXY_HOPS=0") ||
 			!strings.Contains(got, `\"10.128.2.15\"`) {
 			t.Errorf("want the xff-hops-zero WARN naming the UI pod, got %q", got)
+		}
+		// The operator reads the value to set here: a proxy count would
+		// key a GCE Ingress on the load balancer, shared and unwarned.
+		if !strings.Contains(got, proxyWarnHint) {
+			t.Errorf("want the WARN to ask for %q, got %q", proxyWarnHint, got)
 		}
 		if n := strings.Count(got, "level=WARN"); n != 1 {
 			t.Errorf("warned %d times within a minute, want 1", n)

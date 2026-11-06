@@ -16,16 +16,14 @@ import (
 // known name, such as the ever-present "admin", from being locked out of a
 // public login by anyone who knows it (CWE-307, ADR-0004).
 //
-// Without a reverse proxy of your own in front (TrustProxyHops 0, the
-// default) it is the peer that connected; X-Forwarded-For is not trusted,
-// since any client may send one. TrustProxyHops is how many proxies of your
-// own stand in front: the client is then read from X-Forwarded-For,
-// trusting only the rightmost that many entries, which those proxies
-// appended, and ignoring whatever a client put to their left. Behind an
-// ingress or a load balancer the peer is the proxy, the same address for
-// every client, so TrustProxyHops must be set or the throttle cannot tell
-// sources apart and falls back to one shared, per-name lock (README,
-// "Hesaplar ve giriş").
+// With TrustProxyHops 0 (the default) it is the peer that connected;
+// X-Forwarded-For is not trusted, since any client may send one. Above 0
+// the client is read from X-Forwarded-For, trusting only the rightmost
+// TrustProxyHops entries, which the proxies in front appended, and ignoring
+// whatever a client put to their left. Behind an ingress or a load balancer
+// the peer is the proxy, the same address for every client, so
+// TrustProxyHops must be set or the throttle cannot tell sources apart and
+// falls back to one shared, per-name lock (README, "Hesaplar ve giriş").
 //
 // Browsers never reach the backend themselves: the Route or Ingress sends
 // them to the UI, whose pod is then the peer here for every client. The UI
@@ -34,7 +32,10 @@ import (
 // its own peer there when no proxy did. So the UI takes the place of the
 // proxy nearest to us, and the hops count the entries the proxies in front
 // of the UI write to the header, or 1 when none does (README, "Hesaplar ve
-// giriş", has them per topology).
+// giriş", has them per topology). That 1 holds only while no untrusted
+// client reaches the UI but through such a proxy (a port-forward): Next.js
+// keeps a header a client sent, so with the UI's Service exposed directly
+// the hops stay 0, which costs one shared lock rather than a bypass.
 //
 // A published source-address throttle must not go silently ineffective when
 // it is left unconfigured behind a proxy, so clientIP warns (rate-limited,
@@ -49,17 +50,19 @@ func (h *handler) clientIP(r *http.Request, now time.Time) string {
 	xff := forwardedFor(r.Header.Values("X-Forwarded-For"))
 	if h.opts.TrustProxyHops <= 0 {
 		if len(xff) > 0 {
-			// A proxy in front set X-Forwarded-For, but we are told to trust
-			// none of it (the default), so the throttle sees the one peer
-			// address for every client and falls back to a single shared,
-			// per-name lock: the published DoS fix is silently ineffective
-			// here. Warn, naming the address keyed on so the operator can
-			// see it is the proxy's, but keep to the peer, since the header
-			// is a client's to forge without a trusted proxy to vouch for it.
+			// A proxy in front, or Next.js in the UI, set X-Forwarded-For, but
+			// we are told to trust none of it (the default), so the throttle
+			// sees the one peer address for every client and falls back to a
+			// single shared, per-name lock: the published DoS fix is silently
+			// ineffective here. Warn, naming the address keyed on so the
+			// operator can see it is the proxy's (or the UI pod's), but keep
+			// to the peer, since the header is a client's to forge without a
+			// trusted proxy to vouch for it.
 			h.proxyWarn.warn(now, "xff-hops-zero",
 				fmt.Sprintf("X-Forwarded-For seen but UPTIME_TRUST_PROXY_HOPS=0: the sign-in throttle keys on the "+
-					"peer %q for every client and falls back to one shared per-name lock; set it to the number of "+
-					"your own reverse proxies (README, \"Hesaplar ve giriş\")", peer))
+					"peer %q for every client and falls back to one shared per-name lock; set it to the "+
+					"X-Forwarded-For entries your proxies in front of the UI write, 1 with none and the UI reached "+
+					"only through a port-forward (README, \"Hesaplar ve giriş\", \"Vekil-hop rehberi\")", peer))
 		}
 		return peer
 	}
@@ -74,13 +77,16 @@ func (h *handler) clientIP(r *http.Request, now time.Time) string {
 		// set. Reading it would let an attacker spoof a fresh source each
 		// request (slipping the throttle) or forge a victim's address (to
 		// lock them out). Fall back to the peer, which no client controls,
-		// and warn that the hop count is too high for this request, or a
-		// proxy is being bypassed.
+		// and warn that the hop count is too high for this request, or the
+		// request bypassed a proxy or the UI (a sign-in sent to the backend
+		// directly carries no header).
 		h.proxyWarn.warn(now, "xff-hops-too-high",
 			fmt.Sprintf("X-Forwarded-For has fewer entries than UPTIME_TRUST_PROXY_HOPS=%d: the forwarded chain is "+
 				"shorter than the trusted hops, so the source falls back to the peer %q rather than a "+
-				"client-settable entry; set UPTIME_TRUST_PROXY_HOPS to the real number of your own reverse proxies, "+
-				"or a proxy is being bypassed (README, \"Hesaplar ve giriş\")", h.opts.TrustProxyHops, peer))
+				"client-settable entry; set UPTIME_TRUST_PROXY_HOPS to the X-Forwarded-For entries your proxies in "+
+				"front of the UI write, 1 with none and the UI reached only through a port-forward, or this sign-in "+
+				"bypassed a proxy or the UI (README, \"Hesaplar ve giriş\", \"Vekil-hop rehberi\")",
+				h.opts.TrustProxyHops, peer))
 		return peer
 	}
 	return chain[i]

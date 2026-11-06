@@ -185,9 +185,10 @@ type Options struct {
 	// and the password change use under keys of their own. AccountThrottle,
 	// when set, is a second, much looser ceiling on a name's failures across
 	// all sources, so a distributed guess cannot run forever; nil turns it
-	// off. TrustProxyHops is how many reverse proxies of your own stand in
-	// front, so the source address can be read from X-Forwarded-For; 0
-	// trusts no such header and uses the peer that connected.
+	// off. TrustProxyHops is how many X-Forwarded-For entries the proxies in
+	// front of the UI write, or 1 with none, so the source address can be
+	// read from the header the UI passes on; 0 trusts no such header and
+	// uses the peer that connected.
 	SessionTTL        time.Duration
 	Throttle          *auth.Throttle
 	AccountThrottle   *auth.Throttle
