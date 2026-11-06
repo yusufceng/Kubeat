@@ -78,6 +78,16 @@ type Config struct {
 	// that is the UI pod, the same for every client, so set this to tell
 	// sources apart (CWE-307, ADR-0004; README, "Hesaplar ve giriş").
 	TrustProxyHops int // UPTIME_TRUST_PROXY_HOPS
+	// FrontendToken is the secret the UI presents with every request to the
+	// backend (the header X-Frontend-Token, from its FRONTEND_TOKEN), by
+	// which the backend tells the UI from any other peer: X-Forwarded-For is
+	// read only from a request that carries it, so a pod that reaches the
+	// backend directly cannot pick the source its sign-ins count against.
+	// Surrounding spaces are dropped; one a header cannot carry (anything
+	// but printable ASCII without spaces) is set aside with a warning.
+	// Empty while TrustProxyHops is above 0 trusts the header from no peer,
+	// also with a warning.
+	FrontendToken string // UPTIME_FRONTEND_TOKEN
 
 	// LDAP; see ldapauth.Config. Empty LDAPURL means local accounts only.
 	LDAPURL                string        // UPTIME_LDAP_URL
@@ -652,6 +662,25 @@ func Load() (Config, error) {
 	if cfg.TrustProxyHops, err = envIntOrZero("UPTIME_TRUST_PROXY_HOPS", 0); err != nil {
 		return Config{}, err
 	}
+	// The UI sends the token in a header, which loses surrounding spaces on
+	// the way and cannot carry some characters at all: such a token would
+	// never match, so it is set aside and said, rather than left to fail
+	// every request without a word. Neither stops the backend: the
+	// throttle then keys on the peer, one shared lock, not a bypass.
+	cfg.FrontendToken = strings.TrimSpace(os.Getenv("UPTIME_FRONTEND_TOKEN"))
+	if cfg.FrontendToken != "" && !headerToken(cfg.FrontendToken) {
+		cfg.Warnings = append(cfg.Warnings, "UPTIME_FRONTEND_TOKEN holds a character a header cannot carry as it is "+
+			"(only printable ASCII without spaces can): it is ignored, and X-Forwarded-For is trusted from no peer; "+
+			"use letters and digits, as the chart's generated <release>-frontend-token does")
+		cfg.FrontendToken = ""
+	}
+	if cfg.TrustProxyHops > 0 && cfg.FrontendToken == "" {
+		cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("UPTIME_TRUST_PROXY_HOPS is %d but UPTIME_FRONTEND_TOKEN is not set: "+
+			"X-Forwarded-For is trusted from no peer, so the sign-in throttle keys on the peer, the UI pod for every "+
+			"browser, and falls back to one shared per-name lock; give the backend UPTIME_FRONTEND_TOKEN and the UI "+
+			"FRONTEND_TOKEN the same random value, as the chart does with <release>-frontend-token "+
+			"(README, \"Hesaplar ve giriş\", \"Güvenilir eş\")", cfg.TrustProxyHops))
+	}
 	if cfg.AllowPlaintextSecrets, err = envBool("UPTIME_ALLOW_PLAINTEXT_SECRETS", false); err != nil {
 		return Config{}, err
 	}
@@ -699,6 +728,18 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("UPTIME_OIDC_DEFAULT_ROLE: must be admin, editor, viewer or empty, got %q", cfg.OIDCDefaultRole)
 	}
 	return cfg, nil
+}
+
+// headerToken says whether s is a token a header carries as it is:
+// printable ASCII without spaces, the same rule the UI applies to the
+// FRONTEND_TOKEN it sends (frontend/lib/frontend-token.ts).
+func headerToken(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x21 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return s != ""
 }
 
 func envString(key, def string) string {

@@ -45,8 +45,9 @@ func send(token, method, url, body string) (int, string) {
 	return resp.StatusCode, answer.Error
 }
 
-// signInFrom signs in with the source address set in X-Forwarded-For, for
-// a handler that trusts one proxy hop; it returns the answer's status.
+// signInFrom signs in as the UI does, with its token and the source
+// address set in X-Forwarded-For, for a handler that trusts one proxy hop;
+// it returns the answer's status.
 func signInFrom(ip, base, username, password string) int {
 	req, err := http.NewRequest("POST", base+"/api/v1/auth/login",
 		strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
@@ -54,6 +55,7 @@ func signInFrom(ip, base, username, password string) int {
 		return 0
 	}
 	req.Header.Set("X-Forwarded-For", ip)
+	req.Header.Set(frontendTokenHeader, testFrontendToken)
 	resp, err := sendClient.Do(req)
 	if err != nil {
 		return 0
@@ -249,6 +251,7 @@ func TestSignInThrottleIsPerSourceIP(t *testing.T) {
 	// The attacker's own source is locked, and the 429 carries Retry-After.
 	req, _ := http.NewRequest("POST", base+"/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"yanlis"}`))
 	req.Header.Set("X-Forwarded-For", attacker)
+	req.Header.Set(frontendTokenHeader, testFrontendToken)
 	resp, err := sendClient.Do(req)
 	if err != nil {
 		t.Fatalf("attacker after three guesses: %v", err)

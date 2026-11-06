@@ -405,6 +405,7 @@ func main() {
 			Throttle:                 throttle,
 			AccountThrottle:          accountThrottle,
 			TrustProxyHops:           cfg.TrustProxyHops,
+			FrontendToken:            cfg.FrontendToken,
 			PasswordMinLength:        cfg.PasswordMinLength,
 			LoginConcurrency:         cfg.LoginConcurrency,
 			LoginQueueWait:           cfg.LoginQueueWait,

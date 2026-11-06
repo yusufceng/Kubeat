@@ -10,13 +10,28 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/yusufceng/Kubeat/backend/internal/auth"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 )
+
+// fromUI is a request as the UI sends it: from peer, with the UI's token
+// and the X-Forwarded-For lines given.
+func fromUI(peer string, xff ...string) *http.Request {
+	r := &http.Request{RemoteAddr: peer, Header: http.Header{}}
+	r.Header.Set(frontendTokenHeader, testFrontendToken)
+	for _, v := range xff {
+		r.Header.Add("X-Forwarded-For", v)
+	}
+	return r
+}
 
 // clientIP reads the source the throttle keys on: the peer without a
 // trusted proxy, and the right entry of X-Forwarded-For with one, ignoring
 // whatever a client put to the left of the hops it trusts. When the
 // forwarded chain is shorter than the trusted hops the leftmost is a
 // client's to set, so clientIP falls back to the peer rather than trust it.
+// These requests come from the UI, the one peer whose header is read.
 func TestClientIP(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -31,19 +46,89 @@ func TestClientIP(t *testing.T) {
 		{name: "one hop ignores a spoofed left entry", hops: 1, peer: "10.0.0.1:5000", xff: []string{"1.2.3.4, 203.0.113.7"}, want: "203.0.113.7"},
 		{name: "two hops step back two from us", hops: 2, peer: "10.0.0.1:5000", xff: []string{"203.0.113.7, 10.0.0.2"}, want: "203.0.113.7"},
 		{name: "several header lines join in order", hops: 1, peer: "10.0.0.1:5000", xff: []string{"1.2.3.4", "203.0.113.7"}, want: "203.0.113.7"},
+		{name: "an IPv6 client", hops: 1, peer: "[fd00::15]:41234", xff: []string{"2001:db8::7"}, want: "2001:db8::7"},
 		{name: "fewer entries than hops falls back to the peer, not the leftmost", hops: 3, peer: "10.0.0.1:5000", xff: []string{"203.0.113.7"}, want: "10.0.0.1"},
 		{name: "a hop but no header falls back to the peer", hops: 1, peer: "10.0.0.1:5000", want: "10.0.0.1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &handler{opts: Options{TrustProxyHops: tc.hops}}
-			r := &http.Request{RemoteAddr: tc.peer, Header: http.Header{}}
-			for _, v := range tc.xff {
-				r.Header.Add("X-Forwarded-For", v)
-			}
-			if got := h.clientIP(r, time.Now()); got != tc.want {
+			h := &handler{opts: Options{TrustProxyHops: tc.hops, FrontendToken: testFrontendToken}}
+			if got := h.clientIP(fromUI(tc.peer, tc.xff...), time.Now()); got != tc.want {
 				t.Errorf("clientIP(hops=%d, peer=%q, xff=%v) = %q, want %q", tc.hops, tc.peer, tc.xff, got, tc.want)
 			}
 		})
+	}
+}
+
+// attackerPod is a pod of another tenant that reaches the backend's Service
+// directly, never through the UI.
+const attackerPod = "10.128.5.9:39000"
+
+// forgedXFF are the forms an X-Forwarded-For may take, each made up by a
+// peer that is not the UI: none of them may name the source its sign-ins
+// count against.
+var forgedXFF = []struct {
+	name  string
+	lines []string
+}{
+	{"one address", []string{"203.0.113.7"}},
+	{"a comma-separated list", []string{"198.51.100.1, 203.0.113.7"}},
+	{"a list without spaces", []string{"198.51.100.1,198.51.100.2,203.0.113.7"}},
+	{"several header lines", []string{"198.51.100.1", "203.0.113.7"}},
+	{"an IPv6 address", []string{"2001:db8::7"}},
+	{"a bracketed IPv6 address with a port", []string{"[2001:db8::7]:4711"}},
+	{"an address with a port", []string{"203.0.113.7:4711"}},
+	{"garbage", []string{"not-an-address"}},
+	{"empty entries", []string{", ,", " "}},
+	{"an entry far too long", []string{strings.Repeat("9", 4096)}},
+}
+
+// The ways a peer may fail to prove it is the UI: no token, a wrong one, a
+// near miss, or the right one twice or beside a wrong one, which the UI
+// never sends.
+var notTheUI = []struct {
+	name   string
+	tokens []string
+}{
+	{"no token", nil},
+	{"a wrong token", []string{"guess"}},
+	{"an empty token", []string{""}},
+	{"the token's prefix", []string{testFrontendToken[:len(testFrontendToken)-1]}},
+	{"the token with a byte more", []string{testFrontendToken + "x"}},
+	{"the token in another case", []string{strings.ToUpper(testFrontendToken)}},
+	{"the token beside a wrong one", []string{"guess", testFrontendToken}},
+	{"the token twice", []string{testFrontendToken, testFrontendToken}},
+}
+
+// Any pod in the cluster can reach the backend's Service: with hops above 0
+// one that is not the UI keys on its own address whatever X-Forwarded-For
+// it writes, in every form, and whatever it presents for the UI's token
+// (CWE-307: it cannot spread its guesses over made-up sources, nor take a
+// victim's address).
+func TestClientIPUntrustedPeerKeysOnThePeer(t *testing.T) {
+	for _, hops := range []int{1, 2} {
+		for _, who := range notTheUI {
+			for _, form := range forgedXFF {
+				t.Run(fmt.Sprintf("hops=%d, %s, %s", hops, who.name, form.name), func(t *testing.T) {
+					h := &handler{opts: Options{TrustProxyHops: hops, FrontendToken: testFrontendToken}}
+					r := &http.Request{RemoteAddr: attackerPod, Header: http.Header{}}
+					for _, v := range who.tokens {
+						r.Header.Add(frontendTokenHeader, v)
+					}
+					for _, v := range form.lines {
+						r.Header.Add("X-Forwarded-For", v)
+					}
+					if got := h.clientIP(r, time.Now()); got != "10.128.5.9" {
+						t.Errorf("source = %q, want the peer 10.128.5.9", got)
+					}
+				})
+			}
+		}
+	}
+	// The same from an IPv6 peer: the port goes, the address stays.
+	h := &handler{opts: Options{TrustProxyHops: 1, FrontendToken: testFrontendToken}}
+	r := &http.Request{RemoteAddr: "[fd00::9]:39000", Header: http.Header{"X-Forwarded-For": {"203.0.113.7"}}}
+	if got := h.clientIP(r, time.Now()); got != "fd00::9" {
+		t.Errorf("an IPv6 peer: source = %q, want fd00::9", got)
 	}
 }
 
@@ -55,8 +140,10 @@ const proxyWarnHint = "the X-Forwarded-For entries your proxies in front of the 
 
 // A published source-address throttle must not go silently ineffective, so
 // clientIP warns when X-Forwarded-For cannot be trusted: an X-Forwarded-For
-// arriving while the header is trusted none (hops 0), and a forwarded chain
-// shorter than the trusted hops.
+// arriving while the header is trusted none (hops 0), a sign-in from a peer
+// that is not the UI, or with no token to tell the UI by, while hops are
+// trusted, and a forwarded chain shorter than the trusted hops. No warning
+// names the token, nor what a request presented for it.
 func TestClientIPWarns(t *testing.T) {
 	req := func(peer string, xff ...string) *http.Request {
 		r := &http.Request{RemoteAddr: peer, Header: http.Header{}}
@@ -65,11 +152,14 @@ func TestClientIPWarns(t *testing.T) {
 		}
 		return r
 	}
+	logged := func(opts Options) (*handler, *bytes.Buffer) {
+		var logs bytes.Buffer
+		return &handler{opts: opts, proxyWarn: newProxyWarn(slog.New(slog.NewTextHandler(&logs, nil)))}, &logs
+	}
 	t0 := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 
 	t.Run("hops=0 and a header warns and keeps the peer", func(t *testing.T) {
-		var logs bytes.Buffer
-		h := &handler{opts: Options{TrustProxyHops: 0}, proxyWarn: newProxyWarn(slog.New(slog.NewTextHandler(&logs, nil)))}
+		h, logs := logged(Options{TrustProxyHops: 0})
 		if got := h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), t0); got != "198.51.100.9" {
 			t.Errorf("source = %q, want the peer 198.51.100.9", got)
 		}
@@ -79,21 +169,85 @@ func TestClientIPWarns(t *testing.T) {
 	})
 
 	t.Run("hops=0 without a header stays quiet", func(t *testing.T) {
-		var logs bytes.Buffer
-		h := &handler{opts: Options{TrustProxyHops: 0}, proxyWarn: newProxyWarn(slog.New(slog.NewTextHandler(&logs, nil)))}
+		h, logs := logged(Options{TrustProxyHops: 0})
 		h.clientIP(req("198.51.100.9:4321"), t0)
 		if logs.Len() != 0 {
 			t.Errorf("warned with no X-Forwarded-For: %q", logs.String())
 		}
 	})
 
+	t.Run("a peer that is not the UI warns and keys on the peer", func(t *testing.T) {
+		h, logs := logged(Options{TrustProxyHops: 1, FrontendToken: testFrontendToken})
+		r := req(attackerPod, "203.0.113.7")
+		r.Header.Set(frontendTokenHeader, "a-guess-at-the-token")
+		if got := h.clientIP(r, t0); got != "10.128.5.9" {
+			t.Errorf("source = %q, want the peer 10.128.5.9", got)
+		}
+		got := logs.String()
+		if !strings.Contains(got, "level=WARN") || !strings.Contains(got, "did not present the UI's X-Frontend-Token") ||
+			!strings.Contains(got, "UPTIME_TRUST_PROXY_HOPS=1") || !strings.Contains(got, `\"10.128.5.9\"`) ||
+			!strings.Contains(got, "it came with one, ignored") {
+			t.Errorf("want the xff-untrusted-peer WARN naming the hops and the peer, got %q", got)
+		}
+		// The secret stays out of the log, and so does what was presented
+		// for it, which may be a near miss.
+		if strings.Contains(got, testFrontendToken) || strings.Contains(got, "a-guess-at-the-token") {
+			t.Errorf("the WARN names a token: %q", got)
+		}
+	})
+
+	t.Run("a sign-in sent to the backend directly warns that it came without a header", func(t *testing.T) {
+		h, logs := logged(Options{TrustProxyHops: 1, FrontendToken: testFrontendToken})
+		if got := h.clientIP(req("10.128.7.3:51000"), t0); got != "10.128.7.3" {
+			t.Errorf("source = %q, want the peer 10.128.7.3", got)
+		}
+		if got := logs.String(); !strings.Contains(got, "did not present the UI's X-Frontend-Token") ||
+			!strings.Contains(got, "it came with none") {
+			t.Errorf("want the xff-untrusted-peer WARN saying the request had no X-Forwarded-For, got %q", got)
+		}
+	})
+
+	t.Run("hops above 0 without a frontend token trusts no peer and warns", func(t *testing.T) {
+		h, logs := logged(Options{TrustProxyHops: 1})
+		// Whatever the request presents: there is nothing to compare it with.
+		for _, presented := range []string{"", testFrontendToken} {
+			r := req(frontendPod, "203.0.113.7")
+			if presented != "" {
+				r.Header.Set(frontendTokenHeader, presented)
+			}
+			if got := h.clientIP(r, t0); got != "10.128.2.15" {
+				t.Errorf("presenting %q: source = %q, want the peer 10.128.2.15", presented, got)
+			}
+		}
+		got := logs.String()
+		if !strings.Contains(got, "UPTIME_TRUST_PROXY_HOPS=1 but UPTIME_FRONTEND_TOKEN is not set") ||
+			!strings.Contains(got, `\"10.128.2.15\"`) {
+			t.Errorf("want the xff-no-frontend-token WARN naming the peer, got %q", got)
+		}
+		if n := strings.Count(got, "level=WARN"); n != 1 {
+			t.Errorf("warned %d times within a minute, want 1", n)
+		}
+		if strings.Contains(got, testFrontendToken) {
+			t.Errorf("the WARN names the presented token: %q", got)
+		}
+	})
+
+	t.Run("the UI without X-Forwarded-For keys on the peer and warns", func(t *testing.T) {
+		h, logs := logged(Options{TrustProxyHops: 1, FrontendToken: testFrontendToken})
+		if got := h.clientIP(fromUI(frontendPod), t0); got != "10.128.2.15" {
+			t.Errorf("source = %q, want the peer 10.128.2.15", got)
+		}
+		if got := logs.String(); !strings.Contains(got, "fewer entries than UPTIME_TRUST_PROXY_HOPS=1") {
+			t.Errorf("want the xff-hops-too-high WARN, got %q", got)
+		}
+	})
+
 	t.Run("a chain shorter than hops warns and falls back to the peer", func(t *testing.T) {
-		var logs bytes.Buffer
-		h := &handler{opts: Options{TrustProxyHops: 2}, proxyWarn: newProxyWarn(slog.New(slog.NewTextHandler(&logs, nil)))}
+		h, logs := logged(Options{TrustProxyHops: 2, FrontendToken: testFrontendToken})
 		// Only one forwarded entry, which a client could have set, so the
 		// source must not be read from it: a forged X-Forwarded-For must
 		// neither slip the throttle nor lock a victim out.
-		if got := h.clientIP(req("10.0.0.1:5000", "1.2.3.4"), t0); got != "10.0.0.1" {
+		if got := h.clientIP(fromUI("10.0.0.1:5000", "1.2.3.4"), t0); got != "10.0.0.1" {
 			t.Errorf("source = %q, want the peer 10.0.0.1, not the client-set entry", got)
 		}
 		if !strings.Contains(logs.String(), "UPTIME_TRUST_PROXY_HOPS=2") || !strings.Contains(logs.String(), "level=WARN") {
@@ -104,12 +258,14 @@ func TestClientIPWarns(t *testing.T) {
 		if !strings.Contains(logs.String(), proxyWarnHint) {
 			t.Errorf("want the WARN to ask for %q, got %q", proxyWarnHint, logs.String())
 		}
+		if strings.Contains(logs.String(), testFrontendToken) {
+			t.Errorf("the WARN names the token: %q", logs.String())
+		}
 	})
 
-	t.Run("a full-length chain reads the client and stays quiet", func(t *testing.T) {
-		var logs bytes.Buffer
-		h := &handler{opts: Options{TrustProxyHops: 2}, proxyWarn: newProxyWarn(slog.New(slog.NewTextHandler(&logs, nil)))}
-		if got := h.clientIP(req("10.0.0.1:5000", "203.0.113.7, 10.0.0.2"), t0); got != "203.0.113.7" {
+	t.Run("a full-length chain from the UI reads the client and stays quiet", func(t *testing.T) {
+		h, logs := logged(Options{TrustProxyHops: 2, FrontendToken: testFrontendToken})
+		if got := h.clientIP(fromUI("10.0.0.1:5000", "203.0.113.7, 10.0.0.2"), t0); got != "203.0.113.7" {
 			t.Errorf("source = %q, want the client 203.0.113.7", got)
 		}
 		if logs.Len() != 0 {
@@ -118,8 +274,7 @@ func TestClientIPWarns(t *testing.T) {
 	})
 
 	t.Run("the warning is rate-limited to once a minute per key", func(t *testing.T) {
-		var logs bytes.Buffer
-		h := &handler{opts: Options{TrustProxyHops: 0}, proxyWarn: newProxyWarn(slog.New(slog.NewTextHandler(&logs, nil)))}
+		h, logs := logged(Options{TrustProxyHops: 0})
 		h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), t0)
 		h.clientIP(req("198.51.100.9:4321", "203.0.113.2"), t0.Add(30*time.Second))
 		if n := strings.Count(logs.String(), "level=WARN"); n != 1 {
@@ -132,14 +287,26 @@ func TestClientIPWarns(t *testing.T) {
 		}
 	})
 
-	t.Run("the two warnings keep separate keys", func(t *testing.T) {
-		var logs bytes.Buffer
-		h := &handler{opts: Options{TrustProxyHops: 0}, proxyWarn: newProxyWarn(slog.New(slog.NewTextHandler(&logs, nil)))}
+	t.Run("a flood from a peer that is not the UI warns once a minute", func(t *testing.T) {
+		h, logs := logged(Options{TrustProxyHops: 1, FrontendToken: testFrontendToken})
+		for i := range 100 {
+			h.clientIP(req(attackerPod, fmt.Sprintf("198.51.100.%d", i)), t0.Add(time.Duration(i)*100*time.Millisecond))
+		}
+		if n := strings.Count(logs.String(), "level=WARN"); n != 1 {
+			t.Errorf("warned %d times within a minute, want 1", n)
+		}
+	})
+
+	t.Run("the warnings keep separate keys", func(t *testing.T) {
+		h, logs := logged(Options{TrustProxyHops: 0, FrontendToken: testFrontendToken})
 		h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), t0) // hops=0 branch
 		h.opts.TrustProxyHops = 2
-		h.clientIP(req("10.0.0.1:5000", "1.2.3.4"), t0) // short-chain branch
-		if n := strings.Count(logs.String(), "level=WARN"); n != 2 {
-			t.Errorf("distinct misconfigurations warned %d times, want 2", n)
+		h.clientIP(fromUI("10.0.0.1:5000", "1.2.3.4"), t0) // short-chain branch
+		h.clientIP(req(attackerPod, "203.0.113.7"), t0)    // untrusted-peer branch
+		h.opts.FrontendToken = ""
+		h.clientIP(req(frontendPod, "203.0.113.7"), t0) // no-token branch
+		if n := strings.Count(logs.String(), "level=WARN"); n != 4 {
+			t.Errorf("distinct misconfigurations warned %d times, want 4", n)
 		}
 	})
 }
@@ -167,8 +334,26 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+// serveFrom answers a POST to path with body, sent from peer: with token in
+// X-Frontend-Token unless it is empty, and with xff as X-Forwarded-For
+// unless it is empty. It returns the answer's status.
+func serveFrom(srv *httptest.Server, peer, token, xff, path, body string) int {
+	req := httptest.NewRequest("POST", path, strings.NewReader(body))
+	req.RemoteAddr = peer
+	if token != "" {
+		req.Header.Set(frontendTokenHeader, token)
+	}
+	if xff != "" {
+		req.Header.Set("X-Forwarded-For", xff)
+	}
+	rec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, req)
+	return rec.Code
+}
+
 // throughFrontend serves the API as the UI reaches it: every request comes
-// from frontendPod, with the X-Forwarded-For the UI passed on as it got it
+// from frontendPod with the UI's token (frontend/lib/frontend-token.ts), and
+// with the X-Forwarded-For the UI passed on as it got it
 // (frontend/lib/forwarded-for.ts): the one a proxy in front of the UI wrote
 // or, without one, the one Next.js writes with its own peer. It makes the
 // administrator "admin" (password "parola-123") and returns a sign-in as
@@ -182,14 +367,7 @@ func throughFrontend(t *testing.T, hops int) (signIn func(xff, password string) 
 		o.Logger = slog.New(slog.NewTextHandler(logs, nil))
 	}) // three failures lock a source, no account ceiling
 	post := func(path, xff, body string) int {
-		req := httptest.NewRequest("POST", path, strings.NewReader(body))
-		req.RemoteAddr = frontendPod
-		if xff != "" {
-			req.Header.Set("X-Forwarded-For", xff)
-		}
-		rec := httptest.NewRecorder()
-		srv.Config.Handler.ServeHTTP(rec, req)
-		return rec.Code
+		return serveFrom(srv, frontendPod, testFrontendToken, xff, path, body)
 	}
 	if code := post("/api/v1/auth/setup", "", `{"username":"admin","password":"parola-123"}`); code != http.StatusOK {
 		t.Fatalf("setup: status = %d, want 200", code)
@@ -338,4 +516,76 @@ func TestSignInThroughFrontend(t *testing.T) {
 			t.Errorf("%d sign-in refused lines name the UI pod they keyed on, want 3: %q", n, got)
 		}
 	})
+}
+
+// The attack the trusted peer closes: a pod of another tenant reaches the
+// backend's Service directly and writes a fresh X-Forwarded-For with every
+// guess. Before, each guess counted against a made-up source of its own, so
+// one pod slipped the per-source throttle and filled the name's account
+// ceiling, locking the administrator out for everyone. Now its guesses key
+// on its own address: the per-source throttle stops it at
+// UPTIME_LOGIN_MAX_FAILURES, far below the ceiling, and the administrator
+// signs in through the UI (CWE-307, ADR-0004). The defaults are the
+// backend's own: ten per source, fifty per name.
+func TestSignInUntrustedPeerCannotFillTheAccountCeiling(t *testing.T) {
+	for _, who := range []struct {
+		name, token string
+	}{{"without the UI's token", ""}, {"with a wrong token", "a-guess"}} {
+		t.Run(who.name, func(t *testing.T) {
+			meter := metrics.New("test")
+			logs := &syncBuffer{}
+			srv, _ := newTestAPIWith(t, func(o *Options) {
+				o.TrustProxyHops = 1
+				o.Throttle = &auth.Throttle{MaxFailures: 10, Lockout: time.Minute}
+				o.AccountThrottle = &auth.Throttle{MaxFailures: 50, Lockout: time.Minute}
+				o.SignIns = meter
+				o.Logger = slog.New(slog.NewTextHandler(logs, nil))
+			})
+			const login = "/api/v1/auth/login"
+			if code := serveFrom(srv, frontendPod, testFrontendToken, "", "/api/v1/auth/setup",
+				`{"username":"admin","password":"parola-123"}`); code != http.StatusOK {
+				t.Fatalf("setup: status = %d, want 200", code)
+			}
+			// Sixty guesses, more than the ceiling, each claiming a source
+			// of its own.
+			for i := range 60 {
+				want := http.StatusUnauthorized
+				if i >= 10 {
+					want = http.StatusTooManyRequests
+				}
+				xff := fmt.Sprintf("198.51.%d.%d", i/250, i%250+1)
+				if code := serveFrom(srv, attackerPod, who.token, xff, login, `{"username":"admin","password":"yanlis"}`); code != want {
+					t.Fatalf("guess %d from the pod: status = %d, want %d", i+1, code, want)
+				}
+			}
+			// The administrator, through the UI from a source of their own.
+			if code := serveFrom(srv, frontendPod, testFrontendToken, "203.0.113.2", login,
+				`{"username":"admin","password":"parola-123"}`); code != http.StatusOK {
+				t.Errorf("the admin through the UI: status = %d, want 200 (the pod must not reach the account ceiling)", code)
+			}
+			got, err := meter.Gather()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got["kubeat_signin_throttled_total{kind=account}"] != 0 {
+				t.Errorf("kind=account = %v, want 0", got["kubeat_signin_throttled_total{kind=account}"])
+			}
+			if got["kubeat_signin_throttled_total{kind=source}"] != 50 {
+				t.Errorf("kind=source = %v, want 50", got["kubeat_signin_throttled_total{kind=source}"])
+			}
+			text := logs.String()
+			if n := strings.Count(text, "source=10.128.5.9"); n != 10 {
+				t.Errorf("%d sign-in refused lines name the pod's address, want 10: %q", n, text)
+			}
+			if strings.Contains(text, "source=198.51.") {
+				t.Errorf("keyed on an address the pod wrote: %q", text)
+			}
+			if !strings.Contains(text, "did not present the UI's X-Frontend-Token") {
+				t.Errorf("want the xff-untrusted-peer WARN, got %q", text)
+			}
+			if strings.Contains(text, testFrontendToken) || strings.Contains(text, "a-guess") {
+				t.Errorf("the log names a token: %q", text)
+			}
+		})
+	}
 }

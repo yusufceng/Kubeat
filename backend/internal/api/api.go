@@ -189,11 +189,15 @@ type Options struct {
 	// off. TrustProxyHops is how many X-Forwarded-For entries the proxies in
 	// front of the UI write, or 1 with none, so the source address can be
 	// read from the header the UI passes on; 0 trusts no such header and
-	// uses the peer that connected.
+	// uses the peer that connected. FrontendToken is the secret the UI
+	// presents in X-Frontend-Token: the header is read only from a request
+	// that carries it, so that no other peer can pick its source; empty
+	// trusts it from no peer.
 	SessionTTL        time.Duration
 	Throttle          *auth.Throttle
 	AccountThrottle   *auth.Throttle
 	TrustProxyHops    int
+	FrontendToken     string
 	PasswordMinLength int
 	// LoginConcurrency bounds the bcrypt comparisons that run at once; zero
 	// means half the CPUs, at least one, and two with LDAP (see
