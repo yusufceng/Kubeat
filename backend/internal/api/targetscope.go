@@ -105,7 +105,16 @@ const scopeRefused = "the target is outside your namespaces: a monitor's check o
 // resolve, while the proxy connects to the Service or the ClusterIP they
 // spell. The proxy exception also wants the host written without trailing
 // dots: NO_PROXY reads such a host as written, so the request would go to
-// the proxy for a name NO_PROXY means to keep away from it.
+// the proxy for a name NO_PROXY means to keep away from it. A host that is
+// not ASCII is refused too, before it is classified: net/http and NO_PROXY's
+// matching take it through IDNA first, which drops a soft hyphen (U+00AD)
+// or a zero-width space (U+200B) and turns the Unicode full stops (U+3002,
+// U+FF0E, U+FF61) into dots, so "kubernetes.default­" reaches the API
+// server, while the pure-Go resolver refuses it without asking (an
+// NXDOMAIN). HTTP, WebSocket, ping and DNS monitors and the other webhook
+// types are held to ASCII already (asciiHost, validHost); an ntfy channel's
+// URL and a host:port target are not. An international name is written in
+// its xn-- form.
 //
 // An external target that resolves externally (the public Internet, the
 // company network outside the cluster, an OpenShift Route's public host) is
@@ -121,6 +130,11 @@ func (h *handler) targetInScope(ctx context.Context, p auth.Principal, host stri
 	name := scopeHost(host)
 	if name == "" {
 		return &scopeRefusal{scopeRefused} // nothing but dots: no host at all
+	}
+	for i := 0; i < len(host); i++ {
+		if host[i] >= 0x80 {
+			return &scopeRefusal{scopeRefused} // not ASCII: the proxy reads it through IDNA
+		}
 	}
 	if _, err := netip.ParseAddr(name); err != nil && netguard.Numeric(name) {
 		return &scopeRefusal{scopeRefused} // a number not written as an address

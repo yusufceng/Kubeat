@@ -598,8 +598,9 @@ func TestScopeTrustProxyAcceptsProxiedNXDOMAIN(t *testing.T) {
 // it would go to the proxy; the full .svc and FQDN forms and the API server's
 // names; and a public name that resolves to a cluster address (S81). Each of
 // them also written as the proxy reads it but the resolver and NO_PROXY do
-// not — with trailing dots, or as a number inet_aton reads as an address
-// (172.30.1, 0xac.0x1e.0.1) — and a proxied name with trailing dots.
+// not — with trailing dots, as a number inet_aton reads as an address
+// (172.30.1, 0xac.0x1e.0.1), or with characters that are not ASCII on an
+// ntfy channel — and a proxied name with trailing dots.
 func TestScopeTrustProxyKeepsRefusing(t *testing.T) {
 	srv, _ := newTestAPIWith(t, func(o *Options) {
 		o.Resolver = corpResolver(t)
@@ -704,6 +705,67 @@ func TestScopeTrustProxyKeepsRefusing(t *testing.T) {
 		if code := doAs(t, token, "POST", base+"/api/v1/channels", body, nil); code != http.StatusForbidden {
 			t.Errorf("webhook at %s: status = %d, want 403", target, code)
 		}
+	}
+
+	// An ntfy channel's URL is not held to ASCII as the other webhook types'
+	// are (webURL), so its host reaches the scope check as written. The
+	// proxy reads it as net/http hands it over, through IDNA: a soft hyphen
+	// (U+00AD) and a zero-width space (U+200B) are dropped, and the
+	// ideographic, fullwidth and halfwidth full stops (U+3002, U+FF0E, U+FF61)
+	// become dots. The pure-Go resolver refuses such a name without asking (an
+	// NXDOMAIN) and NO_PROXY does not match it, so read as written each of
+	// these with an ASCII dot was a proxied NXDOMAIN that reached the Service,
+	// the API server or the address it spells. A scoped user is refused any
+	// host that is not ASCII, with the setting on or off, even one that would
+	// name their own namespace; an international name is written in its xn--
+	// form.
+	for _, mode := range []struct {
+		name  string
+		trust bool
+	}{{"setting on", true}, {"setting off", false}} {
+		t.Run("ntfy not ASCII, "+mode.name, func(t *testing.T) {
+			srv, _ := newTestAPIWith(t, func(o *Options) {
+				o.Resolver = corpResolver(t)
+				o.ScopeTrustProxy = mode.trust
+				o.Proxy = corpProxy(corpNoProxy)
+			})
+			base := srv.URL
+			token := signInScoped(t, base)
+			for i, target := range []string{
+				"https://kubernetes.default\u00ad/alerts",             // soft hyphen: the API server
+				"https://api.payments\u200b/alerts",                   // zero-width space: another team's Service
+				"https://api.payments.svc.cluster.local\u3002/alerts", // ideographic full stop
+				"https://kubernetes.default.svc\uff0e/alerts",         // fullwidth full stop
+				"https://hooks.payments.svc\uff61/alerts",             // halfwidth ideographic full stop
+				"https://api\uff0epayments/alerts",                    // dots between the labels: no ASCII dot, so already a short name
+				"https://kubernetes\u3002default\u3002svc/alerts",     // the same; kept against a later reading of such dots
+				"https://172.30.0.1\u3002/alerts",                     // a bare ClusterIP
+				"https://10.0.0.5\uff61/alerts",                       // an address the proxy may reach
+				"https://ntfy\u00ad.shop.svc/alerts",                  // even one naming their own namespace
+				"https://ntfy.vendor\u200b.example/alerts",            // a proxied external name
+			} {
+				body := `{"name":"ntfy-` + strconv.Itoa(i) + `","type":"ntfy","target":"` + target + `","namespaces":["shop"]}`
+				var problem errorBody
+				if code := doAsError(t, token, "POST", base+"/api/v1/channels", body, &problem); code != http.StatusForbidden {
+					t.Errorf("ntfy at %+q: status = %d, want 403 (%q)", target, code, problem.Error)
+					continue
+				}
+				if problem.Code != codeTargetScope {
+					t.Errorf("ntfy at %+q: code = %q, want %q", target, problem.Code, codeTargetScope)
+				}
+			}
+
+			// A retarget is held to the same rule: an ntfy channel at the
+			// user's own Service may not be moved to such a host.
+			var own channelResponse
+			body := `{"name":"ntfy-own","type":"ntfy","target":"https://ntfy.shop.svc/alerts","namespaces":["shop"]}`
+			if code := doAs(t, token, "POST", base+"/api/v1/channels", body, &own); code != http.StatusCreated {
+				t.Fatalf("ntfy at the user's own Service: status = %d, want 201", code)
+			}
+			if code := doAs(t, token, "PATCH", base+"/api/v1/channels/"+itoa(own.ID), `{"target":"https://kubernetes.default\u00ad/alerts"}`, nil); code != http.StatusForbidden {
+				t.Errorf("retargeting ntfy at a host with a soft hyphen: status = %d, want 403", code)
+			}
+		})
 	}
 }
 
