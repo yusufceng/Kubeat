@@ -262,6 +262,53 @@ func TestSignInThroughFrontend(t *testing.T) {
 		}
 	})
 
+	// The limit README and ADR-0004 document: a hop count above the true one
+	// is not the safe side once the UI passes the header on. Behind a plain
+	// Route (one entry, the router's, so 1 is right) set to 2, a client that
+	// writes an entry of its own lengthens the chain to the hops, and the
+	// entry it wrote is read as its source: a fresh one each guess slips the
+	// per-source throttle, a victim's address is taken, and none of it
+	// warns. Only a sign-in that does not lengthen the header keeps to the
+	// UI pod and warns that the chain is short, which is the operator's
+	// sign that the value is too high.
+	t.Run("hops=2 behind a plain Route lets a lengthened header pick the source", func(t *testing.T) {
+		signIn, logs, _ := throughFrontend(t, 2)
+		// As the router appends it: what the attacker wrote, then the
+		// attacker. Twice the guesses that lock a source, none locked.
+		for i := range 6 {
+			if code := signIn(fmt.Sprintf("192.0.2.%d, %s", i+1, attacker), "yanlis"); code != http.StatusUnauthorized {
+				t.Fatalf("attacker guess %d with a made-up entry: status = %d, want 401 (each counts against the entry)", i+1, code)
+			}
+		}
+		if code := signIn(owner+", "+attacker, "yanlis"); code != http.StatusUnauthorized {
+			t.Fatalf("attacker guess with the owner's address: status = %d, want 401", code)
+		}
+		got := logs.String()
+		for i := range 6 {
+			if !strings.Contains(got, fmt.Sprintf("source=192.0.2.%d\n", i+1)) {
+				t.Errorf("guess %d not keyed on the entry the attacker wrote: %q", i+1, got)
+			}
+		}
+		if !strings.Contains(got, "source="+owner) {
+			t.Errorf("the owner's address the attacker wrote was not taken as the source: %q", got)
+		}
+		if strings.Contains(got, "source="+attacker) || strings.Contains(got, "level=WARN") {
+			t.Errorf("keyed on the attacker's real address, or warned, for a lengthened header: %q", got)
+		}
+		// A browser that writes nothing: the chain is shorter than the hops,
+		// so it keys on the UI pod and warns.
+		if code := signIn(owner, "yanlis"); code != http.StatusUnauthorized {
+			t.Fatalf("a sign-in with the router's entry alone: status = %d, want 401", code)
+		}
+		got = logs.String()
+		if !strings.Contains(got, "fewer entries than UPTIME_TRUST_PROXY_HOPS=2") || !strings.Contains(got, `\"10.128.2.15\"`) {
+			t.Errorf("want the xff-hops-too-high WARN naming the UI pod, got %q", got)
+		}
+		if !strings.Contains(got, "source=10.128.2.15") {
+			t.Errorf("a short chain did not key on the UI pod: %q", got)
+		}
+	})
+
 	t.Run("hops=0 keys on the UI pod and warns", func(t *testing.T) {
 		signIn, logs, _ := throughFrontend(t, 0)
 		for i := range 3 {
