@@ -241,7 +241,11 @@ dizin hesabınıza taşıyın, sonra ekibi ekleyin.
    Bundan sonra `admin` yalnızca acil durum hesabıdır.
 3. **Ekip grubu.** Ekibin AD grubu → rol **Editör**, namespace'ler ekibin
    namespace'leri. Ekip üyeleri böylece yalnızca kendi namespace'lerini
-   görür ve orada monitor ekleyebilir. Gruba girmeyen biri giriş
+   görür ve oradaki Service'lere ve genel adreslere monitor ekleyebilir.
+   0.48–0.49'da editör kurum ağına (özel aralıklara) çözülen bir ada, router
+   VIP'ine çözülen bir Route adına ve yukarıdaki vekilli kurulumda yalnız
+   vekilin çözdüğü bir dış ada monitor kuramaz (README "Hedef politikası");
+   bunları yönetici kurar ya da keşiften içe aktarılır. Gruba girmeyen biri giriş
    yapamaz (varsayılan rol boş); isteniyorsa `ldap.extraEnv` altında
    `UPTIME_LDAP_DEFAULT_ROLE: viewer` ve `UPTIME_LDAP_DEFAULT_NAMESPACES:
    "*"` ile dizindeki herkese izleyici rolü verilir. AD'de gruplar iç

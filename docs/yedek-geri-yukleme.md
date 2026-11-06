@@ -64,7 +64,16 @@ kontrol yapmaz. Planlı bir geri yüklemede:
 
 Yedek PVC'si aynı cluster'dadır; cluster'ın tamamını kaybetmeye karşı
 kopyaların ve şifreleme anahtarının dışarıya da taşınması gerekir. Backend
-imajında `tar` olmadığından `kubectl cp` çalışmaz, dosyalar `cat` ile taşınır:
+imajında `tar` olmadığından `kubectl cp` çalışmaz, dosyalar `cat` ile taşınır.
+
+**Uyarı (geçici, [#120](https://github.com/yusufceng/Kubeat/issues/120) ile
+kalkar).** Düz `cat` büyük dosyayı sessizce kesebilir
+([#117](https://github.com/yusufceng/Kubeat/pull/117)). Kopyayı
+[pilot.md "Yükseltmeden önce yedek"](pilot.md#yükseltmeden-önce-yedek)'teki
+parçalı ve sha256 doğrulamalı blokla alın (`oc` yerine `kubectl` yazın); blok
+"yedek doğrulandı" demiyorsa kopyaya güvenmeyin. Doğrulanan kopyanın sha256'sını
+(`sha256sum`, macOS'ta `shasum -a 256`) kopyanın yanına yazın ve geri
+yüklemeden önce yeniden karşılaştırın.
 
 ```sh
 kubectl exec deploy/kubeat-backend -- ls /backup

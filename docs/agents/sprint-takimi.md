@@ -40,6 +40,11 @@ sonunda bakar ve yön verir.
    olmasını ya da ayar eksik/çelişkiliyken (ör. `X-Forwarded-For` gelirken
    `hops=0`) açılış ya da çalışma anında bir WARN verilmesini sayar: yayımlanmış
    bir güvenlik düzeltmesi, "izleme asla durmaz" gibi, sessizce etkisiz kalmamalı.
+   Gözlem (metrik, denetim) maddesinin kabul ölçütü ya chart alarmını (promtool'la
+   sınanan) ya da sinyali ayıran bir etiketi sayar; "metrik var, alarm ya da ayrım
+   kullanıcıda" yeterli değildir. Bir güvenlik ya da denetim maddesi "her red
+   yolu" diyorsa kabul ölçütü yolları tek tek sayar ya da belge "denetlenmeyen red
+   yolları"nı gerekçesiyle listeler.
 3. **Öncelik**: PO sprint hedefini, en çok dört maddelik sıralı listeyi ve
    gerekçeli "yapılmayacaklar"ı verir. Bir hikâyenin bilinen yan etkisi
    sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
@@ -97,7 +102,10 @@ sonunda bakar ve yön verir.
    iki sprint üst üste kullanıcıda kaldıysa plan onu ajan-içi koşulabilir bir
    benzetim olarak tanımlamayı değerlendirir (minikube'da iki namespace +
    sınırlı kullanıcı + gerçek çözüm yolu, `--context minikube`); yoksa iddia
-   hiç "doğrulandı" olmaz.
+   hiç "doğrulandı" olmaz. Kaynak adres, vekil zinciri ya da kapsam gibi bir
+   güvenlik iddiasının provası kullanıcının asıl yolundan koşar (tarayıcı →
+   Route/Ingress → arayüz → backend); backend'e port-forward ile elle yazılmış
+   bir başlık yeterli sayılmaz.
 
 Ret alan bir madde en çok üç düzeltme turu görür. Dördüncü inceleme
 sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
