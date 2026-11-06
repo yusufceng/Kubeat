@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"strings"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
@@ -89,6 +91,22 @@ const scopeRefused = "the target is outside your namespaces: a monitor's check o
 //     connects directly (TCP, DNS, gRPC, ping, the databases, a check of each
 //     pod), gets no exception.
 //
+// The host is first read as the proxy and the resolver read it (scopeHost):
+// in lower case and without its trailing dots, which only root a name and
+// which a proxy drops, as Squid does. A host made of numbers that is not an
+// address as written (172.30.1, 0xac.0x1e.0.1 and 2887647233 all spell
+// 172.30.0.1 to inet_aton; netguard.Numeric) is refused: a proxy and glibc
+// read it as an address, the pure-Go resolver as a name that does not exist,
+// and readers disagree on some forms (010 is 8 or 10), so the address it
+// reaches cannot be told. Read as written instead, "api.payments.svc.." or
+// "172.30.0.1.." would be an external name the resolver refuses without
+// asking (an NXDOMAIN, which the proxy exception accepts) and NO_PROXY's
+// patterns do not match, and "172.30.1" an external name that does not
+// resolve, while the proxy connects to the Service or the ClusterIP they
+// spell. The proxy exception also wants the host written without trailing
+// dots: NO_PROXY reads such a host as written, so the request would go to
+// the proxy for a name NO_PROXY means to keep away from it.
+//
 // An external target that resolves externally (the public Internet, the
 // company network outside the cluster, an OpenShift Route's public host) is
 // left to the target policy, unchanged. Options.Resolver is the backend's own
@@ -100,8 +118,15 @@ func (h *handler) targetInScope(ctx context.Context, p auth.Principal, host stri
 	if p.SeesAll() || host == "" {
 		return nil
 	}
-	if netguard.InCluster(host) {
-		if ns, ok := netguard.Namespace(host); !ok || !p.CanRead(ns) {
+	name := scopeHost(host)
+	if name == "" {
+		return &scopeRefusal{scopeRefused} // nothing but dots: no host at all
+	}
+	if _, err := netip.ParseAddr(name); err != nil && netguard.Numeric(name) {
+		return &scopeRefusal{scopeRefused} // a number not written as an address
+	}
+	if netguard.InCluster(name) {
+		if ns, ok := netguard.Namespace(name); !ok || !p.CanRead(ns) {
 			return &scopeRefusal{scopeRefused}
 		}
 		return nil
@@ -113,16 +138,25 @@ func (h *handler) targetInScope(ctx context.Context, p auth.Principal, host stri
 		ctx, cancel = context.WithTimeout(ctx, h.opts.ResolveTimeout)
 		defer cancel()
 	}
-	inCluster, err := netguard.ResolvesInCluster(ctx, h.opts.Resolver, host)
+	inCluster, err := netguard.ResolvesInCluster(ctx, h.opts.Resolver, name)
 	switch {
 	case inCluster:
 		return &scopeRefusal{scopeRefused}
 	case err == nil:
 		return nil
-	case h.opts.ScopeTrustProxy && netguard.NotFound(err) && netguard.Proxied(h.opts.Proxy, request):
+	case h.opts.ScopeTrustProxy && netguard.NotFound(err) && netguard.Proxied(h.opts.Proxy, request) &&
+		!strings.HasSuffix(request.Hostname(), "."):
 		return nil
 	}
 	return &scopeRefusal{scopeRefused}
+}
+
+// scopeHost is host as the scope check reads it, and as the audit entry of a
+// refused target names it: in lower case, without surrounding space and
+// without every trailing dot, as a proxy and the resolver read a name. It is
+// "" for a host made of dots alone.
+func scopeHost(host string) string {
+	return strings.ToLower(strings.TrimRight(strings.TrimSpace(host), "."))
 }
 
 // monitorRequestURL is the URL of the HTTP request a monitor's check sends,
@@ -195,13 +229,17 @@ const (
 // login_failed, so a SOC sees the attempt over the 90-day window — before, a
 // refusal left only a 403 and no trace — and counts it in
 // kubeat_target_scope_denied_total for alerting. detail names the target or
-// the namespace for the log. The client still gets the very same 403 with the
+// the namespace for the log; a target is written as the scope check read it
+// (scopeHost), without its trailing dots, so one host is one spelling in the
+// log however it was written. The client still gets the very same 403 with the
 // same generic body: the response is written by the caller and left untouched,
 // so neither the log nor the metric tells a client anything new.
 func (h *handler) auditScopeDenied(r *http.Request, reason, detail string) {
 	phrase := scopeDeniedTargetText
 	if reason == metrics.ScopeDeniedNamespace {
 		phrase = scopeDeniedNamespaceText
+	} else if host := scopeHost(detail); host != "" {
+		detail = host
 	}
 	h.audit(r, "deny", "target-scope", 0, fmt.Sprintf(h.auditText(phrase), detail))
 	h.opts.Meter.TargetScopeDenied(reason)

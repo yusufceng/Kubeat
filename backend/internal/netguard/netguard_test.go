@@ -504,6 +504,22 @@ func TestNumericHosts(t *testing.T) {
 	}
 }
 
+// Numeric exports the same test for the scope check: a host in one of
+// inet_aton's forms is numeric whether or not it spells an address, and a
+// name is not. Trailing dots are the caller's to drop.
+func TestNumericExported(t *testing.T) {
+	for _, host := range []string{"172.30.1", "0xac.0x1e.0.1", "2887647233", "010.0.0.1", "10.0.0.5", "172.30.0.256", "08"} {
+		if !Numeric(host) {
+			t.Errorf("Numeric(%s) = false, want true", host)
+		}
+	}
+	for _, host := range []string{"", "status.vendor.example", "172.30.0.1.", "172-30-0-1.sslip.io", "fd00::1"} {
+		if Numeric(host) {
+			t.Errorf("Numeric(%q) = true, want false", host)
+		}
+	}
+}
+
 func TestCheckHost(t *testing.T) {
 	p := mustNew(t, nil, nil)
 	ctx := context.Background()

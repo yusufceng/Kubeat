@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -470,9 +471,13 @@ func corpProxy(noProxy string) func(*http.Request) (*url.URL, error) {
 const corpNoProxy = ".svc,.cluster.local,172.30.0.0/16,.corp.example"
 
 // corpResolver answers like the backend's resolver behind such a proxy: the
-// cluster's names, two-label short names included (ndots), resolve; a public
-// name pointing at a cluster address resolves to it; every other name is
-// NXDOMAIN, since only the proxy resolves external names.
+// cluster's names, two-label short names included (ndots), resolve; every
+// other name is NXDOMAIN, since only the proxy resolves external names. The
+// one public name in it, 172-30-0-1.sslip.io pointing at a cluster address,
+// stands for a cluster DNS that does answer for some public names (one that
+// forwards them, or a company zone it serves): there the name is refused.
+// Where the backend cannot resolve it, it is an NXDOMAIN like any other and
+// is left to the proxy (TestScopeTrustProxyLeavesUnresolvedNamesToTheProxy).
 func corpResolver(t *testing.T) fakeResolver {
 	return fakeResolver{
 		"api.payments":        ipList(t, "172.30.44.9"), // another team's Service, via ndots
@@ -591,7 +596,10 @@ func TestScopeTrustProxyAcceptsProxiedNXDOMAIN(t *testing.T) {
 // ping, the databases); a bare ClusterIP; a short name; a two-label name the
 // pod's search domains (ndots) turn into a Service or the API server, though
 // it would go to the proxy; the full .svc and FQDN forms and the API server's
-// names; and a public name that resolves to a cluster address (S81).
+// names; and a public name that resolves to a cluster address (S81). Each of
+// them also written as the proxy reads it but the resolver and NO_PROXY do
+// not — with trailing dots, or as a number inet_aton reads as an address
+// (172.30.1, 0xac.0x1e.0.1) — and a proxied name with trailing dots.
 func TestScopeTrustProxyKeepsRefusing(t *testing.T) {
 	srv, _ := newTestAPIWith(t, func(o *Options) {
 		o.Resolver = corpResolver(t)
@@ -631,6 +639,26 @@ func TestScopeTrustProxyKeepsRefusing(t *testing.T) {
 		{"apiserver-fqdn", "http", "https://kubernetes.default.svc.cluster.local/healthz", ""},
 		{"public-name-internal-ip", "http", "https://172-30-0-1.sslip.io/", ""},
 		{"websocket-two-label", "websocket", "wss://api.payments/socket", ""},
+		// The same names and addresses with trailing dots, which the proxy
+		// drops: the resolver refuses such a name without asking and NO_PROXY
+		// does not match it, so read as written it was a proxied NXDOMAIN.
+		{"fqdn-dots", "http", "https://api.payments.svc.cluster.local.../", ""},
+		{"svc-dots", "http", "https://api.payments.svc../", ""},
+		{"bare-clusterip-dots", "http", "https://172.30.0.1.../", ""},
+		{"short-name-dots", "http", "https://api../", ""},
+		{"two-label-dots", "http", "https://api.payments../", ""},
+		{"apiserver-svc-dots", "http", "https://kubernetes.default.svc../healthz", ""},
+		{"apiserver-two-label-dots", "http", "https://KUBERNETES.default../healthz", ""},
+		{"websocket-fqdn-dots", "websocket", "wss://api.payments.svc.cluster.local../socket", ""},
+		// A number not written as an address; the dots get it past the
+		// monitor's own "write an address as one" check.
+		{"inet-aton-short-dots", "http", "https://172.30.1../", ""},
+		{"inet-aton-hex-dots", "http", "https://0xac.0x1e.0.1../", ""},
+		{"inet-aton-number-dots", "http", "https://2887647233../", ""},
+		// A proxied NXDOMAIN name written with trailing dots: NO_PROXY reads it
+		// as written, so the exception is not given.
+		{"proxied-name-dot", "http", "https://status.vendor.example./", ""},
+		{"proxied-name-dots", "http", "https://status.vendor.example../", ""},
 	} {
 		extra := `"namespace":"shop"`
 		if tc.extra != "" {
@@ -653,11 +681,85 @@ func TestScopeTrustProxyKeepsRefusing(t *testing.T) {
 		"https://hooks.payments/kubeat",      // two-label, resolves into the cluster
 		"https://hooks.payments.svc/kubeat",  // another team's Service
 		"https://172-30-0-1.sslip.io/kubeat", // public name, cluster address
+		// Trailing dots, which the proxy drops.
+		"https://kubernetes.default.svc../hook",
+		"https://ghost.payments.svc.cluster.local../hook",
+		"https://hooks.payments.svc../hook",
+		"https://hooks.payments../hook",
+		"https://172.30.0.1../hook",
+		"https://api../hook",
+		"https://.../hook",
+		// A number not written as an address, which a proxy reads as one.
+		"https://172.30.1/hook",
+		"https://0xac.0x1e.0.1/hook",
+		"https://2887647233/hook",
+		"https://010.0.0.1/hook",
+		"https://172.30.0.256/hook",
+		"https://3405803777/hook", // 203.0.113.1, external, still not written as an address
+		// A proxied NXDOMAIN name written with trailing dots.
+		"https://hooks.vendor.example./kubeat",
+		"https://hooks.vendor.example../kubeat",
 	} {
 		body := `{"name":"hook-` + strconv.Itoa(i) + `","type":"webhook","target":"` + target + `","namespaces":["shop"]}`
 		if code := doAs(t, token, "POST", base+"/api/v1/channels", body, nil); code != http.StatusForbidden {
 			t.Errorf("webhook at %s: status = %d, want 403", target, code)
 		}
+	}
+}
+
+// Where the backend's resolver cannot answer for public names, as behind a
+// proxy that alone resolves them, a public name pointing at an address the
+// proxy reaches (a node, a VIP, a company range; here 10.0.0.5 by
+// 10-0-0-5.sslip.io) is an NXDOMAIN like any other, so with the setting on it
+// is left to the proxy and accepted. This is the condition README and
+// ADR-0003 put on the setting: the proxy's own ACL, not the scope check,
+// keeps such an address closed (S81).
+func TestScopeTrustProxyLeavesUnresolvedNamesToTheProxy(t *testing.T) {
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.Resolver = fakeResolver{} // the backend resolves no public name
+		o.ScopeTrustProxy = true
+		o.Proxy = corpProxy(corpNoProxy)
+	})
+	base := srv.URL
+	token := signInScoped(t, base)
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors",
+		monitorJSON("node", "http", "https://10-0-0-5.sslip.io/", `"namespace":"shop"`), nil); code != http.StatusCreated {
+		t.Errorf("a public name the backend cannot resolve: status = %d, want 201 (left to the proxy)", code)
+	}
+}
+
+// Whatever the setting, the scope check reads a host as the proxy and the
+// resolver read it: without its trailing dots and in lower case, and a host
+// made of numbers that is not written as an address is refused. A scoped
+// user's own Service written with trailing dots is in scope, and the audit
+// entry of a refusal names the host in that one spelling.
+func TestScopeReadsHostAsTheProxyDoes(t *testing.T) {
+	srv, db := newTestAPIWith(t, func(o *Options) { o.Resolver = corpResolver(t) })
+	base := srv.URL
+	token := signInScoped(t, base)
+
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors",
+		monitorJSON("apiserver", "http", "https://Kubernetes.Default.SVC../healthz", `"namespace":"shop"`), nil); code != http.StatusForbidden {
+		t.Errorf("API server with trailing dots: status = %d, want 403", code)
+	}
+	hook := `{"name":"hook","type":"webhook","target":"https://0xac.0x1e.0.1/hook","namespaces":["shop"]}`
+	if code := doAs(t, token, "POST", base+"/api/v1/channels", hook, nil); code != http.StatusForbidden {
+		t.Errorf("webhook at a numeric host: status = %d, want 403", code)
+	}
+	denials := auditDenials(t, db)
+	var summaries []string
+	for _, d := range denials {
+		summaries = append(summaries, d.Summary)
+	}
+	for _, want := range []string{"target kubernetes.default.svc is outside your namespaces", "target 0xac.0x1e.0.1 is outside your namespaces"} {
+		if !slices.Contains(summaries, want) {
+			t.Errorf("deny summaries = %q, want one %q", summaries, want)
+		}
+	}
+
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors",
+		monitorJSON("own", "http", "https://api.shop.svc../", `"namespace":"shop"`), nil); code != http.StatusCreated {
+		t.Errorf("own Service with trailing dots: status = %d, want 201", code)
 	}
 }
 

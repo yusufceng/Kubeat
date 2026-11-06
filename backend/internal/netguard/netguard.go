@@ -375,6 +375,16 @@ func (p *Policy) CheckHost(ctx context.Context, host string) error {
 	return nil
 }
 
+// Numeric reports whether host is written the way inet_aton reads an IPv4
+// address (2852039166, 0xa9.0xfe.0xa9.0xfe, 127.1, 010.0.0.1, or plain
+// 10.0.0.1), whether or not it spells one; trailing dots are the caller's to
+// drop first, as a proxy does. A proxy and glibc read such a host as an
+// address, the pure-Go resolver refuses it as a name, and readers disagree on
+// some forms (inet_aton reads 010 as 8). The per-user scope check
+// (api.targetInScope) refuses one that is not an address as written, since
+// it cannot tell which address the request reaches.
+func Numeric(host string) bool { return numeric(host) }
+
 // numeric reports whether host is written the way inet_aton reads an IPv4
 // address: one to four parts separated by dots, each decimal, octal (with
 // a leading 0) or hexadecimal (with 0x). A part that is not a valid number
