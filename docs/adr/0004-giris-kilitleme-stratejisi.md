@@ -83,14 +83,44 @@ istemcinin denetlemediği eşe (peer) düşer: uydurma bir `X-Forwarded-For` ile
 her istekte taze bir kaynak gibi görünüp throttle atlanabilir ne de bir kurban
 kilitlenebilir. Yanıt hâlâ değişmez (genel 401/429).
 
-**Somut hop örnekleri.** Değer tam olarak önünüzdeki kendi vekillerinizin
-sayısıdır; girişe ulaşan her vekil `X-Forwarded-For`'a bir girdi ekler:
+**Arayüz yolu (0.50).** Tarayıcı backend'e doğrudan gelmez: Route ve Ingress
+yalnız arayüze gider ve backend'in eşi her istemci için arayüz pod'udur. 0.48 ve
+0.49'da arayüz giriş, parola değiştirme ve durum sayfası kilidi isteklerini
+backend'e `X-Forwarded-For` olmadan iletiyordu; bu yüzden kaynak-başına throttle
+tarayıcı yolunda, hop değeri ne olursa olsun, ad-başına tek paylaşılan kilide
+geriliyor ve yukarıdaki (a) uyarısı bu yolda hiç düşmüyordu (bilinen sınır).
+0.50'de arayüz bu üç çağrıda gelen başlığı **aynen** taşır (girdi eklemez,
+silmez; başlık yoksa eklemez). Next.js başlığı, önde onu yazan bir vekil yoksa
+kendi eşiyle doldurur ve var olana eklemez. Server action soket eşini
+okuyamadığı için arayüzün kendi gördüğü eşi eklemesi seçilmedi (backlog). Arayüz
+böylece backend'e en yakın vekilin yerini alır; değer, arayüzün önündeki
+vekillerin `X-Forwarded-For`'a yazdığı girdi sayısıdır, hiçbiri yazmıyorsa `1`.
 
-- Düz OpenShift Route (HAProxy router): `1`.
-- Önünde WAF ya da harici yük dengeleyici olan OpenShift Route: router + o
-  katman, `2`.
-- GKE: Google Cloud yük dengeleyici (GCLB) + `ingress-nginx`, `2`; yalnız
-  Container-native LB/GCLB (ingress-nginx yoksa) `1`.
+**Somut hop örnekleri.** Arayüz yoluna göre türetildi; hiçbiri henüz bu yolda
+ölçülmedi (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
+
+- Vekilsiz, arayüze `kubectl port-forward`: `1` (girdiyi Next.js yazar).
+  Ölçülmedi.
+- Düz OpenShift Route (HAProxy router, varsayılan `forwardedHeaderPolicy:
+  Append`): `1`. Ölçülmedi.
+- Önünde başlığı yazan bir WAF ya da L7 yük dengeleyici olan Route: `2`.
+  Ölçülmedi.
+- GKE `ingress-nginx`, L4 LoadBalancer Service, `externalTrafficPolicy: Local`,
+  varsayılan ayarlar: `1` (controller gelen başlığı kendi eşiyle değiştirir).
+  Ölçülmedi.
+- Önde L7 Google Cloud yük dengeleyici (GCLB) + `ingress-nginx`
+  (`use-forwarded-headers` ve `compute-full-forwarded-for` açık): `3` (GCLB
+  istemciyi ve yük dengeleyicinin adresini, `ingress-nginx` GCLB vekilini
+  yazar). Ölçülmedi.
+- GKE'nin kendi Ingress'i (GCE): `2` (GCLB istemciyi ve yük dengeleyicinin
+  adresini yazar). Ölçülmedi.
+
+Başlığı yazmayan bir katman (L4 yük dengeleyici, TCP geçişli WAF) sayılmaz; o
+zaman throttle o katmanın adresine anahtarlanır ve uyarı düşmez. 0.49'a kadar
+burada yazan değerler (Route `1`, WAF'lı Route `2`, GCLB + `ingress-nginx` `2`,
+yalnız GCLB `1`) arayüz yolunu hesaba katmıyordu; son ikisi GCLB'nin iki girdi
+yazdığını ve `ingress-nginx`'in varsayılan ayarlarla başlığı değiştirdiğini de
+saymıyordu.
 
 **Paylaşılan kurumsal NAT/vekil.** `X-Forwarded-For` doğru okunsa bile, aynı
 kurumsal NAT ya da ileri vekil arkasındaki kullanıcılar aynı kaynak adresten
@@ -102,11 +132,13 @@ bırakılmalıdır). Kaynak-IP'ye dayanmayan gerçek bir ayrım (güvenilir-veki
 allowlist) kod ve bu ADR'de değişim ister; şimdilik yön olarak backlog'da
 izlenir (`docs/backlog.md`, "Giriş throttle için güvenilir-vekil IP allowlist").
 
-Görülen kaynak adresini loga yazılan WARN satırından doğrulayın: yukarıdaki
-iki durumda satır, throttle'ın anahtarladığı eşi (`peer`) adıyla yazar; bu
-adres beklediğiniz vekil ya da istemci adresiyse `UPTIME_TRUST_PROXY_HOPS`
-doğru demektir. (Denetim kaydı ve istemci yanıtı kaynak adresini taşımaz, enum
-sızdırmamak için.)
+Görülen kaynak adresi, ayar doğruyken de, her başarısız girişin
+`sign-in refused` log satırındaki `source` alanından doğrulanır (0.50); 0.49'da
+doğrulama yalnız yanlış ayarda düşen WARN satırına bağlıydı. `source`
+istemcinin adresiyse `UPTIME_TRUST_PROXY_HOPS` doğrudur; bir vekilin adresiyse
+değer eksik, arayüz pod'unun adresiyse `0` ya da fazladır. Satır yalnız operatör
+logudur: denetim kaydı ve istemci yanıtı kaynak adresini taşımaz, enum
+sızdırmamak için.
 
 Yanıt değişmez: kilit 429 + `Retry-After` döner, enum sızdırmaz; başarısız
 denemeler ve adı kilitleyen ret yine denetim kaydına ve loga yazılır.
@@ -139,6 +171,13 @@ kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
   WARN verilir, bu yüzden uydurma başlık ne throttle'ı atlatır ne de kurbanı
   kilitler (yalnızca o NAT/eş paylaşılan bir kilide geriler). Yanlış ayarın
   maliyeti böylece "bypass" değil "tek paylaşılan kilit"tir.
+- **Cluster içinden uydurma başlık.** Değer `0`'dan büyükken backend
+  `X-Forwarded-For`'a bağlanan eşe bakmadan güvenir: cluster içindeki bir pod
+  backend'e doğrudan ya da 0.50'den beri arayüz Service'i üzerinden (arayüz
+  başlığı aynen taşır) kendi yazdığı bir başlıkla bağlanıp kaynağını seçebilir.
+  Backend'e doğrudan geleni `networkPolicy.enabled=true` kapatır; arayüze
+  doğrudan gelen bugün açıktır. İkisi S79'da
+  ([#119](https://github.com/yusufceng/Kubeat/issues/119)) ele alınır.
 - **Tek replica.** Sayaç bellektedir; backend yeniden başlayınca ya da başka
   replicada sıfırlanır. Çok replicalı dağıtık throttle yol haritasında bilinen
   sınırdır.

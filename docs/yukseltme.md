@@ -226,12 +226,31 @@ görünür kılar. Şema değişmez (26); hiçbir madde yeni zorunlu ayar getirm
 
 ### Yapılacak
 
+- **Bilinen sınır (0.48–0.49): arayüz yolu istemci adresini taşımaz.** Route
+  ve Ingress yalnız arayüze gider; 0.48 ve 0.49'da arayüz giriş, parola
+  değiştirme ve durum sayfası kilidi isteklerini backend'e `X-Forwarded-For`
+  olmadan iletir. Tarayıcıdan gelen her deneme arayüz pod'unun adresine
+  anahtarlanır: `UPTIME_TRUST_PROXY_HOPS` kaç olursa olsun kaynak-başına
+  throttle ad-başına tek paylaşılan kilide geriler; `0` iken `WARN` bu yolda
+  düşmez, `1` iken "zincir kısa" `WARN`'ı düşer ama kaynak yine arayüz pod'udur.
+  Aşağıdaki hop sayıları bu sürümlerde yalnız backend'e doğrudan gelen istekte
+  (port-forward, API) işe yarar. 0.50 bunu düzeltir
+  ([#118](https://github.com/yusufceng/Kubeat/issues/118)): arayüz başlığı
+  aynen taşır ve değer arayüz yoluna göre yeniden türetildi (README "Hesaplar
+  ve giriş", "Vekil-hop rehberi"): vekilsiz (arayüze port-forward) `1`, düz
+  OpenShift Route `1`, önünde başlığı yazan bir WAF ya da L7 yük dengeleyici
+  olan Route `2`, GKE `ingress-nginx` (L4 LoadBalancer, `externalTrafficPolicy:
+  Local`, varsayılan ayarlar) `1`, önde L7 GCLB + `ingress-nginx`
+  (`use-forwarded-headers` ve `compute-full-forwarded-for`) `3`, GKE'nin kendi
+  Ingress'i (GCE) `2`; hiçbiri henüz ölçülmedi. 0.49'da kalırken kilitli bir
+  hesap için README "Kilitli hesaba girmek" yolları geçerlidir.
 - **Giriş bir vekilin arkasındaysa `UPTIME_TRUST_PROXY_HOPS`'u somut hop sayısına
   göre gözden geçirin.** 0.49, `X-Forwarded-For` görülürken `hops=0` iken ve
   ayarlanan hop sayısı gerçek zincirden kısa/uzun geldiğinde çalışma anında
   dakika-sınırlı bir `WARN` yazar (satır anahtarlanan adresi de verir; görülen
-  kaynağı bu satırdan doğrulayın). Somut sayılar: OpenShift Route tek başına 1,
-  önünde kurumsal WAF/LB varsa 2; GKE'de GCLB + ingress-nginx 2, yalnız GCLB 1.
+  kaynağı bu satırdan doğrulayın). 0.49'da arayüz yolunda hiçbir değer
+  kaynakları ayırmaz (yukarıdaki sınır); 0.50'nin sayılarını şimdiden vermek
+  zararsızdır: kaynak arayüz pod'u kalır ve "zincir kısa" `WARN`'ı düşer.
   Paylaşılan kurumsal NAT/vekil arkasında aynı kaynak adresi birçok kullanıcı
   için tektir; o popülasyonda `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`'ı daha yüksek
   tutmayı değerlendirin (güvenilir-vekil IP allowlist yol haritasında).
@@ -298,10 +317,10 @@ frontend Service değerleri ekler. Şema değişmez (26).
   hesap-başına kilidine yakın ama daha gevşek). Değeri chart'ta
   `backend.extraEnv` ya da values ile verin.
 
-  **Somut hop sayısı** (girişe ulaşan her vekil `X-Forwarded-For`'a bir girdi
-  ekler): düz OpenShift Route (HAProxy router) `1`; önünde WAF/harici yük
-  dengeleyici olan Route `2`; GKE'de GCLB + `ingress-nginx` `2`, yalnız
-  GCLB/Container-native LB (ingress-nginx yoksa) `1`.
+  **Somut hop sayısı:** 0.48 ve 0.49'da arayüz istemci adresini taşımadığı
+  için arayüzden gelen girişte hiçbir değer kaynakları ayırmaz ("0.49'a
+  yükseltme", bilinen sınır). Arayüz yoluna göre türetilmiş değerler 0.50'den
+  itibaren README "Hesaplar ve giriş", "Vekil-hop rehberi"ndedir.
 
   **Görülen kaynağı doğrulayın.** 0.49'dan itibaren yanlış ayar sessizce etkisiz
   kalmaz: `X-Forwarded-For` geldiği hâlde `UPTIME_TRUST_PROXY_HOPS=0` iken ve

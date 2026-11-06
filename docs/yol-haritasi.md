@@ -167,18 +167,26 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   throttle/lockout'u enum sızdırmayan `reason`/`kind` etiketli metriklerle
   (`kubeat_signin_failures_total{reason}`, `kubeat_signin_throttled_total{kind}`)
   görünür kıldı; istemci yanıtı (401/429) değişmedi. **Arayüz yolu
-  (0.48–0.49):** arayüz istemci adresini backend'e taşımıyor. Route/Ingress
-  arkasında giriş, parola değiştirme ve durum sayfası kilidi arayüz pod'unun
-  adresine anahtarlanıyor, yani tarayıcıdan gelen girişte kaynak-başına throttle
-  ad-başına tek paylaşılan kilide geriliyor. hops=0 iken WARN düşmüyor; hops=1
-  iken `xff-hops-too-high` WARN'ı düşüyor ama kaynak yine arayüz pod'u. hops>0
-  iken backend'e doğrudan bağlanan her pod uydurma `X-Forwarded-For` ile kaynak
-  seçebiliyor. Sprint 8 (0.50.0) ikisini ele alır: S78
-  ([#118](https://github.com/yusufceng/Kubeat/issues/118)) arayüzün başlığı
-  taşıması ve hop rehberi, S79
-  ([#119](https://github.com/yusufceng/Kubeat/issues/119)) `X-Forwarded-For`'a
-  yalnız arayüzden güvenmek. Paylaşılan kurumsal NAT ayrımı backlog'da
-  ([backlog](backlog.md) "Giriş throttle için güvenilir-vekil IP allowlist").
+  (0.48–0.49, bilinen sınır):** arayüz istemci adresini backend'e taşımıyordu.
+  Route/Ingress arkasında giriş, parola değiştirme ve durum sayfası kilidi arayüz
+  pod'unun adresine anahtarlanıyor, yani tarayıcıdan gelen girişte kaynak-başına
+  throttle ad-başına tek paylaşılan kilide geriliyordu. hops=0 iken WARN
+  düşmüyordu; hops=1 iken `xff-hops-too-high` WARN'ı düşüyor ama kaynak yine
+  arayüz pod'u oluyordu. S78 ([#118](https://github.com/yusufceng/Kubeat/issues/118),
+  0.50.0) arayüzün bu üç çağrıda gelen `X-Forwarded-For`'u aynen taşımasıyla
+  düzeltir: hops=0 iken WARN arayüz yolunda da düşer, `sign-in refused` log
+  satırı anahtarlanan kaynağı (`source`) yazar ve hop rehberi arayüz yoluna göre
+  yeniden türetildi (README "Hesaplar ve giriş"; hiçbir satır henüz bu yolda
+  ölçülmedi, sandbox Route provası sürümden sonra). Chart varsayılanı 0 kaldı;
+  kurulum notu Route/Ingress açıkken değeri önerir. Kalanlar: hops>0 iken cluster
+  içindeki bir pod backend'e doğrudan ya da arayüz Service'i üzerinden uydurma
+  `X-Forwarded-For` ile kaynak seçebiliyor (backend'e doğrudan geleni
+  `networkPolicy.enabled` kapatır; S79
+  [#119](https://github.com/yusufceng/Kubeat/issues/119) `X-Forwarded-For`'a
+  yalnız arayüzden güvenmek); parola değiştirme ve durum sayfası kilidi başlığı
+  alıyor ama sayaçları henüz kaynağa göre değil (S76, sprint 9). Paylaşılan
+  kurumsal NAT ayrımı backlog'da ([backlog](backlog.md) "Giriş throttle için
+  güvenilir-vekil IP allowlist").
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
   bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
   sınırını tanımaz; bu yüzden
