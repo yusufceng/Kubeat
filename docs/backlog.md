@@ -1730,6 +1730,16 @@ kapasitesine sığmaz. S72 bu turda NAT durumunu ve `UPTIME_LOGIN_ACCOUNT_MAX_FA
 tavanını ADR-0004/README'de açıklar ve yön olarak allowlist'i bırakır; iş buradan
 izlenir. Tetikleyici: NAT'lı popülasyonda gözlenmiş kilitlenme ya da ayrı kapasite.
 
+Güncelleme (2026-11-06, sprint 7 kapanışı; [sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)):
+tetikleyici büyük ölçüde karşılandı. Müşteri A (Deniz) tam o tetikleyici popülasyon:
+60 uygulama ekibi tek kurumsal NAT/ileri vekil arkasından giriyor; `hops` doğru
+ayarlansa bile herkes tek kaynak adres görünüyor ve bir ekibin hatalı denemeleri
+diğerlerini (ve admin hesabını) yavaşlatabiliyor. S72'nin önerdiği tek çare
+`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` tavanını yükseltmek, bu da kilitleme korumasını
+gevşetiyor. A (önemli): "Kurumsal NAT'lı popülasyon tetikleyici sayılıp güvenilir-vekil
+IP allowlist (ya da kaynak-IP'ye dayanmayan kimlik sinyali) bir sonraki sprinte
+planlansın." Güçlü sprint-8 adayı; kod + ADR-0004 değişimi, L.
+
 ## Kapsam daralınca var olan monitor/kanal hedeflerini kapsama karşı yeniden denetlemek (S73)
 
 2026-11-05'te sprint 8 kuyruğuna alındı (sprint 7 planı; [sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -1747,3 +1757,60 @@ seferlik denetleniyor" kökünden olduğundan S77'nin defense-in-depth tamamlay�
 L ve ADR-0003:57-58 bilinçli kararını açtığı için PO/ADR kararı gerektirir.
 Tetikleyici: S77 merge sonrası ve gerçek çok kiracılı prova tanımlanınca sprint 8'in
 kesin adayı.
+
+## Yeni giriş/dizin/throttle metrikleri için chart PrometheusRule ve throttle sessiz-etkisizlik metriği (S63/S72 takibi)
+
+2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
+İki ertelenen parça/bulgu tek kökten (gözlem eklendi ama operatör alarma bağlayamıyor):
+(a) S63 ([#108](https://github.com/yusufceng/Kubeat/issues/108)) `kubeat_signin_failures_total{reason}`
+ve `kubeat_signin_throttled_total{kind}` metriklerini ekledi ama isteğe bağlı
+`KubeatDirectoryUnreachable` (ve hesap-kilidi) PrometheusRule'u promtool lokalde
+olmadığından eklenmedi; chart var olan 13 kuralı getiriyor, bu yeni seriler için
+kural yok. (b) S72 ([#106](https://github.com/yusufceng/Kubeat/issues/106)) XFF
+yanlış ayarını yalnız dakika-sınırlı log WARN'ıyla (`throttle.go` `proxyWarn`)
+bildiriyor; `metrics.go`'da buna karşılık bir sayaç yok, yayımlanan DoS düzeltmesinin
+sessizce etkisiz kaldığı metrikle görülemiyor. Müşteri B (Ece, GKE + Grafana Cloud,
+log boru hattı yok): "Sessiz etkisizliği bir metrikle (ör. `kubeat_signin_throttle_degraded_total`)
+görüp Grafana Cloud'dan Slack'e alarm kurmak istiyorum (önemli); yeni metrikler için
+hazır alarmla 15 dakikada kurmak istiyorum (hoş olur)." İş: (a) opsiyonel
+`KubeatDirectoryUnreachable`/hesap-kilidi PrometheusRule chart values ile; (b) throttle
+sessiz-etkisizlik sayacı + opsiyonel alarm; ikisi de `deploy/helm/test-chart.sh`'ta
+promtool ile doğrulanır. S72/S63 auth + `metrics.go` + chart yüzeyinin doğrudan
+takibi. Tetikleyici: promtool'a katlanacak bir docs+chart turu ya da throttle/dizin
+alarmı isteyen ilk kullanıcı (B tetikleyici popülasyon).
+
+## Kapsam-dışı hedef reddi denetimini keşif-import/restore, bakım ve workload yollarına genişletmek + flood cap (S68 takibi)
+
+2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
+S68 ([#109](https://github.com/yusufceng/Kubeat/issues/109)) kapsam reddini denetim
+satırına (`deny`/`target-scope`) ve `kubeat_target_scope_denied_total{reason}` sayacına
+yazdı ama yalnız monitor create/clone/update ve kanal create/update red dallarını
+kapsıyor. Müşteri A (Deniz, banka SOC, 90 gün denetim, önemli): "Cross-tenant hedef
+kurma girişiminin HER yolunun denetimde iz bırakmasını istiyorum." Bugün
+`discovery.go:192,306` (keşiften içe-aktarma/geri yükleme) ve `maintenance.go:182,215`
+(bakım penceresi) `scopeError` redleri ile `workloadInScope` reddi `auditScopeDenied`'dan
+geçmiyor; bu yollardan kapsam dışına çıkma denemesi 403 dönse de denetime/sayaca
+yazılmıyor (SOC kör noktası). Ek olarak S68 red kaydında `login_failed`'deki gibi bir
+flood cap yok. İş: aynı `deny`/`target-scope` kaydı ve sayacı bu yollarda da üretilir;
+en azından kapsanmayan yollar SECURITY/denetim belgesinde "denetlenmeyen red yolları"
+olarak açıkça sayılır; bir yüzeyde flood gözlemlenirse cap eklenir. S68 ile aynı
+`targetscope.go`/`monitors.go` yüzeyi. Tetikleyici: S68 merge sonrası (karşılandı) ve
+bir docs/targetscope turu; sprint 8 adayı, S77 fail-safe ayrımıyla birlikte
+değerlendirilir.
+
+## Kapsam çözüm-hatası reddini gerçek cross-tenant reddinden ayırmak (reason/WARN, S77 takibi)
+
+2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
+S77 ([#107](https://github.com/yusufceng/Kubeat/issues/107)) fail-open'ı fail-safe'e
+çevirdi ama `targetscope.go:40` tek `scopeRefused` sabiti hem çözüm-hatası reddini hem
+cluster içine çözülen gerçek cross-tenant reddini döndürüyor; çağrı noktaları
+(`monitors.go:741/811/997`) ikisini de `metrics.ScopeDeniedTarget` (reason=target)
+olarak sayıyor. Müşteri A (Deniz, hava boşluklu OpenShift, önemli): "deny/target-scope
+sayacındaki bir sıçramanın bir SSRF saldırısı mı yoksa benim egress/CoreDNS arızam mı
+olduğunu anlamak istiyorum." Bugün CoreDNS kesintisi/egress-reddinde meşru dış-hedef
+create'leri reddedilince denetim ve sayaç tıpkı bir saldırı gibi görünüyor, operatöre
+"yanlış-yapılandırma" sinyali yok. İş: çözüm-hatası reddi için ayrı bir `reason`/etiket
+(ör. `reason=resolve_error`) ya da bir WARN üretilsin ki S72'deki sessiz/yanıltıcı
+durumun benzeri olmasın; egress/DNS arızası bir saldırı dalgasından ayrılabilsin. S77/S68
+ile aynı `targetscope.go`/`metrics.go` yüzeyi. Tetikleyici: S77 merge sonrası (karşılandı)
+ve bir targetscope/gözlem turu; sprint 8 adayı, S68 kapsam genişletmesiyle birlikte.
