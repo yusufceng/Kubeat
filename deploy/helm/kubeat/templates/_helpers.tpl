@@ -116,6 +116,16 @@ expects it and the ServiceMonitor sends it.
 {{- end }}
 
 {{/*
+The Secret holding the token by which the backend tells the UI from other
+peers: the UI sends it with every request (FRONTEND_TOKEN) and the backend
+reads X-Forwarded-For only from a request that carries it
+(UPTIME_FRONTEND_TOKEN). Read with dig: it came after 0.49.
+*/}}
+{{- define "kubeat.frontendTokenSecret" -}}
+{{ dig "existingSecret" "" (.Values.frontendToken | default dict) | default (printf "%s-frontend-token" .Release.Name) }}
+{{- end }}
+
+{{/*
 The Ingress host as a URL: HTTPS only when the Ingress serves TLS itself.
 When TLS ends in front of the ingress controller, at a load balancer, the
 address users really reach is given in publicURL.
