@@ -84,6 +84,8 @@ to the X-Forwarded-For entries your proxies in front of the UI write
   an L7 Google Cloud load balancer in front of ingress-nginx with
   use-forwarded-headers and compute-full-forwarded-for: 3
 {{- end }}
+If unsure, take the lower value and check the source it keys on: one too
+high lets a client lengthen the header and pick its own source, unwarned.
 Upgrade with it, e.g.
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 {{- end }}
