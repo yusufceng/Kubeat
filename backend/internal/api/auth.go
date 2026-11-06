@@ -713,7 +713,7 @@ func signInFailureReason(why string) string {
 //
 // The log line names source, the address the throttle keyed the attempt
 // on (see clientIP), so that the operator can check UPTIME_TRUST_PROXY_HOPS
-// against a sign-in of their own also when it is right, and no warning
+// against a sign-in of their own also while it is right and no warning
 // shows the address: the client's address there means the hops are right,
 // a proxy's or the UI pod's means they are not. It is the operator's log
 // alone: the audit row and the answer do not carry it, so nothing in them
