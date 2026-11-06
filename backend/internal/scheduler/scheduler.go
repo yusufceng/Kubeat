@@ -258,16 +258,23 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time, startup bool, sched
 		return dueAt[due[i].ID].Before(dueAt[due[j].ID])
 	})
 
-	// Hand the due monitors to the workers, waiting for a free one for as
-	// long as this tick lasts. Giving up the moment the queue is full would
-	// cap throughput at one queue-full per tick however fast the checks are.
-	// The deadline bounds only that wait: while the queue has room a check
-	// goes in, however long the tick has already run.
+	// Hand the due monitors to the workers, waiting for a free one for at
+	// most one tick's length, counted from here, after ListMonitors, not
+	// from the start of the tick. Giving up the moment the queue is full
+	// would cap throughput at one queue-full per tick however fast the
+	// checks are. The deadline bounds only that wait: while the queue has
+	// room a check goes in, however late it is.
 	deadline := time.NewTimer(s.opts.Tick)
 	defer deadline.Stop()
 
 dispatch:
 	for i, m := range due {
+		// Once the context is cancelled nothing more is queued, room or
+		// not; the check has taken no token and is not marked running yet,
+		// so there is nothing to undo.
+		if ctx.Err() != nil {
+			return
+		}
 		sc := schedules[m.ID]
 		// A host the check goes to, or an address it reaches, at its
 		// ceiling of checks a minute makes the check wait for a later

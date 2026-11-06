@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -543,6 +544,46 @@ func TestTickQueuesEveryDueCheckWhileTheQueueHasRoom(t *testing.T) {
 	gathered, _ := opts.Metrics.Gather()
 	if skipped := gathered["kubeat_scheduler_dispatch_skipped_total"]; skipped != 0 {
 		t.Errorf("dispatch_skipped = %v with room in the queue, want 0", skipped)
+	}
+}
+
+// Once the context is cancelled a tick queues nothing, though the queue has
+// room: the due checks take no host's tokens, are not marked running, are
+// not counted as skipped and stay due.
+func TestTickQueuesNothingOnceTheContextIsCancelled(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0)
+	ms, schedules := overdue(50, t0)
+	for i := range ms {
+		ms[i].Target = fmt.Sprintf("https://example.com/%d", ms[i].ID)
+	}
+	st := &fakeStore{}
+	st.setMonitors(ms...)
+	opts := testOptions()
+	opts.TargetMaxRate = 60 // tokens for every one of them
+	opts.Metrics = metrics.New("test")
+	s := New(st, nil, opts)
+	jobs := make(chan store.Monitor, len(ms))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s.tick(ctx, t0, false, schedules, jobs)
+	if got := drain(jobs); len(got) != 0 {
+		t.Errorf("queued %v after the context was cancelled", got)
+	}
+	gathered, _ := opts.Metrics.Gather()
+	if skipped := gathered["kubeat_scheduler_dispatch_skipped_total"]; skipped != 0 {
+		t.Errorf("dispatch_skipped = %v after the context was cancelled, want 0", skipped)
+	}
+	if len(s.charged) != 0 || len(s.names.external.buckets) != 0 {
+		t.Errorf("tokens taken after the context was cancelled: charged=%v buckets=%v", s.charged, s.names.external.buckets)
+	}
+	for _, m := range ms {
+		if s.inFlight[m.ID] {
+			t.Errorf("monitor %d is marked running", m.ID)
+		}
+		if next := schedules[m.ID].next; next.After(t0) {
+			t.Errorf("monitor %d moved on to %s although it was not handed out", m.ID, next.Sub(t0))
+		}
 	}
 }
 
