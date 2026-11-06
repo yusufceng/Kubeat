@@ -737,7 +737,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
 	m.Enabled = true
-	if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, principal(r), m.Host()); err != nil {
+	if err := h.targetInScope(r.Context(), principal(r), m.Host(), monitorRequestURL(m)); err != nil {
 		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, m.Host())
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
@@ -807,7 +807,7 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, principal(r), m.Host()); err != nil {
+	if err := h.targetInScope(r.Context(), principal(r), m.Host(), monitorRequestURL(m)); err != nil {
 		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, m.Host())
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
@@ -993,8 +993,9 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
-		if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, p, merged.monitor(current).Host()); err != nil {
-			h.auditScopeDenied(r, metrics.ScopeDeniedTarget, merged.monitor(current).Host())
+		retargeted := merged.monitor(current)
+		if err := h.targetInScope(r.Context(), p, retargeted.Host(), monitorRequestURL(retargeted)); err != nil {
+			h.auditScopeDenied(r, metrics.ScopeDeniedTarget, retargeted.Host())
 			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 			return
 		}

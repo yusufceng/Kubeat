@@ -449,7 +449,7 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		forbidden(w)
 		return
 	}
-	if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, principal(r), channelTargetHost(typ, target)); err != nil {
+	if err := h.targetInScope(r.Context(), principal(r), channelTargetHost(typ, target), channelRequestURL(typ, target)); err != nil {
 		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, channelTargetHost(typ, target))
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
@@ -551,7 +551,7 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.Target != nil {
-			if err := targetInScope(r.Context(), h.opts.Resolver, h.opts.ResolveTimeout, p, channelTargetHost(ch.Type, ch.Target)); err != nil {
+			if err := h.targetInScope(r.Context(), p, channelTargetHost(ch.Type, ch.Target), channelRequestURL(ch.Type, ch.Target)); err != nil {
 				h.auditScopeDenied(r, metrics.ScopeDeniedTarget, channelTargetHost(ch.Type, ch.Target))
 				writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 				return

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
@@ -46,6 +45,9 @@ const scopeRefused = "the target is outside your namespaces: a monitor's check o
 // targetInScope reports why host — a monitor's target host or a channel
 // webhook's host — is outside the caller's namespaces, or nil when the caller
 // may aim a check or a delivery at it. A non-nil error is a *scopeRefusal.
+// request is the URL of the HTTP request the check or the delivery sends to
+// host (monitorRequestURL, channelRequestURL), or nil for one that connects
+// to host directly; it matters only for the proxy exception below.
 //
 // A caller who sees every namespace (an administrator, the service token, an
 // editor or a viewer of all) reaches any target, as before, so a
@@ -67,22 +69,34 @@ const scopeRefused = "the target is outside your namespaces: a monitor's check o
 //     pointing at a cluster address ("172-30-0-1.sslip.io") — because its name
 //     carries no namespace the resolver honoured, so it cannot be attributed to
 //     the caller. A name the resolver cannot answer for — a CoreDNS outage, a
-//     timeout, or an NXDOMAIN — is refused too: it cannot be proven external,
-//     and accepting it would leave the hole this closes, where a scoped caller
-//     registers an external-looking name during a resolver outage and the
-//     checker dials it into the cluster once the resolver recovers (ADR-0003 c,
-//     resolver-error fail-safe). The resolution is bounded by resolveTimeout
-//     (a few seconds) so a slow resolver does not hold a create or an edit open
-//     to the server's write timeout.
+//     SERVFAIL, a timeout, or an NXDOMAIN — is refused too: it cannot be
+//     proven external, and accepting it would leave the hole this closes,
+//     where a scoped caller registers an external-looking name during a
+//     resolver outage and the checker dials it into the cluster once the
+//     resolver recovers (ADR-0003 c, resolver-error fail-safe). The resolution
+//     is bounded by Options.ResolveTimeout (a few seconds) so a slow resolver
+//     does not hold a create or an edit open to the server's write timeout.
+//   - The one exception is an NXDOMAIN for a request handed to the proxy,
+//     behind Options.ScopeTrustProxy (UPTIME_TARGET_SCOPE_TRUST_PROXY, off by
+//     default). Where only the operator's proxy, outside the cluster, resolves
+//     external names, a local NXDOMAIN says nothing about where the request
+//     goes: the proxy resolves the name and connects, the backend never dials
+//     it. The request goes to the proxy when netguard.Proxied says so, the
+//     choice the checker's and the senders' transports make (HTTP_PROXY,
+//     HTTPS_PROXY, NO_PROXY). The name is still resolved, so one that
+//     resolves into the cluster is still refused, and so are a SERVFAIL and a
+//     timeout. A request NO_PROXY keeps away from the proxy, and a type that
+//     connects directly (TCP, DNS, gRPC, ping, the databases, a check of each
+//     pod), gets no exception.
 //
 // An external target that resolves externally (the public Internet, the
 // company network outside the cluster, an OpenShift Route's public host) is
-// left to the target policy, unchanged. resolver is the backend's own
+// left to the target policy, unchanged. Options.Resolver is the backend's own
 // (net.DefaultResolver when nil); only a scoped caller's external-looking
 // name is resolved, so single-tenant installs and administrators never pay a
 // lookup. A refusal carries the single generic scopeRefused message, so the
 // body does not become an internal-address oracle.
-func targetInScope(ctx context.Context, resolver netguard.Resolver, resolveTimeout time.Duration, p auth.Principal, host string) error {
+func (h *handler) targetInScope(ctx context.Context, p auth.Principal, host string, request *url.URL) error {
 	if p.SeesAll() || host == "" {
 		return nil
 	}
@@ -94,29 +108,73 @@ func targetInScope(ctx context.Context, resolver netguard.Resolver, resolveTimeo
 	}
 	// host is external by its spelling. Bound the resolution so a slow or
 	// stuck resolver cannot hold the request open to HTTPWriteTimeout.
-	if resolveTimeout > 0 {
+	if h.opts.ResolveTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, resolveTimeout)
+		ctx, cancel = context.WithTimeout(ctx, h.opts.ResolveTimeout)
 		defer cancel()
 	}
-	if inCluster, err := netguard.ResolvesInCluster(ctx, resolver, host); err != nil || inCluster {
+	inCluster, err := netguard.ResolvesInCluster(ctx, h.opts.Resolver, host)
+	switch {
+	case inCluster:
 		return &scopeRefusal{scopeRefused}
+	case err == nil:
+		return nil
+	case h.opts.ScopeTrustProxy && netguard.NotFound(err) && netguard.Proxied(h.opts.Proxy, request):
+		return nil
+	}
+	return &scopeRefusal{scopeRefused}
+}
+
+// monitorRequestURL is the URL of the HTTP request a monitor's check sends,
+// the one a proxy may be handed: an HTTP monitor's target (keyword and JSON
+// checks are HTTP monitors), and a WebSocket monitor's with ws and wss read
+// as http and https, as the checker sends the handshake. It is nil for a type
+// that connects to its target directly (TCP, DNS, gRPC, ping, the
+// databases), for a check of each pod, which goes to the pods' addresses,
+// and for a target that is not such a URL.
+func monitorRequestURL(m store.Monitor) *url.URL {
+	if m.EachPod || (m.Type != store.MonitorHTTP && m.Type != store.MonitorWebSocket) {
+		return nil
+	}
+	u, err := url.Parse(m.Target)
+	if err != nil {
+		return nil
+	}
+	switch {
+	case m.Type == store.MonitorWebSocket && u.Scheme == "ws":
+		u.Scheme = "http"
+	case m.Type == store.MonitorWebSocket && u.Scheme == "wss":
+		u.Scheme = "https"
+	case m.Type == store.MonitorWebSocket, u.Scheme != "http" && u.Scheme != "https":
+		return nil
+	}
+	return u
+}
+
+// channelRequestURL is the URL a channel's delivery is posted to, when a
+// user chooses it: a webhook-type channel's (webhook, Slack, Teams, Discord,
+// Mattermost, Google Chat, Gotify, ntfy), sent over the senders' transport
+// and so through the proxy where HTTP_PROXY, HTTPS_PROXY and NO_PROXY say.
+// It is nil for the types whose target is not such a URL — a Telegram chat,
+// a PagerDuty key, e-mail addresses — since those reach the operator's own
+// endpoints, which the scope does not govern.
+func channelRequestURL(typ store.ChannelType, target string) *url.URL {
+	switch typ {
+	case store.ChannelWebhook, store.ChannelSlack, store.ChannelTeams, store.ChannelDiscord,
+		store.ChannelMattermost, store.ChannelGoogleChat, store.ChannelGotify, store.ChannelNtfy:
+		if u, err := url.Parse(target); err == nil {
+			return u
+		}
 	}
 	return nil
 }
 
 // channelTargetHost is the host a channel's delivery connects to, when a user
 // chooses it and it can be a cluster-internal address: the host of a webhook
-// or an ntfy URL. It is "" for the types whose target is not such a URL — a
-// Telegram chat, a PagerDuty key, e-mail addresses — since those reach the
-// operator's own endpoints, which the scope does not govern.
+// or an ntfy URL (channelRequestURL), or "" for the other types.
 func channelTargetHost(typ store.ChannelType, target string) string {
-	switch typ {
-	case store.ChannelWebhook, store.ChannelSlack, store.ChannelTeams, store.ChannelDiscord,
-		store.ChannelMattermost, store.ChannelGoogleChat, store.ChannelGotify, store.ChannelNtfy:
-		if u, err := url.Parse(target); err == nil {
-			return u.Hostname()
-		}
+	if u := channelRequestURL(typ, target); u != nil {
+		return u.Hostname()
 	}
 	return ""
 }

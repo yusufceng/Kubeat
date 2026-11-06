@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"runtime"
 	"time"
 
@@ -277,7 +278,17 @@ type Options struct {
 	// (UPTIME_TARGET_RESOLVE_TIMEOUT). Zero leaves the lookup to the request
 	// context's own deadline.
 	ResolveTimeout time.Duration
-	Logger         *slog.Logger
+	// ScopeTrustProxy lets the scope check accept an external-looking name
+	// that does not exist for the backend's resolver (NXDOMAIN) when the
+	// check or the delivery is an HTTP request handed to the proxy, which
+	// resolves it outside the cluster (UPTIME_TARGET_SCOPE_TRUST_PROXY; see
+	// targetInScope). Off, such a name is refused like any unresolved one.
+	ScopeTrustProxy bool
+	// Proxy decides whether a request goes to a proxy, for that exception.
+	// Nil is http.ProxyFromEnvironment, the checker's and the senders' own
+	// choice; a test supplies its own.
+	Proxy  func(*http.Request) (*url.URL, error)
+	Logger *slog.Logger
 }
 
 // Revision identifies the shape of the API. Increase it whenever a response

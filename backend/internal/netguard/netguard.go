@@ -202,6 +202,22 @@ func EnvironmentProxies() []string {
 	return out
 }
 
+// Proxied reports whether a request for u is handed to a proxy by proxy, a
+// Transport's Proxy function. Nil is http.ProxyFromEnvironment: the choice
+// the checker's transports and the senders' make (HTTP_PROXY, HTTPS_PROXY
+// and NO_PROXY), so a caller deciding by it decides as they will. A nil u,
+// and a proxy function that fails, mean the request is not proxied.
+func Proxied(proxy func(*http.Request) (*url.URL, error), u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
+	to, err := proxy(&http.Request{URL: u})
+	return err == nil && to != nil
+}
+
 // blockedError names the refused address and the denied range it is in.
 type blockedError struct {
 	addr   netip.Addr // as connected to
@@ -308,7 +324,9 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 // that do not go to the host itself, where Control never sees its address:
 // a request handed to a proxy, which then connects on its own. A name that
 // does not resolve here is left to the proxy, which may know names this
-// network does not.
+// network does not. That is the target policy; the per-user scope check
+// refuses such a name for a user limited to some namespaces unless
+// UPTIME_TARGET_SCOPE_TRUST_PROXY is on (api.targetInScope).
 //
 // A host made of numbers is not a name, though: a proxy that reads it as
 // inet_aton does takes 2852039166, 0xa9.0xfe.0xa9.0xfe and 169.254.43518

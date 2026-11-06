@@ -9,13 +9,24 @@ import (
 	"time"
 )
 
+// proxyEnv are the variables net/http reads a proxy from. A proxy in the
+// environment the tests run in would add its warning to every Load (S81),
+// so they start without one; a test that needs one sets it.
+var proxyEnv = []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"}
+
+func TestMain(m *testing.M) {
+	for _, key := range proxyEnv {
+		os.Unsetenv(key)
+	}
+	os.Exit(m.Run())
+}
+
 func TestLoadDefaults(t *testing.T) {
 	for _, k := range os.Environ() {
 		if name, _, _ := strings.Cut(k, "="); strings.HasPrefix(name, "UPTIME_") {
 			t.Setenv(name, "")
 		}
 	}
-
 	got, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -50,6 +61,7 @@ func TestLoadDefaults(t *testing.T) {
 		CheckShowValue:   true,
 
 		TargetResolveTimeout: 5 * time.Second,
+		// TargetScopeTrustProxy defaults to false: a proxied NXDOMAIN is refused.
 
 		MinCheckInterval: 5 * time.Second,
 		StatsWindow:      24 * time.Hour,
@@ -318,6 +330,55 @@ func TestDiscoveryDefaultIntervalUnderTheExternalMinimumWarns(t *testing.T) {
 	t.Setenv("UPTIME_MIN_CHECK_INTERVAL_EXTERNAL", "15s")
 	if cfg, err := Load(); err != nil || len(cfg.Warnings) != 0 {
 		t.Errorf("default equal to the external minimum: warnings = %q, err = %v; want none", cfg.Warnings, err)
+	}
+}
+
+// UPTIME_TARGET_SCOPE_TRUST_PROXY is off by default, which keeps 0.49's
+// refusal of an external name only the proxy resolves. The start warns once
+// when a proxy is set and the setting is off, naming the setting and the
+// condition for turning it on (a proxy outside the cluster), and when the
+// setting is on with no proxy, where it does nothing (S81).
+func TestTargetScopeTrustProxy(t *testing.T) {
+	load := func() Config {
+		t.Helper()
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		return cfg
+	}
+	if cfg := load(); cfg.TargetScopeTrustProxy || len(cfg.Warnings) != 0 {
+		t.Errorf("default: trust proxy = %v, warnings = %q; want off and none", cfg.TargetScopeTrustProxy, cfg.Warnings)
+	}
+
+	for _, key := range proxyEnv {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, "http://proxy.corp.example:3128")
+			cfg := load()
+			if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "UPTIME_TARGET_SCOPE_TRUST_PROXY is off") ||
+				!strings.Contains(cfg.Warnings[0], "outside the cluster") || !strings.Contains(cfg.Warnings[0], "UPTIME_TARGET_SCOPE_TRUST_PROXY=true") {
+				t.Errorf("%s set, setting off: warnings = %q, want one naming the setting and the condition", key, cfg.Warnings)
+			}
+			for _, off := range []string{"false", "0"} {
+				t.Setenv("UPTIME_TARGET_SCOPE_TRUST_PROXY", off)
+				if cfg := load(); cfg.TargetScopeTrustProxy || len(cfg.Warnings) != 1 {
+					t.Errorf("%s set, setting %q: trust proxy = %v, warnings = %q; want off and the warning", key, off, cfg.TargetScopeTrustProxy, cfg.Warnings)
+				}
+			}
+			t.Setenv("UPTIME_TARGET_SCOPE_TRUST_PROXY", "true")
+			if cfg := load(); !cfg.TargetScopeTrustProxy || len(cfg.Warnings) != 0 {
+				t.Errorf("%s set, setting on: trust proxy = %v, warnings = %q; want on and none", key, cfg.TargetScopeTrustProxy, cfg.Warnings)
+			}
+		})
+	}
+
+	t.Setenv("UPTIME_TARGET_SCOPE_TRUST_PROXY", "true")
+	if cfg := load(); !cfg.TargetScopeTrustProxy || len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "changes nothing") {
+		t.Errorf("setting on, no proxy: trust proxy = %v, warnings = %q; want on and one saying it does nothing", cfg.TargetScopeTrustProxy, cfg.Warnings)
+	}
+	t.Setenv("UPTIME_TARGET_SCOPE_TRUST_PROXY", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Error("UPTIME_TARGET_SCOPE_TRUST_PROXY=sometimes was accepted")
 	}
 }
 
