@@ -127,13 +127,24 @@ daraltması sprint 8'de (0.50, #121).**
   (`netguard.Proxied`, `NO_PROXY` dahil); yalnız HTTP/HTTPS (anahtar kelime ve
   JSON dahil), WebSocket monitor'leri ve webhook türü kanallar vekile gider.
   Çözüm yine yapılır ve karar o yanıta dayanır:
-  - cluster içine çözülen ad (iki etiketli `api.payments`, `kubernetes.default`,
-    iç adrese çözülen genel ad), SERVFAIL, REFUSED ve zaman aşımı yine
-    reddedilir; fail-safe korunur;
+  - cluster içine çözülen ad (iki etiketli `api.payments`, `kubernetes.default`),
+    SERVFAIL, REFUSED ve zaman aşımı yine reddedilir; fail-safe korunur. İç
+    adrese çözülen genel ad yalnız backend onu çözebiliyorsa reddedilir;
+    vekilli topolojide backend genel adları çözemez, ad NXDOMAIN alır ve vekile
+    bırakılır (aşağıda "Şart");
   - `NO_PROXY`'ye uyan ad ve doğrudan bağlanan türler (TCP, DNS, gRPC, ping,
     veritabanı, `each_pod`) istisna almaz;
   - adından cluster içi olan biçimler (çıplak ClusterIP, kısa ad, `.svc`/FQDN,
-    API sunucusu adı) zaten çözüme gelmeden ad-sınıflamayla karar bulur.
+    API sunucusu adı) zaten çözüme gelmeden ad-sınıflamayla karar bulur;
+  - host sınıflanmadan önce vekilin okuduğu gibi okunur: küçük harfe çevrilir ve
+    sondaki noktaların hepsi atılır. Rakamlardan oluşan ama adres gibi
+    yazılmamış host (`172.30.1`, `0xac.0x1e.0.1`) sınırlı kullanıcı için
+    reddedilir, çünkü vekil ve glibc onu bir adres okur, Go'nun çözücüsü ise
+    yok sayar ve okuyucular bazı biçimlerde (`010`) anlaşamaz. Sonunda nokta
+    olan bir ad istisna almaz: `NO_PROXY` adı yazıldığı gibi eşler. İlk turda
+    `api.payments.svc..`, `172.30.0.1..` ve `172.30.1` gibi yazımlar Go
+    çözücüsünden sorgusuz bir NXDOMAIN alıp `NO_PROXY`'yi atladığı için
+    istisnadan geçiyordu (inceleme bulgusu); bu okuma onu kapatır.
 
   Çözümü tamamen atlamak (Müşteri A'nın önerisi) seçilmedi: var olan
   monitor'ler yeniden denetlenmediği için (S73) `NO_PROXY` ya da vekil sonradan
@@ -144,7 +155,12 @@ daraltması sprint 8'de (0.50, #121).**
   cluster DNS'ini ve kendi arama alanlarını kullanır: backend'de bugün NXDOMAIN
   alan bir ad (Service'i sonradan oluşturulan `api.payments`, vekilin kendi
   namespace'ine göre çözülen bir ad) vekilde ClusterIP'ye çözülüp oraya
-  bağlanabilir; böyle bir kurulumda ayar kapalı kalır. Vekil verilmiş ve ayar
+  bağlanabilir; böyle bir kurulumda ayar kapalı kalır. Ayar açıkken kapsamı
+  sınırlı kullanıcı, vekilin ulaştığı her adrese (node IP'leri/NodePort, router,
+  API ve LoadBalancer VIP'leri, kurumun özel aralıkları) bir adla ulaşır: iç
+  adrese işaret eden genel bir ad backend'de NXDOMAIN alır ve vekile bırakılır.
+  Vekilin ACL'i bunları kapatmalı, yoksa ayar kapalı kalmalı; ayar açıkken
+  kapsamın sınırı vekilin ulaşabildiği yerdir. Vekil verilmiş ve ayar
   kapalıyken backend açılışta bir kez `WARN` yazar. Kalan sınırlar: cluster DNS'i
   dış adlara NXDOMAIN değil SERVFAIL ya da zaman aşımıyla yanıt veriyorsa ayar
   yardım etmez ve bu red denetimde gerçek bir cross-tenant reddinden ayrılmaz

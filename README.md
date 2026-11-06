@@ -659,6 +659,13 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   (`api`) — sınırlı bir kullanıcı için reddedilir; kullanıcı Service'i
   `servis.namespace.svc` biçiminde adlandırmalı ya da bir yöneticiden
   istemelidir.
+- **Host'un yazılışı (0.50).** Kapsam host'u vekilin ve çözücünün okuduğu gibi
+  okur: büyük/küçük harf fark etmez ve sondaki noktaların hepsi atılır
+  (`api.odeme.svc..` `api.odeme.svc`'dir, `172.30.0.1..` çıplak ClusterIP'dir).
+  Rakamlardan oluşan ama adres gibi yazılmamış bir host (`172.30.1`,
+  `0xac.0x1e.0.1`, `2887647233`; vekil ve glibc üçünü de `172.30.0.1` okur)
+  sınırlı kullanıcı için reddedilir; adres `172.30.0.1` gibi yazılır. Denetim
+  satırı host'u bu tek yazılışla kaydeder.
 - **Çözüm anında (dial-time) denetim (0.48; çözüm hatasında güvenli taraf 0.49).**
   Kapsam yalnızca adın yazılışına bakmaz: kapsamı sınırlı bir kullanıcı bir hedef
   belirlediğinde (monitor/kanal oluşturma ya da hedefini değiştirme), adı cluster
@@ -725,8 +732,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       NXDOMAIN'dedir:
       - cluster içine çözülen ad: iki etiketli `api.odeme` ya da
         `kubernetes.default` (vekile gidecek olsa da `ndots` onu Service'e ya da
-        API sunucusuna çözer) ve iç adrese çözülen genel ad
-        (`172-30-0-1.sslip.io`);
+        API sunucusuna çözer);
+      - iç adrese çözülen genel ad (`172-30-0-1.sslip.io`), **yalnız backend bu
+        adı çözebiliyorsa**. Vekilli kurulumda backend genel adları çözemez;
+        ad NXDOMAIN alır ve vekile bırakılır (aşağıda "Şart");
       - SERVFAIL, REFUSED ve zaman aşımı (fail-safe korunur);
       - `NO_PROXY`'ye uyan ve burada NXDOMAIN alan ad (ör. kurumun kendi alanı
         `.sirket.local`): doğrudan bağlanılacağı için istisna almaz;
@@ -735,14 +744,24 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       - cluster içi biçimler, eskisi gibi adlarındaki namespace'e göre: çıplak
         ClusterIP (`172.30.0.0/16` gibi bir `NO_PROXY` aralığında da), kısa ad
         (`api`), başka namespace'in `.svc` ya da tam adı, API sunucusunun
-        adları.
+        adları; sondaki noktalarla ya da rakamla yazılmış hâlleri de
+        (`kubernetes.default.svc..`, `172.30.1`; yukarıda "Host'un yazılışı");
+      - sonunda nokta olan bir ad (`durum.saglayici.example.`): `NO_PROXY` adı
+        yazıldığı gibi eşler, bu yüzden böyle bir ad istisna almaz; ad noktasız
+        yazılır.
     - **Şart: vekil cluster dışında.** Ayar yalnız vekil cluster **dışında**
       çalışıyor, cluster'ın adlarını çözemiyor ve ClusterIP ya da pod
       adreslerine ulaşamıyorsa açılır. Cluster içindeki bir vekil cluster DNS'ini
       ve kendi arama alanlarını (`ndots`) kullanır: backend'de bugün NXDOMAIN
       alan bir ad (ör. Service'i sonradan oluşturulan `api.odeme` ya da vekilin
       kendi namespace'ine göre çözülen bir ad) vekilde ClusterIP'ye çözülüp
-      oraya bağlanabilir. Böyle bir kurulumda ayar kapalı kalmalıdır.
+      oraya bağlanabilir. Böyle bir kurulumda ayar kapalı kalmalıdır. Ayar
+      açıkken kapsamı sınırlı kullanıcı, vekilin ulaştığı her adrese (node
+      IP'leri/NodePort, router, API ve LoadBalancer VIP'leri, kurumun özel
+      aralıkları) bir adla ulaşır: iç adrese işaret eden genel bir ad
+      (`10-0-0-5.sslip.io` ya da kullanıcının kendi alanı) backend'de NXDOMAIN
+      alır ve vekile bırakılır. Vekilin ACL'i bunları kapatmalı, yoksa ayar
+      kapalı kalmalı.
     - **Uyarı.** `HTTP_PROXY`/`HTTPS_PROXY` verilmiş ve ayar kapalıysa backend
       açılışta bir kez `WARN` yazar: kapsamı sınırlı kullanıcının yalnız vekilin
       çözdüğü dış hedefleri reddedilir, vekil cluster dışındaysa ayar açılabilir.
@@ -754,7 +773,9 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       bu hata bugün denetim satırında ve sayaçta gerçek bir cross-tenant reddinden
       ayrılmaz (S82). Kayıt anındaki karar `NO_PROXY` ve vekile göre verilir:
       `NO_PROXY` sonradan değişirse var olan monitor'ler yeniden denetlenmez
-      (S73, backlog).
+      (S73, backlog); ayarı kapatmak ya da 0.49'a dönmek de ayar açıkken kabul
+      edilmiş monitor ve kanalları yeniden denetlemez, bunlar çalışmaya devam
+      eder (S73).
   - **Red mesajı.** Kapsam dışı hedefin reddi, nedenini ayırt etmeyen tek genel bir
     mesaj verir (hangi namespace olduğunu ya da adın iç adrese çözülüp çözülmediğini
     söylemez); aksi hâlde sınırlı bir kullanıcı bu mesajla keyfî bir adın cluster
@@ -788,7 +809,9 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   - Vekilli bir kurulumda yalnız vekilin çözebildiği, burada NXDOMAIN alan bir
     dış ad 0.49'da bu kullanıcı için reddedilir. 0.50'de vekile giden HTTP
     isteğinde `UPTIME_TARGET_SCOPE_TRUST_PROXY` ile kabul edilir (yukarıda
-    "Vekilli kurulum"); ayar kapalıyken red sürer.
+    "Vekilli kurulum"); ayar kapalıyken red sürer. Ayar açıkken kurum ağına
+    işaret eden ama backend'in çözemediği bir ad da vekile gider: o zaman
+    yukarıdaki kısıtı vekilin ACL'i sağlar.
   - Yönetici ve kapsamı `*` olan kullanıcı etkilenmez. Böyle bir hedefi yönetici
     kurar ya da keşiften içe aktarılır (içe aktarma yalnız namespace'e bakar).
     Kurum aralıkları için ayar sonraki sprintin adayı.

@@ -267,7 +267,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   NXDOMAIN'i reddetmiyor (S81 [#121](https://github.com/yusufceng/Kubeat/issues/121),
   sprint 8). Cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine reddediliyor;
   cluster DNS'i dış adlara SERVFAIL ya da zaman aşımıyla yanıt veriyorsa ayar
-  yardım etmiyor; minikube provası release manager'da, gerçek hava boşluklu
+  yardım etmiyor; ayar açıkken kapsamın sınırı vekilin ulaştığı yer (iç adrese
+  işaret eden genel ad backend'de NXDOMAIN alıp vekile gidiyor), bu yüzden node
+  IP'lerini, VIP'leri ve kurum aralıklarını vekilin ACL'i kapatmalı;
+  minikube provası release manager'da, gerçek hava boşluklu
   cluster provası kullanıcıda; (c) denetim ve sayaç çözüm hatasını gerçek cross-tenant reddinden
   ayırmıyor ve denetim satırlarının sınırı yok (S82, sprint 9 kuyruğu); (d)
   kapsam daralınca var olan monitor'ler yeniden denetlenmiyor (S73, backlog;

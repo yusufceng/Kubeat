@@ -207,9 +207,12 @@ cluster dışında çalışıyorsa açılır. O zaman namespace'le sınırlı bi
 yalnız vekilin çözdüğü bir dış ada (Slack, Teams ya da bir SaaS'ın durum
 adresi) HTTP monitor'ü ve kanal kurabilir. Vekil cluster içindeyse satırı
 silin: o vekil cluster'ın adlarını çözüp ClusterIP'lere bağlanabilir. Ayar
-kapalıyken ve vekil verilmişken backend açılışta bir `WARN` yazar; satırı
-sildiyseniz aşağıdaki "Uyarı ve hata" kontrolünde yalnız bu satır beklenir.
-0.49 bu ayarı tanımaz ve yok sayar.
+açıkken kapsamı sınırlı kullanıcı, vekilin ulaştığı her adrese (node
+IP'leri/NodePort, router, API ve LoadBalancer VIP'leri, kurumun özel
+aralıkları) bir adla ulaşır. Vekilin ACL'i bunları kapatmalı, yoksa ayar
+kapalı kalmalı. Ayar kapalıyken ve vekil verilmişken backend açılışta bir
+`WARN` yazar; satırı sildiyseniz aşağıdaki "Uyarı ve hata" kontrolünde
+yalnız bu satır beklenir. 0.49 bu ayarı tanımaz ve yok sayar.
 
 ### 3. Kurulum
 
@@ -258,7 +261,11 @@ dizin hesabınıza taşıyın, sonra ekibi ekleyin.
    bunları yönetici kurar ya da keşiften içe aktarılır. Yukarıdaki vekilli
    kurulumda yalnız vekilin çözdüğü bir dış ad 0.49'da da reddedilir; 0.50'de
    `UPTIME_TARGET_SCOPE_TRUST_PROXY: "true"` ile editör onu kurabilir (vekil
-   cluster dışındaysa; README "Vekilli kurulum"). Gruba girmeyen biri giriş
+   cluster dışındaysa; README "Vekilli kurulum"). Ayar açıkken kapsamı sınırlı
+   kullanıcı, vekilin ulaştığı her adrese (node IP'leri/NodePort, router, API
+   ve LoadBalancer VIP'leri, kurumun özel aralıkları) bir adla ulaşır; yukarıdaki
+   0.48 kısıtı o adresler için vekilin ACL'ine kalır. Vekilin ACL'i bunları
+   kapatmalı, yoksa ayar kapalı kalmalı. Gruba girmeyen biri giriş
    yapamaz (varsayılan rol boş); isteniyorsa `ldap.extraEnv` altında
    `UPTIME_LDAP_DEFAULT_ROLE: viewer` ve `UPTIME_LDAP_DEFAULT_NAMESPACES:
    "*"` ile dizindeki herkese izleyici rolü verilir. AD'de gruplar iç

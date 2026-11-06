@@ -305,7 +305,8 @@ görünür kılar. Şema değişmez (26); hiçbir madde yeni zorunlu ayar getirm
   kanalı da reddedilir. Her deneme bir `deny`/`target-scope` satırı ve
   `reason=target` sayımı bırakır; bu bir cross-tenant girişimi değildir. 0.49'da
   geçici yol: hedefi yönetici kurar ya da keşiften içe aktarılır. 0.50'de opt-in
-  `UPTIME_TARGET_SCOPE_TRUST_PROXY` (yalnız vekil cluster dışındaysa) bu reddi
+  `UPTIME_TARGET_SCOPE_TRUST_PROXY` (yalnız vekil cluster dışındaysa ve vekilin
+  ACL'i node IP'lerini, VIP'leri ve kurum aralıklarını kapatıyorsa) bu reddi
   kaldırır ([#121](https://github.com/yusufceng/Kubeat/issues/121); README "Hedef
   politikası" → "Vekilli kurulum").
 - Gözlem (davranış değil): kapsam/yetki dışı hedef reddi artık bir denetim satırı
