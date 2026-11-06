@@ -363,64 +363,39 @@ yedekle birlikte saklanmalıdır.
 Sandbox her sürümle yükseltilir; gerçek bir pilotta yükseltme yalnızca
 ekibi engelleyen bir hata için yapılır (yukarıda "Dokunmayın"). İkisinde de
 yükseltmeden önce en yeni yedek kopyası ve şifreleme anahtarı cluster
-dışına alınır ve kopyanın sağlama toplamı pod'daki dosyanınkiyle
-karşılaştırılır. Blok "yedek doğrulandı" demiyorsa yükseltme yapılmaz.
-Sürüme özgü adımlar, geri dönüş ve alarm kurallarının değişip değişmediği
-[yukseltme.md](yukseltme.md)'dedir; o dosya her yükseltmeden önce bu bloğu
-ister. Backend imajında `tar` olmadığından `kubectl cp` kullanılamaz;
-`oc exec` ile düz `cat` ise büyük ikili dosyada akışı **sessizce ve değişken
-noktada kesebilir** (uzak ya da hız sınırlı API uçlarında, ör. Developer
-Sandbox, birkaç MB'tan sonra). Bu yüzden kopya 512 KB'lik parçalar hâlinde
-alınır ve her parça pod'daki sha256 ile karşılaştırılır; eşleşmeyen parça
-yeniden çekilir. En sonda tüm dosyanın sha256'sı pod'unkiyle birebir
-eşleşmeli ve başlık `SQLite format 3` olmalı; blok "yedek doğrulandı"
-demiyorsa yükseltme yapılmaz:
+dışına alınır ve kopya pod'daki dosyaya karşı doğrulanır. Sürüme özgü
+adımlar, geri dönüş ve alarm kurallarının değişip değişmediği
+[yukseltme.md](yukseltme.md)'dedir; o dosya her yükseltmeden önce bu adımı
+ister.
+
+Blok tek yerde, müşteri runbook'unda durur:
+[yedek-geri-yukleme.md "Yedek kopyaları cluster dışına almak"](yedek-geri-yukleme.md#yedek-kopyaları-cluster-dışına-almak).
+Backend imajında `tar` olmadığından `kubectl cp` kullanılamaz; `oc exec` ile
+düz `cat` ise büyük ikili dosyada akışı sessizce ve değişken noktada kesebilir
+(Developer Sandbox'ta birkaç MB'tan sonra,
+[#117](https://github.com/yusufceng/Kubeat/pull/117)). Bu yüzden blok kopyayı
+512 KiB'lik parçalarla alır, her parçayı ve tüm dosyayı pod'daki sha256 ile,
+başlığı `SQLite format 3` ile karşılaştırır. **Blok "yedek doğrulandı"
+demiyorsa yükseltme yapılmaz.**
+
+Sandbox'ta ve OpenShift'te blok `oc` ile çalışır; bloğun ilk satırını şöyle
+yazın, gövdesi aynı kalır:
 
 ```sh
-NS=kubeat                          # sandbox'ta kendi namespace'iniz
-BS=524288                          # 512 KiB parça
-X(){ oc -n "$NS" exec deploy/kubeat-backend -- sh -c "$1"; }
-
-B=$(X 'ls -1 /backup/kubeat-*.db | tail -n 1'); F=$(basename "$B")
-SIZE=$(X "wc -c < $B" | tr -dc 0-9)
-POD=$(X "sha256sum $B" | cut -d' ' -f1)
-N=$(( (SIZE + BS - 1) / BS ))
-
-: > "$F"; i=0
-while [ "$i" -lt "$N" ]; do
-  want=$(X "dd if=$B bs=$BS skip=$i count=1 2>/dev/null | sha256sum" | cut -d' ' -f1)
-  t=0
-  while :; do
-    X "dd if=$B bs=$BS skip=$i count=1 2>/dev/null | base64" | base64 -d > part 2>/dev/null || true
-    [ "$(shasum -a 256 part | cut -d' ' -f1)" = "$want" ] && break   # Linux'ta: sha256sum
-    t=$((t+1)); [ "$t" -ge 8 ] && { echo "parça $i alınamadı"; exit 1; }
-  done
-  cat part >> "$F"; rm -f part; i=$((i+1))
-done
-
-oc -n "$NS" get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d > kubeat-secret.key
-YEREL=$(shasum -a 256 "$F" | cut -d' ' -f1)       # Linux'ta: sha256sum "$F"
-HDR=$(head -c 16 "$F" | tr -d '\0')
-if [ "$POD" = "$YEREL" ] && [ -s kubeat-secret.key ] && printf '%s' "$HDR" | grep -q 'SQLite format 3'; then
-  echo "yedek doğrulandı: $F"
-else
-  echo "YEDEK DOĞRULANMADI: yükseltmeyin"
-fi
+KUBECTL=oc NS=<namespace> RELEASE=kubeat sh -s <<'EOF'
 ```
 
-- Kopya adları zamana göre sıralanır, son satır en yeni kopyadır; yazılmakta
-  olan kopya (`.partial`) listeye girmez. `/backup` boşsa ya da yoksa
-  yedekleme kapalıdır (`backup.enabled`).
+- `NS`, sandbox'ta kendi namespace'inizdir; `RELEASE` chart'ın release
+  adıdır (`kubeat-backend` ve `kubeat-secret-key` adlarının ön eki).
 - Backend pod'u yoksa (sandbox uyutmuşsa) önce
-  `oc -n "$NS" scale deploy/kubeat-backend --replicas=1` ve
-  `oc -n "$NS" rollout status deploy/kubeat-backend`.
+  `oc -n <namespace> scale deploy/kubeat-backend --replicas=1` ve
+  `oc -n <namespace> rollout status deploy/kubeat-backend`.
 - Kopya en yeni yedektir: yaşı en çok `backup.interval` kadardır ve
   kaybedilebilecek veri budur. Kopyayı ve anahtarı ayrı, erişimi kısıtlı
   yerlerde saklayın; yükseltme sorun çıkarırsa dönüş README "Yedekleme ve
   geri yükleme"dedir.
-- Release adı `kubeat` değilse `kubeat-backend` ve `kubeat-secret-key`
-  adlarındaki ön eki değiştirin. `kubectl` ile komutlar aynıdır; minikube'da
-  yalnızca `--context minikube` ile.
+- Minikube'da `kubectl` yalnızca `--context minikube` ile:
+  `KUBECTL="kubectl --context minikube"`.
 
 ## Pilot sonunda
 

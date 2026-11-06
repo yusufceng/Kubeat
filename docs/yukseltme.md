@@ -22,10 +22,14 @@ Her sürümün bölümü dört alt başlık taşır:
 ## Yükseltmeden önce yedek
 
 Her yükseltmeden önce en yeni yedek kopyasını ve şifreleme anahtarını
-cluster dışına alın ve kopyanın sağlama toplamını pod'daki dosyanınkiyle
-karşılaştırın: [pilot.md "Yükseltmeden önce yedek"](pilot.md#yükseltmeden-önce-yedek).
-Blok `exec … cat` ve sağlama toplamıyla çalışır, backend imajında `tar`
-gerekmez; "yedek doğrulandı" demiyorsa yükseltmeyin.
+cluster dışına alın ve kopyayı pod'daki dosyaya karşı doğrulayın:
+[yedek-geri-yukleme.md "Yedek kopyaları cluster dışına almak"](yedek-geri-yukleme.md#yedek-kopyaları-cluster-dışına-almak).
+Blok kopyayı `exec` üzerinden 512 KiB'lik parçalarla alır; her parçayı ve
+tüm dosyayı pod'daki sha256 ile, başlığı `SQLite format 3` ile karşılaştırır.
+Backend imajında `tar` gerekmez; blok `kubectl` ile de `oc` ile de
+(`KUBECTL=oc`) çalışır. **"yedek doğrulandı" demiyorsa yükseltmeyin.** Düz
+`exec … cat` ile alınmış bir kopya (0.49 ve öncesinin belgesindeki yol)
+doğrulanmamıştır ve sessizce kesilmiş olabilir; ona güvenerek yükseltmeyin.
 
 - Veritabanı şemasını yükselten bir sürümden (0.38, 0.39, 0.40) dönüşün tek
   yolu bu kopyadır; 0.40'tan beri şema 26'dır ve sonraki sürümler

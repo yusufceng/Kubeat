@@ -3463,11 +3463,19 @@ ile 0.44'e yükseltin, değişikliği sonraki yükseltmede yapın. Namespace'i
 silmek ise PVC'leri de siler: kopyaların cluster dışına taşınması bunun için
 de gerekir.
 
-Yedek kopyaları cluster dışına almak, bir yardımcı pod ile adım adım geri
-yükleme (aynı kurulumda ve cluster ya da namespace kaybında), node kaybından
-ve dolu volume'dan dönüş, geri yüklemeden önce susturma ile GitOps self-heal,
-geri yükleme pod'unun fsGroup/UID'i, RPO/RTO hedefleri ve prova kaydı
-runbook'tadır: [docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md).
+Runbook ([docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md)) şunları
+adım adım anlatır:
+
+- Yedek kopyaları cluster dışına almak: 512 KiB'lik parçalarla, parça başına
+  ve tüm dosya için sha256 ile ve `SQLite format 3` başlık denetimiyle;
+  `kubectl` ve `oc` ile aynı blok. Blok "yedek doğrulandı" demiyorsa kopya
+  geçersizdir.
+- Bir yardımcı pod ile adım adım geri yükleme (aynı kurulumda ve cluster ya
+  da namespace kaybında). Bilgisayardaki kopya pod'da sha256'sı ve başlığı
+  tutmadan veritabanının yerine konmaz.
+- Node kaybından ve dolu volume'dan dönüş, geri yüklemeden önce susturma ile
+  GitOps self-heal, geri yükleme pod'unun fsGroup/UID'i, RPO/RTO hedefleri
+  ve prova kaydı.
 
 `kubeat_backup_last_success_timestamp_seconds` metriği en yeni kopyanın
 zamanını verir: son başarılı kopyanın, yeniden başlatmadan sonra da yedek
