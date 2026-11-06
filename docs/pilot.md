@@ -363,18 +363,41 @@ dışına alınır ve kopyanın sağlama toplamı pod'daki dosyanınkiyle
 karşılaştırılır. Blok "yedek doğrulandı" demiyorsa yükseltme yapılmaz.
 Sürüme özgü adımlar, geri dönüş ve alarm kurallarının değişip değişmediği
 [yukseltme.md](yukseltme.md)'dedir; o dosya her yükseltmeden önce bu bloğu
-ister. Backend imajında `tar` olmadığından `kubectl cp` yerine `exec ... cat`
-kullanılır:
+ister. Backend imajında `tar` olmadığından `kubectl cp` kullanılamaz;
+`oc exec` ile düz `cat` ise büyük ikili dosyada akışı **sessizce ve değişken
+noktada kesebilir** (uzak ya da hız sınırlı API uçlarında, ör. Developer
+Sandbox, birkaç MB'tan sonra). Bu yüzden kopya 512 KB'lik parçalar hâlinde
+alınır ve her parça pod'daki sha256 ile karşılaştırılır; eşleşmeyen parça
+yeniden çekilir. En sonda tüm dosyanın sha256'sı pod'unkiyle birebir
+eşleşmeli ve başlık `SQLite format 3` olmalı; blok "yedek doğrulandı"
+demiyorsa yükseltme yapılmaz:
 
 ```sh
 NS=kubeat                          # sandbox'ta kendi namespace'iniz
-B=$(oc -n "$NS" exec deploy/kubeat-backend -- sh -c 'ls -1 /backup/kubeat-*.db | tail -n 1')
-F=$(basename "$B")
-oc -n "$NS" exec deploy/kubeat-backend -- cat "$B" > "$F"
+BS=524288                          # 512 KiB parça
+X(){ oc -n "$NS" exec deploy/kubeat-backend -- sh -c "$1"; }
+
+B=$(X 'ls -1 /backup/kubeat-*.db | tail -n 1'); F=$(basename "$B")
+SIZE=$(X "wc -c < $B" | tr -dc 0-9)
+POD=$(X "sha256sum $B" | cut -d' ' -f1)
+N=$(( (SIZE + BS - 1) / BS ))
+
+: > "$F"; i=0
+while [ "$i" -lt "$N" ]; do
+  want=$(X "dd if=$B bs=$BS skip=$i count=1 2>/dev/null | sha256sum" | cut -d' ' -f1)
+  t=0
+  while :; do
+    X "dd if=$B bs=$BS skip=$i count=1 2>/dev/null | base64" | base64 -d > part 2>/dev/null || true
+    [ "$(shasum -a 256 part | cut -d' ' -f1)" = "$want" ] && break   # Linux'ta: sha256sum
+    t=$((t+1)); [ "$t" -ge 8 ] && { echo "parça $i alınamadı"; exit 1; }
+  done
+  cat part >> "$F"; rm -f part; i=$((i+1))
+done
+
 oc -n "$NS" get secret kubeat-secret-key -o jsonpath='{.data.key}' | base64 -d > kubeat-secret.key
-POD=$(oc -n "$NS" exec deploy/kubeat-backend -- sha256sum "$B" | cut -d' ' -f1)
-YEREL=$(shasum -a 256 "$F" | cut -d' ' -f1)   # Linux'ta: sha256sum "$F"
-if [ -n "$POD" ] && [ "$POD" = "$YEREL" ] && [ -s kubeat-secret.key ]; then
+YEREL=$(shasum -a 256 "$F" | cut -d' ' -f1)       # Linux'ta: sha256sum "$F"
+HDR=$(head -c 16 "$F" | tr -d '\0')
+if [ "$POD" = "$YEREL" ] && [ -s kubeat-secret.key ] && printf '%s' "$HDR" | grep -q 'SQLite format 3'; then
   echo "yedek doğrulandı: $F"
 else
   echo "YEDEK DOĞRULANMADI: yükseltmeyin"
