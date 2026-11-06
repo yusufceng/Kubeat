@@ -270,6 +270,17 @@ isteğinde `r.RemoteAddr`; `user_agent` ve hash zinciri yok; "90 gün
 değiştirilemez saklama" SIEM'in işidir. Stdout satırı tek başına S boyutlu
 bir parça olarak sprint 2 ya da 3 dolgusu olabilir.
 
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+stdout satırı S83 olarak hikâyeleştirildi. Müşteri A: `deny`/`target-scope`
+satırlarının merkezi loga ya da SIEM'e giden bir makine yolu yok, README ise
+"SOC'a bağlanabilir" diyor. Alınmadı: tetikleyici (ilk dış kurumsal görüşme)
+gerçekleşmedi, Müşteri A simüle bir müşteri; satır sınırı (`auditCap`) S82'ye
+bağlı ve madde ADR-0002'deki lisans kapısına bir not gerektiriyor. SOC'un bugün
+de bağlanabileceği sinyal `kubeat_target_scope_denied_total` sayacı. Tetikleyici:
+S82'nin merge edilmesi ve gerçek bir SIEM isteği. README "Kapsam ihlali
+denetimi"ndeki "SOC'a bağlanabilir" cümlesi sprint 9 belge turunda "kayıtlar API
+ve arayüzden okunur, SIEM'e kendiliğinden akmaz" diye daraltılır.
+
 ## Oturuma boşta kalma süresi `UPTIME_SESSION_IDLE`
 
 2026-10-27'de ertelendi (S5). Kurumsal güvenlik kontrol listesi maddesi
@@ -331,6 +342,18 @@ yedek" bölümü pilot.md'nin bloğuna bağlanıyor (`exec … cat` ve sağlama
 toplamı); tek komutluk blok ve imaja `tar` S7 ile sprint 5 kuyruğunda
 (sprint 4 kapanışı önerisinde 7. sıra, [sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)).
 
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+#117'nin gözlemi kayda geçer. `oc exec` ile düz `cat`, Developer Sandbox'ta
+~5,7 MB'lık yedeği 0,6–2,4 MB'a sessizce kesti; pilot.md "Yükseltmeden önce
+yedek" bloğu bu yüzden 512 KiB'lik parçalara, parça başına ve tüm dosya için
+sha256 doğrulamasına geçti. Bloğun müşteri runbook'una
+([yedek-geri-yukleme.md](yedek-geri-yukleme.md)) taşınması ve doğrulamasız
+geri yüklemenin kapatılması sprint 8'de S84
+([#120](https://github.com/yusufceng/Kubeat/issues/120)). Parçalı blok `tar`
+olmadan çalıştığı için imaja `tar` ekleme gerekçesi zayıfladı; `tar` kısmı
+backlog'da kalır. Tetikleyici: parçalı bloğun bir platformda (ör. GKE)
+yetersiz kalması.
+
 ## Yedek kopyalarını S3 uyumlu depoya yüklemek
 
 2026-10-27'de ertelendi (S8). `UPTIME_BACKUP_S3_*` ile her başarılı kopyanın
@@ -377,6 +400,17 @@ kanal ve durum sayfası yönetme isteği yeni bir kullanıcıdan gelmiyor (S14'�
 kaynağı da Müşteri B), tetikleyici yanmadı. API'ye cluster dışından erişim
 yolunun belgesi ve arayüzün `/api/v1` isteğine JSON 404 dönmesi S34'te
 (sonraki sprint havuzu).
+
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+S34'ün kod kısmı (arayüzün `/api/v1` ve `/metrics` isteğine giriş sayfası
+yönlendirmesi yerine JSON 404 dönmesi; belge kısmı 0.46'da #59/#60 ile yapıldı)
+"sonraki sprint" kuyruğundan backlog'a alındı: beş sprinttir kuyrukta kaybediyordu
+ve orada tutmak yanıltıcıydı. Yeni kanıt: release manager gözlemi (sandbox
+Route'u üzerinden API giriş isteği 307 döndü) ve Müşteri B'nin CI senaryosu
+(`curl -f` 307'yi başarı sayıyor). Etkisi yanlış adrese yazılmış bir betikle
+sınırlı; doğru yol 0.46'dan beri README "API" ve NOTES'ta yazılı. Tetikleyici:
+`frontend/proxy.ts`'e dokunan ilk madde (S34 ona katılır) ya da gerçek bir
+kullanıcı raporu.
 
 ## Ücretsiz katmanda tek OIDC sağlayıcısıyla giriş; alternatifi TOTP 2FA
 
@@ -1630,6 +1664,18 @@ genişletmek. Tetikleyici: bu yüzeylerden birinde giriş-kilidi benzeri bir DoS
 gözlemi ya da bir güvenlik incelemesi; herhangi bir `throttle.go`/`auth.go`
 dokunuşuna katlanabilir.
 
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+S76 olarak **yeniden açıldı** ve sprint 9 kuyruğuna girdi (sprint 7'de geri
+çevrilmişti). Tetikleyicisi ("herhangi bir `throttle.go`/`auth.go` dokunuşu")
+S78 ([#118](https://github.com/yusufceng/Kubeat/issues/118)) ile karşılanıyor.
+Sprint 8 keşfi durum sayfası kilidinin ve parola değiştirmenin de arayüzden
+`X-Forwarded-For`'suz geldiğini gösterdi; S78 başlığı bu iki çağrıda da
+taşıyınca `sp:`/`pw:` anahtarlarına kaynak eklemek ilk kez işe yarar (S78
+olmadan etkisiz). Sprint 8'de alınmadı: dörtlü sınır dolu ve aynı auth
+yüzeyinde iki L var (S78, S79); ikisi merge edildikten sonra sprint 9'da. Açık
+soru varsayılanı değişti: girişteki gibi gevşek bir slug/hesap tavanı olur
+(`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` yeniden kullanılır, yeni ayar yok).
+
 ## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
 
 2026-11-04'te ertelendi (sprint 5 planı; [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)).
@@ -1652,6 +1698,16 @@ ve 30 cluster / 60 ekip yaygınlaştırma kararı güvenlik incelemesi bağlamı
 sağladı. Yine de liste S67 (iki etiketli ad + dial-time kapsam, #95) kapsam
 sınırı metnini değiştireceği için **S67'den sonra** yazılmalı; kapasite gereği
 bir sprint kaydı. **Güçlü sprint-7 adayı**, S67 merge sonrası alınır.
+
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+sprint kuyruğundan backlog'a alındı; bağımlılık S78
+([#118](https://github.com/yusufceng/Kubeat/issues/118)) ve S80 oldu. Üç rol de
+listenin onlardan sonra yazılmasını istiyor: bugün yazılırsa arayüz yolunda
+geçersiz olan hop satırlarını ve README "Hedef politikası"ndaki kurum ağı
+cümlesini kalıcılaştırır. Liste, S78 ile S80'in merge edildiği sprintin en son
+merge'ü olarak yazılır; hops>0 ise ağ politikası satırını (ve S79 teslim
+edildiyse güvenilir eş ayarını, [#119](https://github.com/yusufceng/Kubeat/issues/119))
+içerir. Tetikleyici: S78 ile S80'in merge edilmesi.
 
 ## Kapsam/yetki dışı hedef reddini denetim kaydına ve metriğe yazmak (S68)
 
@@ -1740,6 +1796,15 @@ gevşetiyor. A (önemli): "Kurumsal NAT'lı popülasyon tetikleyici sayılıp g�
 IP allowlist (ya da kaynak-IP'ye dayanmayan kimlik sinyali) bir sonraki sprinte
 planlansın." Güçlü sprint-8 adayı; kod + ADR-0004 değişimi, L.
 
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+ilk dilimi sprint 8'de S79 ([#119](https://github.com/yusufceng/Kubeat/issues/119))
+alıyor: hops>0 iken backend `X-Forwarded-For`'a yalnız arayüzden (chart'ın
+ürettiği paylaşılan sır başlığıyla tanınan eşten) gelen istekte güvenir; bu,
+ADR-0004'te karar olur. Kaynak-IP'ye dayanmayan NAT ayrımı backlog'da kalır.
+Tetikleyici: S79 merge edildikten sonra NAT'lı bir popülasyonda gözlenen
+kilitlenme. Cluster dışındaki güvenilir vekiller için CIDR listesi ayrı maddede
+("XFF güveni için cluster dışındaki güvenilir vekillerin CIDR listesi").
+
 ## Kapsam daralınca var olan monitor/kanal hedeflerini kapsama karşı yeniden denetlemek (S73)
 
 2026-11-05'te sprint 8 kuyruğuna alındı (sprint 7 planı; [sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -1757,6 +1822,19 @@ seferlik denetleniyor" kökünden olduğundan S77'nin defense-in-depth tamamlay�
 L ve ADR-0003:57-58 bilinçli kararını açtığı için PO/ADR kararı gerektirir.
 Tetikleyici: S77 merge sonrası ve gerçek çok kiracılı prova tanımlanınca sprint 8'in
 kesin adayı.
+
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+artık sprint 8'in kesin adayı değil, backlog'da (PO önceki kararı açıkça
+değiştirdi). Müşteri A ve SRE, S80 (kurum aralıkları), S81 (vekilli NXDOMAIN,
+[#121](https://github.com/yusufceng/Kubeat/issues/121)) ve S82
+(`reason=resolve_error`, satır sınırı) düzelmeden yapılacak bir yeniden denetimin
+bugünkü RFC1918 ve NXDOMAIN mantığıyla kurum ve vekilli hedeflerin hepsini kapsam
+dışı işaretleyip denetim fırtınası çıkaracağını gösterdi. Kabul ölçütlerine üç şey
+eklendi: S80 ve S81 kurallarının aynen uygulanması, çözüm hatasının
+`resolve_error` olarak işaretlenip kapsam dışı sayılmaması ve tur başına satır
+sınırı. Hikâye L ve ADR-0003:57-58'deki kararı açıyor. Tetikleyici: S80, S81 ve
+S82'nin merge edilmesi. README'deki "var olan monitor'ler yeniden denetlenmez"
+satırı artık README.md:727-730'da.
 
 ## Yeni giriş/dizin/throttle metrikleri için chart PrometheusRule ve throttle sessiz-etkisizlik metriği (S63/S72 takibi)
 
@@ -1779,6 +1857,17 @@ promtool ile doğrulanır. S72/S63 auth + `metrics.go` + chart yüzeyinin doğru
 takibi. Tetikleyici: promtool'a katlanacak bir docs+chart turu ya da throttle/dizin
 alarmı isteyen ilk kullanıcı (B tetikleyici popülasyon).
 
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+S85 olarak hikâyeleşti ve sprint 9 kuyruğunda: üç kural (dizine ulaşılamıyor,
+hesap tavanı kilidi `kind="account"`, kaynak ayrımı gerilemiş) ve kaynak-ayrımı
+sayacı (`reason` kapalı küme, proxyWarn'ın dakika sınırından bağımsız). Sprint 8'e
+alınmadı: sayaç ancak S78'den ([#118](https://github.com/yusufceng/Kubeat/issues/118))
+sonra anlam kazanıyor, hop anlamı S78/S79 ile değişiyor ve auth zinciri bu sprint
+iki L ile dolu. Sprint 7'nin "promtool lokalde yok" engeli geçersiz (CI'da kurulu).
+Gerekirse dizin ve hesap tavanı kuralları M boyutlu ayrı bir maddeye bölünür.
+README'deki örnek `kind="account"` alarmının arayüz yolunda gerçek admin kilidini
+kaçırdığı (kilit `kind="source"`'ta oluyor) S85'in kabul ölçütünde.
+
 ## Kapsam-dışı hedef reddi denetimini keşif-import/restore, bakım ve workload yollarına genişletmek + flood cap (S68 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -1798,6 +1887,19 @@ olarak açıkça sayılır; bir yüzeyde flood gözlemlenirse cap eklenir. S68 i
 bir docs/targetscope turu; sprint 8 adayı, S77 fail-safe ayrımıyla birlikte
 değerlendirilir.
 
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+aşağıdaki "Kapsam çözüm-hatası reddini ..." maddesiyle birlikte S82 olarak
+hikâyeleşti ve sprint 9 kuyruğunda (2. aday). Red yolları tek tek sayıldı:
+`discovery.go:192` (içe aktarma) ve `:306` (geri yükleme), `maintenance.go:182` ve
+`:215`, `monitors.go:734` ve `:992` (`workloadInScope`), `:840` (push token
+yenileme), `:1136` (silme), `alerting.go:225` (test bildirimi), `notes.go:113` ve
+`:170` (olay notu). Her biri ya `deny`/`target-scope` satırı yazar ya da README
+"Kapsam ihlali denetimi"ndeki "denetlenmeyen red yolları" listesinde gerekçesiyle
+yer alır (sprint 7 retro "değişecek 3"). Satır sınırı `login_failed`'in `auditCap`'i
+ile gelir, yeni ayar yok. S80 ve S81
+([#121](https://github.com/yusufceng/Kubeat/issues/121)) önce gelir: onlar
+düzelmeden kapsamı genişletmek yanlış pozitifleri çoğaltır.
+
 ## Kapsam çözüm-hatası reddini gerçek cross-tenant reddinden ayırmak (reason/WARN, S77 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -1814,3 +1916,72 @@ create'leri reddedilince denetim ve sayaç tıpkı bir saldırı gibi görünüy
 durumun benzeri olmasın; egress/DNS arızası bir saldırı dalgasından ayrılabilsin. S77/S68
 ile aynı `targetscope.go`/`metrics.go` yüzeyi. Tetikleyici: S77 merge sonrası (karşılandı)
 ve bir targetscope/gözlem turu; sprint 8 adayı, S68 kapsam genişletmesiyle birlikte.
+
+Güncelleme (2026-11-06, sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+yukarıdaki "Kapsam-dışı hedef reddi denetimini ..." maddesiyle birlikte S82 olarak
+hikâyeleşti ve sprint 9 kuyruğunda (2. aday). Kapsam: SERVFAIL, NXDOMAIN ve zaman
+aşımı için `reason="resolve_error"`; istemci isteği iptal ettiyse denetim satırı
+yazılmaz (SRE: çözüm zaman aşımı 5 sn, arayüzün backend zaman aşımı 3 sn, iptal
+edilen istek sahte bir red satırı bırakıyor); `UPTIME_TARGET_RESOLVE_TIMEOUT`
+varsayılanı arayüzünkünden küçük olur. Sprint 8'de alınmadı: Müşteri A'ya göre
+S80 ve S81 önce gelmeli, yoksa yanlış pozitifler çoğalır; S81
+([#121](https://github.com/yusufceng/Kubeat/issues/121)) vekilli topolojideki
+NXDOMAIN gürültüsünü zaten azaltıyor. Aynı `targetscope.go`/`config.go` yüzeyi,
+S81'den sonra sıralı.
+
+## Chart'ta Route/Ingress açıkken `UPTIME_TRUST_PROXY_HOPS` varsayılanını 1 yapmak
+
+2026-11-06'da ertelendi (sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
+Release manager gözlemi: `route.enabled=true` iken chart'ın hop değeri 0 kalıyor;
+OpenShift Route ile kurulan her kurulum WARN alıyor ve throttle'ı router adresine
+anahtarlıyor, operatör elle 1 yazmalı. Sprint 8'de varsayılan bilerek 0 bırakıldı,
+çünkü 1 yapmak iki soruna yol açar: önünde WAF ya da yük dengeleyici olan bir
+Route'ta throttle o katmanın adresine anahtarlanır ve WARN düşmeden sessizce
+geriler; frontend NetworkPolicy'si kapalıyken de arayüz Service'inden uydurma XFF
+yolu açılır. S78 ([#118](https://github.com/yusufceng/Kubeat/issues/118)) ile
+hops=0 iken arayüz yolunda da WARN düşer ve NOTES, route ya da ingress açıkken
+README'deki değeri önerir. Tetikleyici: frontend NetworkPolicy'sinin (S79,
+[#119](https://github.com/yusufceng/Kubeat/issues/119)) sahada kullanılması ya da
+yanlış hop ayarının tekrarlanan raporu.
+
+## Arayüzün kendi gördüğü eşi `X-Forwarded-For`'a eklemesi
+
+2026-11-06'da ertelendi (sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
+S78 ([#118](https://github.com/yusufceng/Kubeat/issues/118)) gelen başlığı aynen
+taşır, çünkü server action soket eşini okuyamıyor; Next.js de başlık varken eşi
+eklemiyor (`frontend/node_modules/next/dist/server/base-server.js:601`, `??=`).
+Arayüz Service'ine doğrudan gelen uydurma XFF'i ağ politikası olmadan kapatmanın
+tek yolu bu, ama özel bir sunucu gerektiriyor. Bugünkü önlem S79'un
+([#119](https://github.com/yusufceng/Kubeat/issues/119)) opt-in frontend
+NetworkPolicy'si; kapalıyken sınır README "Hesaplar ve giriş" ve ADR-0004'te
+yazılı. Tetikleyici: opt-in frontend NetworkPolicy'sinin bir platformda
+uygulanamaması.
+
+## XFF güveni için cluster dışındaki güvenilir vekillerin CIDR listesi (S79'un isteğe bağlı parçası)
+
+2026-11-06'da ertelendi (sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
+S79 ([#119](https://github.com/yusufceng/Kubeat/issues/119)) arayüzü chart'ın
+ürettiği paylaşılan bir sır başlığıyla tanır (pod adresleri tek bir pod ağı
+CIDR'ından dağıtıldığı için bir CIDR listesi arayüz pod'unu saldırgan pod'dan
+ayıramaz). Cluster dışındaki güvenilir vekiller için isteğe bağlı bir CIDR listesi
+ise alınmadı: API bilerek Route/Ingress'ten açılmıyor, backend'e doğrudan bağlanan
+meşru bir dış vekil kanıtı yok ve ayar sayısı küçük kalmalı. Tetikleyici:
+backend'in önüne kendi vekilini koyan bir kurulum.
+
+## Keşif eşitlemesinde bellek sınırı ve OOMKill döngüsü (S42)
+
+2026-11-06'da sprint kuyruğundan backlog'a alındı (sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
+Sprint 5'ten beri "sonraki sprint" kuyruğundaydı; boyut L. SRE ve Müşteri A
+(yüksek): annotation eşitlemesi her turda Service, Pod, EndpointSlice, Ingress,
+Route ve workload listelerini sayfalamadan belleğe alıyor; varsayılan 256Mi limit
+6–7 bin pod civarında aşılıyor ve OOMKill'den sonraki açılış yine eşitlemeyle
+başladığı için döngü kuruluyor, kontroller duruyor. Kanıt yalnız yerel sentetik
+ölçüm; gerçek büyük bir kurulum yok. Geçici yol [yol-haritasi.md](yol-haritasi.md)
+"Bilinen sınırlar"da yazılı: `backend.resources.limits.memory` artırılır ya da
+`discovery.namespaces` ile kapsam daraltılır. Aynı `k8s.go` `Candidates`
+fonksiyonuna dokunan S43 (okunamayan namespace'i atlamak + eşitleme metriği, M)
+sprint 9 kuyruğunda ve önce gelir: sprint 3'ün "S42 → S43" sırası tersine döndü,
+çünkü S43'ün metriği S42 için ilk sinyali verir. İlk dilim önerisi: bellek aşımını
+görünür kılan metrik ve rehber; sayfalama/akış ikinci dilim. Tetikleyici: S43
+merge edildikten sonra 3 binden fazla pod'lu gerçek bir kurulum ya da bir OOMKill
+gözlemi. Yol haritasının "Bilinen sınırlar" satırı bu maddeye bağlanır.

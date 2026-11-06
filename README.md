@@ -721,9 +721,23 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   erişim girişimi (başka ekibin Service'ine ya da API sunucusuna monitor/kanal) iz
   bırakır ve SOC'a bağlanabilir. Yönetici ve kapsamı `*` olan kullanıcı sayaca ya da
   denetim kaydına düşmez (onlar için red oluşmaz).
-- Cluster dışı hedefler (genel internet, cluster dışındaki kurum ağı, bir
-  OpenShift Route'unun genel adı) eskisi gibi yalnızca hedef politikasına
-  tabidir; kapsam onları kısıtlamaz.
+- Genel bir adrese çözülen cluster dışı hedefler (genel internet, genel
+  adresli bir OpenShift Route adı) yalnızca hedef politikasına tabidir; kapsam
+  onları kısıtlamaz. Özel adresli kurum ağı ise kapsamı sınırlı kullanıcı için
+  bugün cluster dışı sayılmaz:
+  - Kapsam denetimi özel aralıkları (10/8, 172.16/12, 192.168/16, 100.64/10)
+    cluster içi sayar. Kurum ağına çözülen bir ad ve özel adrese (router VIP'ine)
+    çözülen bir on-prem Route adı bu kullanıcı için reddedilir (0.48'den beri);
+    çıplak bir kurum IP'si de (0.47'den beri). Aynı hedefin klonu ya da hedef
+    değişikliği de reddedilir.
+  - Vekilli bir kurulumda yalnız vekilin çözebildiği, burada NXDOMAIN alan bir
+    dış ad da bu kullanıcı için reddedilir (0.49'dan beri; yukarıda "Egress ve
+    DNS").
+  - Yönetici ve kapsamı `*` olan kullanıcı etkilenmez. Böyle bir hedefi yönetici
+    kurar ya da keşiften içe aktarılır (içe aktarma yalnız namespace'e bakar).
+    Vekilli kurulum için opt-in bir ayar 0.50'de planlandı
+    ([#121](https://github.com/yusufceng/Kubeat/issues/121)); kurum aralıkları
+    için ayar sonraki sprintin adayı.
 - Kısıt hedef belirlenirken uygulanır (monitor/kanal oluşturma ve hedefini
   değiştirme); var olan monitor'ler yükseltmede yeniden denetlenmez,
   çalışmaya devam eder. Keşiften içe aktarma kullanıcının düzenleyebildiği
@@ -1105,7 +1119,27 @@ her vekil `X-Forwarded-For`'a bir girdi ekler:
 - GKE: Google Cloud yük dengeleyici (GCLB) + `ingress-nginx`, `2`; yalnız
   GCLB/Container-native LB (ingress-nginx yoksa) `1`.
 
-**Yanlış ayar sessizce etkisiz kalmaz (0.49).** Giriş, yayımlanmış bir DoS
+**Bilinen sınır (0.48–0.49): arayüz istemci adresini taşımaz.** Route ve
+Ingress yalnız arayüze gider; arayüz giriş, parola değiştirme ve durum sayfası
+kilidi isteklerini backend'e `X-Forwarded-For` olmadan iletir. Bu sürümlerde
+backend tarayıcıdan gelen her denemenin kaynağını arayüz pod'unun adresi olarak
+görür:
+
+- `UPTIME_TRUST_PROXY_HOPS` kaç olursa olsun, arayüzden gelen girişte
+  kaynak-başına throttle ad-başına tek paylaşılan kilide geriler; adını bilen
+  biri bir hesabı arayüzü kullanan herkes için kilitleyebilir.
+- `0` iken aşağıdaki WARN bu yolda düşmez; `1` iken "zincir kısa" WARN'ı düşer
+  ama kaynak yine arayüz pod'udur.
+- Yukarıdaki hop değerleri bugün yalnız backend'e doğrudan gelen istekte
+  (port-forward, API) geçerlidir.
+
+Düzeltme 0.50 için planlandı
+([#118](https://github.com/yusufceng/Kubeat/issues/118)); o zamana dek kilitli
+bir hesap için aşağıdaki "Kilitli hesaba girmek" yolları geçerlidir.
+
+**Yanlış ayar sessizce etkisiz kalmaz (0.49) — ama 0.48–0.49'da yalnız
+backend'e doğrudan gelen istekte** (yukarıdaki bilinen sınır; arayüzden gelen
+girişte `0` iken WARN düşmez). Giriş, yayımlanmış bir DoS
 düzeltmesi olduğu için ayar eksik ya da fazla olduğunda loga dakikada en fazla
 bir kez WARN yazılır:
 
@@ -1207,7 +1241,9 @@ her isteği kullanıcının oturumuyla yapar.
 **Kilitli hesaba girmek.** Kilit artık kaynak adrese göredir (CWE-307,
 [ADR-0004](docs/adr/0004-giris-kilitleme-stratejisi.md)): adını bilen biri tek
 bir kaynaktan bir hesabı, örneğin her zaman var olan `admin`'i, herkes için
-kilitleyemez; meşru sahip başka bir adresten girmeye devam eder. Yine de bir
+kilitleyemez; meşru sahip başka bir adresten girmeye devam eder (0.48–0.49'da
+bu, arayüzden gelen girişte geçerli değil: yukarıdaki "Bilinen sınır
+(0.48–0.49)"). Yine de bir
 hesap tümüyle kilitlenebilir — kendi adresinizden art arda yanlış yazdığınızda
 (`UPTIME_LOGIN_MAX_FAILURES`), ya da çok sayıda ayrı kaynaktan gelen dağıtık
 bir tahmin hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, varsayılan 50)
