@@ -475,7 +475,8 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	// everyone: the legitimate owner signing in from elsewhere is never
 	// locked out (CWE-307, ADR-0004).
 	now := time.Now().UTC()
-	key := signInIPKey(h.clientIP(r, now), req.Username)
+	source := h.clientIP(r, now)
+	key := signInIPKey(source, req.Username)
 	acctKey := signInKey(req.Username)
 	// The attempt counts as a failure from here on, before the password is
 	// checked: parallel attempts cannot all be tried before the first
@@ -524,7 +525,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !right {
-			h.loginFailed(w, r, key, req.Username, wrongPassword, attempt, known)
+			h.loginFailed(w, r, key, source, req.Username, wrongPassword, attempt, known)
 			return
 		}
 	case h.ldap() != nil && (!known || user.Source == store.UserLDAP):
@@ -536,7 +537,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, ldapauth.ErrInvalidCredentials) {
-			h.loginFailed(w, r, key, req.Username, rejectedByDirectory, attempt, known)
+			h.loginFailed(w, r, key, source, req.Username, rejectedByDirectory, attempt, known)
 			return
 		}
 		if err != nil {
@@ -563,7 +564,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 			// The password was right, but the account may not sign in. That
 			// counts as a failure all the same: anyone in the directory
 			// could otherwise write an audit row a request, and never lock.
-			h.opts.Logger.Info("sign-in refused", "user", req.Username, "reason", "no role", "attempt", attempt)
+			h.opts.Logger.Info("sign-in refused", "user", req.Username, "reason", "no role", "attempt", attempt, "source", source)
 			h.auditRefusal(r.Context(), key, req.Username, store.AuditEntry{
 				Action: "login_denied", ObjectType: "user", ObjectID: user.ID, Summary: req.Username + ": " + err.Error(),
 			}, attempt, true)
@@ -586,7 +587,7 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		if known {
 			failure = passwordElsewhere
 		}
-		h.loginFailed(w, r, key, req.Username, failure, attempt, known)
+		h.loginFailed(w, r, key, source, req.Username, failure, attempt, known)
 		return
 	}
 	if !user.Enabled {
@@ -710,6 +711,14 @@ func signInFailureReason(why string) string {
 // attempt when it began; attempt is its number in the lockout period.
 // Every failure is logged; see auditRefusal for the audit log.
 //
+// The log line names source, the address the throttle keyed the attempt
+// on (see clientIP), so that the operator can check UPTIME_TRUST_PROXY_HOPS
+// against a sign-in of their own also when it is right, and no warning
+// shows the address: the client's address there means the hops are right,
+// a proxy's or the UI pod's means they are not. It is the operator's log
+// alone: the audit row and the answer do not carry it, so nothing in them
+// tells a username apart from a password.
+//
 // known says that the name has a local record: an account, local or one
 // that signed in through the directory or SSO before. Its failures are
 // written whatever LoginAuditPerMinute: there are only so many such names,
@@ -718,9 +727,9 @@ func signInFailureReason(why string) string {
 // flood of made-up names must not hide the guesses at one of them. Those
 // of a name without one, made up or only in the directory, count against
 // the cap: anyone can cause them.
-func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, key, username, why string, attempt int, known bool) {
+func (h *handler) loginFailed(w http.ResponseWriter, r *http.Request, key, source, username, why string, attempt int, known bool) {
 	h.opts.SignIns.SignInFailed(signInFailureReason(why))
-	h.opts.Logger.Info("sign-in refused", "user", username, "reason", why, "attempt", attempt)
+	h.opts.Logger.Info("sign-in refused", "user", username, "reason", why, "attempt", attempt, "source", source)
 	h.auditRefusal(r.Context(), key, username, store.AuditEntry{Username: username, Action: "login_failed", Summary: h.auditText(why)},
 		attempt, !known)
 	unauthorized(w, "invalid username or password")

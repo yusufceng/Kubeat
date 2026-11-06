@@ -27,6 +27,15 @@ import (
 // sources apart and falls back to one shared, per-name lock (README,
 // "Hesaplar ve giriş").
 //
+// Browsers never reach the backend themselves: the Route or Ingress sends
+// them to the UI, whose pod is then the peer here for every client. The UI
+// passes on the X-Forwarded-For it got, as it got it, with the throttled
+// calls (sign-in, password change, status-page unlock), and Next.js writes
+// its own peer there when no proxy did. So the UI takes the place of the
+// proxy nearest to us, and the hops count the entries the proxies in front
+// of the UI write to the header, or 1 when none does (README, "Hesaplar ve
+// giriş", has them per topology).
+//
 // A published source-address throttle must not go silently ineffective when
 // it is left unconfigured behind a proxy, so clientIP warns (rate-limited,
 // see proxyWarn) when the configuration cannot be trusted: an

@@ -2,6 +2,7 @@ import "server-only";
 import type { ChannelEvent } from "@/lib/channel-types";
 
 import { config } from "@/lib/config";
+import { forwardedForHeader } from "@/lib/forwarded-for";
 import { sessionToken } from "@/lib/session";
 
 /**
@@ -1361,11 +1362,15 @@ function statusPageTokenHeader(token?: string): Record<string, string> {
 /** The token a visitor holds for a protected page, and when it stops working. */
 export type StatusPageSession = { token: string; expires_at: string };
 
-/** Trades a protected page's password for a token; 401 for a wrong one, 429 after too many. */
-export const unlockStatusPage = (slug: string, password: string) =>
+/**
+ * Trades a protected page's password for a token; 401 for a wrong one, 429
+ * after too many. forwardedFor is the visitor's request's X-Forwarded-For,
+ * passed on for the throttle (lib/forwarded-for.ts).
+ */
+export const unlockStatusPage = (slug: string, password: string, forwardedFor?: string | null) =>
   request<StatusPageSession>(
     `/status-pages/by-slug/${encodeURIComponent(slug)}/unlock`,
-    { method: "POST", body: JSON.stringify({ password }) },
+    { method: "POST", body: JSON.stringify({ password }), headers: forwardedForHeader(forwardedFor) },
     { open: true },
   );
 
@@ -1435,19 +1440,33 @@ export const setup = (body: { username: string; display_name: string; password: 
 
 /**
  * Signs in; a refusal is an ApiError with status 401, 403, 429, or 503 when
- * the backend is checking too many sign-ins at once.
+ * the backend is checking too many sign-ins at once. forwardedFor is the
+ * browser's request's X-Forwarded-For: the backend throttles failed
+ * sign-ins per source address and reads it from there (lib/forwarded-for.ts).
  */
-export const login = (username: string, password: string) =>
-  request<Session>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }, { open: true });
+export const login = (username: string, password: string, forwardedFor?: string | null) =>
+  request<Session>(
+    "/auth/login",
+    { method: "POST", body: JSON.stringify({ username, password }), headers: forwardedForHeader(forwardedFor) },
+    { open: true },
+  );
 
 export const logout = (token: string) =>
   request<void>("/auth/logout", { method: "POST" }, { open: true, token });
 
 export const getMe = () => request<Me>("/auth/me");
 
-/** A wrong current password is a 400; too many of them in a row, a 429. */
-export const changePassword = (current_password: string, new_password: string) =>
-  request<void>("/auth/password", { method: "POST", body: JSON.stringify({ current_password, new_password }) });
+/**
+ * A wrong current password is a 400; too many of them in a row, a 429.
+ * forwardedFor is the browser's request's X-Forwarded-For, passed on for the
+ * throttle (lib/forwarded-for.ts).
+ */
+export const changePassword = (current_password: string, new_password: string, forwardedFor?: string | null) =>
+  request<void>("/auth/password", {
+    method: "POST",
+    body: JSON.stringify({ current_password, new_password }),
+    headers: forwardedForHeader(forwardedFor),
+  });
 
 export const listUsers = () => request<User[]>("/users");
 
