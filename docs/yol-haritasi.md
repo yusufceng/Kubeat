@@ -180,7 +180,11 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   satırı anahtarlanan kaynağı (`source`) yazar ve hop rehberi arayüz yoluna göre
   yeniden türetildi (README "Hesaplar ve giriş"; hiçbir satır henüz bu yolda
   ölçülmedi, sandbox Route provası sürümden sonra). Chart varsayılanı 0 kaldı;
-  kurulum notu Route/Ingress açıkken değeri önerir. Kalanlar: hops>0 iken cluster
+  kurulum notu Route/Ingress açıkken değeri önerir. Fazla hop değeri artık
+  güvenli tarafa düşmez: başlığa ekleyen bir vekilin (Route, GCLB) arkasında
+  istemci başlığı uzatıp kaynağını seçebilir ve WARN düşmez (0.49'da arayüz
+  yolunda kaynak eşe düşüyordu); README ve kurulum notu emin olunmayan durumda
+  küçük değeri önerir. Kalanlar: hops>0 iken cluster
   içindeki bir pod backend'e doğrudan ya da arayüz Service'i üzerinden (arayüz
   `NodePort` ise node portuna node üzerinden gelen bir istemci de) uydurma
   `X-Forwarded-For` ile kaynak seçebiliyor (backend'e doğrudan geleni

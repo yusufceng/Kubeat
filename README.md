@@ -1163,6 +1163,15 @@ Dikkat edilecekler:
   Service'in `externalTrafficPolicy: Cluster` (varsayılan) olması da böyledir:
   `ingress-nginx` istemciyi değil node'u görür. İkisini de aşağıdaki log
   satırının `source` alanından görürsünüz.
+- Değer doğrusundan büyükse güvenli tarafa düşmez (0.50). Başlığa ekleyen bir
+  vekilin (Route `Append`, GCLB) arkasında istemci başlığı fazladan bir girdiyle
+  uzatıp kaynağını seçer: kaynak-başına sınır atlanır (yalnız hesap tavanı
+  kalır), adresi bilinen bir kurban kilitlenebilir ve bu isteklerde WARN düşmez.
+  Eksik değerin maliyeti paylaşılan kilit, fazla değerinki bypass'tır: emin
+  değilseniz (ör. önünüzdeki WAF'ın başlığı yazıp yazmadığını bilmiyorsanız)
+  küçük değeri seçin ve `source` alanıyla doğrulayın. Arayüzden gelen girişte
+  "zincir kısa" WARN'ı sürüyorsa (WARN'ın yazdığı eş arayüz pod'uysa) değer
+  fazladır: düşürün. 0.49'da bu WARN arayüz yolunda beklenen durumdu.
 - `ingress-nginx`'te `use-forwarded-headers`'ı `compute-full-forwarded-for`
   olmadan açmayın: varsayılan `proxy-real-ip-cidr` (`0.0.0.0/0`) ile controller
   başlığı istemcinin yazabileceği en soldaki girdiyle değiştirir ve her istek
@@ -1185,7 +1194,9 @@ Chart'ın varsayılanı `0`'dır. `route.enabled` ya da `ingress.enabled` açık
 kurulum notu (NOTES) değerin `0` kaldığını söyler ve yukarıdaki satırlardan o
 giriş türüne uyanları önerir: Route için `1` (önünde başlığı yazan bir WAF ya da
 L7 yük dengeleyiciyle `2`); Ingress için `ingress-nginx` varsayılanlarıyla `1`,
-GCE Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`. Ağ politikası
+GCE Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`. Emin değilseniz
+küçük değeri seçip `source` alanıyla doğrulamanızı söyler (fazla değer
+atlatılabilir, yukarıda). Ağ politikası
 kapalıysa `networkPolicy.enabled=true`'yu da önerir ve açmadan önce "Ağ
 erişimi"ni okumanızı söyler: politika açılınca başka namespace'lerdeki push
 işleri arayüze göndermelidir, OpenShift dışında `networkPolicy.metricsFrom`
@@ -1231,7 +1242,10 @@ WARN yazılır; 0.50'den beri bu arayüzden gelen girişte de böyledir:
   istemcinin ayarlayabileceği en soldaki girdiye değil, hiçbir istemcinin
   denetlemediği eşe (peer) düşer. Böylece uydurma bir `X-Forwarded-For` ile ne
   her istekte taze bir kaynak gibi görünüp throttle atlanabilir ne de bir kurban
-  kilitlenebilir; o eş/NAT yalnızca paylaşılan bir kilide geriler.
+  kilitlenebilir; o eş/NAT yalnızca paylaşılan bir kilide geriler. Bu yalnız
+  zinciri kısa gelen istek için geçerlidir: başlığa ekleyen bir vekilin
+  arkasında zincirini uzatan istemci WARN almadan kaynağını seçer (yukarıda
+  "Dikkat edilecekler").
 
 Değerin eksik olması (ör. WAF'lı Route'ta `1`) WARN vermez: throttle o vekilin
 adresine anahtarlanır. Bunu yukarıdaki `source` alanından görürsünüz.

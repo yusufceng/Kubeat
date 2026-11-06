@@ -83,7 +83,10 @@ sayısından büyük ya da bir istek vekili atlıyordur. (b) durumunda görülen
 artık istemcinin ayarlayabileceği en soldaki girdiye (`chain[0]`) değil, hiçbir
 istemcinin denetlemediği eşe (peer) düşer: uydurma bir `X-Forwarded-For` ile ne
 her istekte taze bir kaynak gibi görünüp throttle atlanabilir ne de bir kurban
-kilitlenebilir. Yanıt hâlâ değişmez (genel 401/429).
+kilitlenebilir. Bu yalnız zinciri gerçekten kısa gelen istek için geçerlidir:
+başlığa ekleyen bir vekilin arkasında istemci zinciri uzatabilir, 0.50'den beri
+arayüz yolunda da (aşağıda "Vekil güveni"). Yanıt hâlâ değişmez (genel
+401/429).
 
 **Arayüz yolu (0.50).** Tarayıcı backend'e doğrudan gelmez: Route ve Ingress
 yalnız arayüze gider ve backend'in eşi her istemci için arayüz pod'udur. 0.48 ve
@@ -176,11 +179,17 @@ kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
   güvenilmediğinde, çalışma anında WARN'lar (yukarıda). Değer bu sayıdan
   büyükse, 0.47–0.48'de istemci `X-Forwarded-For` uydurarak her istekte taze
   bir kaynak gibi görünüp throttle'ı atlatabiliyor ya da bir kurbanı
-  kilitleyebiliyordu; 0.49'da zincir hop'tan kısa gelince
-  görülen kaynak istemci-kontrollü en soldaki girdiye değil eşe (peer) düşer ve
-  WARN verilir, bu yüzden uydurma başlık ne throttle'ı atlatır ne de kurbanı
-  kilitler (yalnızca o NAT/eş paylaşılan bir kilide geriler). Yanlış ayarın
-  maliyeti böylece "bypass" değil "tek paylaşılan kilit"tir.
+  kilitleyebiliyordu. 0.49'da arayüz başlığı taşımadığından arayüz yolundaki
+  zincir hop'tan kısa kalıyordu: görülen kaynak istemci-kontrollü en soldaki
+  girdiye değil eşe (peer) düşüyor ve WARN veriliyordu, bu yüzden uydurma başlık
+  o yolda ne throttle'ı atlatıyor ne de kurbanı kilitliyordu; yanlış ayarın
+  maliyeti "bypass" değil "tek paylaşılan kilit"ti. 0.50'den beri arayüz
+  istemcinin başlığını taşıdığından, başlığa ekleyen bir vekilin (Route
+  `Append`, GCLB) arkasında değer doğrusundan büyükse istemci başlığı fazladan
+  girdiyle uzatıp kaynağını seçebilir ve bu isteklerde WARN düşmez. Eksik
+  değerin maliyeti paylaşılan kilit, fazla değerinki bypass'tır; emin
+  değilseniz küçük değeri seçip `source` alanıyla doğrulayın. Arayüz yolunda
+  "zincir kısa" WARN'ı sürüyorsa değer fazladır.
 - **Cluster içinden uydurma başlık.** Değer `0`'dan büyükken backend
   `X-Forwarded-For`'a bağlanan eşe bakmadan güvenir: cluster içindeki bir pod
   backend'e doğrudan ya da 0.50'den beri arayüz Service'i üzerinden (arayüz

@@ -118,8 +118,11 @@ backend:
     # bypass. Above 0 turn networkPolicy.enabled on, or any pod can reach
     # the backend with an X-Forwarded-For of its own. A misconfigured value is
     # warned (rate-limited): X-Forwarded-For seen while 0, or a chain shorter
-    # than the hops (which then safely falls back to the peer); a value too
-    # low is not, but every refused sign-in logs the source it keyed on.
+    # than the hops (which then safely falls back to the peer). But too high
+    # behind a proxy that appends (Route, GCLB), a client lengthening the
+    # header picks its source, unwarned: if unsure, take the lower value. A
+    # value too low is not warned either, but every refused sign-in logs the
+    # source it keyed on.
     # UPTIME_TRUST_PROXY_HOPS: "1"              # X-Forwarded-For entries your proxies in front of the UI write (1 with none); source read from the rightmost this many (0: trust none, use the peer)
     # UPTIME_LOGIN_MAX_FAILURES: "10"           # per-source failures that lock a source's attempts at a name
     # UPTIME_LOGIN_ACCOUNT_MAX_FAILURES: "50"   # loose, very high ceiling on a name's failures across all sources; 0 turns it off
