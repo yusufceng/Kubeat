@@ -349,10 +349,12 @@ PVC'sini `persistentvolumeclaim` etiketiyle kapsar. Hiçbiri yoksa aynı
 uyarı eşiği olan %15 boş alan):
 
 ```yaml
+# <release> = helm release adı; kubeat değilse değiştirin
+# (release kubeat ise persistentvolumeclaim="kubeat-data")
 - alert: KubeatDataVolumeFillingUp
   expr: |
-    kubelet_volume_stats_available_bytes{persistentvolumeclaim="kubeat-data"}
-      / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim="kubeat-data"}
+    kubelet_volume_stats_available_bytes{persistentvolumeclaim="<release>-data"}
+      / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim="<release>-data"}
       < 0.15
   for: 15m
   labels:
@@ -362,10 +364,11 @@ uyarı eşiği olan %15 boş alan):
 ```
 
 (kubernetes-mixin ayrıca `predict_linear` ile dört gün içinde dolacak
-volume'u da uyarır; yukarıdaki oran en küçük hâlidir.) `<release>` chart'ın
-release adıysa PVC adı `<release>-data`'dır; metrik sunulmuyorsa
-kube-state-metrics / kubelet volume metriklerinin scrape edildiğinden emin
-olun.
+volume'u da uyarır; yukarıdaki oran en küçük hâlidir.) Kuraldaki `<release>`
+yer tutucusunu chart'ın release adıyla değiştirin: veri PVC'sinin adı
+`<release>-data`'dır ve hiçbir PVC'ye uymayan bir etiketle kural hata
+vermeden hiç yanmaz. Metrik sunulmuyorsa kube-state-metrics / kubelet volume
+metriklerinin scrape edildiğinden emin olun.
 
 Volume dolduğunda:
 
