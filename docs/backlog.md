@@ -281,6 +281,18 @@ S82'nin merge edilmesi ve gerçek bir SIEM isteği. README "Kapsam ihlali
 denetimi"ndeki "SOC'a bağlanabilir" cümlesi sprint 9 belge turunda "kayıtlar API
 ve arayüzden okunur, SIEM'e kendiliğinden akmaz" diye daraltılır.
 
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+yalnız `deny`/`target-scope` dilimi S82'ye çekildi
+([#143](https://github.com/yusufceng/Kubeat/issues/143); PO kararı). Müşteri A'nın
+sprint 10 keşfindeki bulgusu: API'deki insan denemesi loga düşmüyor, kontrol anı
+satırında namespace ve monitor kaynağı yok. API reddi bir `WARN` yazar (kullanıcı,
+namespace, reason, host), kontrol anı `WARN`'ı namespace'i ve kaynağı taşır; satırlar
+`auditCap`'in dakika sınırına bağlı. ADR-0002'ye aykırı değil: yukarıdaki karara göre
+stdout satırı lisans kapısının dışında, kapı arayüz, API ve CSV. ADR notunu S82 yazar;
+README "Kapsam ihlali denetimi"ndeki "SOC'a bağlanabilir" cümlesi de S82'de daralır.
+Kalan kısmın (denetim kaydının tamamını stdout'a yazmak, süzgeçler, CSV, kaynak
+adresi) tetikleyicisi değişmedi: gerçek bir SIEM isteği.
+
 ## Oturuma boşta kalma süresi `UPTIME_SESSION_IDLE`
 
 2026-10-27'de ertelendi (S5). Kurumsal güvenlik kontrol listesi maddesi
@@ -447,6 +459,16 @@ bir sağlık yolunda tutmak. Annotation'la çalışan ekip bunu manifestten anca
 `backend/internal/discovery/sync.go`). Bu parça (küçük) sprint 10'da S43 ile aynı keşif
 paketinde slot almadan, ya da sprint 11 belge turunda SSO çaresiyle birlikte adaydır;
 karar PO'da. Ada göre arama, `upsert` ve OpenAPI'nin tetikleyicisi değişmedi.
+
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+`kubeat.io/path`'in Route ve Ingress'te tanınması ve sertifikası `spec.tls` dışında
+verilen GKE Ingress'inin (ManagedCertificate, pre-shared-cert, host'suz tls girdisi)
+`https://` sayılması S94 olarak hikâyeleşti. S94 sprint 11 adayı: S95 ile Müşteri
+B'nin GKE ve annotation yolunda, `k8s.go`'da S43'ün
+([#147](https://github.com/yusufceng/Kubeat/issues/147)) arkasından. Kapsamı açmayan
+bugünkü çare: yönetilen monitor'de HTTP seçenekleri (yönlendirme sınırı, kabul edilen
+kodlar) arayüzden değiştirilebiliyor (`backend/internal/api/monitors.go:1198-1204`).
+Ada göre arama, `upsert` ve OpenAPI backlog'da; tetikleyicileri değişmedi.
 
 ## Ücretsiz katmanda tek OIDC sağlayıcısıyla giriş; alternatifi TOTP 2FA
 
@@ -2019,6 +2041,15 @@ sakladığından farklı yazması (API'yle kurulmuş bir monitor'de) bu yüzden
 gereksiz bir daralma doğurabilir; bedeli erişilebilirliktir. Formla API'nin
 seçenek yazışını eşitlemek bu sınırı kaldırır (frontend, küçük; kanıt gelirse).
 
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+S91 (kaydı olmayan monitor'lerde kapsam kaydının kendiliğinden genişlemesini bir
+kereye indirmek ve kaydı yöneticiye göstermek) aynı kayıt yüzeyinde. Sprint 11'de S73
+ile aynı ADR-0003 (c) turunda gelir, ki ADR iki ardışık sprintte iki kez değişmesin.
+ADR'deki "Görüntü yazanı tutmaz" notunun yazan kimliği S73'ten S91'e geçti (Müşteri A,
+sprint 10 keşfi): kayda yazanın kimliği göçsüz bir JSON alanında S91'le gelir.
+Tetikleyici (S80, S81 ve S82'nin merge'ü) sprint 10 sonunda dolar; S73 sprint 11
+taslağının ilk maddesi.
+
 ## Yeni giriş/dizin/throttle metrikleri için chart PrometheusRule ve throttle sessiz-etkisizlik metriği (S63/S72 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2057,6 +2088,18 @@ gerileme kuralı, sonra dizin ve hesap tavanı kuralları. 0.50 (S79) iki gerile
 yolu ekledi (`no_frontend_token`, `untrusted_peer`); sayacın `reason` kümesi
 dörde çıktı. Bu sprintte `throttle.go`'ya S76 ([#134](https://github.com/yusufceng/Kubeat/issues/134)) dokunuyor; sıra S76 →
 S88 → S85.
+
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+dilim 1 sprint 10'da (S85 [#146](https://github.com/yusufceng/Kubeat/issues/146), aynı
+zincirde S88'den sonra): kaynak ayrımı gerileme sayacı (`reason` kümesine
+`hops_too_low` eklendi, `surface` etiketi), durum sayfası ve parola değiştirme
+429'larının yeni serisi ve "kaynak ayrımı gerilemiş" kuralı. Backlog'da kalan dilim 2:
+"dizine ulaşılamıyor" (`reason="directory_unreachable"`) ve hesap tavanı kilidi
+(`kind="account"`) kuralları, README "Aracın kendi sağlığı" → "Kopyalamak"taki kabuk
+ve GitHub Actions örneklerinin kurulu değerlerle render etmesi. Adım 2 bu iki sinyal
+için bugün de karşılanıyor: S63'ün `reason`/`kind` etiketleri onları ayırıyor.
+Tetikleyici: dizin ya da hesap kilidi alarmı isteyen bir kurulum, ya da sprint 11'de
+boş yer.
 
 ## Kapsam-dışı hedef reddi denetimini keşif-import/restore, bakım ve workload yollarına genişletmek + flood cap (S68 takibi)
 
@@ -2107,6 +2150,16 @@ kapansın diye, oluşturmadaki kural) bugün `connection` sayılıyor. Ayrım
 sayaçta ve denetimde kalmalı, sonuçta değil: sonuç cluster içine düşen bir addan
 ayırt edilmemeli.
 
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+sprint 10'da S82'nin ikinci PR'ıyla karşılanıyor
+([#143](https://github.com/yusufceng/Kubeat/issues/143)): satır sınırı (`auditCap`,
+API'de ve kontrol anında) ve red yolları tek tek (`discovery.go:192`, `:311`;
+`maintenance.go:182`, `:215`; `monitors.go:735`, `:1008`, `:856`, `:1222`;
+`alerting.go:225`; `notes.go:113`, `:170`). PO kararı: push token yenileme, silme,
+test bildirimi ve olay notu hedef seçimi değil yetki reddi; "denetlenmeyen red
+yolları" listesinde gerekçesiyle yer alır. Madde #143 merge edilince kapanır; kapanış
+notu listenin README'deki yerini (bölüm adı) yazar.
+
 ## Kapsam çözüm-hatası reddini gerçek cross-tenant reddinden ayırmak (reason/WARN, S77 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2141,6 +2194,18 @@ S82 sprint 10 kuyruğunda 1. sırada. `targetscope.go` zinciri S80 ([#132](https
 S86 ([#131](https://github.com/yusufceng/Kubeat/issues/131)) → S82; S86'nın kontrol anı reddi aynı etiket kümesini ve satır
 sınırını kullanacak. Müşteri A'nın sprint 8 bulgusu 3'ü (ayarı açmadan bir dış
 adın yerel çözüm sonucunu gösteren komut, pilot ön şart sınaması) S82'ye katıldı.
+
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+sprint 10'da S82'nin ilk PR'ıyla karşılanıyor
+([#142](https://github.com/yusufceng/Kubeat/issues/142)): `reason="resolve_error"`
+API'de ve kontrolün açtığı her bağlantıda; iptal ve süre dolması red sayılmaz; kapalı
+kümeli `source` etiketi (`user`, `annotation`, `unrecorded`).
+`UPTIME_TARGET_RESOLVE_TIMEOUT` yalnız API yolunu sınırlar ve varsayılanı 5 sn'den 2
+sn'ye iner; kontrol anındaki çözüm monitor'ün kendi zaman aşımına bağlanır (0.51'den
+beri kontrol de API'nin süresini kullanıyor). Madde S82'nin iki PR'ı
+([#142](https://github.com/yusufceng/Kubeat/issues/142),
+[#143](https://github.com/yusufceng/Kubeat/issues/143)) merge edilince kapanır;
+kapanış notu "denetlenmeyen red yolları" listesinin README'deki yerini yazar.
 
 ## Chart'ta Route/Ingress açıkken `UPTIME_TRUST_PROXY_HOPS` varsayılanını 1 yapmak
 
@@ -2221,6 +2286,16 @@ Güncelleme (2026-11-07, sprint 9 planı; [sprints/2026-11-07-sprint-09.md](spri
 S43 sprint 10 kuyruğunda (4. sıra); kabul ölçütüne chart kuralı ya da ayırıcı
 etiket eklendi (`sprint-takimi.md` adım 2). S42'nin kararı ve tetikleyicisi
 değişmedi.
+
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+SRE'nin `GOMEMLIMIT` önerisi S42'nin ilk dilimi olarak not edildi. Downward API
+limitin %90'ını hesaplayamıyor (yalnız limitin kendisini verir); bu yüzden backend'de
+bir kod parçası ve bir ayar gerekiyor, sprint 10'a alınmadı. 0.51'de ikinci bir bellek
+tüketicisi çıktı (kapsama bağlı HTTP kontrollerinin boşta tuttuğu bağlantılar); onu
+sprint 10'da S92 ([#144](https://github.com/yusufceng/Kubeat/issues/144)) kaldırıyor.
+S43 ([#147](https://github.com/yusufceng/Kubeat/issues/147)) sprint 10'da. Tetikleyici
+değişmedi: S43 merge edildikten sonra 3 binden fazla pod'lu gerçek bir kurulum ya da
+bir OOMKill.
 
 ## Açıkça kapatılmış `UPTIME_TARGET_SCOPE_TRUST_PROXY` için açılış WARN'ını INFO'ya indirmek
 
@@ -2399,6 +2474,17 @@ gerekçe "İzleme asla durmaz" ilkesi ve boş listenin daha sıkı taraf olması
 PO'da. PMO önerisi: 1.0'dan önce, aynı kapsam yüzeyindeki S73 ile sıralı olarak sprint
 11 adayı.
 
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+PO kararı: çalışma anı geri düşüşü (S96) kabul edildi ve S80'in "backend başlamaz"
+kararı ortama bağlı denetimler (API sunucusunun adresi, pod'un kendi adresleri,
+adreslerin okunamaması) için değişiyor. Backend başlar, ayar yok sayılır (boş liste
+daha sıkı taraf), `ERROR` satırı, gauge ve chart kuralı verilir; biçim hataları yine
+backend'i başlatmaz. Uygulama sprint 11'de, render anındaki cluster ağı beyanı ve S73
+ile. Ek kanıt (Müşteri B, sprint 10 keşfi): beyan edilen cluster ağları kapsam
+denetiminin cluster içi sınıflamasını da beslemeli. Bugünkü açılış korumasının gerçek
+pod'daki davranışı sprint 10'un zorunlu provası (c)'de, çok node'lu minikube'da pod
+drain ile taşınarak ölçülür; sonuç sprint 11'in girdisi.
+
 ## Kurulum notunda `frontend.networkPolicy.from` önerisini Ingress sınıfına göre vermek
 
 2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
@@ -2412,6 +2498,14 @@ için kopyalanabilir bir `values-gke.yaml` yok (bulgu 5). Tetikleyici: o iki bul
 taşıyan madde (sprint 10 ya da sprint 11 belge turu adayı) ya da `gce-internal` ile
 kurulan bir kurulum.
 
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+tetikleyici doldu. Madde S95'in kabul ölçütüne girdi (GCE Ingress yolu: kurulum
+notunda hop ve TLS çelişki satırları, `from` öneri satırı, CI'da render edilen
+`values-gke.yaml`); S95 sprint 11 adayı, S94 ile. Madde S95 merge edilince kapanır. Bu
+sprintte yalnız ara önlem: README GKE bölümünün GCE paragrafı ManagedCertificate yolu
+için üç değeri birlikte veriyor (`ingress.tls.enabled=false`,
+`publicURL=https://<host>`, annotation; plan dalı).
+
 ## `test-chart.sh`'in README denetimini kurulum notunun gösterdiği bölüme daraltmak
 
 2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133) BA incelemesinin düşük bulgusu; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
@@ -2420,6 +2514,10 @@ bölümünde geçmesini kabul ölçütü sayıyor. `deploy/helm/test-chart.sh` m
 README'de arıyor; bölüm başka yerde aynı metni taşıyınca denetim yanlışlıkla geçer.
 İş: denetimi bölüm başlıkları arasında (`awk` ile, pilot örneğindeki gibi) yapmak.
 Tetikleyici: kurulum notuna dokunan bir sonraki madde.
+
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+tetikleyici doldu; madde S95'in kabul ölçütünde (sprint 11 adayı) ve S95 merge
+edilince kapanır.
 
 ## Keşiften içe aktarmayı monitor'ün kapsam kuralıyla hizalamak
 
@@ -2432,6 +2530,12 @@ bağlantıda kapsama tabi olduğundan bu monitor kontrolde `blocked_by_scope` il
 olur. İçe aktarma aynı kararı içe aktarma anında verirse kullanıcı erken ve açık bir
 403 alır. Aynı `discovery.go` yolu S82'nin red yolları listesinde. Tetikleyici: S82
 (sprint 10) ya da S73.
+
+Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+PO kararı: S82'ye girmedi, çünkü ayrı bir davranış değişikliği ve S82 zaten L. S82 içe
+aktarmanın red yolunu (`discovery.go:192`) yalnız denetim ve sayaç açısından ele
+alıyor ([#143](https://github.com/yusufceng/Kubeat/issues/143)). Tetikleyici S73
+(sprint 11).
 
 ## Kapsam denetiminin porta bakması (node üstündeki router VIP'i)
 
@@ -2455,3 +2559,15 @@ varsayılanı geri açar. Sprint 9'da Müşteri A (bulgu 1, SSO) istisna değil 
 ve `kubeat.io/path` istedi; Müşteri B (bulgu 6) tek kiracılı kurulum için yükseltme
 notunda kısa yol istedi. Tetikleyici: belge çaresi ve `kubeat.io/path` yetmeyen bir
 kurulum.
+
+## README'deki negatif adımın imajını (`curlimages/curl:8.10.1`) digest'e sabitlemek ve `check-versions.sh` ile denetlemek
+
+2026-11-07'de eklendi (sprint 10 planı;
+[sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). README "Hesaplar
+ve giriş" → "Arayüzün ağ politikası" → "Politikanın uygulandığını doğrulamak" adımı
+başka bir namespace'te `curlimages/curl:8.10.1` ile bir pod açar. İmaj yalnız etiketle
+verilmiş ve etiketin var olduğu doğrulanmadı (sprint 9 "Sprint 10'a devredenler").
+Müşteri A istedi; Müşteri A, Müşteri B ve SRE düşük önemde dedi. Etiketin varlığı tek
+bir registry sorgusuyla doğrulanır (release manager; cluster gerekmez). Etiketin
+yanına digest'i yazmak ve `scripts/check-versions.sh`'in bu satırı denetlemesi sprint
+11 belge turunda yapılır. Tetikleyici: sprint 11 belge turu.

@@ -34,7 +34,9 @@ sonunda bakar ve yön verir.
    bölümünde önerdiği değerin geçmesi kabul ölçütüdür; NOTES platforma göre
    bir değer öneriyorsa o değerin o platformun provasında (ya da ajan-içi
    benzetiminde) ölçülmesi de kabul ölçütüdür, ölçülmeyen satır "ölçülmedi"
-   kalır. Cross-tenant ya da
+   kalır. NOTES sınıfa ya da platforma göre bir değer öneriyorsa verilen değer
+   onunla çeliştiğinde de bir satır yazar, yalnız değer boşken ya da `0` iken
+   değil. Cross-tenant ya da
    SSRF gibi güvenlik maddelerinde kabul ölçütü ve reviewer sorusu ad
    çözümünün biçimlerini tek tek sayar (çıplak IP, kısa ad, iki etiketli
    `servis.namespace`, tam `.svc`/FQDN, API sunucusu adı) ve pod'un DNS arama
@@ -47,7 +49,11 @@ sonunda bakar ve yön verir.
    sınanan) ya da sinyali ayıran bir etiketi sayar; "metrik var, alarm ya da ayrım
    kullanıcıda" yeterli değildir. Bir güvenlik ya da denetim maddesi "her red
    yolu" diyorsa kabul ölçütü yolları tek tek sayar ya da belge "denetlenmeyen red
-   yolları"nı gerekçesiyle listeler.
+   yolları"nı gerekçesiyle listeler. Davranış değiştiren bir güvenlik maddesinin
+   kabul ölçütü bir etki tablosu da sayar: satırlar kurulum türü (tek kiracılı,
+   çok kiracılı, vekilli), sütunlar monitor kaynağı (yönetici ya da `*`, kapsamı
+   sınırlı, annotation, kaydı olmayan); her hücrede sonuç, önce kapsamı açmayan
+   çare ve yükseltme notu cümlesi bulunur.
 3. **Öncelik**: PO sprint hedefini, en çok dört maddelik sıralı listeyi ve
    gerekçeli "yapılmayacaklar"ı verir. Bir hikâyenin bilinen yan etkisi
    sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
@@ -99,7 +105,12 @@ sonunda bakar ve yön verir.
    sonraki sprintin keşfi bu listenin sonucuyla ve koşulmayan maddeleriyle
    başlar. Bir hikâye bir müşterinin asıl kurulum ya da aynalama yolunu
    belgeliyorsa o yol ya CI'da koşar ya da bu listeye zorunlu prova olarak
-   yazılır; "isteğe bağlı" yalnızca yan yollar içindir. Gerçek ya da çok
+   yazılır; "isteğe bağlı" yalnızca yan yollar içindir. Ajan sınırında
+   ölçülemeyen önerilen bir kurulum yolunun en az CI'da render edilen bir values
+   reçetesi olur (`test-chart.sh` senaryosu); "ölçülmedi" etiketi kalır. Backend'i
+   başlatmayan her yol (ör. bir ayar doğrulaması) için gerçek pod'da bir ajan-içi
+   prova adımı planlanır. Release manager kullanıcıda kalan zorunlu provaları
+   sprint sonu özetinin ilk satırında verir. Gerçek ya da çok
    kiracılı cluster isteyen bir güvenlik iddiası da aynıdır: sandbox provası
    sürümden önce zorunlu prova olarak planlanır (yalnız `go test` yetmez) ya
    da sürüm metni iddiayı temkinli yazar ("ana vektörler kapandı, prova
@@ -140,7 +151,10 @@ turu, kod değişmedi") ki kesilen koşu yeniden başlarken o tur doğru okunsun
   commit ve PR İngilizce. Conventional Commits; commit sonunda
   `Co-Authored-By` satırı.
 - **İzleme asla durmaz.** Lisans, hata ya da ayar eksikliği kontrolleri
-  durdurmaz.
+  durdurmaz. Bir ayar doğrulaması planda bu ilkeye karşı tartılır: güvenli geri
+  düşüş daha sıkı tarafsa (ör. boş liste) çalışma anında backend durmaz, ayar yok
+  sayılır, `ERROR` satırı ve chart alarmı verilir; render anında yakalanabilen
+  çakışma chart'ta yakalanır.
 - **Verilmiş kararlar.** `docs/adr/`, `docs/backlog.md` (ertelenenler) ve
   `docs/yol-haritasi.md` okunmadan kapsam önerilmez. Bir karara aykırı
   öneri açıkça yazılır: "ADR-0002'ye aykırı, çünkü...".

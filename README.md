@@ -177,7 +177,12 @@ yolu için bunun yerine `frontend.service.annotations`'a `cloud.google.com/neg:
 '{"ingress": true}'` ekleyin (bir values dosyasında). TLS için GCE Ingress
 çoğunlukla cert-manager HTTP-01 yerine bir `ManagedCertificate` ister; bunun
 ayrı bir annotation'ı (`networking.gke.io/managed-certificates`) ve cluster'da
-bir ManagedCertificate nesnesi gerekir. GCE Ingress sağlık kontrolünü kendi
+bir ManagedCertificate nesnesi gerekir. Bu yolda TLS yük dengeleyicide bittiği
+için üç değeri birlikte verin: `ingress.tls.enabled=false` (chart Ingress'e
+var olmayan bir TLS Secret'ı yazmasın), `publicURL=https://<host>` (TLS
+kapalıyken chart adresi `http://` diye türetir) ve `ingress.annotations`
+altında `networking.gke.io/managed-certificates: <ManagedCertificate adı>`.
+GCE Ingress sağlık kontrolünü kendi
 varsayılanıyla yapar; container-native modda pod'un hazırlık probe'unu
 (`/login`) kullanır. **GCE varyantı henüz gerçek bir GKE'de doğrulanmadı**
 (prova kullanıcıda, bkz. [yol haritası](docs/yol-haritasi.md#bilinen-sınırlar)).
