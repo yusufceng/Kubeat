@@ -1983,6 +1983,14 @@ ve raporlamak olarak kalır. Bunun için kayda yazanın kimliği göçsüz eklen
 ADR'sinde. Kanallar ayrı maddede ("Kanal hedeflerinde hedef kapsamını teslimat
 anında uygulamak").
 
+Kayıt kuralı asimetrik (ADR-0003 c): kayıt daha geniş bir kapsama yalnız
+kontrolün bağlandığı yeri adlandıran bir ayar değişince geçer; kaydın
+namespace'lerinin hepsini tutmayan birinin kontrolün herhangi bir ayarını
+değiştirmesi onu ortak namespace'lere daraltır. Formun bir seçeneği API'nin
+sakladığından farklı yazması (API'yle kurulmuş bir monitor'de) bu yüzden
+gereksiz bir daralma doğurabilir; bedeli erişilebilirliktir. Formla API'nin
+seçenek yazışını eşitlemek bu sınırı kaldırır (frontend, küçük; kanıt gelirse).
+
 ## Yeni giriş/dizin/throttle metrikleri için chart PrometheusRule ve throttle sessiz-etkisizlik metriği (S63/S72 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
