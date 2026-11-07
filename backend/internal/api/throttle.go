@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 )
 
 // frontendTokenHeader carries the secret by which the UI proves it is the
@@ -70,11 +72,26 @@ const frontendTokenHeader = "X-Frontend-Token"
 // the sign-ins leave. now is the request's clock, threaded in so the
 // rate-limiting is testable. No warning names the token, nor the value a
 // request presented for it.
+//
+// A log line a minute is no alert, and an install whose install notes no one
+// reads (Argo CD, Terraform) has nothing else to tell it by, so every such
+// request is also counted, with its reason and surface and without its
+// address, in kubeat_signin_source_degraded_total, whatever the warning's
+// limit; the chart's KubeatSignInSourceDegraded alerts on it. A request
+// that did not come from the UI is counted as untrusted_peer too, which is
+// expected for a script and alerts no one. One more misconfiguration is
+// counted and warned of although the source is read as configured: a source
+// that is one of the addresses Kubeat's own public URL resolves to
+// (PublicAddresses) is the load balancer in front of the UI rather than a
+// client, so the hops are too few, or a layer that writes no header connects
+// from that address (hops_too_low); every browser behind it shares one lock,
+// as with the hops at 0.
 func (h *handler) clientIP(r *http.Request, s surface, now time.Time) string {
 	peer := hostOnly(r.RemoteAddr)
 	xff := forwardedFor(r.Header.Values("X-Forwarded-For"))
 	if h.opts.TrustProxyHops <= 0 {
 		if len(xff) > 0 {
+			h.opts.SignIns.SourceDegraded(metrics.DegradedHopsZero, s.metric)
 			// A proxy in front, or Next.js in the UI, set X-Forwarded-For, but
 			// we are told to trust none of it (the default), so the throttle
 			// sees the one peer address for every client and falls back to a
@@ -96,6 +113,7 @@ func (h *handler) clientIP(r *http.Request, s surface, now time.Time) string {
 		// Hops are trusted, but there is no token to tell the UI by, so no
 		// peer may name its client: every browser keys on the UI pod, one
 		// shared lock (the backend said so at start, too).
+		h.opts.SignIns.SourceDegraded(metrics.DegradedNoFrontendToken, s.metric)
 		h.proxyWarn.warn(now, "xff-no-frontend-token",
 			fmt.Sprintf("UPTIME_TRUST_PROXY_HOPS=%d but UPTIME_FRONTEND_TOKEN is not set: X-Forwarded-For is trusted "+
 				"from no peer, so the %s throttle keys on the peer %q, the UI pod for every browser, and falls "+
@@ -108,6 +126,7 @@ func (h *handler) clientIP(r *http.Request, s surface, now time.Time) string {
 		// Not the UI: a script or a port-forward to the backend, or a pod
 		// with an X-Forwarded-For of its own making. Whatever the header
 		// says, the source is the peer, which no client chooses.
+		h.opts.SignIns.SourceDegraded(metrics.DegradedUntrustedPeer, s.metric)
 		came := "it came with none"
 		if len(xff) > 0 {
 			came = "it came with one, ignored"
@@ -134,6 +153,7 @@ func (h *handler) clientIP(r *http.Request, s surface, now time.Time) string {
 		// lock them out). Fall back to the peer, which no client controls,
 		// and warn that the hop count is too high for this request, or the
 		// request reached the UI without passing the proxies in front of it.
+		h.opts.SignIns.SourceDegraded(metrics.DegradedHopsTooHigh, s.metric)
 		h.proxyWarn.warn(now, "xff-hops-too-high",
 			fmt.Sprintf("X-Forwarded-For has fewer entries than UPTIME_TRUST_PROXY_HOPS=%d: the forwarded chain is "+
 				"shorter than the trusted hops, so the %s throttle's source falls back to the peer %q, one shared %s "+
@@ -144,7 +164,30 @@ func (h *handler) clientIP(r *http.Request, s surface, now time.Time) string {
 				h.opts.TrustProxyHops, s.name, peer, s.shared, s.name))
 		return peer
 	}
-	return chain[i]
+	source := chain[i]
+	if h.opts.PublicAddresses.Contains(source) {
+		// The source is Kubeat's own load balancer: the proxies in front of
+		// the UI write more entries than the hops trust, and the one read is
+		// the one the load balancer appended for itself (a GCE Ingress or a
+		// GKE Gateway at 1). Or a layer in front that writes no header (an
+		// L4 load balancer without the PROXY protocol, a NAT) connects from
+		// that address, and no hop count reads past it: more hops would read
+		// a client-settable entry there, so the warning names both and
+		// raises the hops for the first only. The source stays as
+		// configured, which is no client's to choose; only the operator is
+		// told.
+		h.opts.SignIns.SourceDegraded(metrics.DegradedHopsTooLow, s.metric)
+		h.proxyWarn.warn(now, "xff-hops-too-low",
+			fmt.Sprintf("the %s throttle keys on %q, an address UPTIME_PUBLIC_URL's host resolves to: that is Kubeat's "+
+				"own load balancer or proxy, not a client, and every browser behind it falls back to one shared %s "+
+				"lock. Either UPTIME_TRUST_PROXY_HOPS=%d is lower than needed: raise it to the X-Forwarded-For entries "+
+				"your proxies in front of the UI write, 2 behind a GCE Ingress or a GKE Gateway; or a layer in front "+
+				"that writes none (an L4 load balancer without the PROXY protocol, a NAT) connects from that address: "+
+				"then no value tells the browsers apart and a higher one lets a client pick its source, so count only "+
+				"the entries your proxies write (README, \"Hesaplar ve giriş\", \"Vekil-hop rehberi\")",
+				s.name, source, s.shared, h.opts.TrustProxyHops))
+	}
+	return source
 }
 
 // fromFrontend says whether r comes from the UI: it carries the UI's token
@@ -229,13 +272,14 @@ func signInIPKey(ip, username string) string {
 // A surface is a password the throttle guards per source: a sign-in's, a
 // status page's, or the current one asked for to change it. name is what
 // the X-Forwarded-For warnings call it; shared is the one lock every client
-// falls back to when the throttle cannot tell sources apart.
-type surface struct{ name, shared string }
+// falls back to when the throttle cannot tell sources apart; metric is its
+// surface label in the throttle's counters.
+type surface struct{ name, shared, metric string }
 
 var (
-	signInSurface     = surface{name: "sign-in", shared: "per-name"}
-	passwordSurface   = surface{name: "password change", shared: "per-account"}
-	statusPageSurface = surface{name: "status-page unlock", shared: "per-page"}
+	signInSurface     = surface{name: "sign-in", shared: "per-name", metric: metrics.SurfaceSignIn}
+	passwordSurface   = surface{name: "password change", shared: "per-account", metric: metrics.SurfacePasswordChange}
+	statusPageSurface = surface{name: "status-page unlock", shared: "per-page", metric: metrics.SurfaceStatusPage}
 )
 
 // statusPageScope and passwordScope are the scopes of the passwords other
@@ -277,12 +321,14 @@ type guess struct {
 // out (CWE-307). The loose ceiling on the scope's failures from all sources
 // (UPTIME_LOGIN_ACCOUNT_MAX_FAILURES; no AccountThrottle when it is 0) keeps
 // a distributed guess from running forever. Past either it answers 429 with
-// Retry-After, the same for both, and returns false.
+// Retry-After, the same for both, and returns false; the operator tells them
+// apart by kubeat_throttled_total's kind.
 func (h *handler) beginGuess(w http.ResponseWriter, r *http.Request, s surface, scope string, now time.Time) (guess, bool) {
 	source := h.clientIP(r, s, now)
 	g := guess{h: h, key: sourceKey(source, scope), ceiling: scope, at: now, source: source}
 	attempt, locked, ok := h.opts.Throttle.Begin(g.key, now)
 	if !ok {
+		h.opts.SignIns.Throttled(s.metric, metrics.ThrottleSource)
 		tooManyAttempts(w, locked)
 		return guess{}, false
 	}
@@ -290,6 +336,7 @@ func (h *handler) beginGuess(w http.ResponseWriter, r *http.Request, s surface, 
 	if h.opts.AccountThrottle != nil {
 		if _, locked, ok := h.opts.AccountThrottle.Begin(scope, now); !ok {
 			h.opts.Throttle.Undo(g.key, now)
+			h.opts.SignIns.Throttled(s.metric, metrics.ThrottleAccount)
 			tooManyAttempts(w, locked)
 			return guess{}, false
 		}

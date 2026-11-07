@@ -1823,6 +1823,10 @@ bağımsız giriş tavanı geldi (`UPTIME_LOGIN_SOURCE_MAX_FAILURES`, varsayıla
 kapalı, `kind="source_total"`; ADR-0004 "Not: adlardan bağımsız kaynak tavanı").
 Yalnız girişi kapsar; bu maddenin iki yüzeyi kaynak + kapsam sınırıyla kalır.
 
+Güncelleme (2026-11-07, S85 dilim 1 [#146](https://github.com/yusufceng/Kubeat/issues/146), 0.52.0): bu iki yüzeyin
+429'ları `kubeat_throttled_total{surface,kind}`'da sayılır (`source` ya da `account`);
+`kubeat_signin_throttled_total`'ın anlamı değişmedi.
+
 ## Throttle'da IPv6 kaynaklarını /64'e toplamak
 
 2026-11-07'de ertelendi (S76 incelemesi, [#134](https://github.com/yusufceng/Kubeat/issues/134)).
@@ -2110,6 +2114,22 @@ ve GitHub Actions örneklerinin kurulu değerlerle render etmesi. Adım 2 bu iki
 için bugün de karşılanıyor: S63'ün `reason`/`kind` etiketleri onları ayırıyor.
 Tetikleyici: dizin ya da hesap kilidi alarmı isteyen bir kurulum, ya da sprint 11'de
 boş yer.
+
+Güncelleme (2026-11-07, S85 dilim 1 [#146](https://github.com/yusufceng/Kubeat/issues/146), 0.52.0): (b) **çözüldü.**
+`kubeat_signin_source_degraded_total{reason,surface}` (`hops_zero`, `no_frontend_token`,
+`untrusted_peer`, `hops_too_high`, `hops_too_low`; her istek, adres yok), durum sayfası ve
+parola değiştirme 429'ları için `kubeat_throttled_total{surface,kind}` ve chart'ın
+`kubeat.signin` grubunda `KubeatSignInSourceDegraded` (`untrusted_peer` hariç;
+`metrics.prometheusRule.signInSeverity`), promtool'da yanan ve yanmayan senaryoyla.
+`hops_too_low` `UPTIME_PUBLIC_URL`'ün host'unu açılışta ve 5 dakikada bir çözer, CNAME'de ve
+çözülemeyen host'ta susar; GKE'de ölçülmedi. Bu maddede kalan yalnız dilim 2: (a)'nın
+dizine ulaşılamıyor ve hesap tavanı kuralları ve README "Kopyalamak" örneklerinin kurulu
+değerlerle render etmesi. Tetikleyici değişmedi. Bilinen sınır: kural iki kurulumda doğru
+değerde de sürekli yanar (arayüz Service'i vekilsiz dışarı açık, `hops_zero`; başlığı
+yazmayan bir katman genel adresten bağlanıyor, `hops_too_low`) ve kuralı tek başına
+kapatan bir values anahtarı yok; README "Sayaç ve kural" Alertmanager'da `alertname` +
+`reason` + `namespace` ile susturmayı veriyor. Kural başına bir anahtar, susturmayı
+yetersiz bulan ilk kurulumda dilim 2 ile birlikte değerlendirilir.
 
 ## Kapsam-dışı hedef reddi denetimini keşif-import/restore, bakım ve workload yollarına genişletmek + flood cap (S68 takibi)
 

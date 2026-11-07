@@ -204,6 +204,11 @@ type Options struct {
 	TrustProxyHops    int
 	FrontendToken     string
 	PasswordMinLength int
+	// PublicAddresses, when set, are the addresses Kubeat's own public URL
+	// resolves to, kept fresh by its Run: a throttled request keyed on one
+	// of them was keyed on the load balancer in front of the UI, the hops
+	// one too few, which clientIP counts and warns of. Nil checks none.
+	PublicAddresses *PublicAddresses
 	// now, when set, is the clock the throttled password checks read (the
 	// sign-in, the password change and the status-page unlock), so that a
 	// test can run their lockout on a fake one; nil is the time.
@@ -242,7 +247,10 @@ type Options struct {
 	Metrics      http.Handler
 	MetricsToken string
 	// SignIns records sign-in failures and throttle refusals for the operator
-	// (kubeat_signin_failures_total, kubeat_signin_throttled_total); the same
+	// (kubeat_signin_failures_total, kubeat_signin_throttled_total), the
+	// throttle's requests it could not key on their client and the 429s of the
+	// password change and the status-page unlock
+	// (kubeat_signin_source_degraded_total, kubeat_throttled_total); the same
 	// meter served at Metrics. A nil one is valid and records nothing, so the
 	// client responses (a generic 401, a 429) are the whole story without it.
 	SignIns *metrics.Metrics

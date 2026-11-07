@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -396,6 +397,19 @@ func main() {
 		}()
 	}
 	reportSourceCeiling(cfg, logger)
+	// The addresses Kubeat's own public URL resolves to, at start and every
+	// few minutes in the background, never on a request's path: a throttled
+	// request keyed on one of them was keyed on the load balancer in front
+	// of the UI, the hops one too few (hops_too_low). Without a public URL
+	// there is none to check against.
+	publicAddresses := api.NewPublicAddresses(cfg.PublicURL, net.DefaultResolver, logger)
+	if publicAddresses != nil {
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			publicAddresses.Run(ctx)
+		}()
+	}
 
 	if cfg.PrometheusURL != "" {
 		client, err := prom.New(prom.Options{
@@ -452,6 +466,7 @@ func main() {
 			SourceThrottle:           sourceThrottle,
 			TrustProxyHops:           cfg.TrustProxyHops,
 			FrontendToken:            cfg.FrontendToken,
+			PublicAddresses:          publicAddresses,
 			PasswordMinLength:        cfg.PasswordMinLength,
 			LoginConcurrency:         cfg.LoginConcurrency,
 			LoginQueueWait:           cfg.LoginQueueWait,

@@ -122,8 +122,10 @@ backend:
     # for the Route or the Ingress class. The 1 with none holds for a
     # port-forward only: Next.js keeps a header a client sent, so with
     # frontend.service.type LoadBalancer or NodePort and no such proxy in
-    # front keep 0, a shared lock rather than a bypass. The backend reads
-    # the header only from the UI, which proves itself with the
+    # front keep 0, a shared lock rather than a bypass (with
+    # metrics.prometheusRule.enabled, KubeatSignInSourceDegraded then fires
+    # with reason hops_zero: silence it, README "Sayaç ve kural"). The
+    # backend reads the header only from the UI, which proves itself with the
     # frontendToken Secret below: a pod that reaches the backend directly
     # keys on its own address whatever it writes. One that
     # reaches the UI's Service directly is passed on as the UI's; above 0
@@ -133,9 +135,11 @@ backend:
     # safely fall back to the peer). But too high behind a proxy that
     # appends (Route, GCLB), a client lengthening the header picks its
     # source, unwarned: if unsure, take the lower value. A value too low is
-    # not warned either, but every refused sign-in logs the source it keyed
-    # on; with UPTIME_LOGIN_SOURCE_MAX_FAILURES set, too low a value makes
-    # that ceiling one lock for every sign-in, so check the source first.
+    # warned only when the source is an address UPTIME_PUBLIC_URL's host
+    # resolves to (hops_too_low, 0.52; KubeatSignInSourceDegraded); otherwise
+    # every refused sign-in logs the source it keyed on. With
+    # UPTIME_LOGIN_SOURCE_MAX_FAILURES set, too low a value makes that
+    # ceiling one lock for every sign-in, so check the source first.
     # UPTIME_TRUST_PROXY_HOPS: "1"              # X-Forwarded-For entries your proxies in front of the UI write (1 with none); source read from the rightmost this many (0: trust none, use the peer)
     # UPTIME_LOGIN_MAX_FAILURES: "10"           # per-source failures that lock a source's attempts at a name
     # UPTIME_LOGIN_ACCOUNT_MAX_FAILURES: "50"   # loose, very high ceiling on a name's failures across all sources; 0 turns it off
@@ -572,16 +576,29 @@ metrics:
     # The severity label of the per-monitor alerts.
     severity: warning
     certWarningDays: 14
+    # The severity label of KubeatSignInSourceDegraded, the kubeat.signin
+    # group's alert: the sign-in throttle cannot tell clients apart (the
+    # proxy hops are wrong, or the UI's token is missing), so one lock per
+    # name, page or account is left for everyone. It is the runtime twin of
+    # the install notes' hops warning, for installs whose notes no one reads
+    # (Argo CD, Terraform); README, "Yanlış ayar sessizce etkisiz kalmaz".
+    # It fires at the right value too where the UI's Service is exposed with
+    # no proxy in front (hops_zero) or a layer that writes no header connects
+    # from Kubeat's public address (hops_too_low): silence that reason in
+    # Alertmanager, never raise the hops (a bypass); README, "Sayaç ve kural".
+    # No value turns this rule off alone.
+    signInSeverity: warning
     # The label that tells clusters apart, e.g. "cluster", for rules evaluated
     # over the series of several clusters in one store (Grafana Cloud or
     # Mimir, a global Thanos Ruler): let Grafana Alloy load the rules
     # rendered with it, or copy them there (README, "Operator'süz cluster").
-    # KubeatDown, KubeatUnhealthy, KubeatBackupFailing and the outage,
-    # certificate and channel alerts (KubeatNotificationsFailing) then group
-    # by it beside namespace and job (and the monitor or the channel), so that
-    # one cluster's Kubeat is not hidden by another's, and keep no other label
-    # the store adds (the replica label of an HA pair it does not
-    # deduplicate). KubeatDown also fires for a cluster whose backend was seen
+    # KubeatDown, KubeatUnhealthy, KubeatBackupFailing, the outage,
+    # certificate and channel alerts (KubeatNotificationsFailing) and
+    # KubeatSignInSourceDegraded then group by it beside namespace and job
+    # (and the monitor, the channel or the reason), so that one cluster's
+    # Kubeat is not hidden by another's, and keep no other label the store
+    # adds (the replica label of an HA pair it does not deduplicate).
+    # KubeatDown also fires for a cluster whose backend was seen
     # in the last 24 hours and is gone; a longer absence is the heartbeat's to
     # tell. When every cluster's series are gone together, absent() raises
     # one more KubeatDown, without the cluster label. Leave it empty where

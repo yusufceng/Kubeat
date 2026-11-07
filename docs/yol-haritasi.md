@@ -211,10 +211,11 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   sayfa ve hesap başına gevşek tavan girişinkidir
   (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, yeni ayar yok); değer `0` ya da
   eksikse veya sır eksikse bu iki yüzey de tek paylaşılan kilide geriler
-  (eksik değer WARN vermez), fazla değerde girişteki gibi başlığını uzatan
-  istemci kaynağını seçebilir; WARN yüzeyi adlandırır. Bu iki yüzeyin 429'ları
-  yalnız dakikalık WARN'da görünür, sayacı yoktur (S85 dilim 1, sprint 10,
-  [#146](https://github.com/yusufceng/Kubeat/issues/146)). Gerçek
+  (0.51'de eksik değer WARN vermezdi; 0.52'de bkz. aşağıda S85 dilim 1),
+  fazla değerde girişteki gibi başlığını uzatan istemci kaynağını seçebilir;
+  WARN yüzeyi adlandırır. Bu iki yüzeyin 429'ları
+  0.51'de yalnız dakikalık WARN'da görünüyordu; 0.52'den beri sayılır (aşağıda
+  S85 dilim 1). Gerçek
   tarayıcı yolunda iki kaynaklı prova sandbox Route'unda geçti (sprint 9). Dizin
   (LDAP/AD) hesap kilidiyle etkileşim belgelendi (README "LDAP" → "Dizin hesap
   kilidi", ADR-0004): dizinde bulunan bir adın her yanlış parolası dizine bir
@@ -229,7 +230,24 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   README'nin önerdiği değer gerçek bir AD/OIDC dizininde ölçülmedi (sprint 10
   "Kullanıcıda kalanlar"); kapsam yalnız giriştir. Paylaşılan kurumsal NAT ayrımı
   backlog'da ([backlog](backlog.md) "Giriş throttle için güvenilir-vekil IP
-  allowlist").
+  allowlist"). S85 dilim 1 ([#146](https://github.com/yusufceng/Kubeat/issues/146),
+  0.52.0) parola değiştirme ve durum sayfası 429'larını
+  `kubeat_throttled_total{surface,kind}`'da sayar (`kubeat_signin_throttled_total`'ın
+  anlamı değişmedi) ve throttle'ın kaynağı ayıramadığı her isteği, WARN'ın dakika
+  sınırından bağımsız, `kubeat_signin_source_degraded_total{reason,surface}`'da.
+  Yeni `hops_too_low` nedeni anahtarlanan kaynağın `UPTIME_PUBLIC_URL`'ün çözüldüğü
+  bir adres, yani Kubeat'in kendi yük dengeleyicisi olduğunu söyler ve WARN verir.
+  Chart'ın `KubeatSignInSourceDegraded` kuralı (`metrics.prometheusRule.enabled`)
+  yanlış hop ayarını kurulum notunu görmeyen GitOps ve Terraform kurulumlarına da
+  duyurur. Kalanlar: `hops_too_low` host çözülemezken ya da CNAME/CDN arkasında
+  susar ve GKE'de ölçülmedi; kaynak genel adres değilken eksik değer (WAF'lı
+  Route'ta `1`) yine WARN ve sayaç vermez; arayüz Service'i vekilsiz dışarı
+  açıkken (`hops_zero`) ve başlığı yazmayan bir katman genel adresten
+  bağlanırken (`hops_too_low`) kural doğru değerde de sürekli yanar ve
+  Alertmanager'da susturulur, çünkü kuralı tek başına kapatan bir values
+  anahtarı yok (README "Sayaç ve kural"); dizine ulaşılamaması ve hesap tavanı
+  kilidi için chart kuralı dilim 2'de ([backlog](backlog.md) "Yeni
+  giriş/dizin/throttle metrikleri için chart PrometheusRule ...").
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
   bildirim kanallarının adlarını verir ve kullanıcı rollerinin namespace
   sınırını tanımaz; bu yüzden
