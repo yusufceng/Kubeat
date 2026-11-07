@@ -26,11 +26,17 @@ raise a false alert or a second one.
 {{- $byInstallation := printf "without (%s)" $scrape }}
 {{- $byMonitor := printf "without (%s)" $scrape }}
 {{- $byChannel := printf "without (%s)" $scrape }}
+{{- /*
+The throttle's alert is one per installation and reason: the surfaces
+share the fix, and a Recreate's new pod carries on the old one's alert.
+*/}}
+{{- $byReason := printf "without (%s, surface)" $scrape }}
 {{- if $cluster }}
 {{- $installation = printf "namespace, job, %s" $cluster }}
 {{- $byInstallation = printf "by (%s)" $installation }}
 {{- $byMonitor = printf "by (%s, monitor, monitor_namespace, type)" $installation }}
 {{- $byChannel = printf "by (%s, channel, channel_type)" $installation }}
+{{- $byReason = printf "by (%s, reason)" $installation }}
 {{- end }}
 # Alerts the cluster's own Prometheus raises from Kubeat's metrics, so that
 # outages reach the Alertmanager and receivers the platform already has.
@@ -88,6 +94,29 @@ spec:
             severity: {{ .Values.metrics.prometheusRule.severity | quote }}
           annotations:
             summary: {{ `"certificate of {{ $labels.monitor }} expires in {{ $value | humanizeDuration }}"` }}
+    - name: kubeat.signin
+      rules:
+        # The sign-in throttle, and the password change's and the status-page
+        # unlock's with it, cannot tell clients apart: every browser keys on
+        # one address, the UI pod or a load balancer, and one lock per name,
+        # page or account is left, which anyone who knows a name can close for
+        # everyone. The backend warns of it once a minute and counts every
+        # such request; an install whose notes no one reads (Argo CD,
+        # Terraform) hears it here. A request that did not come from the UI
+        # is counted too, but not here: a script's sign-in keys on its own
+        # address as it should. One request is enough: the misconfiguration
+        # holds for every request until it is fixed, and the alert resolves
+        # 15 minutes after the last one.
+        - alert: KubeatSignInSourceDegraded
+          expr: |-
+            sum {{ $byReason }} (
+              increase(kubeat_signin_source_degraded_total{reason=~"hops_zero|no_frontend_token|hops_too_high|hops_too_low"}[15m])
+            ) > 0
+          labels:
+            severity: {{ dig "prometheusRule" "signInSeverity" "warning" .Values.metrics | default "warning" | quote }}
+          annotations:
+            summary: {{ `"Kubeat's sign-in throttle cannot tell clients apart ({{ $labels.reason }})"` }}
+            description: {{ `"In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: {{ if eq $labels.reason \"hops_zero\" }}X-Forwarded-For came, but UPTIME_TRUST_PROXY_HOPS is 0{{ else if eq $labels.reason \"no_frontend_token\" }}UPTIME_TRUST_PROXY_HOPS is above 0, but UPTIME_FRONTEND_TOKEN is not set{{ else if eq $labels.reason \"hops_too_high\" }}the X-Forwarded-For chain from the UI is shorter than UPTIME_TRUST_PROXY_HOPS{{ else }}the source keyed on is an address of UPTIME_PUBLIC_URL's host, Kubeat's own load balancer, so UPTIME_TRUST_PROXY_HOPS is too low{{ end }}. Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set."` }}
     - name: kubeat.self
       rules:
         # Also with no backend target at all: a pod that is pending, deleted

@@ -572,16 +572,24 @@ metrics:
     # The severity label of the per-monitor alerts.
     severity: warning
     certWarningDays: 14
+    # The severity label of KubeatSignInSourceDegraded, the kubeat.signin
+    # group's alert: the sign-in throttle cannot tell clients apart (the
+    # proxy hops are wrong, or the UI's token is missing), so one lock per
+    # name, page or account is left for everyone. It is the runtime twin of
+    # the install notes' hops warning, for installs whose notes no one reads
+    # (Argo CD, Terraform); README, "Yanlış ayar sessizce etkisiz kalmaz".
+    signInSeverity: warning
     # The label that tells clusters apart, e.g. "cluster", for rules evaluated
     # over the series of several clusters in one store (Grafana Cloud or
     # Mimir, a global Thanos Ruler): let Grafana Alloy load the rules
     # rendered with it, or copy them there (README, "Operator'süz cluster").
-    # KubeatDown, KubeatUnhealthy, KubeatBackupFailing and the outage,
-    # certificate and channel alerts (KubeatNotificationsFailing) then group
-    # by it beside namespace and job (and the monitor or the channel), so that
-    # one cluster's Kubeat is not hidden by another's, and keep no other label
-    # the store adds (the replica label of an HA pair it does not
-    # deduplicate). KubeatDown also fires for a cluster whose backend was seen
+    # KubeatDown, KubeatUnhealthy, KubeatBackupFailing, the outage,
+    # certificate and channel alerts (KubeatNotificationsFailing) and
+    # KubeatSignInSourceDegraded then group by it beside namespace and job
+    # (and the monitor, the channel or the reason), so that one cluster's
+    # Kubeat is not hidden by another's, and keep no other label the store
+    # adds (the replica label of an HA pair it does not deduplicate).
+    # KubeatDown also fires for a cluster whose backend was seen
     # in the last 24 hours and is gone; a longer absence is the heartbeat's to
     # tell. When every cluster's series are gone together, absent() raises
     # one more KubeatDown, without the cluster label. Leave it empty where

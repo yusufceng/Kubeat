@@ -42,6 +42,9 @@ type Metrics struct {
 	signInFailures    *prometheus.CounterVec
 	signInThrottled   *prometheus.CounterVec
 	targetScopeDenied *prometheus.CounterVec
+	// throttle holds the throttle's counters beside the sign-in's
+	// (throttle.go).
+	throttle throttleMetrics
 
 	// hosts are the host labels targetThrottled has been given so far; past
 	// MaxThrottledHosts of them, a new host is counted as OtherHost.
@@ -241,6 +244,7 @@ func New(version string) *Metrics {
 	for _, kind := range []string{ThrottleSource, ThrottleAccount, ThrottleSourceTotal} {
 		m.signInThrottled.WithLabelValues(kind)
 	}
+	m.throttle = newThrottleMetrics(m.registry)
 
 	m.licenseExpiry = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_license_expiry_timestamp_seconds",

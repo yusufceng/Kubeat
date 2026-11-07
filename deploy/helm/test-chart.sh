@@ -716,7 +716,7 @@ rules() {
     [ "$want" = lacks ] || failed "$name: the rules lack \"$text\""
   fi
 }
-for alert in KubeatDown KubeatSchedulerStalled KubeatUnhealthy KubeatMetricsIncomplete KubeatResultsDropped \
+for alert in KubeatSignInSourceDegraded KubeatDown KubeatSchedulerStalled KubeatUnhealthy KubeatMetricsIncomplete KubeatResultsDropped \
   KubeatNotificationsFailing KubeatWorkersSaturated KubeatBackupFailing KubeatBackupStale KubeatLicenseExpiring; do
   rules "$alert with backups" has "alert: $alert" --set backup.enabled=true
 done
@@ -751,6 +751,24 @@ rules "KubeatBackupFailing until a backup succeeds" has 'max_over_time(kubeat_ba
 # KubeatUnhealthy reads what the heartbeat judges, one alert across a
 # Recreate; a loss of some results stays KubeatResultsDropped's warning.
 rules "KubeatUnhealthy reads the self-health gauge" has 'expr: max without (instance, pod, endpoint, container, service) (kubeat_self_healthy) == 0'
+# KubeatSignInSourceDegraded, in a group of its own between the monitors'
+# and Kubeat's own: one alert per installation and reason, across the
+# surfaces and a Recreate, on the four reasons that leave every browser on
+# one lock. A request that did not come from the UI is only counted. Its
+# severity is metrics.prometheusRule.signInSeverity, warning when values
+# from before 0.52 lack it, and it is no part of KubeatUnhealthy.
+rules "kubeat.signin between kubeat.monitors and kubeat.self" has '- name: kubeat.signin'
+if helm template kubeat "$CHART" --show-only templates/prometheusrule.yaml "${RULES[@]}" >"$WORK/rules" 2>"$WORK/err"; then
+  groups="$(grep -E '^    - name: ' "$WORK/rules" | sed 's/^    - name: //' | tr '\n' ' ')"
+  [ "$groups" = "kubeat.monitors kubeat.signin kubeat.self " ] || failed "rule groups in order: $groups"
+else
+  failed "rule groups: refused: $(cat "$WORK/err")"
+fi
+rules "KubeatSignInSourceDegraded per installation and reason" has 'sum without (instance, pod, endpoint, container, service, surface) ('
+rules "KubeatSignInSourceDegraded on the four reasons" has 'increase(kubeat_signin_source_degraded_total{reason=~"hops_zero|no_frontend_token|hops_too_high|hops_too_low"}[15m])'
+rules "KubeatSignInSourceDegraded severity from values" has 'severity: "critical"' --set metrics.prometheusRule.signInSeverity=critical
+rules "KubeatSignInSourceDegraded severity missing from older values" has 'severity: "warning"' \
+  --set metrics.prometheusRule.signInSeverity=null --set metrics.prometheusRule.severity=info
 
 # metrics.prometheusRule.clusterLabel, for rules evaluated over the series of
 # several clusters in one store. Empty, the rules it changes render as 0.44
@@ -760,7 +778,7 @@ rules "KubeatUnhealthy reads the self-health gauge" has 'expr: max without (inst
 # adds, and every other rule renders the same either way. promtool below
 # shows how they behave over two clusters' series.
 CLUSTER=(--set metrics.prometheusRule.clusterLabel=cluster)
-BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing): '
+BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing|KubeatSignInSourceDegraded): '
 # exprs FILE: the expression of every rule in a rendered PrometheusRule, each
 # of its lines after the rule's alert name.
 exprs() {
@@ -830,7 +848,7 @@ if helm template kubeat "$CHART" --namespace kubeat --show-only templates/promet
   --set backup.enabled=true >"$WORK/rules-plain" 2>"$WORK/err" &&
   helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" \
     --set backup.enabled=true "${CLUSTER[@]}" >"$WORK/rules-cluster" 2>"$WORK/err"; then
-  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing): ' |
+  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing|KubeatSignInSourceDegraded): ' |
     diff "$WORK/exprs-0.44" - >"$WORK/diff" ||
     failed "clusterLabel empty: the rules differ from 0.44's: $(cat "$WORK/diff")"
   exprs "$WORK/rules-plain" | grep '^KubeatNotificationsFailing: ' | diff "$WORK/channels-plain" - >"$WORK/diff" ||
@@ -853,8 +871,9 @@ rules "KubeatDown without a backend in any cluster" has 'or absent(up{job="kubea
 rules "outages held per cluster" has 'unless on (namespace, job, cluster) (kubeat_monitor_scrape_success == 1)' "${CLUSTER[@]}"
 rules "outages per cluster and monitor" has 'max by (namespace, job, cluster, monitor, monitor_namespace, type) (kubeat_monitor_incident_open) == 1' "${CLUSTER[@]}"
 rules "KubeatUnhealthy per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_self_healthy) == 0' "${CLUSTER[@]}"
+rules "KubeatSignInSourceDegraded per cluster and reason" has 'sum by (namespace, job, cluster, reason) (' "${CLUSTER[@]}"
 rules "no store label kept but the cluster's" lacks 'without (' "${CLUSTER[@]}"
-for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace channel channel_type severity; do
+for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace channel channel_type reason surface severity; do
   refuses "clusterLabel $label" "metrics.prometheusRule.clusterLabel is \"$label\"" "${RULES[@]}" --set-string metrics.prometheusRule.clusterLabel="$label"
 done
 for label in cluster k8s_cluster _cluster Cluster1; do
