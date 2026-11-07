@@ -996,14 +996,26 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     çözülemezse monitor kendi hatasıyla DOWN olur. Kontrolün bağlandığı uç
     noktalar oluşturma ve değiştirmede de denetlenir.
   - **Kimin kapsamı.** Monitor'ün ayarlarında bir kapsam kaydı tutulur:
-    kontrolün nasıl koştuğunu (hedef, her pod seçeneği, türün seçenekleri) en
-    son değiştiren kullanıcının o anki namespace'leri (oluşturma, klon, içe
-    aktarma, değiştirme).
-    - Bunları değiştirmeyen bir kayıt kaydı korur: duraklatmak; ad, etiket ya
-      da aralık değiştirmek; formu yalnız bunlarla kaydetmek. Yönetici kapsamı
-      sınırlı kullanıcının monitor'ünü düzenleyince kapsam kalkmaz, kapsamı
-      sınırlı kullanıcı yöneticinin monitor'ünü yeniden adlandırınca daralmaz.
-      Kaydı kendine almak isteyen kontrolün bir ayarını değiştirir.
+    kontrolün bağlandığı yeri en son adlandıran kullanıcının o anki
+    namespace'leri (oluşturma, klon, içe aktarma, değiştirme). Bağlanılan
+    yeri hedef ve türün host adı taşıyan seçenekleri adlandırır; kontrolün ne
+    gönderdiği, yanıtı nasıl okuduğu ve her pod seçeneği host adlandırmaz.
+    - **Genişletme dar.** Kayıt daha geniş bir kapsama yalnız hedef ya da
+      host adı taşıyan bir seçenek değişince geçer. Kaydın namespace'lerini
+      tutan biri (yönetici, daha çok namespace'i olan editör) kontrolün öteki
+      seçeneklerini değiştirince ya da formu kaydedince kayıt olduğu gibi
+      kalır: yönetici kapsamı sınırlı kullanıcının monitor'ünü düzenleyince
+      kapsam kalkmaz. Kaydı kendine almak isteyen hedefi ya da host adı taşıyan
+      bir seçeneği değiştirir ya da monitor'ü kopyalar (kopya kopyalayanındır).
+    - **Daraltma geniş.** Kaydın namespace'lerinin hepsini tutmayan biri
+      kontrolün herhangi bir seçeneğini değiştirince kayıt ikisinin ortak
+      namespace'lerine daralır: kapsamı sınırlı kullanıcı yöneticinin
+      monitor'ünün gönderdiğini ya da okuduğunu değiştirirse kontrol onun
+      kapsamına bağlanır. Formun bir seçeneği saklanandan farklı yazması da
+      (ör. API'yle kurulmuş bir monitor'de) değişiklik sayılır; böyle
+      daralmış bir monitor'ü yönetici yukarıdaki gibi geri alır.
+    - Kontrolü değiştirmeyen bir kayıt kaydı korur: duraklatmak; ad, etiket ya
+      da aralık değiştirmek.
     - Kapsamı sınırlı bir kullanıcı, hedefi kapsamının dışında olan bir
       monitor'ün seçeneklerini değiştiremez (403); onu duraklatabilir.
     - Yöneticinin, API token'ının ve kapsamı `*` olan kullanıcının kurduğu
@@ -1034,7 +1046,13 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       host'undan başka bir namespace'e ya da cluster içine, kurum aralığı
       tanımlı değilse özel adresli bir kurum hostuna (ör. bir giriş sayfasına)
       giden annotation monitor'ü DOWN olur. Çare kurum aralığı (yukarıda
-      "Kurum ağı") ya da monitor'ü elle kurmaktır;
+      "Kurum ağı") ya da monitor'ü elle kurmaktır. Vekilli kurulumda
+      (backend'in çözücüsü genel adları çözemiyorsa) kontrolün ulaştığı,
+      backend'in çözemediği başka bir dış host da (ör. bir kimlik sağlayıcının
+      giriş sayfası) reddedilir ve monitor DOWN olur; çare
+      `UPTIME_TARGET_SCOPE_TRUST_PROXY`'dir (yukarıda "Vekilli kurulum"):
+      yalnız NXDOMAIN'i vekile bırakır, SERVFAIL ve zaman aşımı yine red
+      sayılır (S82);
     - ötekiler için, kapsamı sınırlı bir editör yoksa (yerel hesap, LDAP/OIDC
       grup eşlemesi, `UPTIME_LDAP_DEFAULT_ROLE` ya da
       `UPTIME_OIDC_DEFAULT_ROLE` ile verilen sınırlı varsayılan namespace'ler)
@@ -1048,7 +1066,8 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       çıplak bir adrese bağlanan monitor'ü de böylece DOWN olur; yönetici onu
       bir kez kaydedince (formu değiştirmeden kaydetmek ya da hedefi aynı
       değerle `PATCH` etmek) kaydı yazılır ve düzelir. Kapsamı sınırlı bir
-      kullanıcının değiştirmeden kaydetmesi kaydı yazmaz.
+      kullanıcının, hedefi ya da host adı taşıyan bir seçeneği değiştirmeyen
+      kaydı kaydı yazmaz; monitor namespace'ine bağlı kalır.
 
     Yükseltmeden önceki ön kontrol: [docs/yukseltme.md](docs/yukseltme.md)
     "0.51'e yükseltme".
@@ -1064,9 +1083,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       bugün yalnız kanallar için geçerlidir).
     - Vekile giden kontrolde çözüm hatası (SERVFAIL, zaman aşımı) ve
       kontrolün yöneldiği, ayarlarda yazılı olmayan bir adın çözüm hatası da
-      kapsam reddi sayılır: CoreDNS kesintisinde kapsamı sınırlı monitor'lerin
-      bu kontrolleri DOWN olur ve bu red sayaçta gerçek bir reddinden ayrılmaz
-      (S82).
+      kapsam reddi sayılır: CoreDNS kesintisinde kapsamı sınırlı ve
+      annotation'la kurulan monitor'lerin bu kontrolleri DOWN olur, bildirim
+      DNS kesintisini kapsam reddi diye söyler ve bu red sayaçta gerçek bir
+      reddinden ayrılmaz (S82).
     - Hassas aralıkları `UPTIME_TARGET_DENY_CIDRS` ile kapatmak her monitor ve
       kanal için derinlemesine savunma olarak geçerli kalır.
 

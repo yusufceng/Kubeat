@@ -314,7 +314,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   yönetici ve `*` etkilenmiyor, kaydı olmayan eski monitor namespace'ine
   bağlanıyor (kapsamı sınırlı editör yoksa her namespace'in kaydını alıyor),
   annotation monitor'ü her kurulumda nesnesinin namespace'ine bağlı, kayıt
-  yalnız kontrolün bir ayarı değişince el değiştiriyor, reddedilen kontrol
+  daha geniş bir kapsama yalnız kontrolün bağlandığı yeri adlandıran bir ayar
+  değişince geçiyor, kaydın namespace'lerinin hepsini tutmayan biri kontrolün
+  herhangi bir ayarını değiştirince onu daraltıyor, reddedilen kontrol
   DOWN ve `reason=connection` ile sayılıyor. Kalan: kayıt
   yazıldığı anın görüntüsü, kapsam daralınca var olan monitor'ler eski kapsamla
   çalışıyor (S73, backlog, sprint 11 adayı); kanallar yalnız oluşturma ve

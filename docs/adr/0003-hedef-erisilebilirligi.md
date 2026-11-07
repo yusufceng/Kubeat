@@ -268,15 +268,40 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
 
     (1) seçildi (PO şartı: göç yok). Kayıt
     `"scope": {"namespaces": [...], "discovered": true}` biçimindedir;
-    `["*"]` her namespace'tir. Kaydı, kontrolün nasıl koştuğunu (hedefi, her
-    pod seçeneğini, türün seçeneklerini) en son değiştiren yazar: oluşturan,
-    klonlayan, içe aktaran ya da değiştiren (`store.SameCheck`). Bunları
-    değiştirmeyen bir kayıt kaydı korur: duraklatmak; ad, etiket ya da aralık
-    değiştirmek; arayüz formunu yalnız bunlarla kaydetmek (form her kayıtta
-    bütün alanları gönderir, karar gönderilen alanlara değil değişene
-    bakar). Yoksa bir yöneticinin sıradan bir form kaydı kapsamı sınırlı
-    kullanıcının monitor'ünden kapsamı sessizce kaldırır, kapsamı sınırlı
-    kullanıcının yeniden adlandırması da yöneticinin monitor'ünü daraltırdı.
+    `["*"]` her namespace'tir. Kaydı, kontrolün bağlandığı yeri en son
+    adlandıran yazar: oluşturan, klonlayan, içe aktaran ya da hedefi veya
+    türün host adı taşıyan bir seçeneğini değiştiren
+    (`store.SameConnections`). Kontrolün öteki seçenekleri (ne gönderdiği,
+    yanıtı nasıl okuduğu, her pod seçeneği) host adlandırmaz; bağlanılan yeri
+    hedef ve onun nesnesi belirler, onları yazanın kapsamı da kayıttadır.
+    Kural asimetriktir (`api.scopeRecord`):
+    - **Genişletme dar.** Mevcut bir kaydı daha geniş bir kapsamla değiştirmek
+      yalnız bu ayarlar değişince olur. Kaydın namespace'lerini tutan biri
+      (yönetici, daha çok namespace'i olan editör) kontrolün öteki
+      seçeneklerini değiştirince ya da formu kaydedince kayıt olduğu gibi
+      kalır; yoksa bir yöneticinin sıradan bir form kaydı kapsamı sınırlı
+      kullanıcının monitor'ünden kapsamı kaldırırdı.
+    - **Daraltma geniş.** Kaydın namespace'lerinin hepsini tutmayan biri
+      kontrolün herhangi bir seçeneğini değiştirince (`store.SameCheck`)
+      kayıt ikisinin ortak namespace'lerine daralır (`TargetScope.Within`):
+      kapsamı sınırlı kullanıcı, yöneticinin monitor'ünün gönderdiğini ya da
+      okuduğunu değiştirirse kontrol onun kapsamına bağlanır. Formun bir
+      seçeneği saklanandan farklı yazması da değişiklik sayılır; yanlış bir
+      daraltmanın bedeli erişilebilirliktir (monitor `blocked_by_scope` ile
+      DOWN olur, yönetici hedefi ya da host adı taşıyan bir seçeneği
+      değiştirerek ya da kopyalayarak geri alır), kapsam değil.
+    - Kontrolü değiştirmeyen bir kayıt (duraklatmak; ad, etiket ya da aralık
+      değiştirmek) kaydı korur.
+
+    Seçenekler: (a) kontrolün her değişikliğinde kaydı değiştirene vermek:
+    yöneticinin sıradan bir kaydı kapsamı kaldırır; (b) form ile API'nin bir
+    seçeneği yazışını alan alan eşitlemek: kural, formla API'nin her seçeneği
+    her zaman aynı yazmasına dayanır ve her yeni alanda yeniden sınanmalıdır;
+    (c) asimetrik kural: genişletme bağlanılan yeri adlandıran birkaç ayara,
+    daraltma her değişikliğe bağlıdır. (c) seçildi. Geri alma maliyeti
+    küçük: kural tek yerdedir (`api.scopeRecord`, `store.SameConnections`),
+    göç yoktur; listeye bir ayar eklemek genişletmeyi kolaylaştırır, bu yüzden
+    yalnız host adlandıran bir ayar eklenir.
     Hedef ya da seçenek gönderen her değişiklik hedefi değiştirenin
     kapsamıyla denetlenir, böylece kapsamı sınırlı kullanıcı hedefi kapsamının
     dışındaki bir monitor'ün kontrolünü üstlenemez. `discovered`, hedefin
@@ -305,8 +330,13 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     kendi host'undan başka bir namespace'e ya da cluster içine, kurum aralığı
     yoksa özel adresli bir kurum hostuna giden annotation monitor'ü DOWN olur;
     çare kurum aralığı (S80; on-prem router VIP'i `/32` dahil) ya da monitor'ü
-    elle kurmaktır. Geri alma maliyeti küçük: kural tek yerde
-    (`store.ObjectScope`, açılış ve eşitleme), göç yok.
+    elle kurmaktır. Vekilli kurulumda (S81 ortamı: backend'in çözücüsü genel
+    adları çözemez) kontrolün ulaştığı, backend'in çözemediği başka bir dış
+    host da reddedilir ve annotation monitor'ü DOWN olur; çare
+    `UPTIME_TARGET_SCOPE_TRUST_PROXY`'dir: yalnız NXDOMAIN'i vekile bırakır,
+    SERVFAIL ve zaman aşımı yine red sayılır (S82). Geri alma maliyeti
+    küçük: kural tek yerde (`store.ObjectScope`, açılış ve eşitleme), göç
+    yok.
   - **Anlık görüntü mü, canlı okuma mı (S73).** Kayıt, yazanın o anki
     kapsamının anlık görüntüsüdür. Canlı okuma (kaydın kullanıcıyı
     göstermesi, kontrolün kullanıcının bugünkü kapsamını okuması) kapsam
@@ -342,7 +372,9 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     - varsa sayıları açılışta bir `WARN` satırında yazılır, yükseltmeden
       önceki ön kontrol onları listeler (`docs/yukseltme.md`) ve bir
       yöneticinin monitor'ü kaydetmesi, değiştirmeden de olsa, kaydını yazar;
-      kapsamı sınırlı bir kullanıcının değiştirmeden kaydetmesi yazmaz;
+      kapsamı sınırlı bir kullanıcının, hedefi ya da host adı taşıyan bir
+      seçeneği değiştirmeyen kaydı yazmaz (monitor namespace'ine bağlı
+      kalır);
     - sınır: yalnız bugünkü editörlere bakılır; kapsamı sınırlı editörü
       silinmiş ya da genişletilmiş bir kurulumda onun kurduğu kaydı olmayan
       monitor'ler de her namespace'in kaydını alır.
@@ -354,11 +386,14 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     çözümüne dayanır, vekil adı yeniden çözer; kontrolün yöneldiği ve
     çözülemeyen bir ad (vekilli istekte SERVFAIL ve zaman aşımı; doğrudan
     bağlantıda ayarlarda yazılı olmayan her ad) oluşturmadaki gibi güvenli
-    tarafta red sayılır. CoreDNS kesintisinde kapsamı sınırlı monitor'lerin bu
-    kontrolleri bu yüzden DOWN olur ve bu red sayaçta gerçek bir reddinden
-    ayrılmaz (S82). Kapsam daralması var olan kayıtları değiştirmez (S73).
-    Yönetici, kaydı başka birinin olan bir monitor'ü kendine ancak kontrolün
-    bir ayarını değiştirerek alır.
+    tarafta red sayılır. CoreDNS kesintisinde kapsamı sınırlı ve annotation'la
+    kurulan monitor'lerin bu kontrolleri bu yüzden DOWN olur, bildirim DNS
+    kesintisini kapsam reddi diye söyler ve bu red sayaçta gerçek bir
+    reddinden ayrılmaz (S82). Kapsam daralması var olan kayıtları değiştirmez
+    (S73). Yönetici, kaydı başka birinin olan bir monitor'ü kendine ancak
+    hedefi ya da host adı taşıyan bir seçeneği değiştirerek ya da monitor'ü
+    kopyalayarak alır; formun farklı yazdığı bir seçenekle daralmış bir
+    monitor de böyle geri alınır.
 
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
