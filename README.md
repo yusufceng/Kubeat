@@ -1495,9 +1495,10 @@ varsayılan `0`, kapalı):
   kaynaklardaki tavanı. Birine takılan deneme öncekilerden geri alınır, hiçbir
   sayaca yazılmaz.
 - Doğru giriş tavandaki sayacı sıfırlamaz (spreydeki tek bir isabet öncesini
-  silmez) ama kendisi de sayılmaz; yalnız o adın kaynak + ad sayacı, önceden
-  olduğu gibi, sıfırlanır. Dizine ulaşılamaması, meşgul (503) yanıtı ve
-  devre dışı hesabın doğru parolası sayılmaz.
+  silmez) ama kendisi de sayılmaz; o adın kaynak + ad sayacı ve adın tüm
+  kaynaklardaki tavanı, önceden olduğu gibi, sıfırlanır. Dizine ulaşılamaması,
+  meşgul (503) yanıtı ve devre dışı hesabın doğru parolası sayılmaz. Rolü
+  olmayan dizin hesabının doğru parolası (403) ise, S76'daki gibi, sayılır.
 - **Taviz.** Aynı NAT ya da kurumsal vekil (PAC) arkasındaki kullanıcılar tek
   kaynaktır: tavan dolunca o ağın arkasındaki herkesin girişi kilit süresince
   birlikte kapanır. Varsayılanın kapalı olması bu yüzdendir; öneri ve LDAP
@@ -1509,6 +1510,9 @@ varsayılan `0`, kapalı):
   açılışta WARN yazar ("cannot tell sources apart"). Tavanı açmadan önce hop
   değerini `sign-in refused` satırının `source` alanıyla doğrulayın (aşağıda
   "Vekil-hop rehberi"); kilitlenince yol "Kilitli hesaba girmek"tedir.
+  Gerekenden küçük bir değer de tavanı tek kilide çevirir: kaynak, önünüzdeki
+  vekilin ya da yük dengeleyicinin adresi olur ve açılışta uyarı yoktur.
+  `source` alanında tarayıcıların kendi adreslerini görmeden tavanı açmayın.
 - Yalnız girişi kapsar: durum sayfası kilidi ve parola değiştirme kendi
   kaynak + kapsam sınırlarıyla kalır.
 
@@ -1826,7 +1830,8 @@ verirsiniz. `route.enabled` ya da `ingress.enabled` açıkken kurulum notu
     Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`.
 
   Emin değilseniz küçük değeri seçip `source` alanıyla doğrulamanızı söyler
-  (fazla değer atlatılabilir, yukarıda); değeri
+  (fazla değer atlatılabilir, yukarıda; kaynak tavanı açıkken küçük değer de
+  bütün girişleri tek kilide bağlar, "Kaynak tavanı" → "Önce hop değeri"); değeri
   `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` gibi verirsiniz.
 - Route'ta, değer ne olursa olsun, `IfNone`/`Never` notunu, politikayı okuyan
   `oc` komutunu ve yetkisi olmayana Route annotation'ını yazar (yukarıda
@@ -2052,7 +2057,9 @@ Yine de bir
 hesap tümüyle kilitlenebilir — kendi adresinizden art arda yanlış yazdığınızda
 (`UPTIME_LOGIN_MAX_FAILURES`), ya da çok sayıda ayrı kaynaktan gelen dağıtık
 bir tahmin hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, varsayılan 50)
-tetiklediğinde. Kilit sürerken açık oturumlar çalışmaya devam eder. Bu durumlar
+tetiklediğinde, ya da kaynak tavanı (`UPTIME_LOGIN_SOURCE_MAX_FAILURES`)
+açıkken bulunduğunuz kaynağın (aynı NAT ya da vekil, yanlış hop değeri)
+bütün adlardaki hataları tavanı doldurduğunda. Kilit sürerken açık oturumlar çalışmaya devam eder. Bu durumlar
 için başka yollar önceden hazır tutulmalıdır:
 
 - API anahtarı (`UPTIME_API_TOKEN`; chart onu `<release>-api-token`

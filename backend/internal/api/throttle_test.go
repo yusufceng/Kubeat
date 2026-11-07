@@ -1124,6 +1124,24 @@ func TestSignInSourceCeilingOrder(t *testing.T) {
 	wantThrottledKinds(t, meter, 2, 1, 3)
 }
 
+// A source past its ceiling adds nothing to its own counter at the name it
+// tries: refused there more times than that counter allows, it signs in at
+// the name once its ceiling's window has moved on.
+func TestSignInSourceCeilingLeavesTheNameCounter(t *testing.T) {
+	const source = "203.0.113.1"
+	directory := directoryOf("ayse", "mehmet", "zeynep", "can")
+	srv, clock, _ := sourceCeilingAPI(t, 3, 0, directory)
+	for _, name := range []string{"ayse", "mehmet", "zeynep"} {
+		wantSignInStatus(t, srv, source, "Sonbahar2026", http.StatusUnauthorized, name)
+		clock.advance(time.Minute)
+	}
+	for range 4 {
+		wantThrottled(t, "the source at can", signInAt(srv, source, "can", "s3cret"), guessLockout-3*time.Minute)
+	}
+	clock.advance(guessLockout - 3*time.Minute)
+	wantSignInStatus(t, srv, source, "s3cret", http.StatusOK, "can")
+}
+
 // A right password does not wipe out the source's failures at other names:
 // one hit in a spray must not clear the misses before it. It counts as no
 // failure either, so the right passwords of many users behind one NAT do not

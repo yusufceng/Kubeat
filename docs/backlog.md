@@ -2581,3 +2581,16 @@ Müşteri A istedi; Müşteri A, Müşteri B ve SRE düşük önemde dedi. Etike
 bir registry sorgusuyla doğrulanır (release manager; cluster gerekmez). Etiketin
 yanına digest'i yazmak ve `scripts/check-versions.sh`'in bu satırı denetlemesi sprint
 11 belge turunda yapılır. Tetikleyici: sprint 11 belge turu.
+
+## Kaynak tavanının ilk reddi için denetim satırı
+
+2026-11-07'de ertelendi (S88 [#145](https://github.com/yusufceng/Kubeat/issues/145)
+SRE incelemesinin düşük bulgusu; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)).
+Bir ad kaynak + ad sınırında kilitlenince denetim kaydına "sign-in locked after N failed
+attempts" satırı yazılıyor; bir kaynak `UPTIME_LOGIN_SOURCE_MAX_FAILURES` tavanını
+doldurduğunda denetim satırı yok. İz dakikalık throttle `WARN`'ı
+(`throttle=source_total`) ve `kubeat_signin_throttled_total{kind="source_total"}`.
+Güvenlik ekibi bir spreyin kilitlendiği anı denetim kaydında göremez. Öneri: tavanın
+ilk reddinde tek bir satır (ör. `login_locked_source`), denetim satırı sınırıyla
+(`UPTIME_LOGIN_AUDIT_PER_MINUTE`). Tetikleyici: denetim kaydını okuyan gerçek bir
+güvenlik ekibi isteği ya da S83'ün kalanı.
