@@ -227,8 +227,8 @@ func TestScopeDenialWarnLine(t *testing.T) {
 // it was. The refusals of the list README "Kapsam ihlali denetimi" names
 // ("Denetlenmeyen red yolları") are a role's, not a choice of target: a
 // viewer of the namespace renewing a push token, deleting a monitor,
-// sending a test notification or writing an incident note. They leave
-// nothing, and their 403 is unchanged too.
+// sending a test notification or writing, changing or deleting an incident
+// note. They leave nothing, and their 403 is unchanged too.
 func TestScopeDenialPaths(t *testing.T) {
 	a := newScopeAudit(t, 0, func(o *Options) {
 		o.Discovery, o.DiscoveryStatus = &fakeDiscovery{}, "in-cluster"
@@ -304,6 +304,7 @@ func TestScopeDenialPaths(t *testing.T) {
 		{"test notification", watcher, "POST", "/api/v1/monitors/" + itoa(web.ID) + "/test-notification", "", viewerRefusal, "", "", ""},
 		{"incident note", watcher, "POST", "/api/v1/incidents/" + itoa(incident.ID) + "/notes", `{"text":"me too"}`, viewerRefusal, "", "", ""},
 		{"changing an incident note", watcher, "PATCH", "/api/v1/incidents/" + itoa(incident.ID) + "/notes/" + itoa(note.ID), `{"text":"edited"}`, viewerRefusal, "", "", ""},
+		{"deleting an incident note", watcher, "DELETE", "/api/v1/incidents/" + itoa(incident.ID) + "/notes/" + itoa(note.ID), "", viewerRefusal, "", "", ""},
 	} {
 		rowsBefore, linesBefore := len(auditDenials(t, a.db)), len(a.warnings())
 		countedBefore := map[string]float64{}
