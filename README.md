@@ -922,29 +922,27 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     - kaynak adrese güvenen bir kurum servisi (yalnız cluster'ın çıkış
       adresine izin veren bir güvenlik duvarı) bu kullanıcıyı Kubeat'ten
       ayıramaz; böyle bir servisin aralığı listeye girmemeli.
-  - **Açılış koruması.** Backend şu durumlarda başlamaz ve nedenini yazar;
-    ayarı daraltmak ya da boşaltmak hatayı kaldırır:
+  - **Açılış koruması.** Ayar açılışta denetlenir; ayarı daraltmak ya da
+    boşaltmak hatayı kaldırır:
     - aralıklardan biri API sunucusunun adresini (`KUBERNETES_SERVICE_HOST`,
       Service ağında) ya da backend'in kendi adresini (pod IP'si ya da
-      loopback) içeriyorsa (`UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: 10.0.0.0/8
-      holds the API server's address 10.96.0.1 (KUBERNETES_SERVICE_HOST), ...`);
-    - girdi geçersizse: CIDR olmayan değer, `/` olmadan tek adres ya da IPv6
-      biçiminde yazılmış bir IPv4 aralığı (`::ffff:10.50.0.0/112`; hata
-      `10.50.0.0/16` yazımını önerir).
-
-    Koruma yalnız bu adreslere ve pod'un bu açılıştaki adresine bakar; ilk
-    açılışın geçmesi güvence değildir:
-    - pod ağının başka bir parçasını içeren bir aralık (ör. pod ağı
-      `10.128.0.0/14` iken `10.130.0.0/16`) bugün geçer; pod başka bir node'a
-      taşınıp o parçadan adres alınca (drain, yeniden zamanlama) backend
-      başlamaz. Backend tek kopya olduğu için izleme o an durur; `ERROR`
-      satırı ve CrashLoop görünür;
+      loopback) içeriyorsa backend başlamaz ve nedenini yazar
+      (`UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: 10.0.0.0/8 holds the API server's
+      address 10.96.0.1 (KUBERNETES_SERVICE_HOST), ...`);
+    - geçersiz bir girdi de backend'i başlatmaz: CIDR olmayan değer, `/`
+      olmadan tek adres ya da IPv6 biçiminde yazılmış bir IPv4 aralığı
+      (`::ffff:10.50.0.0/112`; hata `10.50.0.0/16` yazımını önerir);
+    - koruma yalnız bu adreslere ve pod'un bu açılıştaki adresine bakar, ilk
+      açılışın geçmesi güvence değildir: pod ağının başka bir parçasını içeren
+      bir aralık (ör. pod ağı `10.128.0.0/14` iken `10.130.0.0/16`) bugün
+      geçer; pod başka bir node'a taşınıp o parçadan adres alınca (drain,
+      yeniden zamanlama) backend başlamaz. Backend tek kopya olduğu için
+      izleme o an durur; `ERROR` satırı ve CrashLoop görünür;
     - pod ve Service ağının tamamını yukarıdaki `network.config/cluster`
       çıktısıyla, node ağını ve API VIP'ini de "Şart"taki kurala göre siz
-      dışarıda tutarsınız.
-
-    Ayar verilmişse açılışta `target scope external ranges in effect` log
-    satırı aralıkları yazar.
+      dışarıda tutarsınız;
+    - ayar verilmişse açılışta `target scope external ranges in effect` log
+      satırı aralıkları yazar.
   - **Ad çözümü ve vekil.** Kurum adı backend'in kendi çözücüsünde çözülmelidir:
     cluster DNS'i kurum alanını kurumsal DNS'e iletir (OpenShift'te
     `dns.operator/default`'un `servers` alanı). Kurum aralıkları vekilli
