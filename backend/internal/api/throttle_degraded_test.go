@@ -259,6 +259,12 @@ func TestSourceDegradedHopsTooLow(t *testing.T) {
 			if tc.counted && (!strings.Contains(text, `\"`+lbAddr+`\"`) || !strings.Contains(text, "one shared per-name lock")) {
 				t.Errorf("the WARN names neither the load balancer's address nor the shared lock: %q", text)
 			}
+			// A layer that writes no header and connects from the public
+			// address looks the same, and more hops would be a bypass there:
+			// the WARN says so rather than only asking for more.
+			if tc.counted && !strings.Contains(text, "an L4 load balancer without the PROXY protocol, a NAT") {
+				t.Errorf("the WARN does not name a layer that writes no header: %q", text)
+			}
 		})
 	}
 }

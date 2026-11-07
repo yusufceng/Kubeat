@@ -83,8 +83,9 @@ const frontendTokenHeader = "X-Frontend-Token"
 // counted and warned of although the source is read as configured: a source
 // that is one of the addresses Kubeat's own public URL resolves to
 // (PublicAddresses) is the load balancer in front of the UI rather than a
-// client, so the hops are too few (hops_too_low); every browser behind it
-// shares one lock, as with the hops at 0.
+// client, so the hops are too few, or a layer that writes no header connects
+// from that address (hops_too_low); every browser behind it shares one lock,
+// as with the hops at 0.
 func (h *handler) clientIP(r *http.Request, s surface, now time.Time) string {
 	peer := hostOnly(r.RemoteAddr)
 	xff := forwardedFor(r.Header.Values("X-Forwarded-For"))
@@ -168,16 +169,23 @@ func (h *handler) clientIP(r *http.Request, s surface, now time.Time) string {
 		// The source is Kubeat's own load balancer: the proxies in front of
 		// the UI write more entries than the hops trust, and the one read is
 		// the one the load balancer appended for itself (a GCE Ingress or a
-		// GKE Gateway at 1). The source stays as configured, which is no
-		// client's to choose; only the operator is told.
+		// GKE Gateway at 1). Or a layer in front that writes no header (an
+		// L4 load balancer without the PROXY protocol, a NAT) connects from
+		// that address, and no hop count reads past it: more hops would read
+		// a client-settable entry there, so the warning names both and
+		// raises the hops for the first only. The source stays as
+		// configured, which is no client's to choose; only the operator is
+		// told.
 		h.opts.SignIns.SourceDegraded(metrics.DegradedHopsTooLow, s.metric)
 		h.proxyWarn.warn(now, "xff-hops-too-low",
 			fmt.Sprintf("the %s throttle keys on %q, an address UPTIME_PUBLIC_URL's host resolves to: that is Kubeat's "+
-				"own load balancer or proxy, not a client, so UPTIME_TRUST_PROXY_HOPS=%d is lower than needed and every "+
-				"browser behind it falls back to one shared %s lock; raise it to the X-Forwarded-For entries your proxies "+
-				"in front of the UI write, 2 behind a GCE Ingress or a GKE Gateway (README, \"Hesaplar ve giriş\", "+
-				"\"Vekil-hop rehberi\")",
-				s.name, source, h.opts.TrustProxyHops, s.shared))
+				"own load balancer or proxy, not a client, and every browser behind it falls back to one shared %s "+
+				"lock. Either UPTIME_TRUST_PROXY_HOPS=%d is lower than needed: raise it to the X-Forwarded-For entries "+
+				"your proxies in front of the UI write, 2 behind a GCE Ingress or a GKE Gateway; or a layer in front "+
+				"that writes none (an L4 load balancer without the PROXY protocol, a NAT) connects from that address: "+
+				"then no value tells the browsers apart and a higher one lets a client pick its source, so count only "+
+				"the entries your proxies write (README, \"Hesaplar ve giriş\", \"Vekil-hop rehberi\")",
+				s.name, source, s.shared, h.opts.TrustProxyHops))
 	}
 	return source
 }

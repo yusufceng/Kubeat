@@ -106,7 +106,12 @@ spec:
         # is counted too, but not here: a script's sign-in keys on its own
         # address as it should. One request is enough: the misconfiguration
         # holds for every request until it is fixed, and the alert resolves
-        # 15 minutes after the last one.
+        # 15 minutes after the last one. Two installs fire at the right value
+        # too: the UI's Service exposed with no proxy in front (hops_zero at
+        # 0), and a layer that writes no header connecting from the public
+        # address (hops_too_low). The lock is shared there indeed, but more
+        # hops would be a bypass, so the description says to silence it
+        # (README, "Sayaç ve kural"); no value turns this rule off alone.
         - alert: KubeatSignInSourceDegraded
           expr: |-
             sum {{ $byReason }} (
@@ -116,7 +121,7 @@ spec:
             severity: {{ dig "prometheusRule" "signInSeverity" "warning" .Values.metrics | default "warning" | quote }}
           annotations:
             summary: {{ `"Kubeat's sign-in throttle cannot tell clients apart ({{ $labels.reason }})"` }}
-            description: {{ `"In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: {{ if eq $labels.reason \"hops_zero\" }}X-Forwarded-For came, but UPTIME_TRUST_PROXY_HOPS is 0{{ else if eq $labels.reason \"no_frontend_token\" }}UPTIME_TRUST_PROXY_HOPS is above 0, but UPTIME_FRONTEND_TOKEN is not set{{ else if eq $labels.reason \"hops_too_high\" }}the X-Forwarded-For chain from the UI is shorter than UPTIME_TRUST_PROXY_HOPS{{ else }}the source keyed on is an address of UPTIME_PUBLIC_URL's host, Kubeat's own load balancer, so UPTIME_TRUST_PROXY_HOPS is too low{{ end }}. Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set."` }}
+            description: {{ `"In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: {{ if eq $labels.reason \"hops_zero\" }}X-Forwarded-For came, but UPTIME_TRUST_PROXY_HOPS is 0 (where the UI's own Service is exposed with no proxy in front, 0 is right and 1 lets a client pick its source: silence this reason){{ else if eq $labels.reason \"no_frontend_token\" }}UPTIME_TRUST_PROXY_HOPS is above 0, but UPTIME_FRONTEND_TOKEN is not set{{ else if eq $labels.reason \"hops_too_high\" }}the X-Forwarded-For chain from the UI is shorter than UPTIME_TRUST_PROXY_HOPS{{ else }}the source keyed on is an address of UPTIME_PUBLIC_URL's host, Kubeat's own load balancer, so either UPTIME_TRUST_PROXY_HOPS is too low or a layer that writes no X-Forwarded-For (an L4 load balancer without the PROXY protocol, a NAT) connects from that address, where no value helps and a higher one lets a client pick its source{{ end }}. Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set (README, \"Hesaplar ve giriş\", \"Sayaç ve kural\")."` }}
     - name: kubeat.self
       rules:
         # Also with no backend target at all: a pod that is pending, deleted

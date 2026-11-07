@@ -44,7 +44,7 @@ tests:
               reason: hops_zero
             exp_annotations: &source-degraded-hops-zero-annotations
               summary: "Kubeat's sign-in throttle cannot tell clients apart (hops_zero)"
-              description: "In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: X-Forwarded-For came, but UPTIME_TRUST_PROXY_HOPS is 0. Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set."
+              description: "In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: X-Forwarded-For came, but UPTIME_TRUST_PROXY_HOPS is 0 (where the UI's own Service is exposed with no proxy in front, 0 is right and 1 lets a client pick its source: silence this reason). Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set (README, \"Hesaplar ve giriş\", \"Sayaç ve kural\")."
       # Across the Recreate: still the one hops_zero alert, beside the new
       # pod's hops_too_low.
       - eval_time: 12m
@@ -59,7 +59,7 @@ tests:
               reason: hops_too_low
             exp_annotations:
               summary: "Kubeat's sign-in throttle cannot tell clients apart (hops_too_low)"
-              description: "In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: the source keyed on is an address of UPTIME_PUBLIC_URL's host, Kubeat's own load balancer, so UPTIME_TRUST_PROXY_HOPS is too low. Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set."
+              description: "In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: the source keyed on is an address of UPTIME_PUBLIC_URL's host, Kubeat's own load balancer, so either UPTIME_TRUST_PROXY_HOPS is too low or a layer that writes no X-Forwarded-For (an L4 load balancer without the PROXY protocol, a NAT) connects from that address, where no value helps and a higher one lets a client pick its source. Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set (README, \"Hesaplar ve giriş\", \"Sayaç ve kural\")."
       # 15 minutes after the last hops_zero request, and after the last
       # hops_too_low one, each resolves.
       - eval_time: 19m
@@ -72,7 +72,7 @@ tests:
               reason: hops_too_low
             exp_annotations:
               summary: "Kubeat's sign-in throttle cannot tell clients apart (hops_too_low)"
-              description: "In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: the source keyed on is an address of UPTIME_PUBLIC_URL's host, Kubeat's own load balancer, so UPTIME_TRUST_PROXY_HOPS is too low. Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set."
+              description: "In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: the source keyed on is an address of UPTIME_PUBLIC_URL's host, Kubeat's own load balancer, so either UPTIME_TRUST_PROXY_HOPS is too low or a layer that writes no X-Forwarded-For (an L4 load balancer without the PROXY protocol, a NAT) connects from that address, where no value helps and a higher one lets a client pick its source. Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set (README, \"Hesaplar ve giriş\", \"Sayaç ve kural\")."
       - eval_time: 26m
         alertname: KubeatSignInSourceDegraded
         exp_alerts: []
