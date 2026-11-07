@@ -42,7 +42,10 @@ Ertelenen fikirler [backlog.md](backlog.md) dosyasındadır.
 | 31 | Hızlı başlangıç ve kurulum belgeleri: güncel kurulum komutu, OpenShift dışı fsGroup notu, yükseltme notları docs/yukseltme.md, lisansın nasıl istendiği, operator'süz cluster için öz-sağlık kuralları (S30) | Sprint 3'te S10+S11 geldi (#47, 0.45.0 ile yayımlandı; fsGroup uygulayan bir CSI sürücüsünde kurulum ve geri yükleme provası geçti, GKE'de koşulmadı): kurulum komutunda ve geri yükleme pod'unda `fsGroup=1001` (OpenShift'te atlanır), OpenShift dışında `podSecurityContext` boşken NOTES uyarısı; README ve docs/pilot.md'deki kurulum ve aynalama komutlarının sürümünü `scripts/check-versions.sh` CI chart işinde ve yayımın imajlardan önceki ilk işinde denetler (etiket = Chart.yaml); Helm iki iş akışında v4.3.1'e sabit, CI chart işi ayrıca Helm 3 (v3.22.1) ile koşar; release.yml'in `workflow_dispatch` kuru denemesi yayım paketlerine ve etiketlere dokunmaz. Sprint 4'te #59 (S12; S34'ün README, S61'in belge kısmı): README'nin ilk ekranında hızlı başlangıç (Ingress `ingress.className` ve cert-manager ile tek komut, fsGroup ve heartbeat satırları), desteklenen sürüm satırı ve GKE zonal notu; 0.38–0.45 yükseltme notları [yukseltme.md](yukseltme.md)'de (her sürümde Yapılacak, Davranış değişikliği, Geri dönüş, Alarm kuralları; başta yükseltmeden önce yedek, atlamalı yol ve API'yle betiklenen ön kontroller), README'de bağlantı; "GitOps ile kurulum"da kurulum notlarının uyarıları ve kapatan değerleri; README "API"de cluster dışından erişim; `check-versions.sh` hızlı başlangıç komutunu da denetler. #60 (S30, S15, S46, S51; S34 ile S56'nın belge kısımları; S45, S49 ve S59'un sınır cümleleri): README "Aracın kendi sağlığı"nda operator'süz cluster için öz-sağlık yolu (PrometheusRule CRD'si + Grafana Alloy `mimir.rules.kubernetes` ile chart'la yükselen kurallar; kopyalama yolu `mimirtool rules sync` ve her yükseltmede koşan adım, GMP `Rules`; elle scrape'in job adı ve `backendIngressFrom`; CRD'siz cluster'da iki değerin kurulumu düşürmesi), kurulum notunda heartbeat'in iki satırı, CRD yokken kural önerilmemesi, heartbeat'in bildirim alamayan kanalı duymadığı ve API anahtarıyla port-forward satırları (`test-chart.sh` `--api-versions` ile ve onsuz); "Ağ erişimi"nde izlenen namespace'lerin varsayılan-ret politikası ve `allow-from-kubeat` (proje şablonu, var olan namespace'ler, AdminNetworkPolicy); "LDAP"ta iç içe AD grupları için zincir süzgeci; lisansın nasıl istendiği ve aynı dosyanın birden çok cluster'da geçtiği; HTTPRoute, bakımda uptime ve TLS'in router'da bitmesi sınır cümleleri. Alloy yolu, GKE, `allow-from-kubeat` ve AD koşulmadı: o sprintin "Kullanıcıda kalanlar" 4, 6 ve 7 ([sprints/2026-10-29-sprint-04.md](sprints/2026-10-29-sprint-04.md)) |
 | 32 | Kararlı sürüm (1.0) kararı | Planlandı: sprint 11 sonunda. Destek penceresi, eski minor desteği ve geri taşıma bu kararla düşünülür (kullanıcı kararı 2026-11-07: satılmış sürüm yok, eski minor'lara geri taşıma yok; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)). Kararın girdileri (sprint 10 planı, [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)): Müşteri A'nın her güvenlik düzeltmesine GHSA ve CVE kaydı ile destek penceresi (en az bir önceki minor'a yama) isteği; kullanıcı kararları (a) eski sürüm desteği yok ve (b) kendi bulunan açıklara advisory yok, ikisi de 1.0'a kadar; kullanıcıdaki GKE uçtan uca ve kurumsal OpenShift provaları; sprint 11'e sığmayan maddeler (ör. S89, S93, S94). Karar "henüz değil" de olabilir |
 
-Yük testi sonuçları: [yuk-testi.md](yuk-testi.md).
+Yük testi sonuçları: [yuk-testi.md](yuk-testi.md); 0.51'de kapsama bağlı HTTP
+kontrollerinin kontroller arasında tuttuğu bağlantıların ölçümü ve 0.52'deki
+düzeltmesi (S92, [#144](https://github.com/yusufceng/Kubeat/issues/144)) orada
+"HTTP kontrolünün bağlantıları" bölümünde.
 
 ## Uptime Kuma ile karşılaştırma
 
@@ -256,12 +259,6 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   proje şablonuyla ya da cluster çapında AdminNetworkPolicy ile (S51, README
   "Ağ erişimi", İzlenen namespace'ler; gerçek bir varsayılan-ret
   namespace'te koşulmadı, yukarıda "Hâlâ doğrulanmayanlar").
-- 0.51'den beri kapsama bağlı HTTP kontrolü (her annotation monitor'ü dahil)
-  bağlantısını kontroller arasında tutuyor: boşta kalan bağlantılar monitor
-  sayısıyla büyüyor ve yenilenen bir sertifika aynı bağlantıda görünmeyebilir
-  (S92, sprint 10, [#144](https://github.com/yusufceng/Kubeat/issues/144)).
-  Merge edilince bu satır kalkar ve [yuk-testi.md](yuk-testi.md)'deki ölçüm
-  satırına bağlanır.
 - Hedef politikası yalnızca loopback, link-local (bulut metadata servisi) ve
   multicast adreslerini kapatır; özel ağlar bilerek açıktır. 0.47.0'da
   kullanıcı başına kapsam eklendi (ADR-0003 c, S64,

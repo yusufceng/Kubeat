@@ -80,6 +80,47 @@ monitor'u ve 10 milyon sonucu sorunsuz okudu.
 
 Veri volume'unun boyut kuralı bunlardan çıkar: README "Geçmiş verisi".
 
+## HTTP kontrolünün bağlantıları (0.52)
+
+2026-11-07, S92 ([#144](https://github.com/yusufceng/Kubeat/issues/144)):
+**ölçüldü (ajan içi, httptest)**. Ortam: geliştirici dizüstü bilgisayarı
+(macOS, Apple Silicon), Go 1.26.10. Checker paketi doğrudan sürüldü,
+scheduler ve veritabanı yoktu. 2000 annotation monitor'ü vardı; her biri
+nesnesinin namespace'ine, yani kapsama bağlıydı. 20 worker'la
+(`UPTIME_WORKERS` varsayılanı) her monitor iki kez kontrol edildi. Hedef ayrı
+bir süreçte çalışan tek bir httptest HTTPS sunucusuydu (HTTP/1.1, loopback).
+Değerler yalnız istemci tarafının farkıdır: ölçümden önceye göre, iki GC'den
+sonra `HeapInuse`, `StackInuse` ve goroutine sayısı; bağlantılar istemcide açık
+kalanlardır. Aralıklar tekrarlanan koşulardandır (0.51.0 dört, 0.52 üç koşu).
+
+| Ölçüm (2000 annotation monitor'ü) | 0.51.0 | 0.52 |
+| --- | --- | --- |
+| Kontrollerden sonra açık bağlantı | 2000 | 0 |
+| Heap | +56–58 MiB | +8,5 MiB |
+| Stack | +16 MiB | +2–2,5 MiB |
+| Goroutine | +4000 | 0 |
+| Kontrol süresi, ikinci tur ortalaması | 0,30 ms (önceki kontrolün bağlantısında) | 6,5–7,6 ms (yeni bağlantı ve TLS el sıkışması) |
+
+- **Kalan heap.** 0.52'de kalan, monitor başına tutulan ve bağlantı taşımayan
+  HTTP taşıyıcısıdır (monitor başına yaklaşık 4 KiB). Monitor silinince,
+  duraklatılınca ya da kapsamdan çıkınca bırakılır. Kapsama bağlı olmayan 2000
+  monitor'de aynı ölçüm 0 bağlantı ve +0,4 MiB heap verdi; 0.51.0'ın paylaşılan
+  havuzu aynı hedefe en çok 2 bağlantı tutuyordu.
+- **Kontrol süresi.** Loopback'te ve 20 eşzamanlı el sıkışmayla ölçüldü.
+  Gerçek ağda her kontrole ad çözme ve bağlantı kurmanın gidiş-dönüşleri
+  eklenir; eşik için README "Yavaş yanıt".
+- **Sertifika.** Sunucu sertifikasını değiştirince 0.51.0'da sonraki kontrol
+  eski bağlantıdan eski sertifikanın bitişini raporladı; 0.52'de bir sonraki
+  kontrol yenisini raporlar ve sertifika olayı kapanır (checker testi
+  `TestHTTPCheckSeesRenewedCertificate`, kapsama bağlı ve bağlı olmayan
+  monitor). Sahadaki etki sunucunun keep-alive politikasına bağlıdır.
+- **CI'da.** `TestHTTPCheckClosesItsConnections` 100 kapsama bağlı monitor ve
+  4 worker'la, HTTP/1.1 ve HTTP/2'de, kontrollerden sonra açık bağlantının 0,
+  aynı anda açık bağlantının en çok worker sayısı olduğunu sınar; süreye bağlı
+  bir eşiği yoktur.
+- **Ölçülmedi.** Gerçek cluster'da, chart'ın 256 Mi bellek limitiyle ve
+  gerçek hedeflerle (aşağıda).
+
 ## Ölçülmeyenler
 
 - Uzun süreli çalışma (günler): veritabanı büyümesi, retention'ın

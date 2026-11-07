@@ -3443,7 +3443,9 @@ HTTP(S) ve WebSocket kontrolleri şunları saklar:
   kadar geçen süre ve toplam süre, milisaniye. Yönlendirme izlendiyse
   aşamalar son isteğinkidir, toplam süre hepsini kapsar. Olmayan aşama boş
   kalır: IP adresinde ad çözme, yeniden kullanılan bağlantıda bağlantı ve
-  el sıkışma, düz HTTP'de el sıkışma yoktur.
+  el sıkışma, düz HTTP'de el sıkışma yoktur. Her kontrol yeni bağlantı
+  açar; yeniden kullanılan bağlantı yalnızca aynı sunucuya giden bir
+  yönlendirmede, kontrolün kendi bağlantısıdır.
 - Bağlanılan **adres** (`ip:port`); bağlanılamadıysa son denenen adres.
   Her pod'u ayrı kontrol eden monitor'da ayrıntılar başarısız olan ilk
   pod'undur ve pod'un adı da yazılır. Bu alan, tanı için gerektiği ve
@@ -4655,10 +4657,20 @@ kapanış bitmeden durdurur.
 
 ### Sertifika bitişi
 
-HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder. Bitişe
-`UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir "sertifika" olayı
-açılır ve bildirim gider; sertifika yenilenince olay kapanır. Bu olay
-kesintilerden bağımsızdır: hedef çalışırken de açık olabilir.
+HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder.
+
+- **Olay.** Bitişe `UPTIME_CERT_WARNING` (varsayılan 14 gün) kala ayrı bir
+  "sertifika" olayı açılır ve bildirim gider; sertifika yenilenince olay
+  kapanır. Bu olay kesintilerden bağımsızdır: hedef çalışırken de açık
+  olabilir.
+- **Okunan sertifika.** Sertifika her kontrolde yeni açılan bağlantıda,
+  sunucunun o an sunduğu sertifikadan okunur: HTTP kontrolü önceki kontrolün
+  bağlantısını yeniden kullanmaz, bitince bağlantılarını kapatır (0.52'den
+  beri; kapsama bağlı ve annotation monitor'leri dahil, bütün HTTP
+  monitor'lerinde). Yenilenen sertifika bu yüzden bir sonraki kontrolde
+  görünür ve olay o kontrolle kapanır.
+- **Yönlendirme.** İzlenen yönlendirmede okunan, yanıtı veren son isteğin
+  bağlantısındaki sertifikadır.
 
 ### Hatırlatma
 
@@ -4691,9 +4703,19 @@ yazılmaz**: olay sayfası yoktur, kanalın son gönderim durumu yine
 güncellenir. Eşiği `0` yapmak ya da monitor'ü durdurmak durumu bildirim
 göndermeden siler.
 
-Yanıt süresi kontrolün ölçtüğü süredir: HTTP'de isteğin tamamı, TCP'de
-bağlantı (ve TLS), DNS'te sorgu, push'ta kaynağın `ping` ile bildirdiği
-değer (bildirmezse hiç yavaş sayılmaz).
+Yanıt süresi kontrolün ölçtüğü süredir:
+
+- **HTTP:** isteğin tamamı, yeni bir ziyaretçinin gördüğü gibi. Her kontrol
+  yeni bağlantı açtığından süreye ad çözme (DNS), TCP bağlantısı ve HTTPS'te
+  TLS el sıkışması da girer (0.52'den beri, bütün HTTP monitor'lerinde);
+  aynı sunucuya giden bir yönlendirme kontrolün kendi bağlantısını yeniden
+  kullanır. Eşiği bağlantı kurmanın bedelini de sayarak seçin: uzak ya da el
+  sıkışması yavaş bir hedefte `slow_above_ms` 0.51'e göre daha erken
+  aşılabilir.
+- **TCP:** bağlantı (ve TLS).
+- **DNS:** sorgu.
+- **Push:** kaynağın `ping` ile bildirdiği değer (bildirmezse hiç yavaş
+  sayılmaz).
 
 **Arayüzde.** Eşik monitor formunun "Zamanlama ve alarm" bölümünde "Yavaş
 yanıt eşiği" olarak girilir (ms; yardım metni ne olacağını okur, zaman

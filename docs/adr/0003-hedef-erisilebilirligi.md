@@ -381,6 +381,24 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     - sınır: yalnız bugünkü editörlere bakılır; kapsamı sınırlı editörü
       silinmiş ya da genişletilmiş bir kurulumda onun kurduğu kaydı olmayan
       monitor'ler de her namespace'in kaydını alır.
+  - **HTTP kontrolünün bağlantıları (0.52, #144).** Her HTTP kontrolü yeni
+    bağlantı açar ve bitince bağlantılarını kapatır; bir kontrolün
+    bağlantısını sonraki kontrol yeniden kullanmaz. Kural kapsama bağlı olsun
+    olmasın her HTTP monitor'üne uygulanır (PO kararı), böylece aynı hedefe
+    elle ve annotation'la kurulmuş iki monitor aynı yanıt süresini ölçer:
+    ad çözme, bağlantı ve TLS el sıkışması dahil. Kontrolün kendi içinde
+    aynı sunucuya giden yönlendirme bağlantıyı yeniden kullanır. Kapsama
+    bağlı monitor'ün kendi taşıyıcısı kalır ama kontroller arasında bağlantı
+    tutmaz; taşıyıcının kendisini bugünkü `Prune` temizliği bırakır, bağlantı
+    yaşı için ayar yoktur. 0.51'de bu taşıyıcı bağlantısını kontroller arasında
+    tutuyordu: boşta bağlantılar monitor sayısıyla büyüyor, yenilenen
+    sertifika aynı bağlantıda görünmüyordu
+    ([yuk-testi.md](../yuk-testi.md) "HTTP kontrolünün bağlantıları").
+    Seçenekler: (a) yalnız kapsama bağlı kontrolde kapatmak: ölçüm semantiği
+    monitor'ün nasıl kurulduğuna göre ikiye ayrılır; (b) her HTTP
+    kontrolünde kapatmak. (b) seçildi; bedeli her kontrolde bir el sıkışma
+    (500 monitor ve 30 sn aralıkta saniyede yaklaşık 17). Geri alma maliyeti
+    düşük: kural tek yerde (`checkHTTPAt`), göç yok.
   - **Yönetici ve `*`.** Kaydı her namespace olan monitor (yönetici, servis
     token'ı, kapsamı `*` olan editör, namespace'siz monitor) hiçbir şeye tabi
     değildir; kontrolü 0.50'deki gibi çalışır.
