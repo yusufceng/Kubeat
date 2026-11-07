@@ -480,6 +480,27 @@ func TestScopedProxy(t *testing.T) {
 	if _, err := s.Proxy(toProxy)(req); !errors.Is(err, ErrScope) {
 		t.Errorf("another team's Service with the context ended: %v", err)
 	}
+
+	// Every host refused by its spelling is refused before any is resolved:
+	// an outage of the resolver, or a lookup the context ended, for the
+	// URL's host does not pass a Host header at another team's Service off
+	// as a fault of the resolver, or as no refusal at all.
+	servfail := ScopeRules{Resolver: brokenResolver{&net.DNSError{Err: "server misbehaving", Name: "x", IsTemporary: true}}}
+	for name, tc := range map[string]struct {
+		rules ScopeRules
+		ctx   context.Context
+	}{
+		"servfail":  {servfail, context.Background()},
+		"cut short": {stalled, cancelled},
+	} {
+		s := tc.rules.Connections(shop, "")
+		req := httptest.NewRequest(http.MethodGet, "http://status.example.com/", nil).WithContext(tc.ctx)
+		req.Host = "api.payments.svc"
+		_, err := s.Proxy(toProxy)(req)
+		if host, why := s.Refused(); why != RefusedOutside || host != "api.payments.svc" || !errors.Is(err, ErrScope) {
+			t.Errorf("Host at another team's Service, %s: err = %v, refused %q, %v; want RefusedOutside of api.payments.svc", name, err, host, why)
+		}
+	}
 }
 
 // A target taken from a cluster object of the monitor's namespace is in

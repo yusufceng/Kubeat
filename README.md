@@ -765,8 +765,12 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       zaman aşımına (`UPTIME_HTTP_WRITE_TIMEOUT`, 2 dk) kadar bekletemez; bu sürede
       çözülemeyen ad çözülememiş sayılıp güvenli tarafta reddedilir ve
       `reason="resolve_error"` ile sayılır (aşağıda "Kapsam ihlali denetimi").
-      Varsayılan, arayüzün backend zaman aşımından (`BACKEND_TIMEOUT_MS`, 3 sn)
-      küçüktür: ret, arayüz isteği bırakmadan forma ulaşır.
+      Sınır her çözüm içindir ve varsayılanı arayüzün backend zaman aşımından
+      (`BACKEND_TIMEOUT_MS`, 3 sn) küçüktür: tek bir çözümün reddi, arayüz isteği
+      bırakmadan forma ulaşır. Çözücüsü adla verilmiş bir DNS monitor'ü ise iki
+      çözüm yapar (hedef ad ve çözücünün host'u); ikisi de takılırsa istek ~4
+      sn sürebilir, arayüz isteği bırakır ve kullanıcı formda 403 yerine zaman
+      aşımı görür. Ret yine yapılır ve `resolve_error` ile sayılır.
     - **Kontrol anında.** Kontrolün açtığı her bağlantıdaki çözüm bu ayara bağlı
       değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de API'nin
       süresini kullanıyordu). Yavaş yanıt veren bir çözücü kontrolü monitor'ün
@@ -774,9 +778,13 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     - **İptal ve süre dolması red değildir.** Kontrolün zaman aşımı ya da
       backend'in kapanışı çözümü yarıda keserse kontrol bu hatayla biter
       (`context deadline exceeded`, `context canceled`): kapsam reddi sayılmaz,
-      sayaç, `WARN` ve denetim satırı yazılmaz. API'de istemci isteği çözüm
-      sürerken bıraktıysa (ör. sayfa kapandı) ret yalnız `resolve_error` ile
-      sayılır, denetim satırı yazılmaz.
+      sayaç, `WARN` ve denetim satırı yazılmaz. Kural yalnız çözülemeyen ada
+      uygulanır: kapsamın cluster'a götürdüğü için reddettiği bir bağlantı
+      (ör. adın cluster adresi; kontrol sonra adın öteki adresinde takılıp
+      zaman aşımına uğrasa da) ret olarak kalır, sonuç `blocked_by_scope`'tur
+      ve `connection` sayılır; ters monitor onu beklediği başarısızlık saymaz.
+      API'de istemci isteği çözüm sürerken bıraktıysa (ör. sayfa kapandı) ret
+      yalnız `resolve_error` ile sayılır, denetim satırı yazılmaz.
   - **Egress ve DNS.** Bu kapsam çözümü yazma anında (oluşturma/değiştirme) ve
     0.51'den beri kontrol anında, kontrolün açtığı her bağlantıda (vekilli kontrol
     dahil) backend'den bir DNS sorgusu yapar; hava boşluklu ya da egress'i kısıtlı
@@ -899,7 +907,13 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       cluster DNS'inin ya da egress'in arızasıdır (yukarıda "Egress ve DNS").
       Ret değişmez: istemci aynı 403'ü, kontrol aynı `blocked_by_scope`
       sonucunu alır. Adından reddedilen biçimler hiç çözülmediği için bir DNS
-      kesintisinde de `target` ya da `connection` sayılır.
+      kesintisinde de `target` ya da `connection` sayılır; vekile giden düz
+      `http://` istekte `Host` başlığındaki ad da, URL'nin adı çözülemese bile
+      (vekile sorulan adların hepsi çözümden önce yazılışlarıyla sınanır).
+      Bilinen sınır: API bir isteği ilk reddiyle sayar. Çözücüsü verilmiş bir
+      DNS monitor'ünde önce hedef ad sınanır; o çözülemezse çözücünün host'u
+      (adından reddedilen başka ekibin DNS Service'i olsa da) sınanmadan ret
+      `resolve_error` sayılır. İstek yine reddedilir.
   - **`source`: kimin kapsamı (0.52, kapalı küme).**
     - `user`: API isteği (API'nin bütün redleri) ya da kapsam kaydı bir
       kullanıcının olan monitor'ün kontrolü.
@@ -911,8 +925,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       (aşağıda "0.51 öncesinden kalan monitor'ler").
   - **Sayılmayanlar.** Kontrolün zaman aşımı ya da backend'in kapanışı çözümü
     yarıda keserse red sayılmaz, satır ve `WARN` yazılmaz (yukarıda "Zaman
-    aşımı"). API'de istemci isteği çözüm sürerken bıraktıysa ret yalnız
-    `resolve_error` ile sayılır, denetim satırı yazılmaz.
+    aşımı"). Kapsamın reddettiği bir cluster bağlantısı kontrol sonra zaman
+    aşımına uğrasa da `connection` sayılır. API'de istemci isteği çözüm
+    sürerken bıraktıysa ret yalnız `resolve_error` ile sayılır, denetim satırı
+    yazılmaz.
   - **Denetim satırı ve log.** Satır nedeni de söyler: "… hedefi
     namespace'lerinizin dışında" ya da "… hedefi çözülemedi". Kontrol anında her
     reddedilen kontrol sayılır; denetim kaydına ise monitor ve neden başına bir

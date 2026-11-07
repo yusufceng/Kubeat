@@ -217,12 +217,17 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 		out = failedf("unsupported monitor type %q", m.Type)
 	}
 	if host, why := scope.Refused(); why != netguard.NotRefused {
-		if err := ctx.Err(); err != nil {
-			// Ended by its timeout or a shutdown: no refusal to count or
-			// write down, whatever the scope made of a connection it could
-			// not finish judging. The check failed as one cut short does.
+		if err := ctx.Err(); why == netguard.RefusedUnresolved && err != nil {
+			// Ended by its timeout or a shutdown while a name may still have
+			// been resolving: no refusal to count or write down, as a lookup
+			// the context ended is no fault of the resolver. The check
+			// failed as one cut short does.
 			out = outcome{err: err, hops: out.hops}
 		} else {
+			// A connection that leads outside the scope was refused on what
+			// the scope knew, and no context ends that: the refusal stands,
+			// counted and written down, however the check went on after it
+			// (to another address of the name, which hung).
 			out = c.refusedByScope(m, out, host, why)
 		}
 	}

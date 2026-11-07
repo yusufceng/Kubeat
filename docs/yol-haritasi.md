@@ -325,8 +325,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   minikube provası geçti (sprint 8), gerçek hava boşluklu
   cluster provası kullanıcıda; (c) 0.52'de sayaç, log ve denetim satırı çözüm hatasını
   (`reason="resolve_error"`) gerçek cross-tenant reddinden ve kaynağı (`source`: `user`,
-  `annotation`, `unrecorded`) birbirinden ayırıyor, kontrolün iptali ve süre dolması red
-  sayılmıyor, `UPTIME_TARGET_RESOLVE_TIMEOUT` (2 sn) yalnız API'yi sınırlıyor (S82,
+  `annotation`, `unrecorded`) birbirinden ayırıyor, kontrolün iptali ya da süre dolmasıyla
+  yarıda kalan çözüm red sayılmıyor (kapsamın reddettiği cluster bağlantısı sayılıyor),
+  `UPTIME_TARGET_RESOLVE_TIMEOUT` (2 sn) yalnız API'yi sınırlıyor (S82,
   sprint 10, [#142](https://github.com/yusufceng/Kubeat/issues/142)); denetim
   satırlarının sınırı yok (S82, sprint 10,
   [#143](https://github.com/yusufceng/Kubeat/issues/143)); CoreDNS kesintisi

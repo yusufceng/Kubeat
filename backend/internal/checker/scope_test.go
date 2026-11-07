@@ -148,21 +148,21 @@ func check(c *Checker, m store.Monitor) store.CheckResult {
 // refusedByTheScope asserts that got is the scope's refusal: down, with the
 // one generic error and nothing else of the connection refused, explained
 // as the scope's, and told once with host, as one that leads outside the
-// scope.
-func refusedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) {
+// scope. It returns what was told.
+func refusedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) []refusalSeen {
 	t.Helper()
-	refusedFor(t, what, got, r, host, netguard.RefusedOutside)
+	return refusedFor(t, what, got, r, host, netguard.RefusedOutside)
 }
 
 // unresolvedByTheScope asserts that got is the scope's refusal of a name
 // that did not resolve: the same result as any refusal, told with host as
 // unresolved, so that only the operator tells the two apart.
-func unresolvedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) {
+func unresolvedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) []refusalSeen {
 	t.Helper()
-	refusedFor(t, what, got, r, host, netguard.RefusedUnresolved)
+	return refusedFor(t, what, got, r, host, netguard.RefusedUnresolved)
 }
 
-func refusedFor(t *testing.T, what string, got store.CheckResult, r *refusals, host string, why netguard.Refusal) {
+func refusedFor(t *testing.T, what string, got store.CheckResult, r *refusals, host string, why netguard.Refusal) []refusalSeen {
 	t.Helper()
 	if got.Up || got.Error != scopeRefusalText {
 		t.Errorf("%s: up = %v, error %q; want the scope's refusal", what, got.Up, got.Error)
@@ -180,6 +180,7 @@ func refusedFor(t *testing.T, what string, got store.CheckResult, r *refusals, h
 	if len(seen) != 1 || seen[0].host != host || seen[0].why != why {
 		t.Errorf("%s: told %+v, want one refusal of %s, %v", what, seen, host, why)
 	}
+	return seen
 }
 
 // Every connection of a held monitor's check is held to the scope, not only

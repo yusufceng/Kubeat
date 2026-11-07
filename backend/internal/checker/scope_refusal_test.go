@@ -2,7 +2,10 @@ package checker
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"reflect"
@@ -79,9 +82,9 @@ func cutShort(t *testing.T, what string, c *Checker, got store.CheckResult, r *r
 // deadline (the monitor's timeout), while the scope still waits for the
 // resolver about a connection the check opens, is no refusal of the scope:
 // the counter, the log and the audit log are not told of it, and the check
-// fails with the context's error. Nor is one refused by the spelling of a
-// host while its context had already ended; its next check, in time, is the
-// first refusal.
+// fails with the context's error. A host refused by its spelling is no
+// lookup a context can end: its refusal stands whatever the context, and is
+// told as the first; the next check's is not.
 func TestScopeRefusal_CheckCutShort(t *testing.T) {
 	dns := scopeDNS(t)
 	proxyURL, _ := url.Parse("http://127.0.0.1:1") // never reached
@@ -109,8 +112,65 @@ func TestScopeRefusal_CheckCutShort(t *testing.T) {
 	other := held(httpMonitor("http://api.payments.svc/"))
 	ended, end := context.WithCancel(context.Background())
 	end()
-	cutShort(t, "another team's Service, the context ended", c, c.Check(ended, other), r, other, context.Canceled)
-	refusedByTheScope(t, "another team's Service, in time", check(c, other), r, "api.payments.svc")
+	told := refusedByTheScope(t, "another team's Service, the context ended", c.Check(ended, other), r, "api.payments.svc")
+	if len(told) == 1 && !told[0].first {
+		t.Error("another team's Service, the context ended: not told as the first refusal")
+	}
+	told = refusedByTheScope(t, "another team's Service, in time", check(c, other), r, "api.payments.svc")
+	if len(told) == 1 && told[0].first {
+		t.Error("another team's Service, in time: told as the first refusal again")
+	}
+}
+
+// A connection the scope refused as leading outside it stands when the check
+// then runs out of time: a name answering with a cluster address and an
+// outside one is refused the first, the dial goes on to the second, and
+// the check's deadline passes while that one hangs. The check is the
+// scope's refusal, for a plain monitor and for an inverted one, which must
+// not take it for the failure it expects; it is counted, logged and written
+// down, as the first. Were it dropped with the deadline, whoever controls
+// the name's answers could try another team's Service and leave no trace.
+func TestScopeRefusal_OutsideStandsPastDeadline(t *testing.T) {
+	dns := dnsServer(t, func(q dnsmessage.Question) []dnsmessage.ResourceBody {
+		switch {
+		case strings.ToLower(q.Name.String()) != "mixed.example.test.":
+			return nil
+		case q.Type != dnsmessage.TypeA:
+			return []dnsmessage.ResourceBody{}
+		}
+		// In this order: the cluster address is dialed, and refused, first.
+		return []dnsmessage.ResourceBody{
+			&dnsmessage.AResource{A: netip.MustParseAddr("127.0.0.2").As4()},
+			&dnsmessage.AResource{A: netip.MustParseAddr("127.0.0.1").As4()},
+		}
+	})
+	for _, inverted := range []bool{false, true} {
+		deadline := newExpiring()
+		release := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+			deadline.expire() // the monitor's timeout passes while the target hangs
+			select {
+			case <-req.Context().Done():
+			case <-release:
+			}
+		}))
+		_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+		r := &refusals{}
+		c := scopedChecker(t, dns, true, r, Options{})
+		m := held(httpMonitor("http://mixed.example.test:" + port + "/hang"))
+		m.Inverted = inverted
+		what := fmt.Sprintf("inverted %v", inverted)
+		got := c.Check(deadline, m)
+		if deadline.Err() == nil {
+			t.Errorf("%s: the check never reached the address outside the cluster", what)
+		}
+		told := refusedByTheScope(t, what, got, r, "mixed.example.test")
+		if len(told) == 1 && !told[0].first {
+			t.Errorf("%s: not told as the first refusal", what)
+		}
+		close(release)
+		srv.Close()
+	}
 }
 
 // A check's refusal is told by why: a connection the check opens to a name

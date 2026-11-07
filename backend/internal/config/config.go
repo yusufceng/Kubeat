@@ -202,10 +202,13 @@ type Config struct {
 	// It keeps a slow or stuck resolver from holding a create or an edit
 	// open to HTTPWriteTimeout; a lookup that does not finish in time is
 	// treated as unresolved, the scoped user's target is refused on the safe
-	// side and counted as resolve_error. The default, 2s, is below the
-	// frontend's BACKEND_TIMEOUT_MS (3s), so the refusal reaches the form
-	// before the frontend gives up. Only the API's: since 0.52 a check's
-	// connections resolve within the monitor's own timeout.
+	// side and counted as resolve_error. It bounds each lookup; the default,
+	// 2s, is below the frontend's BACKEND_TIMEOUT_MS (3s), so the refusal of
+	// one lookup reaches the form before the frontend gives up. A DNS monitor
+	// whose resolver is given by name makes two (its target and the
+	// resolver's host), which may together outlast the frontend. Only the
+	// API's: since 0.52 a check's connections resolve within the monitor's
+	// own timeout.
 	TargetResolveTimeout time.Duration // UPTIME_TARGET_RESOLVE_TIMEOUT
 	// TargetScopeTrustProxy lets that scope check accept an external-looking
 	// name the backend's resolver does not know (NXDOMAIN) when the check or

@@ -40,7 +40,9 @@ type ScopeOptions struct {
 	// monitor refused check after check is one finding, and its row is
 	// written once, not every check; a change of where it connects, a pause
 	// or a restart makes the next refusal a first one again. A check whose
-	// context ended, by its timeout or a shutdown, is not told of.
+	// context ended, by its timeout or a shutdown, is not told of a name
+	// it left unresolved; a connection the scope refused as leading
+	// outside it is told of all the same.
 	Refused func(m store.Monitor, host string, why netguard.Refusal, first bool)
 }
 
