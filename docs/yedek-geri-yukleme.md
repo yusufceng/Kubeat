@@ -549,7 +549,18 @@ Parçalı dışarı alma bloğunun `oc` ile yazılmış önceki biçimi 2026-11-
 Developer Sandbox'ta doğrulanmış yedeği aldı
 ([#117](https://github.com/yusufceng/Kubeat/pull/117)). Bu belgedeki biçim
 (`KUBECTL`, `RELEASE`, `SECRET`, `.partial`) ve doğrulamalı geri yükleme
-(`DOGRULAMASIZ` dahil) henüz bir cluster'da koşulmadı: minikube'da
-`kubectl` ile prova ve bozuk bir kopyanın `mv` edilmediğinin denenmesi
-[sprint 8](sprints/2026-11-06-sprint-08.md#kullanıcıda-kalanlar)'in
-"Kullanıcıda kalanlar" listesinde, GKE'de `kubectl` ile koşu kullanıcıda.
+(`DOGRULAMASIZ` dahil) 2026-11-07'de koşuldu ve geçti
+([sprint 8 "Provaların sonucu"](sprints/2026-11-06-sprint-08.md#kullanıcıda-kalanlar)):
+
+- Sandbox'ta `KUBECTL=oc` ile dışarı alma: 5,7 MB'lık kopya 52 sn'de "yedek
+  doğrulandı".
+- minikube'da `kubectl` ile: veriyi içeren kopya "yedek doğrulandı" dedi. Bozuk
+  üç kopya (dışarı alındıktan sonra değiştirilmiş, SQLite olmayan, yarıya
+  kesilmiş) `GERİ YÜKLENMEDİ` verdi ve `mv` edilmedi. Doğrulanmış kopya
+  `secretKey.existingSecret` ile kurulmuş yeni bir kuruluma geri yüklendi;
+  oradan `SECRET=<ad>` ile yeniden dışarı alma doğrulandı.
+
+Bloklar yalnız macOS istemcisinde sınandı. Geri yüklemedeki `od` ve `tr` GNU
+coreutils ile (Linux istemci, ör. Cloud Shell, RHEL bastion ya da CI koşucusu)
+henüz sınanmadı; CI testi backlog'da ("Doğrulamalı yedek bloklarının
+kalanları"). GKE'de `kubectl` ile koşu kullanıcıda.

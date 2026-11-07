@@ -31,7 +31,10 @@ sonunda bakar ve yön verir.
 2. **Analiz**: BA bulguları birleştirir, hikâyelere çevirir, kabul
    ölçütlerini ve kapsam dışını yazar, ilke ve ADR çakışmalarını işaretler.
    Kurulum notlarına (NOTES) dokunan hikâyede, NOTES'un gösterdiği README
-   bölümünde önerdiği değerin geçmesi kabul ölçütüdür. Cross-tenant ya da
+   bölümünde önerdiği değerin geçmesi kabul ölçütüdür; NOTES platforma göre
+   bir değer öneriyorsa o değerin o platformun provasında (ya da ajan-içi
+   benzetiminde) ölçülmesi de kabul ölçütüdür, ölçülmeyen satır "ölçülmedi"
+   kalır. Cross-tenant ya da
    SSRF gibi güvenlik maddelerinde kabul ölçütü ve reviewer sorusu ad
    çözümünün biçimlerini tek tek sayar (çıplak IP, kısa ad, iki etiketli
    `servis.namespace`, tam `.svc`/FQDN, API sunucusu adı) ve pod'un DNS arama
@@ -73,7 +76,9 @@ sonunda bakar ve yön verir.
 6. **İnceleme**: SRE ya da BA diff'i kabul ölçütlerine göre doğrular;
    release manager CI'yı bekler, squash-merge eder, issue kapanır. Kırmızı
    check'le merge edilmez (main kural seti de zorlar); kararsız bir testin
-   kırmızısı da kırmızıdır: yeniden koşturup geçirilmez, düzeltilir. Yalnız
+   kırmızısı da kırmızıdır: yeniden koşturup geçirilmez, düzeltilir. Teslimatta
+   yeniden koşturma adımı yoktur: kararsız test görülünce hemen sprint dışı bir
+   düzeltme PR'ı açılır ve madde onu bekler. Yalnız
    bağlamsal (komşu satır) bir çakışmayı release manager rebase ile kendi
    çözer ve developer turu açmaz; rebase turu tam inceleme değildir, reviewer
    `git range-diff` ve patch-id ile yalnız çakışma çözümünü okur. Davranış
@@ -105,7 +110,8 @@ sonunda bakar ve yön verir.
    hiç "doğrulandı" olmaz. Kaynak adres, vekil zinciri ya da kapsam gibi bir
    güvenlik iddiasının provası kullanıcının asıl yolundan koşar (tarayıcı →
    Route/Ingress → arayüz → backend); backend'e port-forward ile elle yazılmış
-   bir başlık yeterli sayılmaz.
+   bir başlık yeterli sayılmaz. NetworkPolicy iddiası taşıyan bir prova,
+   politika uygulayan bir CNI (ör. Calico) ile başlatılmış minikube'da koşar.
 
 Ret alan bir madde en çok üç düzeltme turu görür. Dördüncü inceleme
 sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
@@ -144,6 +150,12 @@ turu, kod değişmedi") ki kesilen koşu yeniden başlarken o tur doğru okunsun
 - Hiçbir ajan `kubectl`, `helm`, `oc` çalıştırmaz, cluster'a ya da
   sandbox'a dokunmaz; değerlendirme depo, dokümanlar ve lokal testlerle
   yapılır. Makinedeki kubeconfig gerçek iş cluster'larını içerir.
+- `kubectl`, `oc` ya da `helm` taklit eden bir test düzeneği sahteyi PATH
+  gölgelemesiyle değil, `KUBECTL` gibi bir değişkeni sahte betiğin mutlak yoluna
+  ayarlayarak verir; PATH'e bu üç adla, çağrılınca kayıt yazıp hata veren koruma
+  betikleri konur (`KUBECONFIG` tuzağı ve `command -v` denetimi
+  `.claude/agents/developer.md`'de). Reviewer developer'ın düzeneğini koşmadan
+  önce bu ikisini arar.
 - Release manager provaları ve sandbox yükseltmesini yalnızca açıkça
   verilen bağlamla yapar: minikube'da `--context minikube` (helm'de
   `--kube-context minikube`). Varsayılan bağlam kullanılmaz.
