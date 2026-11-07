@@ -173,6 +173,37 @@ daraltması sprint 8'de (0.50, #121).**
   yardım etmez ve bu red denetimde gerçek bir cross-tenant reddinden ayrılmaz
   (S82); gerçek hava boşluklu cluster provası kullanıcıdadır.
 
+  **Kurum ağı aralıkları (0.51, #132).** (c)'nin "cluster dışı hedefler yalnızca
+  hedef politikasına tabidir" kuralında "cluster dışı" adresle okunur:
+  `netguard.InClusterAddr` her özel adresi cluster içi sayar. Kurumun kendi
+  ağı (on-prem bağımlılıklar, router VIP'ine çözülen Route adları) de özel
+  aralıktadır; kapsamı sınırlı kullanıcı için 0.47'den (çıplak IP) ve 0.48'den
+  (çözülen ad) beri reddediliyordu ve bu hedefleri yönetici kuruyordu. PO
+  kararıyla operatör bu aralıkları opt-in `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`
+  (varsayılan boş; boşken 0.50'nin davranışı) ile verir:
+  - kural tek yerde, `netguard.ExternalRanges`'tadır: bir adres, kapsam için,
+    `InClusterAddr` öyle diyorsa ve listedeki aralıkların hiçbiri onu
+    içermiyorsa cluster içidir. `api.targetInScope` bunu çıplak adrese ve bir
+    adın çözüldüğü her adrese sorar; kapsamı soran her denetim aynı değeri
+    sormalıdır, iki ayrı sınıflama olmasın;
+  - çıplak kurum IP'si de çözülen adresle aynı sınıftadır (PO kararı);
+  - yalnız adresler böyle okunur. Adından cluster içi olan biçimler (`.svc`
+    ve pod adı, kısa ad) adına göre karar bulur; yanıtlarından biri cluster
+    içinde olan ad reddedilir;
+  - hedef politikası ve yük korumaları ayarı okumaz; bunlar kiracı sınırı
+    değildir;
+  - aralıklardan biri API sunucusunun adresini (`KUBERNETES_SERVICE_HOST`) ya da
+    backend'in kendi adresini içeriyorsa backend başlamaz (PO kararı: WARN
+    değil hata, çünkü çakışma Service ya da pod ağını namespace'siz açar).
+    Koruma yalnız bu iki örneğe bakar; pod ve Service ağının geri kalanı, node
+    ağı ve VIP'ler operatörün sorumluluğundadır;
+  - keşiften içe aktarma hedefi çözmez, yalnız namespace'e bakar: aralık
+    Route'un VIP'ini içeriyorsa içe aktarma, klon ve hedef değişikliği aynı
+    sonucu verir; içermiyorsa içe aktarma kabul eder, klon ve hedef değişikliği
+    reddeder (README "Hedef politikası", "Kurum ağı").
+  Listedeki her adrese kapsamı sınırlı kullanıcı bir namespace'e bağlanmadan,
+  Kubeat'in pod'undan ulaşır; ayarın sınırı operatörün listesidir.
+
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
   monitor'ü okuyabilen herkese döner ve aksi hâlde bir iç cluster adresini
