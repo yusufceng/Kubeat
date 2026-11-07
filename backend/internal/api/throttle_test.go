@@ -893,6 +893,10 @@ func TestGuessSharedLockWhenHopsWrong(t *testing.T) {
 				if strings.Contains(got, "sign-in") {
 					t.Errorf("the WARN names the sign-in for a %s: %q", g.surfaceName, got)
 				}
+				shared := map[string]string{statusPageSurface.name: statusPageSurface.shared, passwordSurface.name: passwordSurface.shared}[g.surfaceName]
+				if !strings.Contains(got, "one shared "+shared+" lock") {
+					t.Errorf("the WARN does not name the shared %s lock it fell back to: %q", shared, got)
+				}
 				if n := strings.Count(got, "source=10.128.2.15"); n != 3 {
 					t.Errorf("%d refusals name the UI pod they keyed on, want 3: %q", n, got)
 				}

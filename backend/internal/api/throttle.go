@@ -136,12 +136,12 @@ func (h *handler) clientIP(r *http.Request, s surface, now time.Time) string {
 		// request reached the UI without passing the proxies in front of it.
 		h.proxyWarn.warn(now, "xff-hops-too-high",
 			fmt.Sprintf("X-Forwarded-For has fewer entries than UPTIME_TRUST_PROXY_HOPS=%d: the forwarded chain is "+
-				"shorter than the trusted hops, so the %s throttle's source falls back to the peer %q rather than a "+
-				"client-settable entry; set UPTIME_TRUST_PROXY_HOPS to the X-Forwarded-For entries your proxies in "+
-				"front of the UI write, 1 with none and the UI reached only through a port-forward, or this %s "+
-				"reached the UI without passing the proxies in front of it (README, \"Hesaplar ve giriş\", "+
-				"\"Vekil-hop rehberi\")",
-				h.opts.TrustProxyHops, s.name, peer, s.name))
+				"shorter than the trusted hops, so the %s throttle's source falls back to the peer %q, one shared %s "+
+				"lock for every browser behind it, rather than a client-settable entry; set UPTIME_TRUST_PROXY_HOPS "+
+				"to the X-Forwarded-For entries your proxies in front of the UI write, 1 with none and the UI reached "+
+				"only through a port-forward, or this %s reached the UI without passing the proxies in front of it "+
+				"(README, \"Hesaplar ve giriş\", \"Vekil-hop rehberi\")",
+				h.opts.TrustProxyHops, s.name, peer, s.shared, s.name))
 		return peer
 	}
 	return chain[i]
