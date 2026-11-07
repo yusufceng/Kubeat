@@ -252,7 +252,7 @@ bir `output` ile okunur). Notların uyarıları ve her birini kapatan değer:
 | Thanos 9091 | `prometheus.url` 9091'de ve keşif cluster çapında: pod'ların CPU ve belleği boş kalır | `prometheus.openshiftMonitoringView: true` |
 | Prometheus sertifikası denetlenmiyor | `prometheus.tokenFile` ile birlikte `prometheus.insecureSkipVerify: true`: token'ı o adreste yanıt veren alır | `prometheus.insecureSkipVerify: false` ve `prometheus.caFile` |
 | Ingress TLS | TLS Secret'ı yok (düz HTTP'de kimse giriş yapamaz) ya da Ingress TLS'siz (parolalar düz metin gider) | Secret'ı oluşturun ya da cert-manager'a oluşturtun (`ingress.annotations`); TLS Ingress'in önünde bitiyorsa `ingress.tls.enabled: false` ve `https://` ile `publicURL` |
-| Giriş throttle'ı (hop) | Route ya da Ingress açık ve `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS` yok ya da `0` (varsayılan): her tarayıcı arayüz pod'una sayılır, ad başına tek paylaşılan kilit kalır. Route'ta ayrıca: değer router'ın `forwardedHeaderPolicy`'si `Append` ya da `Replace` iken geçerlidir | `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS: "1"` (düz Route; `ingress-nginx`, controller Service'i `externalTrafficPolicy: Local`) ya da `"2"` (GCE Ingress, GKE Gateway, önünde başlığı yazan bir WAF olan Route); router `IfNone`/`Never` ise ya da politikayı okuyamıyorsanız `route.annotations` altında `haproxy.router.openshift.io/set-forwarded-headers: append` (bkz. "Vekil-hop rehberi") |
+| Giriş throttle'ı (hop) | Route ya da Ingress açık ve `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS` yok ya da `0` (varsayılan): her tarayıcı arayüz pod'una sayılır, ad başına tek paylaşılan kilit kalır. Route'ta ayrıca: değer router'ın `forwardedHeaderPolicy`'si `Append` ya da `Replace` iken geçerlidir | `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS: "1"` (düz Route; `ingress-nginx`, controller Service'i `externalTrafficPolicy: Local`) ya da `"2"` (GCE Ingress, GKE Gateway, önünde başlığı yazan bir WAF olan Route); router `IfNone`/`Never` ise ya da politikayı okuyamıyorsanız `route.annotations` altında `haproxy.router.openshift.io/set-forwarded-headers: append` (bkz. "Vekil-hop rehberi"). Notları görmeyen kurulumda yanlış değeri çalışma anında `KubeatSignInSourceDegraded` kuralı söyler (0.52; `metrics.prometheusRule.enabled: true`, bkz. "Yanlış ayar sessizce etkisiz kalmaz") |
 | Arayüz politikası | Route ya da Ingress açık ve `frontend.networkPolicy.enabled` kapalı: cluster'daki bir pod arayüz Service'ine uydurma bir `X-Forwarded-For` ile gelip giriş kaynağını seçebilir. Açıkken: notlar politikanın uygulandığını doğrulamanızı ister; `from` varsayılanda (OpenShift router'ı) ve render OpenShift'in API'sini görmüyorsa WARNING (OpenShift dışında arayüze kimse ulaşamaz); `networkPolicy.enabled` da açıksa push gönderen namespace'leri hatırlatır | `frontend.networkPolicy.enabled: true`; OpenShift dışında `frontend.networkPolicy.from` controller'ın namespace'i ya da GCE Ingress ve GKE Gateway'de yük dengeleyicinin aralıkları; push gönderen namespace'ler de `from`'a (bkz. "Arayüzün ağ politikası") |
 
 Notlar ayrıca LDAP ya da OIDC için lisansı (`license.existingSecret`),
@@ -1942,7 +1942,9 @@ kubectl -n kubeat logs deploy/kubeat-backend | grep 'sign-in refused'
 - `source` sizin adresinizse (tarayıcınızın internete çıktığı adres) değer
   doğrudur.
 - Bir vekilin (WAF, yük dengeleyici, GCLB) adresiyse değer eksiktir: o
-  katmanın yazdığı girdi kadar artırın. Önde L7 GCLB ve varsayılan ayarlı
+  katmanın yazdığı girdi kadar artırın. Bu adres Kubeat'in genel adresiyse
+  (GCE Ingress, GKE Gateway) 0.52'den beri WARN ve kural da söyler
+  (`hops_too_low`, aşağıda "Yanlış ayar sessizce etkisiz kalmaz"). Önde L7 GCLB ve varsayılan ayarlı
   `ingress-nginx` varken `source` GCLB vekiliyse artırmak işe yaramaz
   (`ingress-nginx` GCLB'nin girdilerini siler): tablodaki iki ayarı açıp `3`
   verin.
@@ -1976,42 +1978,89 @@ burada rolü olmayan birinin reddi (`"reason":"no role"`) de aynı alanı yazar.
 
 **Yanlış ayar sessizce etkisiz kalmaz.** Giriş, yayımlanmış bir DoS düzeltmesi
 olduğu için ayar eksik ya da fazla olduğunda loga dakikada en fazla bir kez
-WARN yazılır; 0.50'den beri bu arayüzden gelen girişte de böyledir:
+WARN yazılır; 0.50'den beri bu arayüzden gelen girişte de böyledir. 0.52'den
+beri her biri ayrıca sayılır ve chart'ın kuralıyla alarma bağlanır (aşağıda
+"Sayaç ve kural"); parantez içindeki ad sayacın `reason` değeridir:
 
-- `X-Forwarded-For` geldiği hâlde `UPTIME_TRUST_PROXY_HOPS=0` ise (önde bir
-  vekil var ama güvenilmiyor): throttle tek paylaşılan ada-başına kilide
-  gerilemiştir; WARN, anahtarlanan eş adresini yazar. Arayüzden gelen girişte
-  bu eş arayüz pod'udur.
+- `X-Forwarded-For` geldiği hâlde `UPTIME_TRUST_PROXY_HOPS=0` ise
+  (`hops_zero`; önde bir vekil var ama güvenilmiyor): throttle tek paylaşılan
+  ada-başına kilide gerilemiştir; WARN, anahtarlanan eş adresini yazar.
+  Arayüzden gelen girişte bu eş arayüz pod'udur.
 - Arayüzden gelen istekte `X-Forwarded-For` zinciri
-  `UPTIME_TRUST_PROXY_HOPS`'tan kısa gelirse (değer gerçek girdi sayısından
-  büyük ya da istek arayüzün önündeki vekilleri atlıyor): görülen kaynak
-  istemcinin ayarlayabileceği en soldaki girdiye değil, hiçbir istemcinin
-  denetlemediği eşe (peer) düşer. Böylece uydurma bir `X-Forwarded-For` ile ne
+  `UPTIME_TRUST_PROXY_HOPS`'tan kısa gelirse (`hops_too_high`; değer gerçek
+  girdi sayısından büyük ya da istek arayüzün önündeki vekilleri atlıyor):
+  görülen kaynak istemcinin ayarlayabileceği en soldaki girdiye değil, hiçbir
+  istemcinin denetlemediği eşe (peer) düşer. Böylece uydurma bir `X-Forwarded-For` ile ne
   her istekte taze bir kaynak gibi görünüp throttle atlanabilir ne de bir kurban
   kilitlenebilir; o eş/NAT yalnızca paylaşılan bir kilide geriler. Bu yalnız
   zinciri kısa gelen istek için geçerlidir: başlığa ekleyen bir vekilin
   arkasında zincirini uzatan istemci WARN almadan kaynağını seçer (yukarıda
   "Dikkat edilecekler").
 - Değer `0`'dan büyükken arayüzün sırrını sunmayan bir eşten giriş gelirse
-  (0.50; backend'e doğrudan bir istek ya da uydurma bir başlık): kaynak o eştir
-  ve WARN eşin adresini, isteğin `X-Forwarded-For` taşıyıp taşımadığını yazar;
-  sırrı ve isteğin sunduğu değeri yazmaz.
-- Değer `0`'dan büyük ama `UPTIME_FRONTEND_TOKEN` tanımsızsa (0.50; chart dışı
-  kurulum): açılışta bir kez, sonra çalışma anında dakikada en fazla bir kez
-  WARN düşer; başlığa hiçbir eşten güvenilmez, her tarayıcı arayüz pod'una
-  anahtarlanır. Başlığın taşıyamayacağı bir karakter içeren sır da açılışta
-  söylenir ve yok sayılır.
+  (`untrusted_peer`, 0.50; backend'e doğrudan bir istek ya da uydurma bir
+  başlık): kaynak o eştir ve WARN eşin adresini, isteğin `X-Forwarded-For`
+  taşıyıp taşımadığını yazar; sırrı ve isteğin sunduğu değeri yazmaz.
+- Değer `0`'dan büyük ama `UPTIME_FRONTEND_TOKEN` tanımsızsa
+  (`no_frontend_token`, 0.50; chart dışı kurulum): açılışta bir kez, sonra
+  çalışma anında dakikada en fazla bir kez WARN düşer; başlığa hiçbir eşten
+  güvenilmez, her tarayıcı arayüz pod'una anahtarlanır. Başlığın taşıyamayacağı
+  bir karakter içeren sır da açılışta söylenir ve yok sayılır.
+- Anahtarlanan kaynak Kubeat'in kendi genel adresiyse (`hops_too_low`, 0.52):
+  kaynak `UPTIME_PUBLIC_URL`'ün host'unun çözüldüğü adreslerden biridir, yani
+  istemcinin değil arayüzün önündeki yük dengeleyicinin adresidir (ör. GCE
+  Ingress ya da GKE Gateway'de değer `2` yerine `1`: okunan girdi GCLB'nin
+  kendi eklediğidir). WARN "hop değeri gerekenden küçük" der
+  (`UPTIME_TRUST_PROXY_HOPS=1 is lower than needed`), adresi ve paylaşılan
+  kilidi yazar, doğru değeri ister. Kaynak değişmez: her tarayıcı o adrese
+  anahtarlanır, tek paylaşılan kilit kalır.
+  - Adresler açılışta ve 5 dakikada bir arka planda çözülür; istek yolunda DNS
+    sorgusu yapılmaz. Bulunan adresler ya da sinyalin neden sustuğu değişince
+    backend bir `INFO` satırı yazar (`throttle: ... public URL's addresses`).
+  - Sinyal emin olamadığında susar, yanlış alarm vermez: host çözülemezse,
+    CNAME ise (CDN ya da bulut yük dengeleyicisinin kendi adı) ya da yalnız
+    loopback adreslerine çözülürse (`localhost`, port-forward). Host mutlak ad
+    olarak sorulur, pod'un arama alanları uygulanmaz. `UPTIME_PUBLIC_URL`
+    boşsa (chart'ta `publicURL`, `route.host` ve `ingress.host` yoksa) hiç
+    bakılmaz.
+  - Ölçülmedi (GKE): satır GCLB'nin belgelenmiş davranışından türetildi,
+    sahte resolver ve sahte saatle sınandı.
 
-Değerin eksik olması (ör. WAF'lı Route'ta `1`) WARN vermez: throttle o vekilin
-adresine anahtarlanır. Bunu yukarıdaki `source` alanından görürsünüz.
+Değerin eksik olması bundan başka (ör. WAF'lı Route'ta `1`: WAF'ın router'a
+bağlandığı adres genelde genel adresinden farklıdır) WARN vermez: throttle o
+vekilin adresine anahtarlanır. Bunu yukarıdaki `source` alanından görürsünüz.
+
+**Sayaç ve kural (0.52).** Kurulum notunu görmüyorsanız (Terraform, Argo CD,
+OpenShift GitOps; bkz. "Kurulum notları görünmez"), yanlış hop ayarını size bu
+kural söyler:
+
+- **Sayaç.** `kubeat_signin_source_degraded_total{reason,surface}` yukarıdaki
+  her isteği WARN'ın dakika sınırından bağımsız sayar. `reason` yukarıdaki beş
+  addan biridir, `surface` `sign_in`, `password_change` ya da `status_page`.
+  Adres taşımaz; 15 seri de açılışta 0'dan başlar.
+- **Kural.** `metrics.prometheusRule.enabled=true` iken `kubeat.signin`
+  grubundaki `KubeatSignInSourceDegraded`, son 15 dakikada `hops_zero`,
+  `no_frontend_token`, `hops_too_high` ya da `hops_too_low` sayıldıysa yanar.
+  Kurulum ve `reason` başına tek alarmdır: yüzeyler ve Recreate'in yeni pod'u
+  ikinci bir alarm açmaz. Açıklaması `reason`'a göre neyin yanlış olduğunu
+  söyler; çaresi yukarıdaki WARN'dadır. Severity
+  `metrics.prometheusRule.signInSeverity` (varsayılan `warning`); kural
+  `KubeatUnhealthy`'ye bağlı değildir.
+- **Ne zaman söner.** Son sayılan istekten 15 dakika sonra. Değeri düzeltince
+  yeni artış olmaz; yanlış değer sürerken her girişte yeniden yanar.
+- **`untrusted_peer` kurala bağlanmaz.** Backend'e doğrudan gelen betik
+  girişinde (port-forward, API) beklenen durumdur ve yalnız sayılır.
+- **Port-forward.** Arayüze yalnız port-forward ile ulaşılan bir kurulumda
+  değer `0` kalırsa kural yanar (Next.js başlığı yazar, yukarıda "Dikkat
+  edilecekler"); orada değer `1`'dir.
 
 **Parola değiştirme ve durum sayfası kilidinde (0.51).** Bu iki yüzey de
 kaynağı aynı yoldan okur, bu yüzden yukarıdakiler onlar için de geçerlidir:
 
 - Uyarılar bu isteklerde de düşer. Satır yüzeyi adlandırır (`sign-in`,
   `password change`, `status-page unlock`); tek paylaşılan kilide geriletenler
-  (değer `0`, sır eksik, zincir kısa) o kilidi de yazar: `per-name`,
-  `per-account` ya da `per-page`.
+  (değer `0`, sır eksik, zincir kısa, 0.52'den beri kaynak genel adres) o
+  kilidi de yazar: `per-name`, `per-account` ya da `per-page`. Sayaç da bu
+  istekleri kendi `surface` değeriyle sayar (0.52, yukarıda "Sayaç ve kural").
 - Dakika sınırı üç yüzeyde ortaktır: her yanlış ayar için dakikada en fazla
   bir satır düşer ve satır o dakikada yanlış ayara ilk takılan isteğin
   yüzeyini yazar. Durum sayfası ziyaretçileri satır sayısını artırmaz.
@@ -2169,7 +2218,7 @@ parolanın kilidi de kaynağa göredir:
 sızdırmamak için genel kaldığından (başarısız giriş hep 401 "kullanıcı adı ya
 da parola hatalı", throttle hep 429), bir dizin kesintisini bir parola
 spreyinden ya da kilitlenen `admin` anını yalnız yanıta bakarak ayırt
-edemezsiniz. Backend bunları `/metrics` üzerinde iki sayaçla gösterir (metrik
+edemezsiniz. Backend bunları `/metrics` üzerinde sayaçlarla gösterir (metrik
 anahtarıyla korunan yüzeyde, bkz. "Metrik anahtarı"); istemci yanıtı değişmez:
 
 - `kubeat_signin_failures_total{reason}` — başarısız parola girişleri,
@@ -2189,18 +2238,29 @@ anahtarıyla korunan yüzeyde, bkz. "Metrik anahtarı"); istemci yanıtı deği�
   ya da tavanı dolan bir NAT'ı. `source_total` serisi tavan kapalıyken de
   açılışta 0'dan başlar.
   Yalnız girişleri sayar: durum sayfası kilidinin ve parola değiştirmenin
-  429'ları bu sayaca girmez. Logdaki ret satırları (`status page unlock
-  refused`, `password change refused`) yalnız yanlış parolada yazılır; 429'lar,
-  sayfanın ya da hesabın tavan kilidi dahil, yalnız throttle'ın dakikalık
-  `sign-in attempts refused` WARN'ında görünür. O satırın `name` alanı son
-  reddedilen anahtardır: `sp:<slug>` ya da `pw:<id>`, kaynağın kilidinde önünde
-  kaynak adresle. Kaynak tavanının aynı satırı `throttle=source_total` alanını
-  taşır ve `name` alanı yalnız kaynak adrestir.
+  429'ları 0.52'den beri ayrı bir sayaçtadır (aşağıda). Logdaki ret satırları
+  (`status page unlock refused`, `password change refused`) yalnız yanlış
+  parolada yazılır; 429'lar ayrıca throttle'ın dakikalık `sign-in attempts
+  refused` WARN'ında görünür. O satırın `name` alanı son reddedilen anahtardır:
+  `sp:<slug>` ya da `pw:<id>`, kaynağın kilidinde önünde kaynak adresle. Kaynak
+  tavanının aynı satırı `throttle=source_total` alanını taşır ve `name` alanı
+  yalnız kaynak adrestir.
+- `kubeat_throttled_total{surface,kind}` (0.52) — durum sayfası kilidinin
+  (`status_page`) ve parola değiştirmenin (`password_change`) 429'ları: `source`
+  (kaynağın kilidi, `UPTIME_LOGIN_MAX_FAILURES`) ya da `account` (sayfanın ya da
+  hesabın tüm kaynaklardaki tavanı, `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`; kilit
+  herkes içindir). Dört seri de açılışta 0'dan başlar.
+  `kubeat_signin_throttled_total`'ın ve aşağıdaki `kind="account"` örneğinin
+  anlamı değişmez.
+- `kubeat_signin_source_degraded_total{reason,surface}` (0.52) — throttle'ın
+  istemciye anahtarlayamadığı istekler, yukarıda "Sayaç ve kural".
 
-Her iki sayacın serisi açılışta 0'dan başlar, böylece ilk olayı `increase()`
+Sayaçların serileri açılışta 0'dan başlar, böylece ilk olayı `increase()`
 ile yakalarsınız; etiket değerleri kapalı bir kümeden gelir ve kullanıcı adı
-taşımaz (seriler sınırlı kalır). Chart hazır bir PrometheusRule getirmez (öz
-sağlık mantığına da bağlanmaz, S38); kendi Prometheus'unuzda şöyle
+ya da adres taşımaz (seriler sınırlı kalır). Chart bunlardan yalnız kaynak
+ayrımı için hazır kural getirir (`KubeatSignInSourceDegraded`, yukarıda);
+dizine ulaşılamaması ve hesap tavanı için kural yoktur (backlog) ve hiçbiri öz
+sağlık mantığına bağlanmaz (S38). Onları kendi Prometheus'unuzda şöyle
 alarmlayabilirsiniz:
 
 ```
@@ -2208,6 +2268,8 @@ alarmlayabilirsiniz:
 increase(kubeat_signin_failures_total{reason="directory_unreachable"}[5m]) > 0
 # Hesap tavanı tetiklendi: olası dağıtık tahmin / kilitlenen admin
 increase(kubeat_signin_throttled_total{kind="account"}[5m]) > 0
+# Bir durum sayfası ya da bir hesabın parola değiştirmesi herkese kilitlendi
+increase(kubeat_throttled_total{kind="account"}[5m]) > 0
 ```
 
 #### LDAP
@@ -3835,6 +3897,8 @@ yayınlar. Başlıcaları:
 | `kubeat_channel_undelivered_outages{channel,channel_type}` | Kanalın almadığı ve yeniden gönderilmeyi bekleyen kesinti (`down`) bildirimi sayısı: reddettiği ya da ulaşılamayan, ve almıyor sayıldığı sürece bekletilenler; yoksa 0. Etkin ve en az bir kez denenmiş ya da böyle bir kesintisi bekleyen her kanal için (bkz. "Alarm") |
 | `kubeat_signin_failures_total{reason}` | Başarısız parola girişleri, nedenine göre: `wrong_password` (yerel hesabın parolası yanlış), `rejected` (dizin reddetti ya da adın burada hesabı yok/başka yolla giriyor), `directory_unreachable` (dizine ulaşılamadı). İstemci yanıtı hep genel 401'dir (enum açılmaz, #78); sayaç bir dizin kesintisini parola spreyinden ayırmaya yarar. Her reason serisi açılışta 0'dan başlar (bkz. "Hesaplar ve giriş" → "Giriş gözlemlenebilirliği") |
 | `kubeat_signin_throttled_total{kind}` | Throttle'ın 429 ile reddettiği girişler: `source` (kaynak-ve-ad başına, `UPTIME_LOGIN_MAX_FAILURES`), `account` (tüm kaynaklardaki gevşek ad tavanı, `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`; ADR-0004'ün açık bıraktığı dağıtık kilidi görünür kılar) ya da `source_total` (0.52; bir kaynağın bütün adlardaki tavanı, `UPTIME_LOGIN_SOURCE_MAX_FAILURES`; tek kaynaktan parola spreyi). İstemci yanıtı değişmez; üç seri de açılışta 0'dan başlar |
+| `kubeat_throttled_total{surface,kind}` | Parola değiştirmenin (`password_change`) ve durum sayfası kilidinin (`status_page`) 429'ları (0.52): `source` (kaynağın kilidi) ya da `account` (sayfanın ya da hesabın tüm kaynaklardaki tavanı). Girişinkiler `kubeat_signin_throttled_total`'dadır; dört seri açılışta 0'dan başlar |
+| `kubeat_signin_source_degraded_total{reason,surface}` | Throttle'ın istemciye anahtarlayamadığı giriş, parola değiştirme ve durum sayfası kilidi istekleri (0.52), WARN'ın dakika sınırından bağımsız her biri: `hops_zero`, `no_frontend_token`, `hops_too_high`, `hops_too_low` (kaynak Kubeat'in kendi genel adresi) ve `untrusted_peer` (arayüzden gelmeyen istek; betikte beklenen). Adres taşımaz; 15 seri açılışta 0'dan başlar. `KubeatSignInSourceDegraded` ilk dördüne bakar (bkz. "Hesaplar ve giriş" → "Yanlış ayar sessizce etkisiz kalmaz") |
 | `kubeat_backups_total{result}` | Yedek denemeleri, `ok` ya da `failed`; iki seri de açılışta 0'dan başlar |
 | `kubeat_backup_last_success_timestamp_seconds` | En yeni yedek kopyanın zamanı; yeniden başlatmada yedek dizinindeki en yeni dosyadan okunur (bkz. "Yedekleme ve geri yükleme") |
 | `kubeat_backup_last_failure_timestamp_seconds` | Son başarısız yedek denemesinin zamanı, süreç açıldığından beri; yoksa 0. Son başarılı kopyadan yeniyse yedekleme başarısızdır (`KubeatBackupFailing`) |
@@ -3861,6 +3925,7 @@ yapılır. Kurallar:
 | --- | --- |
 | `KubeatMonitorDown` | Monitor'un açık kesintisi var (`kubeat_monitor_incident_open`); etiketlerinde `monitor`, `monitor_namespace`, `type`, `namespace`, `job` ve `severity` (`metrics.prometheusRule.severity`, varsayılan `warning`). Kesinti kapanınca bir sonraki scrape'te çözülür, scrape boşluğunda açık kalır (bkz. aşağıda "Scrape boşluğu") |
 | `KubeatCertificateExpiring` | Sertifikanın bitişine `metrics.prometheusRule.certWarningDays` (14) günden az kaldı; scrape boşluğunda açık kalır |
+| `KubeatSignInSourceDegraded` | 0.52, `kubeat.signin` grubu: son 15 dakikada giriş throttle'ı istemcileri ayıramadı (`kubeat_signin_source_degraded_total`'da `hops_zero`, `no_frontend_token`, `hops_too_high` ya da `hops_too_low`); her tarayıcı tek adrese, throttle ad, sayfa ve hesap başına tek kilide geriledi. Kurulum ve `reason` başına tek alarm, yüzeyler ve Recreate dahil; `severity` `metrics.prometheusRule.signInSeverity` (`warning`). `untrusted_peer` bağlanmaz. Kurulum notunu görmeyen GitOps ve Terraform kurulumlarının yanlış hop ayarını görme yolu (bkz. "Hesaplar ve giriş" → "Yanlış ayar sessizce etkisiz kalmaz") |
 | `KubeatDown` | Backend 5 dakikadır scrape edilemiyor ya da hiç backend pod'u yok: pod bekliyor, silindi ya da uyutuldu (`critical`). `up{job="<release>-backend", namespace="<namespace>"}` serisine bakar; ServiceMonitor kapalıyken bu etiketlerle toplayan başka bir scrape yoksa sürekli yanar. Bu sırada kesinti, sertifika ve yedek alarmları 10 dakika açık kalır, sonra çözülür (bkz. aşağıda susturma kuralları) |
 | `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |
 | `KubeatUnhealthy` | `kubeat_self_healthy` 5 dakikadır 0: kontroller zamanlanmıyor ya da sonuçlarının hiçbiri yazılamıyor (dolu ya da salt okunur veri volume'u, takılı bir yazım) (`critical`). Heartbeat olmadan da yanar; yalnızca bazı sonuçların düşmesi `KubeatResultsDropped`'ın uyarısıdır. Backend pod'u yokken yanmaz, o `KubeatDown`'ın işidir; scheduler durunca `KubeatSchedulerStalled` ile birlikte yanar |
@@ -3873,7 +3938,9 @@ yapılır. Kurallar:
 | `KubeatLicenseExpiring` | Kubeat Enterprise lisansının bitişine 30 günden az kaldı ya da lisans bitti; 7 günden az kalınca aynı adla ikinci bir kural `critical` ile yanar (bkz. "Kubeat Enterprise lisansı") |
 
 `kubeat.monitors` grubundaki ilk iki kural `severity` etiketini
-`metrics.prometheusRule.severity` değerinden alır; `kubeat.self`
+`metrics.prometheusRule.severity` değerinden, `kubeat.signin` grubundaki
+`KubeatSignInSourceDegraded` `metrics.prometheusRule.signInSeverity`
+değerinden alır (ikisinin de varsayılanı `warning`); `kubeat.self`
 grubundakiler kendileri koyar (`warning`, belirtilenlerde `critical`). Alarm
 belirtiyi söyler, nedeni backend'in log'undadır. Lisans alarmı `critical`
 olunca `warning` olanı da açık kalır; OpenShift'in ve kube-prometheus-stack'in
@@ -4136,10 +4203,11 @@ bu değerle render edilen kurallar taşınır.
   açık kesinti ve kanal alarmı da öbürünün başarılı scrape'iyle erken
   çözülür.
 - **Ne değişir.** `KubeatDown`, `KubeatUnhealthy`, `KubeatBackupFailing`,
-  `KubeatMonitorDown`, `KubeatCertificateExpiring` ve
-  `KubeatNotificationsFailing`'in kanal ifadeleri bu etiketle, `namespace`
-  ve `job`'un yanında (ve monitor ya da kanal etiketleriyle), cluster başına
-  toplanır ve dış etiketlerden yalnızca onu taşır. Depo bir HA çiftinin
+  `KubeatMonitorDown`, `KubeatCertificateExpiring`,
+  `KubeatNotificationsFailing`'in kanal ifadeleri ve (0.52)
+  `KubeatSignInSourceDegraded` bu etiketle, `namespace` ve `job`'un yanında
+  (ve monitor, kanal ya da `reason` etiketleriyle), cluster başına toplanır ve
+  dış etiketlerden yalnızca onu taşır. Depo bir HA çiftinin
   kopyalarını tekilleştirmiyorsa kopyanın etiketi (ör. `prometheus_replica`)
   de toplanır: bir kopyanın serisi kesilince yanlış `KubeatDown` yanmaz,
   açık kesinti ve bildirim alamayan kanal tek alarm kalır. Recreate'te de
@@ -4160,7 +4228,8 @@ bu değerle render edilen kurallar taşınır.
   da susturur.
 - **Etiket adı.** Prometheus etiket adı olmalı ve kuralların kendi
   kullandığı etiketlerden (`namespace`, `job`, `pod`, `monitor`,
-  `channel`…) biri olmamalıdır; chart aksini reddeder.
+  `channel`, 0.52'den beri `reason` ve `surface`…) biri olmamalıdır; chart
+  aksini reddeder.
 
 ### Operator'süz cluster: Alloy, Grafana Cloud ve Mimir
 
@@ -4184,7 +4253,8 @@ reddedilir. Kubeat'in kendi alarmları orada üç yoldan birine gider; ilki
   yapılandırmasına `mimir.rules.kubernetes` bileşeni eklenir: Alloy
   cluster'daki PrometheusRule nesnelerini bulur ve Mimir'in (Grafana
   Cloud'un) ruler'ına yükler. Her `helm upgrade` kuralı değiştirince Alloy
-  yenisini kendisi taşır; kopyalanacak bir şey yoktur.
+  yenisini kendisi taşır (0.52'nin `kubeat.signin` grubu dahil); kopyalanacak
+  bir şey yoktur.
 
   ```alloy
   mimir.rules.kubernetes "kubeat" {
@@ -4208,8 +4278,12 @@ reddedilir. Kubeat'in kendi alarmları orada üç yoldan birine gider; ilki
 - **Kopyalamak.** CRD de kurulamıyorsa kurallar chart'tan render edilip
   depoya `mimirtool rules sync` ile taşınır. Kopya chart'la yükselmez:
   kural sayısı 0.42'de 5, 0.43'te 12, 0.45'te 13'tü; 0.44'te kopyalayan
-  0.45'te `KubeatUnhealthy` olmadan sessizce sürer. Bu yüzden eşitleme
-  komutu her yükseltmede koşar. [docs/yukseltme.md](docs/yukseltme.md) her
+  0.45'te `KubeatUnhealthy` olmadan sessizce sürer. 0.52 `kubeat.signin`
+  grubunu ve `KubeatSignInSourceDegraded`'i ekler (yedek açıkken 14 kural):
+  0.51'in kopyasıyla kalan bir kurulum yanlış hop ayarını, kurulum notu da
+  görünmediği için, alarmsız sürdürür (bkz. "Hesaplar ve giriş" → "Yanlış
+  ayar sessizce etkisiz kalmaz"). Bu yüzden eşitleme komutu her yükseltmede
+  koşar. [docs/yukseltme.md](docs/yukseltme.md) her
   sürümde "Alarm kuralları: değişti" ya da "değişmedi" der; "değişti" diyen
   her sürümde kopya yenilenir. Komut (`MIMIR_ADDRESS`, `MIMIR_TENANT_ID` ve
   `MIMIR_API_KEY` ortamdan; `namespace` satırı mimirtool'un kural dosyası
@@ -5402,7 +5476,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_NOTIFY_RETRY_MAX` | `15m` | Kanalın almadığı kesinti (`down`, `up`) bildiriminin yeniden denenme aralığının üst sınırı: alıcıya ulaşılamadığında aralık 1 dakikadan başlar, her başarısız denemede ikiye katlanır; reddedilen (4xx) bildirim doğrudan bu aralıkla, meşgul (429) alıcıya `Retry-After` kadar sonra (en çok bu kadar) denenir; `down` olay kapanana kadar denenir (bkz. "Alarm"). `0` yeniden denemeyi kapatır. Alt sınırı `1m` ve bir denemenin süresidir (`UPTIME_NOTIFY_ATTEMPTS × (UPTIME_NOTIFY_TIMEOUT + UPTIME_NOTIFY_RETRY_DELAY)`): daha kısası bu sınıra yükseltilir ve backend açılışta verilen ve kullanılan değeri `WARN` olarak loglar |
 | `UPTIME_NOTIFY_HUMAN_RETRY_MAX` | `0` | İnsanların okuduğu kanallar (Slack, Teams, e-posta, Telegram, Discord…) için `UPTIME_NOTIFY_RETRY_MAX`'tan daha kısa bir üst sınır: bu kanalların yeniden deneme beklemesi en çok bu kadar katlanır ve reddi bu kadar bekler, yazılımın okuduğu webhook ve PagerDuty ise `UPTIME_NOTIFY_RETRY_MAX`'ta kalır; böylece nöbetsiz bir ekibin ana Slack kanalına bayat bir sayfa geç gelmez. `0` (varsayılan) o kanalları da `UPTIME_NOTIFY_RETRY_MAX`'ta bırakır (davranış değişmez); yeniden denemeyi kapatmaz (onu `UPTIME_NOTIFY_RETRY_MAX=0` yapar). Alt sınırı `UPTIME_NOTIFY_RETRY_MAX`'ınkiyle aynıdır: daha kısası ona yükseltilir ve bir `WARN` loglanır |
 | `UPTIME_NOTIFY_RETRY_FOR` | `1h` | Düzelme (`up`) bildiriminin ilk başarısız denemeden itibaren en çok ne kadar süre yeniden deneneceği (almıyor sayılan bir kanal için bekletilen düzelmede süre ilk denemeyle başlar); `0` düzelmeyi yeniden denemez |
-| `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz. `UPTIME_OIDC_REDIRECT_URL` boşsa SSO dönüş adresi de bundan türetilir |
+| `UPTIME_PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres; bildirimlerdeki bağlantılar bununla kurulur, boşsa bağlantı konmaz. `UPTIME_OIDC_REDIRECT_URL` boşsa SSO dönüş adresi de bundan türetilir. Host'u açılışta ve 5 dakikada bir çözülür: giriş throttle'ı bu adreslerden birine anahtarlanan kaynağı "hop değeri küçük" sayar (`hops_too_low`; "Hesaplar ve giriş", "Yanlış ayar sessizce etkisiz kalmaz") |
 | `UPTIME_INSTANCE_NAME` | – | Kurulum kimliği: birden çok kurulumun paylaştığı alıcılar için bildirimlerde bu kurulumun adı. PagerDuty `dedup_key`'inde ve `custom_details`'inde, webhook gövdesinin `instance` alanında, Slack ve Mattermost alt bilgisinde, Teams ve Google Chat kartında ve e-posta gövdesinde görünür. Boşsa `UPTIME_PUBLIC_URL`'ün host'u (varsa portuyla), ikisi de yoksa kimlik yok. Chart'ta `instanceName`. Değiştirmeden önce açık PagerDuty olaylarını kapatın (bkz. "Bildirim kanalları", **Kurulum kimliği**) |
 | `UPTIME_LANGUAGE` | `en` | Bildirim metinlerinin ve ilk yönetici hesabının görünen adının dili: `en` ya da `tr` |
 | `UPTIME_NOTIFY_GROUP_WAIT` | `30s` | Aynı namespace'teki aynı tür olayların insanlara giden kanallarda tek mesajda toplanmak için beklediği süre; `0` kapalı |
