@@ -45,6 +45,10 @@ import (
 var version = "dev"
 
 func main() {
+	// One command besides the server, for an operator in the backend's pod.
+	if len(os.Args) > 1 && os.Args[1] == "resolve" {
+		os.Exit(resolveCommand(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	privateFiles()
 
