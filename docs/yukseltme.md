@@ -48,14 +48,14 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.51'e
+### 0.42'den 0.52'ye
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
    başarısız kanalları düzeltin ya da kapatın; aynı PagerDuty servisine
    bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
    0.46'dan beri uyarıya döner: 1 dakikadan ya da bir denemenin
-   süresinden kısa bir değer 0.46–0.51'de backend'i durdurmaz, alt
+   süresinden kısa bir değer 0.46–0.52'de backend'i durdurmaz, alt
    sınıra yükseltilir ve her açılışta `WARN` yazılır; değeri yine de
    düzeltin: 0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu
    ayarı tanımaz).
@@ -104,32 +104,43 @@ geri dönüş başladığınız sürüme olur.
     `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'i, vekilli kurulumda
     `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi değerlendirin; kapsamı sınırlı kullanıcının kurduğu eski monitor'ü yönetici
     olarak kaydetmeyin.
-11. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46–0.51'de değişmedi:
-    yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi Alertmanager
-    yönlendirmesine ekleyin; kuralları kopyalıyorsanız 0.51'inkileri
-    kopyalayın (0.45'inkilerle aynı).
-12. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
+11. 0.52'nin adımları ("0.52'ye yükseltme", Yapılacak): HTTP monitor'lerinin
+    `slow_above_ms` eşiklerine ve uzak HTTPS hedefi çoksa worker doluluğuna
+    bakın; kapsam reddi alarmlarınızı `reason` ve `source`'a göre gözden
+    geçirin; `UPTIME_TARGET_RESOLVE_TIMEOUT`'un 2 sn'ye indiğini hesaba katın;
+    LDAP'lı kurulumda kaynak tavanına karar verin;
+    `KubeatSignInSourceDegraded` doğru hop değerinde yanıyorsa (`hops_zero`,
+    `hops_too_low`) değeri artırmayın, susturun;
+    `metrics.prometheusRule.clusterLabel` `reason` ya da `surface` ise
+    değiştirin; namespace sınırlı keşifte yükseltmeden önce keşif durumuna
+    bakın.
+12. Alarm kuralları 0.43, 0.44, 0.45 ve 0.52'de değişti, 0.46–0.51'de
+    değişmedi: yeni `kubeat.self` alarmlarını, `KubeatUnhealthy`'yi,
+    `KubeatSignInSourceDegraded`'i ve `KubeatDiscoveryNamespaceSkipped`'i
+    Alertmanager yönlendirmesine ekleyin; kuralları kopyalıyorsanız
+    0.52'ninkileri kopyalayın.
+13. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
     yerine `--reset-then-reuse-values`, Helm 3.14+):
 
     ```sh
-    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 -f values.yaml
+    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 -f values.yaml
     ```
 
-13. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
-    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.51'in yeniden denemesi,
+14. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
+    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.52'nin yeniden denemesi,
     kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
     PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.51'e
+### 0.41'den 0.52'ye
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.51'e"deki adımlar.
+2. Sonra "0.42'den 0.52'ye"deki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
-0.43–0.50'den gelirken başladığınız sürümden sonraki bölümleri
+0.43–0.51'den gelirken başladığınız sürümden sonraki bölümleri
 eskiden yeniye okuyun. 0.40 ya da öncesinden gelirken de öyle; şemayı
 yükselten 0.38, 0.39 ve 0.40'tan dönüş yalnızca yedekle olur.
 
@@ -307,6 +318,224 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 0.52'ye yükseltme
+
+0.52 bir güvenilirlik ve gözlem sürümüdür; güvenlik sürümü değildir. Kapsam
+reddi artık DNS arızasından ve yarıda kalan kontrolden ayrı sayılır ve
+denetim satırları dakika başına sınırlıdır. Her HTTP kontrolü kendi
+bağlantılarını açıp kapatır; bu, 0.51'de kapsama bağlı monitor'lerin bağlantı
+tutmasından gelen gerilemeyi giderir. Giriş throttle'ına kaynak başına opt-in
+bir tavan, kaynak ayrımı gerilediğinde de bir sayaç ve bir chart kuralı gelir.
+Okunamayan bir namespace keşfi durdurmaz. Şema değişmez (26), migration yok;
+chart kurulumunda yeni zorunlu ayar yok.
+
+Kapsam reddinin ayrımı, iki zaman aşımı ve satır sınırı minikube'da ölçüldü
+(2026-11-08): CoreDNS'in tamamen kapanması, SERVFAIL veren ve 3 sn gecikmeli
+yanıt veren bir bölge, vekilli ve vekilsiz kontrol, kapsamı sınırlı bir
+editörün monitor'leri. Okunamayan namespace, iki node'lu bir minikube'da bir
+namespace'in RoleBinding'i kaldırılarak sınandı. HTTP bağlantılarının bellek
+ölçümü ajan içidir ([yuk-testi.md](yuk-testi.md) "HTTP kontrolünün
+bağlantıları"). GKE'nin kube-dns/Cloud DNS'i ve kurumsal DNS ölçülmedi.
+
+### Yapılacak
+
+- **HTTP monitor'lerinin yanıt süresi eşiklerine bakın.** Her HTTP kontrolü
+  yeni bağlantı açtığından süreye ad çözme, TCP bağlantısı ve HTTPS'te TLS el
+  sıkışması girer. Uzak ya da el sıkışması yavaş bir hedefte `slow_above_ms`
+  0.51'e göre daha erken aşılabilir (README "Yavaş yanıt").
+- **Uzak HTTPS hedefi çoksa worker doluluğunu izleyin.** Kontrol süresi
+  uzadığından aynı `UPTIME_WORKERS` daha az kontrol taşır. Yükseltmeden sonra
+  `kubeat_scheduler_dispatch_skipped_total` ve `KubeatWorkersSaturated`'a
+  bakın, gerekirse `UPTIME_WORKERS`'ı artırın. Özel bir GKE cluster'da Cloud
+  NAT'tan aynı adrese giden çok monitor varsa NAT port sınırına da bakın
+  (`nat/dropped_sent_packets_count`); ölçülmedi.
+- **Kapsam reddi alarmlarınızı gözden geçirin.** DNS arızasıyla gelen ret
+  0.51'de API'de `target`, kontrolde `connection` sayılıyordu; 0.52'de
+  `resolve_error`'dır. `reason="target"` ya da `"connection"`'a bakan bir
+  alarm DNS kesintisinde artık yanmaz; bu bilerek yapıldı. Gerçek bir
+  cross-tenant girişimi için alarmı `source="user"` ve `reason="target"`'a
+  bağlayın, DNS'i `reason="resolve_error"` ile ayrıca izleyin (README "Kapsam
+  ihlali denetimi"). Yanıt vermeyen bir çözücü kontrolde sayılmaz, monitor
+  zaman aşımıyla DOWN olur; DNS kesintisini monitor DOWN alarmları ya da
+  cluster DNS'inin kendi metrikleriyle de izleyin.
+- **`UPTIME_TARGET_RESOLVE_TIMEOUT`.** Varsayılan 5 sn'den 2 sn'ye iner ve
+  yalnız API'deki oluşturma ve değiştirmeyi sınırlar. 2–5 sn'de yanıt veren
+  bir çözücüde kapsamı sınırlı kullanıcının oluşturması artık reddedilir.
+  Değeri arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun; çözücünüz 2
+  sn'den yavaşsa değeri 3 sn'nin altında büyütün (ör. `2500ms`). `5s` 0.51'in
+  süresini geri getirir, ama 3 sn'yi aşan çözümde arayüz isteği bırakır.
+- **LDAP'lı kurulumda kaynak tavanına karar verin.** LDAP tanımlıyken
+  `UPTIME_LOGIN_SOURCE_MAX_FAILURES` verilmemişse açılışta bir `WARN` yazılır.
+  Önerilen değer `20`'dir. Aynı NAT ya da kurumsal vekil (PAC) arkasındaki
+  kullanıcılar tek kaynaktır; bu yüzden varsayılan kapalıdır. Açıkça `0`
+  vermek satırı `INFO`'ya indirir. Tavanı açmadan önce hop değerini
+  `sign-in refused` satırının `source` alanıyla doğrulayın: gerekenden küçük
+  bir değer tavanı bütün girişler için tek kilide çevirir (README "Kaynak
+  tavanı").
+- **Doğru değerde yanan kaynak ayrımı kuralı.** İki kurulumda
+  `KubeatSignInSourceDegraded` hop değeri doğruyken de yanar:
+  - Arayüz Service'i önünde vekil olmadan dışarı açıksa (`LoadBalancer` ya da
+    `NodePort`, hop `0`): `hops_zero`.
+  - Başlık yazmayan bir katman (PROXY protocol'süz L4 yük dengeleyici, NAT)
+    Kubeat'in genel adresinden bağlanıyorsa: `hops_too_low`.
+
+  İkisinde de değeri artırmayın; fazlası kaynak başına sınırı atlatılabilir
+  kılar. Kuralı Alertmanager'da `alertname`, `reason` ve `namespace` ile
+  susturun (README "Sayaç ve kural").
+- **Okunamayan bir namespace varsa.** 0.51'de namespace sınırlı keşifte
+  okunamayan tek bir namespace bütün eşitlemeyi durduruyordu. Böyle bir
+  namespace varsa 0.52'nin ilk turu öteki namespace'lerde birikmiş değişiklikleri
+  bir seferde uygular; buna annotation'ı kaldırılmış monitor'lerin
+  geçmişleriyle silinmesi de girer. 0.51'in keşif durumunda
+  (`GET /api/v1/discovery`) `sync.error` boş değilse eşitleme durmuştur:
+  geçmişini korumak istediğiniz monitor'lerin nesnelerinde annotation'ın
+  yerinde olduğunu doğrulayın ve yedeğin doğrulandığından emin olun.
+- **`metrics.prometheusRule.clusterLabel`** `reason` ya da `surface` ise
+  `helm upgrade` render'da durur; yükseltmeden önce başka bir ad verin.
+- **Kuralları kopyalıyorsanız yeniden kopyalayın** (aşağıda "Alarm kuralları:
+  değişti").
+- **Yedeği doğrulamalı blokla alın** (yukarıda "Yükseltmeden önce yedek").
+  "yedek doğrulandı" demiyorsa yükseltmeyin.
+
+### Davranış değişikliği
+
+- **Kapsam reddinde çözüm hatası ve iptal
+  ([#142](https://github.com/yusufceng/Kubeat/issues/142)).**
+  `kubeat_target_scope_denied_total` yeni `reason="resolve_error"` değerini ve
+  kapalı kümeli `source` etiketini (`user`, `annotation`, `unrecorded`)
+  taşır; her seri açılışta 0'dan başlar.
+  - Ne sayılır: API'de SERVFAIL, vekil istisnası dışındaki NXDOMAIN ve çözüm
+    zaman aşımı. Kontrolde vekile giden ya da ayarlarda yazılı olmayan bir ada
+    yönelen bağlantının çözüm hatası.
+  - Ne sayılmaz: doğrudan bağlanan kontrolde monitor'ün yazılı hedefinin
+    çözüm hatası sıradan bir DNS hatasıdır. Annotation'dan gelen monitor'ün
+    kendi host'u nesnenin namespace'iyle kapsamdadır ve hiç çözülmez. Kontrolün zaman aşımı ya da
+    kapanış çözümü yarıda keserse red sayılmaz, kontrol bağlamın hatasıyla
+    biter.
+  - Ne değişmez: istemcinin gördüğü 403 + `target_scope` ve kontrol sonucu
+    `blocked_by_scope`.
+  - Kontrol anındaki çözüm `UPTIME_TARGET_RESOLVE_TIMEOUT`'a bağlı değildir,
+    monitor'ün kendi zaman aşımıyla sınırlıdır. 0.51'de vekile giden kontrol
+    API'nin süresini kullanıyordu.
+- **Denetim satırı sınırı ve API reddinin log satırı
+  ([#143](https://github.com/yusufceng/Kubeat/issues/143)).**
+  - Kapsam reddinin `deny`/`target-scope` satırları ve `WARN`'ları dakikada
+    en çok `UPTIME_LOGIN_AUDIT_PER_MINUTE` kadar yazılır (varsayılan 60).
+    Giriş hataları, API redleri ve kontrol redleri ayrı bütçe kullanır.
+    Sınır aşılınca dakika sonunda bir `WARN` kaç satırın yazılmadığını
+    söyler. Sayaç her reddi saymaya devam eder.
+  - API reddi de kullanıcıyı, namespace'i, nedeni ve hedefi yazan bir `WARN`
+    bırakır; kontrol anı `WARN`'ı namespace'i ve `source`'u da taşır.
+  - Keşiften içe aktarma ve geri yükleme, bakım penceresi ve workload hedefi
+    redleri de denetime yazılır ve sayılır. Push token, silme, test bildirimi
+    ve olay notu redleri README'de "Denetlenmeyen red yolları" olarak,
+    gerekçesiyle listelenir.
+- **HTTP kontrolünün bağlantıları
+  ([#144](https://github.com/yusufceng/Kubeat/issues/144)).** Her HTTP
+  kontrolü, kapsama bağlı olsun olmasın, yeni bağlantı açar ve bitince
+  kapatır. Sonuçları:
+  - Yanıt süresine el sıkışma girer (yukarıda "Yapılacak").
+  - Yenilenen sertifika bir sonraki kontrolde görünür ve sertifika olayı o
+    kontrolle kapanır.
+  - Kapsama bağlı çok monitor'lü kurulumda bellek düşer.
+
+  Ayrı sertifika sunan birden çok sunucunun arkasındaki bir hedefte sertifika
+  olayı kontrolden kontrole açılıp kapanabilir (README "Birden çok sunucu").
+  Aynı sunucuya giden bir yönlendirme kontrolün kendi bağlantısını kullanır.
+  Yeni ayar yok.
+- **Okunamayan namespace
+  ([#147](https://github.com/yusufceng/Kubeat/issues/147)).**
+  - Namespace sınırlı keşifte, Role'ü kaldırılmış ya da RoleBinding'iyle
+    silinmiş bir namespace atlanır ve tur öteki namespace'lerde sürer.
+  - Atlanan namespace'in monitor'leri ve "Kubeat'te silindi" kayıtları,
+    namespace okunana ya da listeden çıkarılana kadar değişmez.
+  - Atlanan namespace'ler üç yerde görünür: `GET /api/v1/discovery`'de
+    (`sync.skipped_namespaces`), namespace başına bir `WARN` satırında ve
+    Keşif sayfasında.
+  - Yeni seriler: `kubeat_discovery_namespaces_skipped` ve
+    `kubeat_discovery_sync_errors_total{reason}`. İkisi de atlanan
+    namespace'in adını etiket olarak taşımaz (`namespace` etiketi Kubeat'in
+    kendi namespace'idir).
+- **Kaynak ayrımı sayacı
+  ([#146](https://github.com/yusufceng/Kubeat/issues/146)).**
+  - `kubeat_signin_source_degraded_total{reason,surface}` throttle'ın
+    kaynağını ayıramadığı her girişi, parola değiştirmeyi ve durum sayfası
+    açılışını sayar.
+  - `kubeat_throttled_total{surface,kind}` durum sayfası kilidi ile parola
+    değiştirmenin 429'larını sayar. `kubeat_signin_throttled_total`'ın anlamı
+    değişmez.
+  - Yeni `hops_too_low` nedeni ve `WARN`'ı için `UPTIME_PUBLIC_URL`'ün host'u
+    açılışta ve 5 dakikada bir çözülür. Emin olmadığında (CDN, CNAME) susar.
+
+Ayrıca (opt-in ya da davranış değiştirmez):
+
+- **Kaynak tavanı ([#145](https://github.com/yusufceng/Kubeat/issues/145)).**
+  `UPTIME_LOGIN_SOURCE_MAX_FAILURES` (varsayılan `0`, kapalı) tek bir
+  kaynağın bütün adlardaki hatalı girişlerine tavan koyar. Tavanı aşan giriş
+  `kubeat_signin_throttled_total{kind="source_total"}` olarak sayılır ve
+  hiçbir parola denenmez: dizine bind gitmez. Yanıt öteki kilitlerle aynıdır
+  (429 + `Retry-After`). Değer verilmiş ama hop değeri `0` ya da
+  `UPTIME_FRONTEND_TOKEN` boşsa açılışta bir `WARN` düşer.
+- **`server resolve AD...`
+  ([#143](https://github.com/yusufceng/Kubeat/issues/143)).** Backend
+  container'ında koşulan komut, bir adı kapsam denetiminin çözdüğü gibi çözer
+  ve kapsamı sınırlı bir kullanıcı için kararı yazar; hiçbir ayarı açmaz.
+  Vekilli kurulumda `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi açmadan önce ön şartı
+  sınamak için: `oc -n kubeat exec deploy/kubeat-backend -- server resolve
+  <ad>` ([pilot.md](pilot.md)).
+
+**Etki tablosu (S82).** Her hücrede sonuç, önce kapsamı açmayan çare
+yazılıdır.
+
+| Kurulum | Yönetici ya da `*` | Kapsamı sınırlı | Annotation | Kaydı olmayan |
+| --- | --- | --- | --- | --- |
+| Tek kiracılı | Değişmez | (yok) | Sonuç aynı. Kendi host'u nesnenin namespace'iyle kapsamdadır ve çözülmez; onun DNS arızası sıradan DNS hatasıdır. Kontrolün başka bir ada (vekile giden ya da ayarlarda yazılı olmayan) yönelen bağlantısında DNS arızası `resolve_error`, gerçek ret `connection` sayılır, ikisi de `source="annotation"`; satırlar dakikada sınırlı. Çare: cluster DNS'i ve egress | Değişmez (açılışta her namespace'in kaydı) |
+| Çok kiracılı | Değişmez | Aynı 403. API'de DNS arızası `resolve_error{source="user"}` sayılır ve bir `WARN` yazar; çözüm başına 2 sn. Kontrolde vekile giden ya da yazılı olmayan bir adın DNS arızası da `resolve_error{source="user"}`; doğrudan bağlanan kontrolde yazılı hedefin DNS hatası sayılmaz. Çare: DNS ve egress, gerekirse süreyi 3 sn'nin altında büyütmek | Tek kiracılıdaki gibi | Namespace'ine bağlı (değişmez); vekile giden ya da yazılı olmayan bir adın DNS arızası `resolve_error{source="unrecorded"}`. Çare: DNS ve egress; hedefi `servis.namespace.svc` ile yazmak; yöneticinin kaydetmesi son çare (kapsamı açar) |
+| Vekilli | Değişmez | Backend'de çözülemeyen vekilli ad yine reddedilir, artık `resolve_error` sayılır. Çare: vekil cluster dışındaysa ve `server resolve` NXDOMAIN diyorsa `UPTIME_TARGET_SCOPE_TRUST_PROXY=true`; SERVFAIL ve zaman aşımında ayar yardım etmez | Kendi host'u değişmez (çözülmez). Vekile giden başka bir adın backend'de çözülemeyişi reddedilir, artık `resolve_error{source="annotation"}`. Çare: Kapsamı sınırlı sütunundaki gibi | Aynı, `source="unrecorded"` |
+
+Kaynak kullanımı: vekile giden kontrolde yanıt vermeyen bir çözücü kontrolü
+5 sn'de değil monitor'ün zaman aşımında bitirir, worker'lar dolabilir
+(minikube'da 3 sn gecikmeli çözücü, 2 worker ve 18 monitor'le
+`kubeat_checks_in_flight` 2'de kaldı, `kubeat_scheduler_dispatch_skipped_total`
+arttı; yanıt vermeyen çözücüyle ölçülmedi). Çare `UPTIME_WORKERS` ya da
+daha kısa bir monitor zaman aşımıdır.
+
+### Geri dönüş
+
+Şema aynı (26), `helm rollback` ile 0.51.0'a. Dönüşte:
+
+- `resolve_error` ve `source` etiketi kalkar: `source` seçicili kurallar
+  eşleşmez, DNS arızası yine `target` ya da `connection` sayılır.
+  `UPTIME_TARGET_RESOLVE_TIMEOUT` 0.51'de vekile giden kontrolü de sınırlar.
+- Denetim satırı sınırı ve API reddinin log satırı kalkar.
+- HTTP: kapsama bağlı monitor'lerde boşta bağlantı birikmesi geri gelir.
+  Bütün HTTP monitor'lerinde (her pod'u ayrı kontrol edenler hariç) eski
+  sertifikanın okunması geri gelir. Yanıt süresi grafiği bir kez daha değişir.
+- `UPTIME_LOGIN_SOURCE_MAX_FAILURES` 0.51'de tanınmaz ve yok sayılır.
+- Okunamayan bir namespace yine bütün eşitlemeyi durdurur.
+- Yeni seriler, iki kural ve `server resolve` kalkar; kuralları kopyaladıysanız
+  0.51'inkileri geri koyun.
+
+### Alarm kuralları: değişti
+
+- Yeni grup `kubeat.signin` (`kubeat.monitors` ile `kubeat.self` arasında):
+  `KubeatSignInSourceDegraded`.
+  - Ne zaman yanar: son 15 dakikada giriş throttle'ı istemcileri
+    ayıramadığında (`hops_zero`, `no_frontend_token`, `hops_too_high`,
+    `hops_too_low`). Kurulum ve neden başına bir alarmdır.
+  - Ciddiyet: `metrics.prometheusRule.signInSeverity` (varsayılan `warning`).
+    `KubeatUnhealthy`'nin parçası değildir.
+  - Hop değeri yanlış bir kurulumda yükseltmeden sonraki ilk girişte yanar.
+    Doğru değerde yandığı iki kurulum yukarıda "Yapılacak"tadır.
+- Yeni grup `kubeat.discovery` (sonda): `KubeatDiscoveryNamespaceSkipped`.
+  Eşitleme 10 dakikadır en az bir namespace'i atlıyorsa yanar; ciddiyeti
+  `warning`'dir; atlanan namespace'in adı etiketlerinde yoktur.
+- `metrics.prometheusRule.clusterLabel` artık `reason` ya da `surface`
+  olamaz; böyle bir değerle `helm upgrade` render'da durur.
+
+Kuralları başka bir depoya kopyalıyorsanız 0.52'ninkileri kopyalayın ve iki
+alarmı Alertmanager yönlendirmesine ekleyin.
 
 ## 0.51'e yükseltme
 

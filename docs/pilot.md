@@ -87,15 +87,15 @@ cp ~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json .
 
 # İmajlar ve chart, imzalarıyla
 R=registry.sirket.local/kubeat
-oras cp -r ghcr.io/yusufceng/kubeat-backend:0.51.0  $R/kubeat-backend:0.51.0
-oras cp -r ghcr.io/yusufceng/kubeat-frontend:0.51.0 $R/kubeat-frontend:0.51.0
-oras cp -r ghcr.io/yusufceng/charts/kubeat:0.51.0   registry.sirket.local/charts/kubeat:0.51.0
+oras cp -r ghcr.io/yusufceng/kubeat-backend:0.52.0  $R/kubeat-backend:0.52.0
+oras cp -r ghcr.io/yusufceng/kubeat-frontend:0.52.0 $R/kubeat-frontend:0.52.0
+oras cp -r ghcr.io/yusufceng/charts/kubeat:0.52.0   registry.sirket.local/charts/kubeat:0.52.0
 
 # İç ağda, aynalanan kopyaların imzası
 cosign verify --trusted-root trusted_root.json \
-  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v0.51.0 \
+  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v0.52.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  $R/kubeat-backend:0.51.0 $R/kubeat-frontend:0.51.0 registry.sirket.local/charts/kubeat:0.51.0
+  $R/kubeat-backend:0.52.0 $R/kubeat-frontend:0.52.0 registry.sirket.local/charts/kubeat:0.52.0
 ```
 
 - `oras cp -r` imajı iki mimarisi, SBOM'u ve provenance'ıyla, `-r` de imza
@@ -117,10 +117,10 @@ doğrulama yapılamaz (README "İmzalarla aynalamak"). Yalnızca imza
 doğrulanmayacaksa:
 
 ```sh
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.51.0  docker://$R/kubeat-backend:0.51.0
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.51.0 docker://$R/kubeat-frontend:0.51.0
-helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0        # kubeat-0.51.0.tgz
-helm push kubeat-0.51.0.tgz oci://registry.sirket.local/charts
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.52.0  docker://$R/kubeat-backend:0.52.0
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.52.0 docker://$R/kubeat-frontend:0.52.0
+helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0        # kubeat-0.52.0.tgz
+helm push kubeat-0.52.0.tgz oci://registry.sirket.local/charts
 ```
 
 ## Kurulum
@@ -302,7 +302,7 @@ listedeyse on-prem Route adlarına da monitor ve kanal kurabilir:
 ### 3. Kurulum
 
 ```sh
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
   -n kubeat -f values-pilot.yaml
 oc -n kubeat rollout status deploy/kubeat-backend
 oc -n kubeat rollout status deploy/kubeat-frontend
@@ -430,7 +430,7 @@ sonuna not edilir. Ölçülen şey ürünün bugünkü hali olmalı.
 | Kesintiler, süreleri, MTTR | Raporlar → 7 gün → "CSV indir" |
 | Haftanın olayları ve kaçının gerçek olduğu | Olaylar → 7 gün süzgeci; her olayı ekiple "gerçek miydi?" diye işaretleyin |
 | Kim ne eklemiş, ne silmiş | Denetim kaydı |
-| Kapsam/yetki dışı hedef kurma girişimi (cross-tenant) | Denetim kaydında `deny`/`target-scope` satırları (kapsamı sınırlı kullanıcının başka ekibin Service'ine ya da API sunucusuna monitor/kanal kurma denemesi); Prometheus varsa `kubeat_target_scope_denied_total{reason}` (`reason=target` hedef kapsam dışı, `reason=namespace` düzenleme yetkisi yok, `reason=connection` monitor'ün kontrolü kapsam dışına bağlanmak istedi; 0.51) |
+| Kapsam/yetki dışı hedef kurma girişimi (cross-tenant) | Denetim kaydında `deny`/`target-scope` satırları (kapsamı sınırlı kullanıcının başka ekibin Service'ine ya da API sunucusuna monitor/kanal kurma denemesi); Prometheus varsa `kubeat_target_scope_denied_total{reason}` (`reason=target` hedef kapsam dışı, `reason=namespace` düzenleme yetkisi yok, `reason=connection` monitor'ün kontrolü kapsam dışına bağlanmak istedi, 0.51; `reason=resolve_error` dış görünen bir ad çözülemedi, çoğu zaman DNS arızası, 0.52; `source` etiketi `user`, `annotation` ya da `unrecorded`; SOC alarmı `reason="target",source="user"` ile, `resolve_error` işletim alarmıdır) |
 | Bildirim teslim oranı | Bildirimler → "Son gönderim"; Prometheus varsa `kubeat_notifications_total` |
 | Başarısız girişler ve dizin kesintisi | Prometheus varsa `kubeat_signin_failures_total{reason}` (dizin düşünce `directory_unreachable` artar; tüm dizin/SSO girişleri genel 401 görür ve bu sırada yerel `admin` ile girilir, neden ayrıca logda) ve `kubeat_signin_throttled_total{kind}` (kaynak/hesap kilidi); `/metrics` anahtarıyla korunur |
 
