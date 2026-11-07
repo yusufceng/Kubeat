@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.SignInFailed(SignInWrongPassword)
 	m.SignInThrottled(ThrottleSource)
 	m.TargetThrottled("example.com")
-	m.TargetScopeDenied(ScopeDeniedTarget)
+	m.TargetScopeDenied(ScopeDeniedTarget, ScopeSourceUser)
 	m.Backup(true, time.Now())
 	m.Backup(false, time.Now())
 	m.LastBackup(time.Now())
@@ -235,48 +236,87 @@ func TestSignInMetrics(t *testing.T) {
 	}
 }
 
-// kubeat_target_scope_denied_total has a series per reason from the start, at
-// 0, and each reason counts on its own: the API's two and the checks' one.
-// The label set is fixed, so no other series can appear.
+// scopeDenied is the Gather key of kubeat_target_scope_denied_total's
+// series of reason and source.
+func scopeDenied(reason, source string) string {
+	return "kubeat_target_scope_denied_total{reason=" + reason + "}{source=" + source + "}"
+}
+
+// kubeat_target_scope_denied_total has a series per meaningful reason and
+// source from the start, at 0 — the API's three reasons by a user, the
+// checks' two by each of the three sources — and each counts on its own.
+// The label set is fixed, so no other series appears.
 func TestTargetScopeDeniedCounter(t *testing.T) {
 	m := New("test")
 	got, err := m.Gather()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace, ScopeDeniedConnection} {
-		key := "kubeat_target_scope_denied_total{reason=" + reason + "}"
-		if value, ok := got[key]; !ok || value != 0 {
-			t.Errorf("%s = %v (present: %v), want 0 at the start", key, value, ok)
+	want := map[string]float64{}
+	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace, ScopeDeniedResolveError} {
+		want[scopeDenied(reason, ScopeSourceUser)] = 0
+	}
+	for _, reason := range []string{ScopeDeniedConnection, ScopeDeniedResolveError} {
+		for _, source := range []string{ScopeSourceUser, ScopeSourceAnnotation, ScopeSourceUnrecorded} {
+			want[scopeDenied(reason, source)] = 0
 		}
 	}
-
-	m.TargetScopeDenied(ScopeDeniedTarget)
-	m.TargetScopeDenied(ScopeDeniedTarget)
-	m.TargetScopeDenied(ScopeDeniedNamespace)
-	for range 3 {
-		m.TargetScopeDenied(ScopeDeniedConnection)
+	if len(want) != 8 {
+		t.Fatalf("%d series expected, want 8", len(want))
+	}
+	scopeSeries := func(got map[string]float64) map[string]float64 {
+		out := map[string]float64{}
+		for key, value := range got {
+			if strings.HasPrefix(key, "kubeat_target_scope_denied_total") {
+				out[key] = value
+			}
+		}
+		return out
+	}
+	if series := scopeSeries(got); !maps.Equal(series, want) {
+		t.Errorf("series at the start = %v, want %v", series, want)
 	}
 
-	got, err = m.Gather()
-	if err != nil {
+	m.TargetScopeDenied(ScopeDeniedTarget, ScopeSourceUser)
+	m.TargetScopeDenied(ScopeDeniedTarget, ScopeSourceUser)
+	m.TargetScopeDenied(ScopeDeniedNamespace, ScopeSourceUser)
+	m.TargetScopeDenied(ScopeDeniedResolveError, ScopeSourceUser)
+	for range 3 {
+		m.TargetScopeDenied(ScopeDeniedConnection, ScopeSourceAnnotation)
+	}
+	m.TargetScopeDenied(ScopeDeniedResolveError, ScopeSourceUnrecorded)
+	want[scopeDenied(ScopeDeniedTarget, ScopeSourceUser)] = 2
+	want[scopeDenied(ScopeDeniedNamespace, ScopeSourceUser)] = 1
+	want[scopeDenied(ScopeDeniedResolveError, ScopeSourceUser)] = 1
+	want[scopeDenied(ScopeDeniedConnection, ScopeSourceAnnotation)] = 3
+	want[scopeDenied(ScopeDeniedResolveError, ScopeSourceUnrecorded)] = 1
+
+	if got, err = m.Gather(); err != nil {
 		t.Fatal(err)
 	}
-	if got["kubeat_target_scope_denied_total{reason=target}"] != 2 {
-		t.Errorf("target = %v, want 2", got["kubeat_target_scope_denied_total{reason=target}"])
+	if series := scopeSeries(got); !maps.Equal(series, want) {
+		t.Errorf("series = %v, want %v", series, want)
 	}
-	if got["kubeat_target_scope_denied_total{reason=namespace}"] != 1 {
-		t.Errorf("namespace = %v, want 1", got["kubeat_target_scope_denied_total{reason=namespace}"])
-	}
-	if got["kubeat_target_scope_denied_total{reason=connection}"] != 3 {
-		t.Errorf("connection = %v, want 3", got["kubeat_target_scope_denied_total{reason=connection}"])
-	}
-	for key := range got {
-		if strings.HasPrefix(key, "kubeat_target_scope_denied_total") &&
-			key != "kubeat_target_scope_denied_total{reason=target}" &&
-			key != "kubeat_target_scope_denied_total{reason=namespace}" &&
-			key != "kubeat_target_scope_denied_total{reason=connection}" {
-			t.Errorf("unexpected scope-denial series %s", key)
+}
+
+// A check's refusal is counted by whose record holds its monitor: the
+// annotation sync's for a monitor it manages, none for one set up before the
+// record, a user's for every other.
+func TestScopeSource(t *testing.T) {
+	recorded := &store.TargetScope{Namespaces: []string{"shop"}}
+	for _, tc := range []struct {
+		m    store.Monitor
+		want string
+	}{
+		{store.Monitor{Namespace: "shop", Scope: recorded}, ScopeSourceUser},
+		{store.Monitor{Namespace: "shop", Source: "route/orders", Scope: &store.TargetScope{Namespaces: []string{"shop"}, Discovered: true}}, ScopeSourceUser},
+		{store.Monitor{Namespace: "shop", Source: "ingress/web", Managed: true, Scope: store.ObjectScope("shop")}, ScopeSourceAnnotation},
+		{store.Monitor{Namespace: "shop", Source: "ingress/web", Managed: true}, ScopeSourceAnnotation},
+		{store.Monitor{Namespace: "shop"}, ScopeSourceUnrecorded},
+		{store.Monitor{Namespace: "shop", Source: "route/orders"}, ScopeSourceUnrecorded},
+	} {
+		if got := ScopeSource(tc.m); got != tc.want {
+			t.Errorf("ScopeSource(managed %v, source %q, record %v) = %q, want %q", tc.m.Managed, tc.m.Source, tc.m.Scope, got, tc.want)
 		}
 	}
 }

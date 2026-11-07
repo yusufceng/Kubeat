@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 )
@@ -123,6 +124,133 @@ func TestScopeRulesRefuses(t *testing.T) {
 	}
 }
 
+// brokenResolver answers every lookup with err, as a resolver in an outage
+// does: a SERVFAIL, a timeout of its own.
+type brokenResolver struct{ err error }
+
+func (r brokenResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return nil, r.err
+}
+
+// stalledResolver answers no lookup: it returns when the lookup's context
+// ends, whatever ends it.
+type stalledResolver struct{}
+
+func (stalledResolver) LookupNetIP(ctx context.Context, _, _ string) ([]netip.Addr, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// expiring is a context whose deadline passes when expire is called, on no
+// clock, so that a test of a lookup cut short by its deadline waits for
+// nothing.
+type expiring struct {
+	context.Context
+	done chan struct{}
+	once sync.Once
+}
+
+func newExpiring() *expiring {
+	return &expiring{Context: context.Background(), done: make(chan struct{})}
+}
+
+func (e *expiring) Done() <-chan struct{} { return e.done }
+
+func (e *expiring) Err() error {
+	select {
+	case <-e.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func (e *expiring) expire() { e.once.Do(func() { close(e.done) }) }
+
+// Judge tells why a host is refused, for the operator alone: one that leads
+// outside the scope by its spelling or by where it resolves, apart from an
+// external-looking one the resolver could not answer for. A form refused by
+// its spelling is never resolved, so an outage of the resolver cannot pass
+// an attempt at another team off as a fault of the resolver: a bare address,
+// a short name, another namespace's .svc and full name, the API server's
+// names. A two-label name the search domains (ndots) turn into a Service,
+// and a public name pointing into the cluster, lead outside where the
+// resolver answers and are unresolved where it does not. A lookup the
+// context ended is unresolved too; telling it from a fault is the caller's.
+func TestScopeRulesJudge(t *testing.T) {
+	spelled := []string{
+		"172.30.0.1", "10.128.2.7", "fd00::1", // bare cluster addresses
+		"api", "kubernetes", // short names
+		"api.payments.svc", "api.payments.svc.cluster.local", // another namespace's Service
+		"kubernetes.default.svc", "kubernetes.default.svc.cluster.local", // the API server
+		"api.payments.svc..", "172.30.1", // spellings a proxy reads otherwise
+	}
+	resolved := []string{
+		"api.payments", "kubernetes.default", // two labels, ndots
+		"172-30-0-1.sslip.io", "mixed.example.com", // public names into the cluster
+	}
+	ctx := context.Background()
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	for name, tc := range map[string]struct {
+		ctx      context.Context
+		resolver Resolver
+		resolved Refusal // what the resolved names and the external one get
+		missing  Refusal // what a name that does not exist gets
+		external Refusal
+	}{
+		"resolver answers": {ctx, scopeTable(t), RefusedOutside, RefusedUnresolved, NotRefused},
+		"servfail":         {ctx, brokenResolver{&net.DNSError{Err: "server misbehaving", Name: "x", IsTemporary: true}}, RefusedUnresolved, RefusedUnresolved, RefusedUnresolved},
+		"resolver timeout": {ctx, brokenResolver{&net.DNSError{Err: "i/o timeout", Name: "x", IsTimeout: true}}, RefusedUnresolved, RefusedUnresolved, RefusedUnresolved},
+		"cut short":        {cancelled, stalledResolver{}, RefusedUnresolved, RefusedUnresolved, RefusedUnresolved},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rules := ScopeRules{Resolver: tc.resolver}
+			for _, host := range spelled {
+				if got := rules.Judge(tc.ctx, shop, host, nil); got != RefusedOutside {
+					t.Errorf("Judge(%q) = %v, want RefusedOutside", host, got)
+				}
+			}
+			for _, host := range resolved {
+				if got := rules.Judge(tc.ctx, shop, host, nil); got != tc.resolved {
+					t.Errorf("Judge(%q) = %v, want %v", host, got, tc.resolved)
+				}
+			}
+			if got := rules.Judge(tc.ctx, shop, "gone.example.com", nil); got != tc.missing {
+				t.Errorf("Judge(gone.example.com) = %v, want %v", got, tc.missing)
+			}
+			if got := rules.Judge(tc.ctx, shop, "status.example.com", nil); got != tc.external {
+				t.Errorf("Judge(status.example.com) = %v, want %v", got, tc.external)
+			}
+			if got := rules.Judge(tc.ctx, shop, "api.shop.svc", nil); got != NotRefused {
+				t.Errorf("Judge(api.shop.svc) = %v, want NotRefused", got)
+			}
+		})
+	}
+
+	// The resolver is never asked about a form refused by its spelling.
+	counting := scopeTable(t)
+	for _, host := range spelled {
+		ScopeRules{Resolver: counting}.Judge(ctx, shop, host, nil)
+	}
+	if counting.calls != 0 {
+		t.Errorf("forms refused by their spelling made %d lookups, want 0", counting.calls)
+	}
+
+	// Behind the proxy exception a proxied NXDOMAIN goes through, and a
+	// resolver that fails is still unresolved.
+	request, _ := url.Parse("https://gone.example.com/")
+	toProxy := func(*http.Request) (*url.URL, error) { return url.Parse("http://proxy.corp.test:3128") }
+	trusting := ScopeRules{Resolver: scopeTable(t), TrustProxy: true, Proxy: toProxy}
+	if got := trusting.Judge(ctx, shop, "gone.example.com", request); got != NotRefused {
+		t.Errorf("a proxied NXDOMAIN behind the exception: %v", got)
+	}
+	trusting.Resolver = brokenResolver{&net.DNSError{Err: "server misbehaving", Name: "x", IsTemporary: true}}
+	if got := trusting.Judge(ctx, shop, "gone.example.com", request); got != RefusedUnresolved {
+		t.Errorf("a proxied SERVFAIL behind the exception: %v", got)
+	}
+}
+
 // The dialer reads each connection's host as the API reads a target: one
 // refused by its spelling is not dialed; an external-looking one may connect
 // only to an address outside the cluster, which is checked on the address
@@ -152,8 +280,8 @@ func TestScopedDialer(t *testing.T) {
 		if conn != nil {
 			conn.Close()
 		}
-		if host, refused := s.Refused(); refused != errors.Is(err, ErrScope) {
-			t.Errorf("%s as %q: refused = %v (host %q), but err = %v", address, as, refused, host, err)
+		if host, why := s.Refused(); (why == RefusedOutside) != errors.Is(err, ErrScope) {
+			t.Errorf("%s as %q: refused = %v (host %q), but err = %v", address, as, why, host, err)
 		}
 		return err
 	}
@@ -212,8 +340,62 @@ func TestScopedDialerTrustsTheProxy(t *testing.T) {
 		t.Fatalf("the trusted proxy at a cluster address: %v", err)
 	}
 	conn.Close()
-	if _, refused := s.Refused(); refused {
+	if _, why := s.Refused(); why != NotRefused {
 		t.Error("the scope refused the trusted proxy")
+	}
+}
+
+// netResolver is a resolver of the dialer's (*net.Resolver) whose every
+// query goes to answer instead of a DNS server.
+func netResolver(answer func(ctx context.Context) error) *net.Resolver {
+	return &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return nil, answer(ctx)
+	}}
+}
+
+// A connection the check opens to an external-looking name it was led to,
+// that does not resolve, is refused as unresolved; one to a name the
+// monitor's settings hold fails as it would. A lookup the dial's context
+// ended, by cancellation or by its deadline, is no refusal: the dial fails
+// with the context's error.
+func TestScopedDialerUnresolved(t *testing.T) {
+	var none *Policy
+	dial := func(ctx context.Context, resolver *net.Resolver, address string) (string, Refusal, error) {
+		t.Helper()
+		s := ScopeRules{}.Connections(shop, "", "named.example.test")
+		conn, err := none.Dialer(&net.Dialer{Resolver: resolver}).In(s, "").DialContext(ctx, "tcp", address)
+		if conn != nil {
+			conn.Close()
+		}
+		host, why := s.Refused()
+		return host, why, err
+	}
+	unreachable := netResolver(func(context.Context) error { return errors.New("no DNS server answers") })
+	if host, why, err := dial(context.Background(), unreachable, "elsewhere.example.test:80"); !errors.Is(err, ErrScope) || why != RefusedUnresolved || host != "elsewhere.example.test" {
+		t.Errorf("a name the check was led to that does not resolve: err = %v, refused %q %v", err, host, why)
+	}
+	if _, why, err := dial(context.Background(), unreachable, "named.example.test:80"); errors.Is(err, ErrScope) || why != NotRefused {
+		t.Errorf("a name of the monitor's that does not resolve: err = %v, refused %v", err, why)
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	giveUp := netResolver(func(ctx context.Context) error {
+		cancel()
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if _, why, err := dial(cancelled, giveUp, "elsewhere.example.test:80"); !errors.Is(err, context.Canceled) || why != NotRefused {
+		t.Errorf("a lookup cancelled: err = %v, refused %v", err, why)
+	}
+	deadline := newExpiring()
+	expire := netResolver(func(ctx context.Context) error {
+		deadline.expire()
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if _, why, err := dial(deadline, expire, "elsewhere.example.test:80"); !errors.Is(err, context.DeadlineExceeded) || why != NotRefused {
+		t.Errorf("a lookup past its deadline: err = %v, refused %v", err, why)
 	}
 }
 
@@ -226,27 +408,28 @@ func TestScopedProxy(t *testing.T) {
 	direct := func(*http.Request) (*url.URL, error) { return nil, nil }
 	for _, c := range []struct {
 		target, host string
-		refused      bool
+		want         Refusal
 	}{
-		{"http://status.example.com/", "", false},
-		{"http://api.shop.svc/", "", false},
-		{"http://api.payments.svc/", "", true},
-		{"http://172.30.0.1/", "", true},
-		{"http://api/", "", true},
-		{"http://api.payments/", "", true},        // ndots: lands on a Service
-		{"http://kubernetes.default/", "", true},  // the API server
-		{"http://172-30-0-1.sslip.io/", "", true}, // a public name pointing into the cluster
-		{"http://gone.example.com/", "", true},    // NXDOMAIN, no exception
-		{"http://status.example.com/", "api.payments.svc", true},
-		{"http://status.example.com/", "api.payments:8080", true},
-		{"http://status.example.com/", "kubernetes.default.svc.cluster.local", true},
-		{"http://status.example.com/", "172.30.0.1", true},
-		{"http://status.example.com/", "[fd00::1]:80", true},
-		{"http://status.example.com/", "172-30-0-1.sslip.io", true},
-		{"http://status.example.com/", "api.shop.svc", false},
-		{"http://status.example.com/", "status.example.com:80", false},
+		{"http://status.example.com/", "", NotRefused},
+		{"http://api.shop.svc/", "", NotRefused},
+		{"http://api.payments.svc/", "", RefusedOutside},
+		{"http://172.30.0.1/", "", RefusedOutside},
+		{"http://api/", "", RefusedOutside},
+		{"http://api.payments/", "", RefusedOutside},        // ndots: lands on a Service
+		{"http://kubernetes.default/", "", RefusedOutside},  // the API server
+		{"http://172-30-0-1.sslip.io/", "", RefusedOutside}, // a public name pointing into the cluster
+		{"http://gone.example.com/", "", RefusedUnresolved}, // NXDOMAIN, no exception
+		{"http://status.example.com/", "api.payments.svc", RefusedOutside},
+		{"http://status.example.com/", "api.payments:8080", RefusedOutside},
+		{"http://status.example.com/", "kubernetes.default.svc.cluster.local", RefusedOutside},
+		{"http://status.example.com/", "172.30.0.1", RefusedOutside},
+		{"http://status.example.com/", "[fd00::1]:80", RefusedOutside},
+		{"http://status.example.com/", "172-30-0-1.sslip.io", RefusedOutside},
+		{"http://status.example.com/", "gone.example.com", RefusedUnresolved},
+		{"http://status.example.com/", "api.shop.svc", NotRefused},
+		{"http://status.example.com/", "status.example.com:80", NotRefused},
 		// Over https the header stays in the tunnel.
-		{"https://status.example.com/", "api.payments.svc", false},
+		{"https://status.example.com/", "api.payments.svc", NotRefused},
 	} {
 		s := rules.Connections(shop, "")
 		req := httptest.NewRequest(http.MethodGet, c.target, nil)
@@ -254,8 +437,8 @@ func TestScopedProxy(t *testing.T) {
 			req.Host = c.host
 		}
 		got, err := s.Proxy(toProxy)(req)
-		if _, refused := s.Refused(); refused != c.refused || errors.Is(err, ErrScope) != c.refused {
-			t.Errorf("%s with Host %q: got %v, %v (refused %v), want refused %v", c.target, c.host, got, err, refused, c.refused)
+		if _, why := s.Refused(); why != c.want || errors.Is(err, ErrScope) != (c.want != NotRefused) {
+			t.Errorf("%s with Host %q: got %v, %v (refused %v), want %v", c.target, c.host, got, err, why, c.want)
 		}
 		// Sent directly, the request is the dialer's to judge.
 		if got, err := rules.Connections(shop, "").Proxy(direct)(req); got != nil || err != nil {
@@ -275,6 +458,49 @@ func TestScopedProxy(t *testing.T) {
 	if _, err := trusting.Connections(shop, "").Proxy(toProxy)(req); !errors.Is(err, ErrScope) {
 		t.Errorf("a Host landing in the cluster behind the exception: %v", err)
 	}
+
+	// A lookup the request's context ended, by cancellation or by its
+	// deadline, is no refusal: the request fails with the context's error.
+	stalled := ScopeRules{Resolver: stalledResolver{}}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	deadline := newExpiring()
+	deadline.expire()
+	for name, ctx := range map[string]context.Context{"cancelled": cancelled, "past its deadline": deadline} {
+		s := stalled.Connections(shop, "")
+		req := httptest.NewRequest(http.MethodGet, "http://status.example.com/", nil).WithContext(ctx)
+		_, err := s.Proxy(toProxy)(req)
+		if _, why := s.Refused(); why != NotRefused || errors.Is(err, ErrScope) || !errors.Is(err, ctx.Err()) {
+			t.Errorf("a lookup %s: err = %v, refused %v", name, err, why)
+		}
+	}
+	// A host refused by its spelling is refused whatever the context.
+	s := stalled.Connections(shop, "")
+	req = httptest.NewRequest(http.MethodGet, "http://api.payments.svc/", nil).WithContext(cancelled)
+	if _, err := s.Proxy(toProxy)(req); !errors.Is(err, ErrScope) {
+		t.Errorf("another team's Service with the context ended: %v", err)
+	}
+
+	// Every host refused by its spelling is refused before any is resolved:
+	// an outage of the resolver, or a lookup the context ended, for the
+	// URL's host does not pass a Host header at another team's Service off
+	// as a fault of the resolver, or as no refusal at all.
+	servfail := ScopeRules{Resolver: brokenResolver{&net.DNSError{Err: "server misbehaving", Name: "x", IsTemporary: true}}}
+	for name, tc := range map[string]struct {
+		rules ScopeRules
+		ctx   context.Context
+	}{
+		"servfail":  {servfail, context.Background()},
+		"cut short": {stalled, cancelled},
+	} {
+		s := tc.rules.Connections(shop, "")
+		req := httptest.NewRequest(http.MethodGet, "http://status.example.com/", nil).WithContext(tc.ctx)
+		req.Host = "api.payments.svc"
+		_, err := s.Proxy(toProxy)(req)
+		if host, why := s.Refused(); why != RefusedOutside || host != "api.payments.svc" || !errors.Is(err, ErrScope) {
+			t.Errorf("Host at another team's Service, %s: err = %v, refused %q, %v; want RefusedOutside of api.payments.svc", name, err, host, why)
+		}
+	}
 }
 
 // A target taken from a cluster object of the monitor's namespace is in
@@ -288,8 +514,8 @@ func TestScopeOwnHost(t *testing.T) {
 	if err := s.Addr("other.apps.example.test", netip.MustParseAddr("10.0.0.100")); !errors.Is(err, ErrScope) {
 		t.Errorf("another host at a cluster address: %v", err)
 	}
-	if host, refused := s.Refused(); !refused || host != "other.apps.example.test" {
-		t.Errorf("Refused() = %q, %v", host, refused)
+	if host, why := s.Refused(); why != RefusedOutside || host != "other.apps.example.test" {
+		t.Errorf("Refused() = %q, %v", host, why)
 	}
 	// The first refusal is the one remembered.
 	_ = s.Host("api.payments.svc")
@@ -297,7 +523,7 @@ func TestScopeOwnHost(t *testing.T) {
 		t.Errorf("Refused() after a second refusal = %q", host)
 	}
 	var none *Scope
-	if host, refused := none.Refused(); refused || host != "" || none.Host("api") != nil || none.Addr("api", netip.MustParseAddr("10.0.0.1")) != nil {
+	if host, why := none.Refused(); why != NotRefused || host != "" || none.Host("api") != nil || none.Addr("api", netip.MustParseAddr("10.0.0.1")) != nil {
 		t.Error("a nil scope refused something")
 	}
 

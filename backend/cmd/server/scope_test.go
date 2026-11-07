@@ -12,6 +12,7 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/config"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -128,17 +129,17 @@ func TestScopeRefusedIsCountedAndWrittenOnce(t *testing.T) {
 	meter := metrics.New("test")
 	var logs bytes.Buffer
 	refused := scopeRefused(db, meter, "tr", slog.New(slog.NewTextHandler(&logs, nil)))
-	m := store.Monitor{ID: 42, Name: "orders"}
-	refused(m, "api.payments.svc", true)
-	refused(m, "api.payments.svc", false)
-	refused(m, "api.payments.svc", false)
+	m := store.Monitor{ID: 42, Name: "orders", Namespace: "shop", Scope: &store.TargetScope{Namespaces: []string{"shop"}}}
+	refused(m, "api.payments.svc", netguard.RefusedOutside, true)
+	refused(m, "api.payments.svc", netguard.RefusedOutside, false)
+	refused(m, "api.payments.svc", netguard.RefusedOutside, false)
 
 	got, err := meter.Gather()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := got["kubeat_target_scope_denied_total{reason=connection}"]; n != 3 {
-		t.Errorf("reason=connection = %v, want 3", n)
+	if n := got["kubeat_target_scope_denied_total{reason=connection}{source=user}"]; n != 3 {
+		t.Errorf("reason=connection source=user = %v, want 3", n)
 	}
 	entries, err := db.ListAudit(ctx, 10)
 	if err != nil {
@@ -152,7 +153,81 @@ func TestScopeRefusedIsCountedAndWrittenOnce(t *testing.T) {
 		!strings.Contains(e.Summary, "orders") || !strings.Contains(e.Summary, "api.payments.svc") || !strings.Contains(e.Summary, "reddedildi") {
 		t.Errorf("audit entry = %+v", e)
 	}
-	if strings.Count(logs.String(), "level=WARN") != 1 || !strings.Contains(logs.String(), "monitor_id=42") {
+	if strings.Count(logs.String(), "level=WARN") != 1 || !strings.Contains(logs.String(), "monitor_id=42") ||
+		!strings.Contains(logs.String(), "reason=connection") {
 		t.Errorf("log: %s", logs.String())
+	}
+}
+
+// A check's refusal of a name that did not resolve is counted as
+// resolve_error, apart from one that leads outside the scope, and its first
+// is logged and written down as such, in both languages. Each is counted by
+// whose record holds the monitor: a user's, the annotation sync's (in every
+// install) or none.
+func TestScopeRefusedTellsReasonAndSource(t *testing.T) {
+	ctx := context.Background()
+	recorded := store.Monitor{ID: 1, Name: "orders", Namespace: "shop", Scope: &store.TargetScope{Namespaces: []string{"shop"}}}
+	annotated := store.Monitor{ID: 2, Name: "web", Namespace: "shop", Source: "ingress/web", Managed: true, Scope: store.ObjectScope("shop")}
+	unrecorded := store.Monitor{ID: 3, Name: "old", Namespace: "shop"}
+
+	for _, language := range []string{"en", "tr"} {
+		t.Run(language, func(t *testing.T) {
+			db := openDB(t, filepath.Join(t.TempDir(), "kubeat.db"))
+			meter := metrics.New("test")
+			var logs bytes.Buffer
+			refused := scopeRefused(db, meter, language, slog.New(slog.NewTextHandler(&logs, nil)))
+			for _, m := range []store.Monitor{recorded, annotated, unrecorded} {
+				refused(m, "login.example.test", netguard.RefusedUnresolved, true)
+				refused(m, "login.example.test", netguard.RefusedUnresolved, false)
+				refused(m, "api.payments.svc", netguard.RefusedOutside, true)
+			}
+
+			got, err := meter.Gather()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, source := range []string{metrics.ScopeSourceUser, metrics.ScopeSourceAnnotation, metrics.ScopeSourceUnrecorded} {
+				if n := got["kubeat_target_scope_denied_total{reason=resolve_error}{source="+source+"}"]; n != 2 {
+					t.Errorf("reason=resolve_error source=%s = %v, want 2", source, n)
+				}
+				if n := got["kubeat_target_scope_denied_total{reason=connection}{source="+source+"}"]; n != 1 {
+					t.Errorf("reason=connection source=%s = %v, want 1", source, n)
+				}
+			}
+			for _, reason := range []string{metrics.ScopeDeniedTarget, metrics.ScopeDeniedNamespace} {
+				if n := got["kubeat_target_scope_denied_total{reason="+reason+"}{source=user}"]; n != 0 {
+					t.Errorf("reason=%s = %v, want 0: a check counts neither", reason, n)
+				}
+			}
+
+			entries, err := db.ListAudit(ctx, 20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 6 {
+				t.Fatalf("audit entries = %d, want two a monitor, one for each reason", len(entries))
+			}
+			unresolved, outside := "a name that did not resolve", "outside the namespaces of whoever set it up"
+			if language == "tr" {
+				unresolved, outside = "ad çözülemediği için", "monitor'ü kuranın namespace'lerinin dışında"
+			}
+			for _, e := range entries {
+				var want string
+				switch {
+				case strings.Contains(e.Summary, "login.example.test"):
+					want = unresolved
+				case strings.Contains(e.Summary, "api.payments.svc"):
+					want = outside
+				}
+				if want == "" || !strings.Contains(e.Summary, want) || e.Username != "checker" || e.Action != "deny" {
+					t.Errorf("audit entry = %+v, want one saying %q", e, want)
+				}
+			}
+			log := logs.String()
+			if strings.Count(log, "level=WARN") != 6 || strings.Count(log, "reason=resolve_error") != 3 ||
+				strings.Count(log, "reason=connection") != 3 || strings.Count(log, "did not resolve") != 3 {
+				t.Errorf("log: %s", log)
+			}
+		})
 	}
 }

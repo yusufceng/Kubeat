@@ -709,6 +709,7 @@ var auditTR = map[string]string{
 	"%s; sign-in locked after %d failed attempts": "%s; %d hatalı denemeden sonra giriş kilitlendi",
 	createThrottled:                               "bir dakika içinde %d monitor oluşturuldu, sınır bu (UPTIME_MONITOR_CREATE_PER_MINUTE); dakika bitene kadar yeni monitor reddediliyor",
 	scopeDeniedTargetText:                         "%s hedefi namespace'lerinizin dışında",
+	scopeDeniedUnresolvedText:                     "%s hedefi çözülemedi, cluster dışında olduğu gösterilemedi",
 	scopeDeniedNamespaceText:                      "%s namespace'i düzenleyebildiğiniz namespace'lerin dışında",
 }
 

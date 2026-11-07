@@ -79,13 +79,14 @@ type refusals struct {
 type refusalSeen struct {
 	monitor int64
 	host    string
+	why     netguard.Refusal
 	first   bool
 }
 
-func (r *refusals) tell(m store.Monitor, host string, first bool) {
+func (r *refusals) tell(m store.Monitor, host string, why netguard.Refusal, first bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.seen = append(r.seen, refusalSeen{m.ID, host, first})
+	r.seen = append(r.seen, refusalSeen{m.ID, host, why, first})
 }
 
 func (r *refusals) take() []refusalSeen {
@@ -146,8 +147,22 @@ func check(c *Checker, m store.Monitor) store.CheckResult {
 
 // refusedByTheScope asserts that got is the scope's refusal: down, with the
 // one generic error and nothing else of the connection refused, explained
-// as the scope's, and told once with host.
-func refusedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) {
+// as the scope's, and told once with host, as one that leads outside the
+// scope. It returns what was told.
+func refusedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) []refusalSeen {
+	t.Helper()
+	return refusedFor(t, what, got, r, host, netguard.RefusedOutside)
+}
+
+// unresolvedByTheScope asserts that got is the scope's refusal of a name
+// that did not resolve: the same result as any refusal, told with host as
+// unresolved, so that only the operator tells the two apart.
+func unresolvedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) []refusalSeen {
+	t.Helper()
+	return refusedFor(t, what, got, r, host, netguard.RefusedUnresolved)
+}
+
+func refusedFor(t *testing.T, what string, got store.CheckResult, r *refusals, host string, why netguard.Refusal) []refusalSeen {
 	t.Helper()
 	if got.Up || got.Error != scopeRefusalText {
 		t.Errorf("%s: up = %v, error %q; want the scope's refusal", what, got.Up, got.Error)
@@ -162,9 +177,10 @@ func refusedByTheScope(t *testing.T, what string, got store.CheckResult, r *refu
 		}
 	}
 	seen := r.take()
-	if len(seen) != 1 || seen[0].host != host {
-		t.Errorf("%s: told %+v, want one refusal of %s", what, seen, host)
+	if len(seen) != 1 || seen[0].host != host || seen[0].why != why {
+		t.Errorf("%s: told %+v, want one refusal of %s, %v", what, seen, host, why)
 	}
+	return seen
 }
 
 // Every connection of a held monitor's check is held to the scope, not only
@@ -216,7 +232,7 @@ func TestScopeEveryConnection_HTTP(t *testing.T) {
 	r.take()
 	for _, host := range []string{"nosuch.payments", "gone.example.test"} {
 		m := held(httpMonitor(at("public.example.test", "/to?host="+host)))
-		refusedByTheScope(t, "on to "+host+", which does not resolve", check(c, m), r, host)
+		unresolvedByTheScope(t, "on to "+host+", which does not resolve", check(c, m), r, host)
 	}
 	// The monitor's own target that does not resolve fails as it would
 	// without a scope: it was held to the scope when it was set.
@@ -287,8 +303,12 @@ func TestScopeEveryConnection_HTTPBehindAProxy(t *testing.T) {
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			name = strings.Trim(h, "[]")
 		}
-		refusedByTheScope(t, "Host "+host, check(c, withHost("http://public.example.test/ok", host)), r, name)
-		refusedByTheScope(t, "on to "+host, check(c, withHost("http://public.example.test/to?host="+url.QueryEscape(host), "")), r, name)
+		why := netguard.RefusedOutside
+		if host == "gone.example.test" {
+			why = netguard.RefusedUnresolved
+		}
+		refusedFor(t, "Host "+host, check(c, withHost("http://public.example.test/ok", host)), r, name, why)
+		refusedFor(t, "on to "+host, check(c, withHost("http://public.example.test/to?host="+url.QueryEscape(host), "")), r, name, why)
 	}
 	// Over https alike.
 	if got := check(c, withHost("https://api.payments/", "")); got.Up || got.Error != scopeRefusalText {
@@ -368,7 +388,7 @@ func TestScopeEveryConnection_AnnotationMonitorBehindAProxy(t *testing.T) {
 	if seen := r.take(); len(seen) != 0 {
 		t.Errorf("its own host told refusals: %+v", seen)
 	}
-	refusedByTheScope(t, "another external host the backend cannot resolve", check(strict, onTo), r, "login.example.test")
+	unresolvedByTheScope(t, "another external host the backend cannot resolve", check(strict, onTo), r, "login.example.test")
 
 	if got := check(behind(true, nil), onTo); !got.Up {
 		t.Errorf("another external host behind the exception: %+v", got)
@@ -379,7 +399,7 @@ func TestScopeEveryConnection_AnnotationMonitorBehindAProxy(t *testing.T) {
 	servfail := behind(true, func(next netguard.Resolver) netguard.Resolver {
 		return failingResolver{next: next, name: "login.example.test"}
 	})
-	refusedByTheScope(t, "another external host whose lookup fails, behind the exception", check(servfail, onTo), r, "login.example.test")
+	unresolvedByTheScope(t, "another external host whose lookup fails, behind the exception", check(servfail, onTo), r, "login.example.test")
 }
 
 // A DNS check is held to the scope at every connection it makes, and in

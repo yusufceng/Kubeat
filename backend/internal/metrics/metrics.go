@@ -73,7 +73,8 @@ const OtherHost = "other"
 const (
 	// ScopeDeniedTarget: the monitor's target host or the channel's delivery
 	// host is outside the caller's namespaces (a cross-tenant attempt at
-	// another team's Service or the API server; see api.targetInScope).
+	// another team's Service or the API server, by its name or by where it
+	// resolves; see api.targetInScope).
 	ScopeDeniedTarget = "target"
 	// ScopeDeniedNamespace: the caller may not edit in the namespace they
 	// aimed the monitor or channel at.
@@ -82,7 +83,53 @@ const (
 	// refused a connection outside it, after the monitor was set up (see
 	// checker.ScopeOptions). Every refused check counts.
 	ScopeDeniedConnection = "connection"
+	// ScopeDeniedResolveError: an external-looking name the resolver could
+	// not answer for (a SERVFAIL, an NXDOMAIN outside the proxy exception, a
+	// timeout) was refused, as the scope refuses what it cannot place: a
+	// target set through the API, or a connection a check opens. More often
+	// a fault of the cluster's DNS than an attempt.
+	ScopeDeniedResolveError = "resolve_error"
 )
+
+// Sources for kubeat_target_scope_denied_total: whose scope refused. The set
+// is closed, so a rule bound to one value keeps meaning the same.
+const (
+	// ScopeSourceUser: an API request, or a check of a monitor whose record
+	// of the scope is a user's. Every refusal of the API is one.
+	ScopeSourceUser = "user"
+	// ScopeSourceAnnotation: a check of a monitor the annotation sync
+	// manages, held to its object's namespace in every install, single-tenant
+	// ones included.
+	ScopeSourceAnnotation = "annotation"
+	// ScopeSourceUnrecorded: a check of a monitor without a record of the
+	// scope (set up before 0.51), held to its namespace.
+	ScopeSourceUnrecorded = "unrecorded"
+)
+
+// scopeDeniedSeries are the reason and source pairs a refusal can be counted
+// under, each there from the start at 0: the API's refusals are a user's, a
+// check's may be any source's.
+var scopeDeniedSeries = [][2]string{
+	{ScopeDeniedTarget, ScopeSourceUser},
+	{ScopeDeniedNamespace, ScopeSourceUser},
+	{ScopeDeniedResolveError, ScopeSourceUser},
+	{ScopeDeniedConnection, ScopeSourceUser},
+	{ScopeDeniedConnection, ScopeSourceAnnotation},
+	{ScopeDeniedResolveError, ScopeSourceAnnotation},
+	{ScopeDeniedConnection, ScopeSourceUnrecorded},
+	{ScopeDeniedResolveError, ScopeSourceUnrecorded},
+}
+
+// ScopeSource is the source label of a refusal of a check of m.
+func ScopeSource(m store.Monitor) string {
+	switch {
+	case m.Managed:
+		return ScopeSourceAnnotation
+	case m.Scope == nil:
+		return ScopeSourceUnrecorded
+	}
+	return ScopeSourceUser
+}
 
 // New returns Metrics with the Go runtime and process collectors registered.
 func New(version string) *Metrics {
@@ -158,12 +205,12 @@ func New(version string) *Metrics {
 	}, []string{"kind"})
 	m.targetScopeDenied = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "kubeat_target_scope_denied_total",
-		Help: "Monitor or channel writes a scoped caller was refused because the target or its namespace was outside their scope, and checks refused a connection outside the scope of whoever set up the monitor, by reason: \"target\" (the monitor's target host or a channel's delivery host is outside the caller's namespaces, a cross-tenant attempt at another team's Service or the API server), \"namespace\" (the caller may not edit in the namespace they aimed at) or \"connection\" (a check of such a monitor was refused a connection outside its scope; the monitor is down, every refused check counts). Only a caller limited to some namespaces raises it; administrators and single-tenant installs never do. The refused request still gets the same 403, and the refused check the same generic error, so this leaks nothing a client could not already tell.",
-	}, []string{"reason"})
+		Help: "Refusals of the per-user target scope: monitor or channel writes a scoped caller was refused, and checks refused a connection outside the scope their monitor is held to, by reason and source. reason: \"target\" (the target host or a channel's delivery host leads outside the caller's namespaces, by its name or where it resolves: another team's Service, the API server), \"namespace\" (the caller may not edit in the namespace they aimed at), \"connection\" (a check was refused a connection outside its monitor's scope; the monitor is down, every refused check counts) or \"resolve_error\" (an external-looking name the resolver could not answer for, a SERVFAIL, an NXDOMAIN outside the proxy exception or a timeout, was refused at the API or at a check, more often a fault of the cluster's DNS than an attempt). source: \"user\" (an API request, every one of the API's refusals, or a check of a monitor whose scope record is a user's), \"annotation\" (a check of a monitor the annotation sync manages, held to its object's namespace in every install: single-tenant installs raise \"connection\" and \"resolve_error\" with it too) or \"unrecorded\" (a check of a monitor set up before the scope was recorded, held to its namespace). A name a check left unresolved when its timeout or a shutdown cut it short is not counted, while a connection a check was refused as leading outside its scope counts as \"connection\" however the check ended; an API request its client gave up on during the lookup counts as \"resolve_error\". The requests of whoever sees every namespace, and the checks of a monitor whose record holds every namespace, raise nothing. The refused request still gets the same 403, and the refused check the same generic error, so this leaks nothing a client could not already tell.",
+	}, []string{"reason", "source"})
 	// The series the audit and any alerting watch are there from the start,
 	// at 0, so a first denial reads as an increase, not a series appearing.
-	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace, ScopeDeniedConnection} {
-		m.targetScopeDenied.WithLabelValues(reason)
+	for _, series := range scopeDeniedSeries {
+		m.targetScopeDenied.WithLabelValues(series[0], series[1])
 	}
 	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_backup_last_success_timestamp_seconds",
@@ -284,10 +331,11 @@ func (m *Metrics) TargetThrottled(host string) {
 // TargetScopeDenied records a monitor or channel write a scoped caller was
 // refused because the target host or the namespace it aimed at was outside
 // their scope, or a check refused a connection outside its monitor's scope.
-// reason is ScopeDeniedTarget, ScopeDeniedNamespace or ScopeDeniedConnection.
-func (m *Metrics) TargetScopeDenied(reason string) {
+// reason is one of the ScopeDenied reasons, source one of the ScopeSource
+// values (ScopeSource for a check).
+func (m *Metrics) TargetScopeDenied(reason, source string) {
 	if m != nil {
-		m.targetScopeDenied.WithLabelValues(reason).Inc()
+		m.targetScopeDenied.WithLabelValues(reason, source).Inc()
 	}
 }
 

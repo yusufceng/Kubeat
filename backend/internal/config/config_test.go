@@ -62,7 +62,7 @@ func TestLoadDefaults(t *testing.T) {
 		KeywordBodyLimit: 1 << 20,
 		CheckShowValue:   true,
 
-		TargetResolveTimeout: 5 * time.Second,
+		TargetResolveTimeout: 2 * time.Second,
 		// TargetScopeTrustProxy defaults to false: a proxied NXDOMAIN is refused.
 
 		MinCheckInterval: 5 * time.Second,
