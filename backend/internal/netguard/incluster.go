@@ -114,9 +114,12 @@ type Resolver interface {
 //
 // The ranges must stay outside the cluster's pod, Service and node networks
 // and its API VIP: an address of theirs listed here is one a scoped user
-// reaches with no namespace to answer for. The router's VIP is the one
-// cluster address an operator may list, on purpose and as a /32, for on-prem
-// Routes, and every Route behind it then opens to scoped users. config.Load
+// reaches with no namespace to answer for. The router's VIP (and a
+// LoadBalancer Service's VIP, for that Service alone) is the one cluster
+// address an operator may list, and only on purpose: as a /32 when it sits in
+// the node network, or within the company range that holds a load balancer
+// outside the cluster in front of the router. Either way every Route behind
+// that VIP then opens to scoped users. config.Load
 // refuses ranges that hold the API server's address or one of the backend's
 // own; the rest is the operator's to keep out (README, "Hedef politikası").
 type ExternalRanges struct{ prefixes []netip.Prefix }
