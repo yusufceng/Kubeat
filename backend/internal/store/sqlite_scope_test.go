@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -286,6 +287,80 @@ func TestSameCheck(t *testing.T) {
 	other.DNS.Resolver = "10.96.0.10"
 	if SameCheck(dns, other) {
 		t.Error("a change of the DNS resolver counts as none")
+	}
+}
+
+// SameConnections tells a change of the hosts a check connects to — the
+// target, the server or site an HTTP request names, a DNS check's resolver —
+// from a change of the rest of the check, which names none.
+func TestSameConnections(t *testing.T) {
+	base := newMonitor("a")
+	base.HTTP = HTTPOptions{Method: "GET", MaxRedirects: 10, Headers: map[string]string{"Host": "Site.Example"}}
+	for name, change := range map[string]func(*Monitor){
+		"name, tags and record": func(m *Monitor) {
+			m.Name, m.Tags, m.Scope = "b", []string{"x"}, &TargetScope{Namespaces: []string{"shop"}}
+		},
+		"method, body and content type": func(m *Monitor) { m.HTTP.Method, m.HTTP.Body, m.HTTP.ContentType = "POST", "a\r\nb", "text/plain" },
+		"keyword and JSON value":        func(m *Monitor) { m.HTTP.Keyword, m.HTTP.JSONPath, m.HTTP.JSONExpected = "ok", "status", " ok " },
+		"other headers":                 func(m *Monitor) { m.HTTP.Headers = map[string]string{"Host": "Site.Example", "X-A": "1"} },
+		"secrets":                       func(m *Monitor) { m.HTTP.Auth, m.HTTP.AuthSecret = HTTPAuthBearer, "s" },
+		"max redirects":                 func(m *Monitor) { m.HTTP.MaxRedirects = 0 },
+		"each pod":                      func(m *Monitor) { m.EachPod = true },
+		"TLS verification":              func(m *Monitor) { m.HTTP.SkipTLSVerify = true },
+		"the case of the site":          func(m *Monitor) { m.HTTP.Headers = map[string]string{"host": "site.example"} },
+	} {
+		changed := base
+		changed.HTTP.Headers = maps.Clone(base.HTTP.Headers)
+		change(&changed)
+		if !SameConnections(base, changed) {
+			t.Errorf("a change of the %s counts as one of where the check connects", name)
+		}
+	}
+	for name, change := range map[string]func(*Monitor){
+		"target":      func(m *Monitor) { m.Target += "x" },
+		"Host header": func(m *Monitor) { m.HTTP.Headers = map[string]string{"Host": "other.example"} },
+		"no Host":     func(m *Monitor) { m.HTTP.Headers = nil },
+		"type":        func(m *Monitor) { m.Type = MonitorWebSocket },
+	} {
+		changed := base
+		changed.HTTP.Headers = maps.Clone(base.HTTP.Headers)
+		change(&changed)
+		if SameConnections(base, changed) {
+			t.Errorf("a change of the %s counts as none", name)
+		}
+	}
+	dns := Monitor{Type: MonitorDNS, Target: "example.com", DNS: DNSOptions{RecordType: "A", Resolver: "8.8.8.8"}}
+	asked := dns
+	asked.DNS.RecordType, asked.DNS.Expected = "AAAA", "2001:db8::1"
+	if !SameConnections(dns, asked) {
+		t.Error("a change of what a DNS check asks counts as one of where it connects")
+	}
+	other := dns
+	other.DNS.Resolver = "10.96.0.10"
+	if SameConnections(dns, other) {
+		t.Error("a change of the DNS resolver counts as none")
+	}
+}
+
+// Within holds a scope to the namespaces of another: a narrower one narrows
+// it, a wider one leaves it, two that overlap leave what both hold.
+func TestTargetScopeWithin(t *testing.T) {
+	all := []string{AllNamespaces}
+	for _, c := range []struct {
+		scope, namespaces, want []string
+	}{
+		{[]string{"shop"}, all, []string{"shop"}},
+		{[]string{"billing", "shop"}, []string{"billing", "payments", "shop"}, []string{"billing", "shop"}},
+		{all, []string{"shop", "billing", "shop"}, []string{"billing", "shop"}},
+		{[]string{"billing", "shop"}, []string{"shop"}, []string{"shop"}},
+		{[]string{"billing", "shop"}, []string{"payments", "shop"}, []string{"shop"}},
+		{[]string{"billing"}, []string{"shop"}, []string{}},
+		{all, all, all},
+	} {
+		got := TargetScope{Namespaces: c.scope, Discovered: true}.Within(c.namespaces)
+		if !slices.Equal(got.Namespaces, c.want) || got.Namespaces == nil || !got.Discovered {
+			t.Errorf("%v within %v = %+v, want %v", c.scope, c.namespaces, got, c.want)
+		}
 	}
 }
 

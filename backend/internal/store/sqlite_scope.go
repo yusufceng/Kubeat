@@ -35,6 +35,18 @@ func HeldToObject(m Monitor) bool {
 	return m.Scope.Discovered && slices.Equal(m.Scope.Namespaces, []string{m.Namespace})
 }
 
+// SameConnections reports whether a and b name the same hosts for their
+// checks to connect to: of one type, at one target, the server and site an
+// HTTP request names (Destination), the resolver a DNS check asks. Whoever
+// names these chooses where the checks connect. The rest of a check's
+// options name no host — what it sends, how it reads the answers, each pod
+// or not — and leave where it connects to the target and its cluster
+// object, whoever set those.
+func SameConnections(a, b Monitor) bool {
+	return a.Type == b.Type && a.Target == b.Target && a.Destination() == b.Destination() &&
+		(a.Type != MonitorDNS || a.DNS.Resolver == b.DNS.Resolver)
+}
+
 // SameCheck reports whether a and b are checked alike: of one type, at one
 // target, each pod or not alike, with the same options of their type as
 // they are stored, defaults filled in. Everything else of a monitor — its

@@ -97,10 +97,12 @@ type Monitor struct {
 	SlowSince time.Time
 
 	// Scope is the record of the target scope the monitor's checks are
-	// held to: the namespaces of whoever last changed how they run, as
-	// those were then (ADR-0003 c, 0.51; SameCheck, ObjectScope). Nil for a monitor written before
-	// the record existed, or saved since by a version that does not keep
-	// it; the checker then holds it to its namespace (see TargetScope).
+	// held to: the namespaces of whoever last named where they connect, as
+	// those were then, narrowed by whoever changed how they run since
+	// (ADR-0003 c, 0.51; SameConnections, SameCheck, TargetScope.Within,
+	// ObjectScope). Nil for a monitor written before the record existed, or
+	// saved since by a version that does not keep it; the checker then holds
+	// it to its namespace (see TargetScope).
 	Scope *TargetScope
 
 	// The options of the check. Only the part of the monitor's own type is
@@ -189,11 +191,12 @@ type DNSOptions struct {
 // monitor's settings, in the JSON of its options, so no schema changes and
 // a version without it reads the monitor as before.
 //
-// It is a snapshot of the scope of whoever last changed how the checks run —
-// the target, each pod or not, the options of the type (SameCheck) — when
-// they changed it, or for an annotation monitor its object's (ObjectScope):
-// a later change of that user's namespaces does not reach it (S73 is to look
-// again at the monitors of a scope that narrowed).
+// It is a snapshot of the scope of whoever last named where the checks
+// connect (SameConnections) when they named it, held since to the scope of
+// anyone who changed how they run without holding all of it (SameCheck,
+// Within), or for an annotation monitor its object's (ObjectScope): a later
+// change of those users' namespaces does not reach it (S73 is to look again
+// at the monitors of a scope that narrowed).
 type TargetScope struct {
 	// Namespaces are those namespaces; AllNamespaces alone for one who
 	// sees every namespace, whose checks are held to nothing.
@@ -208,6 +211,29 @@ type TargetScope struct {
 
 // All reports whether the scope holds every namespace.
 func (s TargetScope) All() bool { return slices.Contains(s.Namespaces, AllNamespaces) }
+
+// Within is s held to namespaces as well: the namespaces both hold, every
+// namespace only where both do (AllNamespaces). Discovered is s's. It is
+// the record of one with those namespaces who changes how checks held to s
+// run without changing where they connect (SameConnections): a narrower
+// scope narrows s, a wider one leaves it as it is.
+func (s TargetScope) Within(namespaces []string) TargetScope {
+	switch {
+	case slices.Contains(namespaces, AllNamespaces):
+		return TargetScope{Namespaces: slices.Clone(s.Namespaces), Discovered: s.Discovered}
+	case s.All():
+		within := slices.Clone(namespaces)
+		slices.Sort(within)
+		return TargetScope{Namespaces: slices.Compact(within), Discovered: s.Discovered}
+	}
+	within := []string{}
+	for _, ns := range s.Namespaces {
+		if slices.Contains(namespaces, ns) {
+			within = append(within, ns)
+		}
+	}
+	return TargetScope{Namespaces: within, Discovered: s.Discovered}
+}
 
 // TargetScope is the scope the monitor's checks are held to: its record or,
 // for a monitor without one, the scope its namespace gives. Only someone who

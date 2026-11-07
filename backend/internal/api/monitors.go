@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1040,13 +1041,12 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if h.recordsScope(p, current, change, connects) {
+	if record := h.scopeRecord(p, current, change, connects); record != nil {
 		// A target taken from a cluster object stays one while it is left
 		// as it is; a monitor without a record counts a discovered one as
 		// such, as the checker does.
-		discovered := current.Source != "" && change.Target == current.Target && (current.Scope == nil || current.Scope.Discovered)
-		change.Scope = targetScopeRecord(p)
-		change.Scope.Discovered = discovered
+		record.Discovered = current.Source != "" && change.Target == current.Target && (current.Scope == nil || current.Scope.Discovered)
+		change.Scope = record
 	}
 	// Stored secrets go only to the server they were entered for: the
 	// target's, or that one on TLS, and the site its Host header names.
@@ -1145,31 +1145,52 @@ func validateEachPod(m store.Monitor) error {
 // managedError answers a change to what discovery owns on a managed monitor.
 const managedError = "this monitor follows the kubeat.io/* annotations of its cluster object; change those instead"
 
-// recordsScope reports whether p's change of current makes p's scope the one
-// its checks are held to (store.Monitor.Scope). The record is the scope of
-// whoever last changed how the checks run: the target, each pod or not, the
-// options of the type (store.SameCheck). A save that leaves those as they
-// are keeps it, the form's too, which sends them all every time: an
-// administrator who renames or tags a scoped user's monitor does not lift
-// its scope, nor does a scoped user narrow an administrator's. Two
-// exceptions:
+// scopeRecord returns the record of the target scope p's change of current
+// holds its checks to (store.Monitor.Scope), or nil to keep current's. A
+// save may narrow the record by any change of how the checks run, and widen
+// it only by naming where they connect:
+//
+//   - A change of the hosts the checks connect to (store.SameConnections)
+//     makes the record p's: whoever names them chooses where the checks go.
+//   - Any other change of how they run (store.SameCheck) holds them to the
+//     namespaces both the record and p's scope hold (TargetScope.Within):
+//     one whose scope does not hold all of the record's narrows it, one
+//     whose scope does keeps it, whatever else the change makes of the
+//     options: a save by an administrator, through the form or not, does
+//     not lift a scoped user's monitor out of its scope, and a scoped user
+//     who changes what an administrator's monitor sends or reads does not
+//     keep the administrator's scope for it.
+//   - A save that leaves how they run as it is keeps the record.
+//
+// Two exceptions:
 //
 //   - A monitor without a record (set up before 0.51, or saved since by
 //     0.50) takes the record of one who sees every namespace when they save
 //     it with its target, unchanged or not: the way back to every namespace
-//     after an upgrade (ADR-0003 c). Anyone else's unchanged save leaves it
-//     held to its namespace.
+//     after an upgrade (ADR-0003 c). Anyone else's save that names no other
+//     host leaves it held to its namespace, which their scope holds.
 //   - An annotation monitor keeps its object's record while the sync manages
 //     it (store.ObjectScope): the object sets where its checks connect,
 //     whoever saves it.
-func (h *handler) recordsScope(p auth.Principal, current, change store.Monitor, connects bool) bool {
+func (h *handler) scopeRecord(p auth.Principal, current, change store.Monitor, connects bool) *store.TargetScope {
 	if current.Managed && h.opts.Sync != nil {
-		return false
+		return nil
 	}
-	if !store.SameCheck(current, change) {
-		return true
+	mine := targetScopeRecord(p)
+	switch {
+	case !store.SameConnections(current, change):
+		return mine
+	case current.Scope == nil && connects && p.SeesAll():
+		return mine
+	case store.SameCheck(current, change):
+		return nil
 	}
-	return current.Scope == nil && connects && p.SeesAll()
+	held := current.TargetScope()
+	within := held.Within(mine.Namespaces)
+	if slices.Equal(within.Namespaces, held.Namespaces) {
+		return nil
+	}
+	return &within
 }
 
 // changesManagedSettings says whether the update touches what the syncer
