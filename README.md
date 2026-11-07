@@ -1329,6 +1329,21 @@ sahibin kendi hataları tavana ulaşmaz; tavan ancak çok sayıda ayrı kaynakta
 gelen toplam denemeyle tetiklenir ve o zaman hesap, meşru sahip dahil, kilit
 süresince kilitlenir (ADR-0004 "Sonuçlar", kabul edilen taviz).
 
+Aynı iki sınır 0.51'den beri iki parolayı daha kaynağa göre korur; her
+birinin kendi sayacı vardır, yeni ayar yoktur:
+
+- Parola değiştirirken sorulan mevcut parola: kaynak ve hesap başına
+  `UPTIME_LOGIN_MAX_FAILURES`, hesabın tüm kaynaklardaki hataları için
+  `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` (aşağıda "Kilitli hesaba girmek").
+- Parolalı bir durum sayfasının parolası: kaynak ve sayfa başına
+  `UPTIME_LOGIN_MAX_FAILURES`, sayfanın tüm kaynaklardaki hataları için
+  `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` ("Durum sayfaları" → "Parola").
+
+LDAP açıkken dizindeki bir adın her yanlış parolası dizine bir bind'dir ve
+dizinin kendi hesap kilidine de sayılır: `UPTIME_LOGIN_MAX_FAILURES`'ı
+dizinin kilit eşiğinin altında tutun (aşağıda "LDAP" → "Dizin hesap
+kilidi").
+
 Kaynak adresi `UPTIME_TRUST_PROXY_HOPS` ile belirlenir. `0` (varsayılan)
 hiçbir `X-Forwarded-For` başlığına güvenmez ve bağlanan eşi (peer) kullanır.
 `N` ayarlandığında istemci `X-Forwarded-For`'un sağdan N girdisine (sizin
@@ -1351,8 +1366,9 @@ başlıktan okunur:
   bir vekilin ya da istemcinin yazdığına, dokunmaz.
 - Arayüz böylece backend'e en yakın vekilin yerini alır: kendisi bir girdi
   yazmaz ve sayılmaz.
-- Parola değiştirme ve durum sayfası kilidinin sayaçları bugün kaynağa göre
-  değil, hesaba ve sayfaya göredir; başlık orada ileride kullanılacak (S76).
+- Parola değiştirme ve durum sayfası kilidinin sayaçları da 0.51'den beri bu
+  başlıktan okunan kaynağa göredir; 0.50'de hesaba ve sayfaya göreydi (bir
+  kaynağın yanlış denemeleri sayfayı herkese kilitliyordu).
 
 **Güvenilir eş: arayüz (0.50).** Cluster'daki her pod backend Service'ine
 bağlanabilir ve pod adresleri tek bir pod ağından dağıtılır: hiçbir adres
@@ -1724,6 +1740,27 @@ WARN yazılır; 0.50'den beri bu arayüzden gelen girişte de böyledir:
 Değerin eksik olması (ör. WAF'lı Route'ta `1`) WARN vermez: throttle o vekilin
 adresine anahtarlanır. Bunu yukarıdaki `source` alanından görürsünüz.
 
+**Parola değiştirme ve durum sayfası kilidinde (0.51).** Bu iki yüzey de
+kaynağı aynı yoldan okur, bu yüzden yukarıdakiler onlar için de geçerlidir:
+
+- Uyarılar bu isteklerde de düşer. Satır yüzeyi adlandırır (`sign-in`,
+  `password change`, `status-page unlock`); tek paylaşılan kilide geriletenler
+  (değer `0`, sır eksik, zincir kısa) o kilidi de yazar: `per-name`,
+  `per-account` ya da `per-page`.
+- Dakika sınırı üç yüzeyde ortaktır: her yanlış ayar için dakikada en fazla
+  bir satır düşer ve satır o dakikada yanlış ayara ilk takılan isteğin
+  yüzeyini yazar. Durum sayfası ziyaretçileri satır sayısını artırmaz.
+- Hop yanlışken iki yüzey de giriş gibi davranır. Değer `0` ya da eksikse
+  veya sır eksikse her tarayıcı aynı kaynaktan (arayüz pod'u ya da vekil)
+  görünür ve iki yüzey **tek paylaşılan kilide** geriler: bir kaynağın
+  `UPTIME_LOGIN_MAX_FAILURES` yanlış denemesi sayfayı ya da hesabın parola
+  değiştirmesini kilit süresince herkese kapatır (0.50'nin davranışı). Değer
+  fazlaysa zinciri kısa gelen tarayıcılar aynı kilide düşer, başlığını uzatan
+  bir istemci ise kaynağını seçebilir (yukarıda).
+- Başarısız deneme log satırı (`status page unlock refused`, `password change
+  refused`) anahtarlanan adresi `source` alanında yazar; yukarıdaki
+  doğrulama bu satırlarla da yapılır.
+
 **Bilinen sınır (0.48–0.49): arayüz istemci adresini taşımıyordu.** 0.48 ve
 0.49'da arayüz giriş, parola değiştirme ve durum sayfası kilidi isteklerini
 backend'e `X-Forwarded-For` olmadan iletiyordu; backend tarayıcıdan gelen her
@@ -1755,8 +1792,9 @@ ve backlog'da izlenir (ADR-0004).
 Deneme, parola denetlenmeden önce sayılır: aynı anda gönderilen istekler de
 sınırı aşamaz. Dizine ulaşılamaması ya da devre dışı bir hesabın doğru parolası
 deneme sayılmaz; dizindeki parolası doğru olup burada rolü olmayan birinin
-girişi ise sayılır. Parola değiştirirken sorulan mevcut parola da aynı sınırla,
-ayrı bir sayaçla korunur. Sayaç backend belleğindedir, yeniden başlatınca
+girişi ise sayılır. Parola değiştirirken sorulan mevcut parola ve durum sayfası
+parolası da aynı sınırlarla, ayrı sayaçlarla korunur (yukarıda "Deneme
+sınırı"). Sayaç backend belleğindedir, yeniden başlatınca
 sıfırlanır ve kilitli olmayan en fazla `UPTIME_LOGIN_THROTTLE_MAX_KEYS`
 (100000) ad tutar; son denemesi kilit süresinden eski adlar her kilit
 süresinde bir silinir. Sınır dolunca (uydurma adlarla bir saldırı) yeni bir
@@ -1845,6 +1883,21 @@ için başka yollar önceden hazır tutulmalıdır:
 - Sayaç bellekte olduğundan backend'i yeniden başlatmak da kilitleri
   kaldırır.
 
+**Parola değiştirme kilidi (0.51).** Parola değiştirirken sorulan mevcut
+parolanın kilidi de kaynağa göredir:
+
+- Oturumunuzu ele geçiren biri mevcut parolayı yanlış deneyerek sizi kendi
+  adresinizden parola değiştirmekten alıkoyamaz; parola değişince öteki
+  oturumlar kapanır (yukarıda "Oturum"). 0.50'ye kadar kilit hesabındı: tek
+  bir kaynağın `UPTIME_LOGIN_MAX_FAILURES` yanlış denemesi değiştirmeyi kilit
+  süresince sahibine de kapatıyordu.
+- Hesabın tüm kaynaklardaki hataları `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`'a
+  ulaşırsa, ya da hop değeri yanlışken paylaşılan tek kaynaktan
+  `UPTIME_LOGIN_MAX_FAILURES` yanlış deneme gelirse (yukarıda "Parola
+  değiştirme ve durum sayfası kilidinde"), parola değiştirme kilit süresince
+  herkese kapanır. O zaman parolayı API anahtarıyla sıfırlayın ya da hesabı
+  devre dışı bırakın (oturumları anında kapanır).
+
 **Giriş gözlemlenebilirliği (metrik).** İstemciye verilen yanıt enum
 sızdırmamak için genel kaldığından (başarısız giriş hep 401 "kullanıcı adı ya
 da parola hatalı", throttle hep 429), bir dizin kesintisini bir parola
@@ -1864,6 +1917,13 @@ anahtarıyla korunan yüzeyde, bkz. "Metrik anahtarı"); istemci yanıtı deği�
   ya da `account` (tüm kaynaklardaki gevşek ad tavanı,
   `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`). `account` artışı, ADR-0004'ün bilerek
   açık bıraktığı "dağıtık saldırıyla hesap kilitleniyor" anını görünür kılar.
+  Yalnız girişleri sayar: durum sayfası kilidinin ve parola değiştirmenin
+  429'ları bu sayaca girmez. Logdaki ret satırları (`status page unlock
+  refused`, `password change refused`) yalnız yanlış parolada yazılır; 429'lar,
+  sayfanın ya da hesabın tavan kilidi dahil, yalnız throttle'ın dakikalık
+  `sign-in attempts refused` WARN'ında görünür. O satırın `name` alanı son
+  reddedilen anahtardır: `sp:<slug>` ya da `pw:<id>`, kaynağın kilidinde önünde
+  kaynak adresle.
 
 Her iki sayacın serisi açılışta 0'dan başlar, böylece ilk olayı `increase()`
 ile yakalarsınız; etiket değerleri kapalı bir kümeden gelir ve kullanıcı adı
@@ -1930,6 +1990,39 @@ UPTIME_LDAP_BIND_PASSWORD=...
   `kubeat_signin_failures_total{reason="directory_unreachable"}` sayacını
   artırır (bkz. "Giriş gözlemlenebilirliği"); kesinti sürerken yerel `admin`
   ile girilir.
+
+**Dizin hesap kilidi (LDAP/AD).** Dizinin kendi hesap kilidi vardır (Active
+Directory'de "Account lockout threshold") ve Kubeat'in deneme sınırından
+bağımsız sayar. "Kubeat dizin hesaplarımızı kilitletebilir mi, parola
+spreyine aracı olur mu" sorusunun bugünkü cevabı:
+
+- Kubeat'te yerel hesabı olmayan ve dizinde bulunan bir adın her yanlış
+  parolası, dizine o kullanıcının DN'iyle bir bind'dir; dizin onu kendi hatalı
+  parola sayacına yazar (AD'de `badPwdCount`). Dizinde bulunmayan ad yalnız
+  aranır, bind gitmez. Yerel hesabı ya da SSO hesabı olan bir ad dizine hiç
+  sorulmaz. Dizine ulaşılamaması Kubeat'te deneme sayılmaz.
+- Kubeat bir adı tek bir kaynaktan `UPTIME_LOGIN_LOCKOUT` içinde en fazla
+  `UPTIME_LOGIN_MAX_FAILURES` kez dizine sorar. Bu değer dizinin eşiğine eşit
+  ya da üstündeyse tek bir kaynak, Kubeat onu durdurmadan önce dizin hesabını
+  kilitler; hesap o zaman yalnız Kubeat'te değil dizine bağlı her yerde
+  kilitlenir.
+- **Öneri (ara önlem).** `UPTIME_LOGIN_MAX_FAILURES`'ı dizinin kilit eşiğinin
+  altında tutun (ör. eşik 5 ise `3`; kullanıcının başka uygulamalardaki
+  hataları da aynı sayaca yazılır). `UPTIME_LOGIN_LOCKOUT`'u dizinin sayacı
+  sıfırlama süresinden (AD'de "Reset account lockout counter after") kısa
+  tutmayın: Kubeat'in sınırı kendi süresi içinde sayar, daha kısa bir süre
+  dizinin penceresine birden çok tur sığdırır. Aynı değer parola değiştirme ve
+  durum sayfası kilidinin kaynak başına sınırıdır; onlar da sıkılaşır.
+- **Bilinen sınırlar.** Çok sayıda ayrı kaynaktan bir ada gelen denemeler
+  toplamda dizinin eşiğini yine aşabilir. Hesap tavanı
+  (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, 50) yerel hesapları da kapsadığından
+  onu dizinin eşiğinin altına çekmek `admin`'i birkaç kaynaktan herkese
+  kilitlenebilir yapar; önerilmez. Bir kaynağın **bütün adlardaki**
+  denemelerine tavan da henüz yoktur: tek bir kaynak bir parolayı çok sayıda
+  ada deneyebilir (parola spreyi) ve dizinde bulunan her ad için bir bind
+  gider. Kaynak başına, adlardan bağımsız tavan planlıdır (S88, sprint 10
+  kuyruğu; yol haritası "Bilinen sınırlar",
+  [ADR-0004](docs/adr/0004-giris-kilitleme-stratejisi.md) "Sonuçlar").
 
 Gerçek bir dizine karşı test: `KUBEAT_TEST_LDAP=ldap://127.0.0.1:3893 go test
 ./internal/ldapauth/` (glauth ile; kullanıcılar `deploy/demo` altında değil,
@@ -2569,12 +2662,59 @@ Görünüm, ayrıntı sayfası ve rozetler token'ı `Authorization: Bearer` ya d
 hangisiyse o geçer; Kubeat'e kendi anahtarıyla giren bir istemci sayfanın
 token'ını ikinci başlıkta verir); yoksa yalnızca sayfanın başlığını
 taşıyan `401 {"locked": true, "title": ...}` döner ki parola ekranı başlığı
-gösterebilsin. Arayüz token'ı HttpOnly bir çerezde tutar. Parola denemeleri
-girişteki gibi sayfa başına kısıtlanır (`UPTIME_LOGIN_MAX_FAILURES`,
-`UPTIME_LOGIN_LOCKOUT`); kilitliyken doğru parola da 429 alır.
+gösterebilsin. Arayüz token'ı HttpOnly bir çerezde tutar.
 `UPTIME_SECRET_KEY` yoksa token'lar o çalıştırmaya özgü bir anahtarla
 imzalanır ve backend yeniden başlayınca ziyaretçilere parola yeniden
 sorulur.
+
+Parola denemeleri girişteki gibi **kaynak adrese göre** kısıtlanır (0.51;
+CWE-307, [ADR-0004](docs/adr/0004-giris-kilitleme-stratejisi.md)); yeni ayar
+yoktur, girişin ayarları kullanılır:
+
+- Bir kaynaktan bir sayfaya `UPTIME_LOGIN_LOCKOUT` (15 dk) içinde
+  `UPTIME_LOGIN_MAX_FAILURES` (10) yanlış parola o kaynağı kilitler: süre
+  dolana kadar o kaynaktan doğru parola da 429 + `Retry-After` alır. Başka bir
+  kaynaktaki ziyaretçi sayfayı doğru parolayla açmaya devam eder. 0.50'ye
+  kadar kilit sayfanındı: tek bir kaynağın yanlış denemeleri sayfayı bütün
+  ziyaretçilere kapatıyordu.
+- Sayfanın **tüm kaynaklardaki** yanlış denemeleri için gevşek bir tavan
+  vardır (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, 50; `0` kapatır), ki çok sayıda
+  kaynağa yayılmış bir tahmin sonsuza dek süremesin. Tavan dolunca sayfa
+  kilit süresince herkese kapanır (ADR-0004'ün kabul ettiği taviz); yanıt
+  kaynağın kilidiyle aynı 429'dur.
+- Doğru parola, girişteki gibi, o kaynağın ve sayfanın tavandaki sayacını
+  sıfırlar: bir olay sırasında sayfayı aynı anda açan çok sayıda ziyaretçinin
+  yazım hataları tavanda birikip sayfayı herkese kilitlemesin diye.
+- IPv6'da her adres ayrı bir kaynaktır, önek toplanmaz: tek bir `/64` çok
+  sayıda kaynak demektir ve kaynağın kilidi onu yavaşlatmaz, yalnız tavan
+  sınırlar. Durum sayfası parolasını güçlü seçin; internete açık bir kurulumda
+  `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES=0` yapmayın.
+- Kaynak, girişteki gibi `UPTIME_TRUST_PROXY_HOPS`'tan okunur (bkz. "Hesaplar
+  ve giriş" → "Vekil-hop rehberi"). Değer `0` ya da eksikse her ziyaretçi aynı
+  kaynaktan görünür ve sayfa tek paylaşılan kilide geriler; `0`'da backend
+  loga `status-page unlock` adını taşıyan bir WARN yazar ("Hesaplar ve
+  giriş" → "Parola değiştirme ve durum sayfası kilidinde (0.51)"). Paylaşılan
+  bir kurumsal NAT arkasındaki ziyaretçiler de tek kaynaktır.
+- Başarısız her deneme backend loguna `status page unlock refused` satırı
+  olarak, sayfanın adresi (`slug`) ve anahtarlanan kaynakla (`source`) yazılır.
+
+**Sınırlar.** Durum sayfası Kubeat'in kendi parçasıdır ve onunla birlikte
+okunamaz hâle gelir:
+
+- Sayfa izlenen cluster'ın içinde çalışır: cluster, Kubeat ya da cluster'ın
+  ağ yolu (Route, Ingress, yük dengeleyici) düşerse sayfa da düşer; tam bir
+  cluster kesintisini müşterilerinize bu sayfa duyuramaz.
+- Backend tek replica çalışır ve `Recreate` ile güncellenir: Kubeat
+  yükseltilirken ve backend pod'u başka bir node'a taşınırken (node drain,
+  eviction) bir iki dakika sayfa "Durum şu anda okunamıyor" gösterir ve
+  rozetler 502 verir. Bir olay sürerken Kubeat'i yükseltmeyin; bakımı
+  sakin bir zamana planlayın.
+- Tam cluster kesintisi için dışarıdan bakan bir tamamlayıcı kullanın
+  (ör. UptimeRobot ya da Grafana Cloud Synthetic Monitoring): sayfanın
+  adresini ve müşteriye dönük birkaç uç noktayı cluster dışından yoklar,
+  kendi durum sayfasıyla duyurur. Kubeat'in heartbeat'i bu işi görmez:
+  cluster dışındaki alıcı yalnız operatörü uyarır, müşteriye bir şey
+  göstermez (bkz. "Aracın kendi sağlığı" → "Hangi arızayı ne duyurur").
 
 **Ayrıntı sayfası.** `detail_pages` açıkken sayfadaki her monitor
 `GET /api/v1/status-pages/by-slug/{slug}/monitors/{monitor_id}` ile kendi
@@ -3673,8 +3813,10 @@ kurmadan, Kubeat'in körleştiği cluster'ın kendi Alertmanager'ından
   ([docs/yedek-geri-yukleme.md](docs/yedek-geri-yukleme.md), "Dolu veri
   volume'undan dönüş" örneği verir). Cluster'ın
   tamamı ya da Prometheus'u düşerse bunları söyleyecek kimse kalmaz; o durumu yalnızca
-  cluster dışındaki heartbeat duyurur. Bildirim alamayan kanalı yalnızca
-  kurallar duyurur: `KubeatNotificationsFailing` kanal başına yanar (bkz.
+  cluster dışındaki heartbeat duyurur, o da yalnız operatöre: müşteriye dönük
+  durum sayfası o sırada okunamaz (bkz. "Durum sayfaları" → "Sınırlar";
+  müşteriye dışarıdan bakan bir tamamlayıcı duyurur). Bildirim alamayan
+  kanalı yalnızca kurallar duyurur: `KubeatNotificationsFailing` kanal başına yanar (bkz.
   yukarıda "Kanal başına bildirim alarmı"); heartbeat de
   `kubeat_self_healthy` de teslimata bakmaz. Heartbeat de kurallar da
   kapalıysa kurulum notu (`NOTES.txt`) bunu uyarır; kurallar kapalıyken
@@ -4849,8 +4991,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_METRICS_TOKEN` | – | `/metrics`'in istediği anahtar (`Authorization: Bearer ...`; API anahtarı da geçer); boşsa `/metrics` herkese açıktır |
 | `UPTIME_ADMIN_PASSWORD_RESET` | `false` | `admin` parolasını `UPTIME_ADMIN_PASSWORD` değerine çeker; bir kez kullanılır |
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
-| `UPTIME_LOGIN_MAX_FAILURES` | `10` | Tek bir kaynak adresin bir kullanıcı adına yönelik girişlerini kilitleyen hatalı deneme sayısı (kaynak-başına; CWE-307, ADR-0004) |
-| `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` | `50` | Bir adın tüm kaynaklardaki hatalı denemeleri için gevşek, çok yüksek tavan; dağıtık tahmini sınırlar, meşru sahibi kendi hatalarıyla kilitlemez. `0` kapatır (yalnız kaynak-başına throttle kalır) |
+| `UPTIME_LOGIN_MAX_FAILURES` | `10` | Tek bir kaynak adresin bir kullanıcı adına yönelik girişlerini kilitleyen hatalı deneme sayısı (kaynak-başına; CWE-307, ADR-0004). 0.51'den beri bir kaynağın bir durum sayfasına ve bir hesabın parola değiştirmesine yönelik denemelerini de aynı sayıda kilitler. LDAP açıkken dizinin kilit eşiğinin altında tutun ("LDAP" → "Dizin hesap kilidi") |
+| `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` | `50` | Bir adın tüm kaynaklardaki hatalı denemeleri için gevşek, çok yüksek tavan; dağıtık tahmini sınırlar, meşru sahibi kendi hatalarıyla kilitlemez. 0.51'den beri bir durum sayfasının ve bir hesabın parola değiştirmesinin tüm kaynaklardaki denemeleri için de ayrı birer tavandır. `0` kapatır (yalnız kaynak-başına throttle kalır) |
 | `UPTIME_TRUST_PROXY_HOPS` | `0` | Arayüzün önündeki vekillerinizin `X-Forwarded-For`'a yazdığı girdi sayısı; hiçbiri yazmıyorsa ve arayüze yalnız port-forward ile ulaşılıyorsa `1` (girdiyi Next.js yazar), arayüz Service'i doğrudan dışarı açıksa `0` kalır. Kaynak adres başlığın sağdan bu kadar girdisinden okunur; `0` başlığa güvenmez, eşi kullanır (arayüzden gelen girişte arayüz pod'u). Başlık yalnız arayüzden (`UPTIME_FRONTEND_TOKEN`) gelen istekte okunur. Değerler: "Hesaplar ve giriş", "Vekil-hop rehberi" |
 | `UPTIME_FRONTEND_TOKEN` | – | Arayüzün her backend isteğinde `X-Frontend-Token` başlığıyla sunduğu sır; backend `X-Forwarded-For`'u yalnız bunu sunan istekte okur, öteki eşlerde kaynak eştir. Arayüzün `FRONTEND_TOKEN`'ıyla aynı olmalı; yazdırılabilir ASCII, boşluksuz (başka bir karakter içeren değer yok sayılır). `UPTIME_TRUST_PROXY_HOPS` `0`'dan büyükken boşsa başlığa hiçbir eşten güvenilmez ve açılışta WARN düşer. Chart `<release>-frontend-token` Secret'ından verir. "Hesaplar ve giriş", "Güvenilir eş" |
 | `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi; denemesi bundan eski adlar bu aralıkla sayaçtan silinir |

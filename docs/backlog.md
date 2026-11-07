@@ -503,7 +503,7 @@ node'a taşınırken müşterinin durum sayfası "Durum şu anda okunamıyor" g�
 "son güncelleme" zamanıyla önbellekten göstersin. Kod işi; bugün müşteriye açık
 bir durum sayfası yok. Belge kısmı (S75: sayfanın Kubeat ve cluster'la birlikte
 düştüğü, yükseltmede bir iki dakika okunamadığı, dışarıdan bakan tamamlayıcı)
-sprint 9'da S76 ([#134](https://github.com/yusufceng/Kubeat/issues/134)) ile README "Durum sayfaları"na girer. Yukarıdaki
+sprint 9'da S76 ([#134](https://github.com/yusufceng/Kubeat/issues/134)) ile README "Durum sayfaları" → "Sınırlar"a girdi. Yukarıdaki
 maddenin "durum sayfası önbelleği ayrı karar" notunun yanında durur. Tetikleyici:
 müşteriye açık ilk durum sayfası.
 
@@ -1758,6 +1758,25 @@ parçası katıldı: S75 (README "Durum sayfaları"nda "Sınırlar") ve S88'in b
 kısmı (README "LDAP" ve "Deneme sınırı"nda dizin kilidi etkileşimi, ADR-0004
 notu). Kaynak başına, adlardan bağımsız giriş tavanı (S88 kod) sprint 10
 kuyruğunda; sıra S76 → S88 → S85.
+
+Güncelleme (2026-11-07, S76 [#134](https://github.com/yusufceng/Kubeat/issues/134), 0.51.0): **çözüldü.** Durum sayfası
+kilidi ve parola değiştirme kaynak + kapsam anahtarına (`sp:`/`pw:`) geçti, gevşek
+tavan girişinkiyle aynı değerde kapsam başına (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`,
+yeni ayar yok); karar ADR-0004 "Sonuçlar"da. Kalanlar: bu iki yüzeyin 429'ları
+`kubeat_signin_throttled_total`'a girmez (yalnız throttle'ın dakikalık WARN'ı;
+S85 kapsamında, sprint 10 adayı, sıra S76 → S88 → S85), gerçek tarayıcı yolunda
+iki kaynaklı prova sürümden sonra (sandbox Route). IPv6 kaynakları ayrı maddede
+("Throttle'da IPv6 kaynaklarını /64'e toplamak").
+
+## Throttle'da IPv6 kaynaklarını /64'e toplamak
+
+2026-11-07'de ertelendi (S76 incelemesi, [#134](https://github.com/yusufceng/Kubeat/issues/134)).
+Throttle kaynağı tam adres olarak tutar (`/128`): tek bir `/64`'ü olan biri her
+adresten ayrı deneme hakkı alır; girişte, parola değiştirmede ve durum sayfasında
+onu yalnız gevşek tavan sınırlar (ADR-0004 "Maliyetler ve riskler"). Seçenekler:
+IPv6 kaynağını `/64`'e toplamak (aynı `/64`'ü paylaşan kullanıcıları birleştirir)
+ya da kaynak ve `/64` için iki katlı anahtar. Tetikleyici: IPv6'lı ilk Route ya da
+Ingress.
 
 ## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
 

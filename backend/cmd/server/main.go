@@ -353,8 +353,9 @@ func main() {
 		sweepThrottle(ctx, throttle)
 	}()
 	// The per-account ceiling: a much looser bound on a name's failures
-	// across all sources, so a distributed guess cannot run forever. Off
-	// when zero, leaving only the per-source throttle above.
+	// across all sources, so a distributed guess cannot run forever, and on
+	// a status page's and an account's password-change failures likewise.
+	// Off when zero, leaving only the per-source throttle above.
 	var accountThrottle *auth.Throttle
 	if cfg.LoginAccountMaxFailures > 0 {
 		accountThrottle = &auth.Throttle{MaxFailures: cfg.LoginAccountMaxFailures, Lockout: cfg.LoginLockout, MaxKeys: cfg.LoginThrottleMaxKeys, Logger: logger}

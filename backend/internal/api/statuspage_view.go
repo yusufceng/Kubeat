@@ -267,9 +267,12 @@ type unlockResponse struct {
 }
 
 // unlockStatusPage answers POST /api/v1/status-pages/by-slug/{slug}/unlock
-// with a token for the page's password. Attempts are throttled per page,
-// as sign-ins are per name: the throttle counts the attempt from the start
-// and takes it back when it turns out not to be a guess.
+// with a token for the page's password. Attempts are throttled per source
+// and page, as sign-ins are per source and name, under a loose ceiling on
+// the page's failures from all sources (beginGuess): one visitor's wrong
+// guesses lock that visitor's source only, not the page for everyone
+// (CWE-307, ADR-0004). The throttle counts the attempt from the start and
+// takes it back when it turns out not to be a guess.
 func (h *handler) unlockStatusPage(w http.ResponseWriter, r *http.Request) {
 	var req unlockRequest
 	if !decodeBody(w, r, &req) {
@@ -280,16 +283,12 @@ func (h *handler) unlockStatusPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "status page not found")
 		return
 	}
-	// A key of its own: usernames have no colon, and "pw:" is the password
-	// changes'.
-	key := "sp:" + slug
-	now := time.Now().UTC()
-	attempt, lockedFor, ok := h.opts.Throttle.Begin(key, now)
+	now := h.now()
+	g, ok := h.beginGuess(w, r, statusPageSurface, statusPageScope(slug), now)
 	if !ok {
-		tooManyAttempts(w, lockedFor)
 		return
 	}
-	undo := func() { h.opts.Throttle.Undo(key, now) }
+	undo := g.undo
 
 	page, err := h.opts.Store.GetStatusPageBySlug(r.Context(), slug)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !page.Published) {
@@ -319,11 +318,11 @@ func (h *handler) unlockStatusPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !right {
-		h.opts.Logger.Info("status page unlock refused", "slug", slug, "attempt", attempt)
+		h.opts.Logger.Info("status page unlock refused", "slug", slug, "attempt", g.attempt, "source", g.source)
 		writeError(w, http.StatusUnauthorized, "wrong password")
 		return
 	}
-	h.opts.Throttle.Reset(key)
+	g.succeeded()
 	expires := now.Add(h.opts.StatusPageSession).Truncate(time.Second)
 	writeJSON(w, http.StatusOK, unlockResponse{Token: h.statusPageToken(page, expires), ExpiresAt: expires})
 }

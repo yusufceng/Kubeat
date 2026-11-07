@@ -66,10 +66,12 @@ type Config struct {
 	LoginAuditPerMinute int // UPTIME_LOGIN_AUDIT_PER_MINUTE
 	// LoginAccountMaxFailures is a loose, very high ceiling on a name's
 	// failed sign-ins across all sources within the lockout period, kept so
-	// a large distributed guess cannot run forever. The per-source throttle
-	// (LoginMaxFailures) holds any one source well below it, so a legitimate
-	// owner's own mistakes never reach it. Zero turns the ceiling off,
-	// leaving only the per-source throttle.
+	// a large distributed guess cannot run forever; a status page's failed
+	// unlocks and an account's failed password changes have one of their
+	// own at the same value. The per-source throttle (LoginMaxFailures,
+	// which counts those per source too) holds any one source well below
+	// it, so a legitimate owner's own mistakes never reach it. Zero turns
+	// the ceiling off, leaving only the per-source throttle.
 	LoginAccountMaxFailures int // UPTIME_LOGIN_ACCOUNT_MAX_FAILURES
 	// TrustProxyHops is how many X-Forwarded-For entries the proxies in
 	// front of the UI write, or 1 with none (Next.js writes its own peer

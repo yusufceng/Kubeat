@@ -853,7 +853,9 @@ func TestStatusPagePassword(t *testing.T) {
 		t.Errorf("view with the old password's token: status = %d, want 401", code)
 	}
 
-	// Guessing is throttled per page, like sign-ins per name.
+	// Guessing is throttled per source and page, like sign-ins per source
+	// and name: these all come from the test's one address (other sources:
+	// TestGuessThrottledPerSource).
 	codes := []int{}
 	for _, password := range []string{"a", "b", "c", "yeni-parola-2"} {
 		codes = append(codes, public(t, "POST", unlock, `{"password":"`+password+`"}`, nil, nil))

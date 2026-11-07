@@ -474,8 +474,8 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	// source's failed guesses throttle only that source, not the name for
 	// everyone: the legitimate owner signing in from elsewhere is never
 	// locked out (CWE-307, ADR-0004).
-	now := time.Now().UTC()
-	source := h.clientIP(r, now)
+	now := h.now()
+	source := h.clientIP(r, signInSurface, now)
 	key := signInIPKey(source, req.Username)
 	acctKey := signInKey(req.Username)
 	// The attempt counts as a failure from here on, before the password is
@@ -897,7 +897,9 @@ type passwordRequest struct {
 // authPassword changes the password of the signed-in local user. The
 // current password is guarded like a sign-in: whoever holds a session that
 // is not theirs must not get to guess it, and take the account over, at
-// the speed of the CPU.
+// the speed of the CPU. Like a sign-in's, its guesses are throttled per
+// source (beginGuess), so that one who holds such a session cannot lock
+// the owner out of the change that would shut them out.
 func (h *handler) authPassword(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	if p.Service {
@@ -917,24 +919,24 @@ func (h *handler) authPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "the password of a directory account is changed in the directory")
 		return
 	}
-	// A key of its own: usernames have no colon.
-	key := "pw:" + strconv.FormatInt(u.ID, 10)
-	now := time.Now().UTC()
-	if _, locked, ok := h.opts.Throttle.Begin(key, now); !ok {
-		tooManyAttempts(w, locked)
+	g, ok := h.beginGuess(w, r, passwordSurface, passwordScope(u.ID), h.now())
+	if !ok {
 		return
 	}
 	right, err := h.checkPassword(r.Context(), u.PasswordHash, req.CurrentPassword)
 	if err != nil {
-		h.opts.Throttle.Undo(key, now)
+		g.undo()
 		writeError(w, http.StatusServiceUnavailable, "too many password checks at once; try again")
 		return
 	}
 	if !right {
+		// The source the throttle keyed on, for the operator to check
+		// UPTIME_TRUST_PROXY_HOPS by, as a refused sign-in's line has it.
+		h.opts.Logger.Info("password change refused", "user", u.Username, "attempt", g.attempt, "source", g.source)
 		writeError(w, http.StatusBadRequest, "the current password is wrong")
 		return
 	}
-	h.opts.Throttle.Reset(key)
+	g.succeeded()
 	if err := h.setPassword(r, u, req.NewPassword); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
