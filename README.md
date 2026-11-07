@@ -877,8 +877,9 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   - **Ayar verilince.** Değer virgülle ayrılmış CIDR listesidir (ör.
     `10.50.0.0/16`; tek adres `/32` ile). Bu aralıklardaki bir adres kapsam
     denetiminde cluster dışı sayılır, genel bir adres gibi:
-    - kurum ağına çözülen ad (`intranet.sirket.local` → `10.50.0.10`) ve router
-      VIP'i bu aralıktaysa on-prem Route adı kabul edilir;
+    - kurum ağına çözülen ad (`intranet.sirket.local` → `10.50.0.10`) kabul
+      edilir; on-prem Route adı ise router VIP'i listedeyse kabul edilir
+      (aşağıda "Şart");
     - çıplak bir kurum IP'si de (`https://10.50.1.1/`) kabul edilir;
     - oluşturma, klon ve hedef değişikliği aynı sonucu verir; monitor'de ve
       webhook türü kanalda aynıdır. Kabul edilen hedef denetim satırı ve sayaç
@@ -900,28 +901,50 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     korumaları bu ayarı okumaz: kurum adı "Hedef yükü"nde eskisi gibi dış
     hedeftir, çıplak kurum IP'si cluster içi. Yönetici ve kapsamı `*` olan
     kullanıcı zaten her hedefe ulaşır.
-  - **Şart: aralık cluster'ın dışında.** Listedeki her adrese kapsamı sınırlı
-    kullanıcı, bir namespace'e bağlanmadan, Kubeat'in pod'undan ulaşır. Bu
-    yüzden listeye yalnız kurumun cluster dışındaki aralıkları girer:
-    - cluster'ın pod ağı, Service ağı, node (makine) ağı ve VIP'leri (API,
-      router, LoadBalancer) girmez. OpenShift'te pod ve Service ağı
+  - **Şart: listeye ne girer.** Listedeki her adrese kapsamı sınırlı kullanıcı,
+    bir namespace'e bağlanmadan, Kubeat'in pod'undan ulaşır. Kural:
+    - kurumun cluster dışındaki aralıkları girer (kurum sunucuları, on-prem
+      bağımlılıklar);
+    - cluster'ın pod ağı, Service ağı, node (makine) ağı ve API VIP'i hiçbir
+      zaman girmez. OpenShift'te pod ve Service ağı
       `oc get network.config/cluster -o jsonpath='{.status.clusterNetwork[*].cidr} {.status.serviceNetwork[*]}'`
       ile, node adresleri `oc get nodes -o wide` ile okunur;
-    - router VIP'i listedeyse o VIP'teki her Route (başka ekiplerinki de) bu
-      kullanıcıya açılır; bunlar kurum ağından zaten erişilen adreslerdir;
+    - router VIP'i yalnız on-prem Route'lar için (bir LoadBalancer Service'inin
+      VIP'i de yalnız o Service için) ve bilerek girer: VIP node ağındaysa
+      node ağının aralığı değil, yalnız VIP `/32` olarak yazılır; router'ın
+      önündeki cluster dışı bir yük dengeleyicideyse onu içeren kurum aralığı
+      da VIP'i listeye alır. Sonuç ikisinde de aynıdır: o VIP'teki her Route,
+      başka ekiplerinkiler de, kapsamı sınırlı kullanıcıya açılır (bunlar kurum
+      ağından zaten erişilen adreslerdir). VIP bir node'un üstündeyse (bare
+      metal'de keepalived) aynı adres o node'un host ağında dinleyen portlarına
+      da (ör. kubelet) çıkar; kapsam portlara bakmaz. Bunu istemiyorsanız VIP'i
+      listeye almayın; on-prem Route'ları yönetici kurar;
     - kaynak adrese güvenen bir kurum servisi (yalnız cluster'ın çıkış
       adresine izin veren bir güvenlik duvarı) bu kullanıcıyı Kubeat'ten
       ayıramaz; böyle bir servisin aralığı listeye girmemeli.
-  - **Açılış koruması.** Aralıklardan biri API sunucusunun adresini
-    (`KUBERNETES_SERVICE_HOST`, Service ağında) ya da backend'in kendi adresini
-    (pod IP'si ya da loopback) içeriyorsa backend başlamaz ve nedenini yazar
-    (`UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: 10.0.0.0/8 holds the API server's
-    address 10.96.0.1 (KUBERNETES_SERVICE_HOST), ...`). Geçersiz bir girdi
-    (CIDR olmayan değer, `/` olmadan tek adres) de backend'i başlatmaz. Ayarı
-    daraltmak ya da boşaltmak hatayı kaldırır. Koruma yalnız bu adreslere bakar;
-    pod ve Service ağının geri kalanı, node ağı ve VIP'ler operatörün
-    sorumluluğundadır. Ayar verilmişse açılışta `target scope external ranges in
-    effect` log satırı aralıkları yazar.
+  - **Açılış koruması.** Backend şu durumlarda başlamaz ve nedenini yazar;
+    ayarı daraltmak ya da boşaltmak hatayı kaldırır:
+    - aralıklardan biri API sunucusunun adresini (`KUBERNETES_SERVICE_HOST`,
+      Service ağında) ya da backend'in kendi adresini (pod IP'si ya da
+      loopback) içeriyorsa (`UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: 10.0.0.0/8
+      holds the API server's address 10.96.0.1 (KUBERNETES_SERVICE_HOST), ...`);
+    - girdi geçersizse: CIDR olmayan değer, `/` olmadan tek adres ya da IPv6
+      biçiminde yazılmış bir IPv4 aralığı (`::ffff:10.50.0.0/112`; hata
+      `10.50.0.0/16` yazımını önerir).
+
+    Koruma yalnız bu adreslere ve pod'un bu açılıştaki adresine bakar; ilk
+    açılışın geçmesi güvence değildir:
+    - pod ağının başka bir parçasını içeren bir aralık (ör. pod ağı
+      `10.128.0.0/14` iken `10.130.0.0/16`) bugün geçer; pod başka bir node'a
+      taşınıp o parçadan adres alınca (drain, yeniden zamanlama) backend
+      başlamaz. Backend tek kopya olduğu için izleme o an durur; `ERROR`
+      satırı ve CrashLoop görünür;
+    - pod ve Service ağının tamamını yukarıdaki `network.config/cluster`
+      çıktısıyla, node ağını ve API VIP'ini de "Şart"taki kurala göre siz
+      dışarıda tutarsınız.
+
+    Ayar verilmişse açılışta `target scope external ranges in effect` log
+    satırı aralıkları yazar.
   - **Ad çözümü ve vekil.** Kurum adı backend'in kendi çözücüsünde çözülmelidir:
     cluster DNS'i kurum alanını kurumsal DNS'e iletir (OpenShift'te
     `dns.operator/default`'un `servers` alanı). Kurum aralıkları vekilli
@@ -4891,7 +4914,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
 | `UPTIME_TARGET_RESOLVE_TIMEOUT` | `5s` | Kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Bkz. "Hedef politikası" → "Çözüm anında denetim". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
 | `UPTIME_TARGET_SCOPE_TRUST_PROXY` | `false` | `true` iken kapsamı sınırlı kullanıcının hedefi backend'in çözücüsünde yalnız NXDOMAIN alıyor ve istek vekile gidiyorsa (`HTTP_PROXY`/`HTTPS_PROXY`, `NO_PROXY` dışında; HTTP, anahtar kelime, JSON, WebSocket monitor'leri ve webhook türü kanallar) reddedilmez. Yalnız vekil cluster dışındaysa açın. Cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine reddedilir. Vekil verilmiş ve ayar kapalıysa açılışta bir `WARN` gelir. Bkz. "Hedef politikası" → "Vekilli kurulum" |
-| `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` | – | Kapsam denetiminin özel olsa da cluster dışı saydığı kurum aralıkları; virgülle ayrılmış CIDR. Bu aralıktaki bir adres (çıplak yazılmış ya da bir addan çözülmüş) kapsamı sınırlı kullanıcı için genel bir adres gibi kabul edilir. Hedef politikası ve yük korumaları bu ayarı okumaz. Cluster'ın pod, Service ve node ağları ile VIP'leri listeye girmemeli; API sunucusunun adresini ya da backend'in kendi adresini içeren aralık backend'i başlatmaz. Bkz. "Hedef politikası" → "Kurum ağı" |
+| `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` | – | Kapsam denetiminin özel olsa da cluster dışı saydığı kurum aralıkları; virgülle ayrılmış CIDR. Bu aralıktaki bir adres (çıplak yazılmış ya da bir addan çözülmüş) kapsamı sınırlı kullanıcı için genel bir adres gibi kabul edilir. Hedef politikası ve yük korumaları bu ayarı okumaz. Cluster'ın pod, Service ve node ağları ile API VIP'i listeye girmez; router VIP'i yalnız on-prem Route'lar için bilerek (node ağındaysa `/32` ile) girer ve o VIP'teki her Route kapsamı sınırlı kullanıcıya açılır. API sunucusunun adresini ya da backend'in kendi adresini içeren aralık ve IPv6 biçiminde yazılmış IPv4 aralığı backend'i başlatmaz. Bkz. "Hedef politikası" → "Kurum ağı" |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL` | `30s` | Hedefi cluster dışında olan bir monitor'un en kısa kontrol (ve tekrar) aralığı; `UPTIME_MIN_CHECK_INTERVAL`'dan kısa olamaz, `0` ayrı kural yok demektir. Bkz. "Hedef yükü" |
 | `UPTIME_TARGET_MAX_RATE` | `60` | Cluster dışındaki bir host'a tüm monitor'ların birlikte dakikada yapabileceği en fazla kontrol; fazlası sonraki tick'i bekler. `0` sınırsız |

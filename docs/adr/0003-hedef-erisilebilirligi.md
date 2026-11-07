@@ -195,8 +195,17 @@ daraltması sprint 8'de (0.50, #121).**
   - aralıklardan biri API sunucusunun adresini (`KUBERNETES_SERVICE_HOST`) ya da
     backend'in kendi adresini içeriyorsa backend başlamaz (PO kararı: WARN
     değil hata, çünkü çakışma Service ya da pod ağını namespace'siz açar).
-    Koruma yalnız bu iki örneğe bakar; pod ve Service ağının geri kalanı, node
-    ağı ve VIP'ler operatörün sorumluluğundadır;
+    Koruma yalnız bu iki örneğe, bu açılıştaki hâlleriyle bakar: pod ağının
+    başka bir parçasını içeren aralık bugün geçer ve pod oraya taşınınca
+    backend'i durdurur. Aynı okuyucu (`netguard.ParseExternalRanges`) IPv6
+    biçiminde yazılmış IPv4 aralığını da reddeder; koruma ve kapsam denetimi
+    bir yazımda ayrışmaz;
+  - listeye ne girer (README "Kurum ağı", "Şart"): pod, Service ve node ağı
+    ile API VIP'i hiç girmez; korumanın yakalamadığı çakışmayı dışarıda tutmak
+    operatörün sorumluluğundadır. Router VIP'i
+    yalnız on-prem Route'lar için bilerek (node ağındaysa `/32` ile) girer;
+    o zaman o VIP'teki her Route, başka ekiplerinkiler de, kapsamı sınırlı
+    kullanıcıya açılır;
   - keşiften içe aktarma hedefi çözmez, yalnız namespace'e bakar: aralık
     Route'un VIP'ini içeriyorsa içe aktarma, klon ve hedef değişikliği aynı
     sonucu verir; içermiyorsa içe aktarma kabul eder, klon ve hedef değişikliği

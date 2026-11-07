@@ -278,9 +278,11 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   aralıklarını (çıplak IP ve çözülen ad) kapsam için cluster dışı sayıyor (S80,
   sprint 9, [#132](https://github.com/yusufceng/Kubeat/issues/132)). API
   sunucusunun ya da backend'in kendi adresini içeren aralık backend'i
-  başlatmıyor; pod ve Service ağının geri kalanı, node ağı ve VIP'lerle çakışma
-  operatörün sorumluluğunda. Keşiften içe aktarma yalnız namespace'e baktığı
-  için aralık Route'un VIP'ini içermiyorsa bu hedefi yine alıyor, klonu ve hedef
+  başlatmıyor; pod ve Service ağının geri kalanı, node ağı ve API VIP'iyle
+  çakışma operatörün sorumluluğunda, router VIP'i yalnız bilerek (node
+  ağındaysa `/32` ile) giriyor ve o VIP'teki her Route'u açıyor. Keşiften
+  içe aktarma yalnız namespace'e baktığı için aralık Route'un VIP'ini
+  içermiyorsa bu hedefi yine alıyor, klonu ve hedef
   değişikliği reddediliyor; minikube provası release manager'da; (b) vekilli kurulumda yerelde NXDOMAIN alan dış ad 0.49'da
   reddediliyor; 0.50'de opt-in `UPTIME_TARGET_SCOPE_TRUST_PROXY` (yalnız vekil
   cluster dışındaysa) vekile giden HTTP/WebSocket monitor'ü ve webhook'ta

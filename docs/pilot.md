@@ -181,8 +181,9 @@ backend:
     NO_PROXY: .svc,.cluster.local,.sirket.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
     # Kapalı kalır; açmadan önce aşağıdaki "Vekilli kapsam"daki iki onay
     # UPTIME_TARGET_SCOPE_TRUST_PROXY: "true"
-    # Kurumun cluster dışındaki aralıkları; pod, Service, node ağı ve VIP'ler
-    # girmez (0.51'den beri; README "Kurum ağı"). Kendi aralığınızla açın.
+    # Kurumun cluster dışındaki aralıkları; pod, Service, node ağı ve API VIP'i
+    # girmez, router VIP'i yalnız bilerek ve /32 ile (0.51'den beri; README
+    # "Kurum ağı", "Şart"). Kendi aralığınızla açın.
     # UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: "10.50.0.0/16"
 
 backup:
@@ -247,18 +248,30 @@ tanımaz ve yok sayar.
 
 `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` (0.51'den beri, varsayılan boş) kurumun
 cluster dışındaki aralıklarını verir. Açınca namespace'le sınırlı editör bu
-aralıklara çözülen kurum adlarına, router VIP'i bu aralıktaysa on-prem Route
-adlarına ve aralıktaki çıplak adreslere monitor ve kanal kurabilir:
+aralıklara çözülen kurum adlarına ve aralıktaki çıplak adreslere, router VIP'i
+listedeyse on-prem Route adlarına da monitor ve kanal kurabilir:
 
 - **Önce cluster'ın ağlarını okuyun.** Pod ve Service ağı
   `oc get network.config/cluster -o jsonpath='{.status.clusterNetwork[*].cidr} {.status.serviceNetwork[*]}'`,
-  node adresleri `oc get nodes -o wide`; bunlar ve API, router ve LoadBalancer
-  VIP'leri listeye girmez. Örnekteki `NO_PROXY` gibi `10.0.0.0/8` yazmayın:
-  OpenShift'in pod ağı (varsayılan `10.128.0.0/14`) onun içindedir.
+  node adresleri `oc get nodes -o wide`; bunlar ve API VIP'i listeye hiç
+  girmez. Örnekteki `NO_PROXY` gibi `10.0.0.0/8` yazmayın: OpenShift'in pod
+  ağı (varsayılan `10.128.0.0/14`) onun içindedir.
+- **Router VIP'i yalnız bilerek.** On-prem Route'ları editöre açmak için
+  router VIP'ini ekleyin: node ağındaysa node ağını değil, yalnız VIP'i `/32`
+  ile (ör. `10.50.0.0/16,192.168.40.5/32`). O VIP'teki her Route, başka
+  ekiplerinkiler de, kapsamı sınırlı kullanıcıya açılır; VIP bir node'un
+  üstündeyse (bare metal'de keepalived) o node'un host ağında dinleyen
+  portları da (ör. kubelet). Bunu istemiyorsanız VIP'i eklemeyin, on-prem
+  Route'ları yönetici kursun (README "Kurum ağı", "Şart").
 - **Açılış koruması.** API sunucusunun ya da backend pod'unun adresini içeren
-  bir aralık backend'i başlatmaz; `oc -n kubeat logs deploy/kubeat-backend`
-  `invalid configuration` satırında aralığı ve adresi yazar. Aralığı daraltın
-  ya da satırı silin.
+  bir aralık ve IPv6 biçiminde yazılmış bir IPv4 aralığı
+  (`::ffff:10.50.0.0/112`) backend'i başlatmaz;
+  `oc -n kubeat logs deploy/kubeat-backend` `invalid configuration` satırında
+  nedenini yazar. Aralığı daraltın ya da satırı silin. Koruma pod'un o anki
+  adresine bakar: pod ağının başka bir parçasını içeren bir aralık (pod ağı
+  `10.128.0.0/14` iken `10.130.0.0/16`) bugün geçer, pod başka bir node'a
+  taşınınca backend'i durdurur. Pod ağının tamamını yukarıdaki
+  `network.config/cluster` çıktısıyla dışarıda tutun.
 - **Kurum adları backend'de çözülmeli.** `NO_PROXY`'deki `.sirket.local`
   adlarına vekil değil backend bağlanır ve `UPTIME_TARGET_SCOPE_TRUST_PROXY`
   onlara istisna vermez: cluster DNS'i kurum alanını kurumsal DNS'e iletmelidir
@@ -315,10 +328,11 @@ dizin hesabınıza taşıyın, sonra ekibi ekleyin.
    0.51'de kurumun aralıkları `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` ile
    verildiyse (yukarıda "2. values-pilot.yaml") editör bu aralıklara çözülen
    adlara ve aralıktaki çıplak adreslere kendisi kurar; pod, Service ve node
-   ağı ile başka ekiplerin Service'leri ona yine kapalıdır. Ayar yokken bunları
-   yönetici kurar; keşiften içe aktarma yalnız namespace'e bakıp Route'u alır,
-   ama içe aktarılan monitor'ün klonu ve aynı host'a hedef değişikliği
-   reddedilir (README "Kurum ağı"). Yukarıdaki vekilli
+   ağı ile başka ekiplerin Service'leri ona yine kapalıdır (router VIP'i
+   listedeyse o VIP'teki Route'lar, başka ekiplerinkiler de, açıktır). Ayar
+   yokken bunları yönetici kurar; keşiften içe aktarma yalnız namespace'e
+   bakıp Route'u alır, ama içe aktarılan monitor'ün klonu ve aynı host'a
+   hedef değişikliği reddedilir (README "Kurum ağı"). Yukarıdaki vekilli
    kurulumda yalnız vekilin çözdüğü bir dış ad 0.49'da da reddedilir; 0.50'de
    `UPTIME_TARGET_SCOPE_TRUST_PROXY: "true"` ile editör onu kurabilir (vekil
    cluster dışındaysa; README "Vekilli kurulum"). Ayar açıkken kapsamı sınırlı
