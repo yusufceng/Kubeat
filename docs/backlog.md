@@ -2063,9 +2063,13 @@ adın yerel çözüm sonucunu gösteren komut, pilot ön şart sınaması) S82'y
 Güncelleme (2026-11-07, S86): kontrol anı reddi `reason="connection"` ile her
 kontrolde sayılıyor; denetim satırı (`deny`/`target-scope`, kullanıcı `checker`)
 monitor başına, bağlandığı yeri belirleyen ayarları değişene ya da backend yeniden
-başlayana kadar bir kez yazılıyor. S82 bu yola da `resolve_error` ayrımını (vekile
-giden kontrolde SERVFAIL ve zaman aşımı bugün `connection` sayılıyor) ve
-`auditCap`'in dakika sınırını getirir.
+başlayana kadar bir kez yazılıyor. S82 bu yola da `resolve_error` ayrımını ve
+`auditCap`'in dakika sınırını getirir: vekile giden kontrolde SERVFAIL ve zaman
+aşımı, doğrudan bağlantıda ise kontrolün yöneldiği ama monitor'ün ayarlarında
+yazılı olmayan bir adın her çözüm hatası (NXDOMAIN dahil; iç-adres oracle'ı
+kapansın diye, oluşturmadaki kural) bugün `connection` sayılıyor. Ayrım
+sayaçta ve denetimde kalmalı, sonuçta değil: sonuç cluster içine düşen bir addan
+ayırt edilmemeli.
 
 ## Kapsam çözüm-hatası reddini gerçek cross-tenant reddinden ayırmak (reason/WARN, S77 takibi)
 

@@ -313,7 +313,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   ADR-0003 c "Her bağlantıda kapsam"): kayıt monitor'ün ayarlarında (şema 26),
   yönetici ve `*` etkilenmiyor, kaydı olmayan eski monitor namespace'ine
   bağlanıyor (kapsamı sınırlı editör yoksa her namespace'in kaydını alıyor),
-  reddedilen kontrol DOWN ve `reason=connection` ile sayılıyor. Kalan: kayıt
+  annotation monitor'ü her kurulumda nesnesinin namespace'ine bağlı, kayıt
+  yalnız kontrolün bir ayarı değişince el değiştiriyor, reddedilen kontrol
+  DOWN ve `reason=connection` ile sayılıyor. Kalan: kayıt
   yazıldığı anın görüntüsü, kapsam daralınca var olan monitor'ler eski kapsamla
   çalışıyor (S73, backlog, sprint 11 adayı); kanallar yalnız oluşturma ve
   değiştirmede denetleniyor (backlog); vekile giden kontrolde çözüm hatası

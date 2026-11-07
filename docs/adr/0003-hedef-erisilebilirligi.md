@@ -232,8 +232,15 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     adrese verilir (`netguard.Dialer.In`), yanıtı kayıttan sonra değişen bir ad
     da (DNS rebinding) böylece yakalanır. Vekile verilen istekte backend
     bağlanmadığı için vekilin istendiği her host, verilmeden önce oluşturmadaki
-    gibi çözülüp denetlenir (`netguard.Scope.Proxy`). Kontrolün bağlandığı uç
-    noktalar oluşturma ve değiştirmede de denetlenir.
+    gibi çözülüp denetlenir (`netguard.Scope.Proxy`). Kontrolün yöneldiği,
+    monitor'ün ayarlarında yazılı olmayan dış görünen bir ad çözülemezse
+    (NXDOMAIN, SERVFAIL, zaman aşımı) bağlantı da oluşturmadaki kuralla
+    reddedilir: çözülemeyen ad cluster dışında olduğu kanıtlanamaz ve ayrı bir
+    hatası, cluster içine düşen addan ayırt edilerek hangi adların orada
+    bulunduğunu söylerdi (iç-adres oracle'ı; yukarıda tek red mesajı). Ayarlarda
+    yazılı adlar (hedef ve öteki uç noktalar) yazılırken denetlendiği için
+    çözülemezse kendi hatasıyla düşer. Kontrolün bağlandığı uç noktalar oluşturma ve
+    değiştirmede de denetlenir.
   - **Red.** Kapsamın reddettiği bağlantı kontrolü DOWN yapar. Sonucun hatası
     tek genel bir metindir, adresi ve nedeni söylemez ((d) maskesi; ayrıntı
     yalnız backend log'unda); açıklaması `blocked_by_scope`, arayüzde ve
@@ -241,10 +248,12 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     (`ErrBlocked`) gibi, beklediği başarısızlık saymaz. Her ret
     `kubeat_target_scope_denied_total{reason="connection"}`'ı artırır; denetim
     kaydına (`deny`/`target-scope`, kullanıcı `checker`) monitor başına bir kez
-    yazılır, monitor'ün bağlandığı yeri belirleyen ayarları değişince ya da
-    backend yeniden başlayınca bir kez daha. Satır sayısı böylece monitor'lerin
-    ve ayar değişikliklerinin sayısıyla sınırlıdır; dakika sınırı S82'de
-    `auditCap`'le birleşir.
+    yazılır, monitor'ün bağlandığı yeri belirleyen ayarları değişince, monitor
+    duraklatılıp açılınca ya da backend yeniden başlayınca bir kez daha. Satır
+    sayısı böylece monitor'lerin ve ayar değişikliklerinin sayısıyla
+    sınırlıdır; dakika sınırı S82'de `auditCap`'le birleşir. Checker'ın monitor
+    başına tuttuğu durum (kendi bağlantı havuzu, son ret) monitor kapsamdan
+    çıkınca, silinince ya da duraklatılınca bırakılır.
   - **Kaydın yeri.** Karşılaştırılan seçenekler:
     1. Var olan `settings` JSON sütunu: göç yok, şema 26 kalır, 0.50'ye
        `helm rollback` mümkün. 0.50 alanı okur ama monitor'ü kaydederken
@@ -259,16 +268,45 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
 
     (1) seçildi (PO şartı: göç yok). Kayıt
     `"scope": {"namespaces": [...], "discovered": true}` biçimindedir;
-    `["*"]` her namespace'tir. Kaydı, kontrolün nereye bağlandığını (hedefi ya
-    da türün seçeneklerini) en son belirleyen yazar: oluşturan, klonlayan, içe
-    aktaran ya da değiştiren. Duraklatmak, ad ve etiket değiştirmek kaydı
-    değiştirmez; seçenek değişikliği hedefi değiştirenin kapsamıyla yeniden
-    denetlenir, böylece kapsamı sınırlı kullanıcı hedefi kapsamının dışındaki
-    bir monitor'ün kontrolünü üstlenemez. `discovered`, hedefin keşiften
-    (içe aktarma ya da annotation) geldiğini söyler: monitor'ün kendi host'u
-    içe aktarmadaki gibi namespace'iyle kapsamdadır (router VIP'ine çözülen
-    on-prem Route adı reddedilmez), kontrolün başka her bağlantısı kayıttaki
-    namespace'lere tabidir.
+    `["*"]` her namespace'tir. Kaydı, kontrolün nasıl koştuğunu (hedefi, her
+    pod seçeneğini, türün seçeneklerini) en son değiştiren yazar: oluşturan,
+    klonlayan, içe aktaran ya da değiştiren (`store.SameCheck`). Bunları
+    değiştirmeyen bir kayıt kaydı korur: duraklatmak; ad, etiket ya da aralık
+    değiştirmek; arayüz formunu yalnız bunlarla kaydetmek (form her kayıtta
+    bütün alanları gönderir, karar gönderilen alanlara değil değişene
+    bakar). Yoksa bir yöneticinin sıradan bir form kaydı kapsamı sınırlı
+    kullanıcının monitor'ünden kapsamı sessizce kaldırır, kapsamı sınırlı
+    kullanıcının yeniden adlandırması da yöneticinin monitor'ünü daraltırdı.
+    Hedef ya da seçenek gönderen her değişiklik hedefi değiştirenin
+    kapsamıyla denetlenir, böylece kapsamı sınırlı kullanıcı hedefi kapsamının
+    dışındaki bir monitor'ün kontrolünü üstlenemez. `discovered`, hedefin
+    keşiften (içe aktarma ya da annotation) geldiğini söyler: monitor'ün
+    kendi host'unun yalnız çözümü denetlenmez, içe aktarmadaki gibi
+    namespace'iyle kapsamdadır (router VIP'ine çözülen on-prem Route adı
+    reddedilmez). Nesnenin host'unu nesnenin sahibi istediği gibi yazar;
+    adından reddedilen bir host (başka namespace'in Service adı, API
+    sunucusu, kısa ad) bu yüzden keşiften gelse de reddedilir. Kontrolün başka
+    her bağlantısı kayıttaki namespace'lere tabidir.
+  - **Annotation monitor'leri.** Annotation'la kurulan monitor'ün hedefini
+    nesneyi düzenleyen belirler; bu kişi cluster'ın RBAC'ındadır ve Kubeat
+    onun kim olduğunu, Kubeat'te hesabı olup olmadığını bilmez. Kubeat'te
+    kapsamı sınırlı kullanıcı olmaması cluster'da namespace'lerine sınırlı
+    ekip olmadığı anlamına gelmez. Bu yüzden kaydı **her kurulumda**
+    nesnenin namespace'idir (`store.ObjectScope`): eşitleme oluştururken ve
+    güncellerken yazar, başka bir kayda dönmüşse bir sonraki turda geri yazar;
+    eşitleme yönettiği sürece API'deki değişiklikler kaydı değiştirmez;
+    açılış kaydı olmayan annotation monitor'lerine de bunu yazar. Seçenekler:
+    (a) her kurulumda namespace'e bağlamak; (b) yalnız kapsamı sınırlı
+    kullanıcısı olan kurulumda bağlamak: Kubeat hesaplarına bakar, kapıyı
+    tek-kiracılı görünen ama çok ekipli bir cluster'da açık bırakır ve kural
+    açılıştaki kararla eşitlemenin kararı arasında ikiye ayrılır. (a)
+    seçildi; Müşteri B'nin "yalnız kapsamı sınırlı kullanıcıya" şartından
+    bilerek sapılır, çünkü annotation'ın sahibi o kullanıcıdır. Etki: kontrolü
+    kendi host'undan başka bir namespace'e ya da cluster içine, kurum aralığı
+    yoksa özel adresli bir kurum hostuna giden annotation monitor'ü DOWN olur;
+    çare kurum aralığı (S80; on-prem router VIP'i `/32` dahil) ya da monitor'ü
+    elle kurmaktır. Geri alma maliyeti küçük: kural tek yerde
+    (`store.ObjectScope`, açılış ve eşitleme), göç yok.
   - **Anlık görüntü mü, canlı okuma mı (S73).** Kayıt, yazanın o anki
     kapsamının anlık görüntüsüdür. Canlı okuma (kaydın kullanıcıyı
     göstermesi, kontrolün kullanıcının bugünkü kapsamını okuması) kapsam
@@ -293,14 +331,18 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     bağlanır (`store.Monitor.TargetScope`). Bir yöneticinin bir namespace'e
     koyup başka yere bağlanan monitor'ü de bu kurala düşer. Sessizce DOWN
     olmasın diye:
-    - açılışta kapsamı sınırlı bir editör yoksa (yerel hesap, dizin grup
-      eşlemesi, LDAP ya da OIDC varsayılan rolü) kimse bir monitor'ü
-      namespace'inin dışına yöneltemezdi: kaydı olmayan monitor'lere her
-      namespace'in kaydı yazılır ve tek kiracılı kurulumda hiçbir şey
-      değişmez;
+    - annotation monitor'lerine açılışta, her kurulumda, nesnenin
+      namespace'inin kaydı yazılır (yukarıda "Annotation monitor'leri");
+    - ötekiler için, açılışta kapsamı sınırlı bir editör yoksa (yerel hesap,
+      dizin grup eşlemesi, LDAP ya da OIDC varsayılan rolü) kimse bir
+      monitor'ü namespace'inin dışına yöneltemezdi: kaydı olmayan monitor'lere
+      her namespace'in kaydı yazılır (keşiften gelenlere `discovered` ile) ve
+      bunlarda değişen bir şey olmaz; tek kiracılı kurulumda değişen yalnız
+      annotation monitor'leridir;
     - varsa sayıları açılışta bir `WARN` satırında yazılır, yükseltmeden
       önceki ön kontrol onları listeler (`docs/yukseltme.md`) ve bir
-      yöneticinin monitor'ü kaydetmesi kaydını yazar;
+      yöneticinin monitor'ü kaydetmesi, değiştirmeden de olsa, kaydını yazar;
+      kapsamı sınırlı bir kullanıcının değiştirmeden kaydetmesi yazmaz;
     - sınır: yalnız bugünkü editörlere bakılır; kapsamı sınırlı editörü
       silinmiş ya da genişletilmiş bir kurulumda onun kurduğu kaydı olmayan
       monitor'ler de her namespace'in kaydını alır.
@@ -309,11 +351,14 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     değildir; kontrolü 0.50'deki gibi çalışır.
   - **Kalan sınırlar.** Kanallar (webhook türü) yalnız oluşturma ve
     değiştirmede denetlenir (backlog). Vekile verilen istekte karar backend'in
-    çözümüne dayanır, vekil adı yeniden çözer; vekile giden kontrolde çözüm
-    hatası (SERVFAIL, zaman aşımı) oluşturmadaki gibi güvenli tarafta red
-    sayılır. CoreDNS kesintisinde kapsamı sınırlı monitor'lerin vekilli
+    çözümüne dayanır, vekil adı yeniden çözer; kontrolün yöneldiği ve
+    çözülemeyen bir ad (vekilli istekte SERVFAIL ve zaman aşımı; doğrudan
+    bağlantıda ayarlarda yazılı olmayan her ad) oluşturmadaki gibi güvenli
+    tarafta red sayılır. CoreDNS kesintisinde kapsamı sınırlı monitor'lerin bu
     kontrolleri bu yüzden DOWN olur ve bu red sayaçta gerçek bir reddinden
     ayrılmaz (S82). Kapsam daralması var olan kayıtları değiştirmez (S73).
+    Yönetici, kaydı başka birinin olan bir monitor'ü kendine ancak kontrolün
+    bir ayarını değiştirerek alır.
 
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
@@ -377,5 +422,6 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
   kontrolün her bağlantısında onun kapsamına tabidir; kayıt `settings`
   JSON'unda, şema 26, 0.50'ye rollback mümkün. Yönetici ve `*` etkilenmez;
   kaydı olmayan monitor namespace'ine bağlanır, kapsamı sınırlı editör yoksa
-  her namespace'in kaydını alır. Kanallar ve kapsam daralması sonraki işlerdir
+  her namespace'in kaydını alır; annotation monitor'ü her kurulumda nesnesinin
+  namespace'ine bağlıdır. Kanallar ve kapsam daralması sonraki işlerdir
   (yukarıda (c), "Her bağlantıda kapsam").

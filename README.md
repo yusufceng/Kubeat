@@ -867,9 +867,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     bağlanmak istedi ve reddedildi (aşağıda "Her bağlantıda"). Her reddedilen
     kontrol sayılır; denetim kaydına ise monitor başına bir satır yazılır
     (kullanıcı `checker`, nesne monitor'ün kimliği), monitor'ün bağlandığı yeri
-    belirleyen ayarları değişince ya da backend yeniden başlayınca bir satır
-    daha. Satır sayısı böylece monitor'lerin ve ayar değişikliklerinin sayısıyla
-    sınırlıdır. Backend log'u aynı anda bir `WARN` yazar.
+    belirleyen ayarları değişince, monitor duraklatılıp yeniden açılınca ya da
+    backend yeniden başlayınca bir satır daha. Satır sayısı böylece
+    monitor'lerin ve ayar değişikliklerinin sayısıyla sınırlıdır. Backend log'u
+    aynı anda bir `WARN` yazar.
 
   Seriler açılışta 0'dan başlar. İstemci yine yalnızca aynı genel 403'ü ya da
   sonuçta aynı genel hatayı görür; denetim kaydı ve metrik `/metrics` token'ıyla
@@ -989,18 +990,36 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     ve vekilli kurulum ayarı aynen geçerlidir. Doğrudan bağlantıda karar
     bağlanılan adrese verilir: yanıtı sonradan iç adrese dönen bir ad da
     reddedilir. Vekile giden istekte host'lar yukarıdaki gibi backend'de
-    çözülüp denetlenir. Kontrolün bağlandığı uç noktalar oluşturma ve
-    değiştirmede de denetlenir.
+    çözülüp denetlenir. Kontrolün yöneldiği, monitor'ün ayarlarında yazılı
+    olmayan bir ad çözülemezse bu da, oluşturmadaki gibi, kapsam reddidir
+    (sonuç, cluster içine düşen bir addan ayırt edilemez); ayarlardaki ad
+    çözülemezse monitor kendi hatasıyla DOWN olur. Kontrolün bağlandığı uç
+    noktalar oluşturma ve değiştirmede de denetlenir.
   - **Kimin kapsamı.** Monitor'ün ayarlarında bir kapsam kaydı tutulur:
-    hedefi ya da türün seçeneklerini en son belirleyen kullanıcının o anki
-    namespace'leri (oluşturma, klon, içe aktarma, değiştirme). Duraklatmak, ad
-    ve etiket değiştirmek kaydı değiştirmez. Kapsamı sınırlı bir kullanıcı,
-    hedefi kapsamının dışında olan bir monitor'ün seçeneklerini değiştiremez
-    (403); onu duraklatabilir. Yöneticinin, API token'ının ve kapsamı `*` olan
-    kullanıcının kurduğu monitor hiçbir şeye tabi değildir. Keşiften içe
-    aktarılan ya da annotation'la kurulan monitor'ün kendi host'u, içe
-    aktarmadaki gibi namespace'iyle kapsamdadır (router VIP'ine çözülen on-prem
-    Route adı dahil); kontrolün başka bağlantıları kayda tabidir.
+    kontrolün nasıl koştuğunu (hedef, her pod seçeneği, türün seçenekleri) en
+    son değiştiren kullanıcının o anki namespace'leri (oluşturma, klon, içe
+    aktarma, değiştirme).
+    - Bunları değiştirmeyen bir kayıt kaydı korur: duraklatmak; ad, etiket ya
+      da aralık değiştirmek; formu yalnız bunlarla kaydetmek. Yönetici kapsamı
+      sınırlı kullanıcının monitor'ünü düzenleyince kapsam kalkmaz, kapsamı
+      sınırlı kullanıcı yöneticinin monitor'ünü yeniden adlandırınca daralmaz.
+      Kaydı kendine almak isteyen kontrolün bir ayarını değiştirir.
+    - Kapsamı sınırlı bir kullanıcı, hedefi kapsamının dışında olan bir
+      monitor'ün seçeneklerini değiştiremez (403); onu duraklatabilir.
+    - Yöneticinin, API token'ının ve kapsamı `*` olan kullanıcının kurduğu
+      monitor hiçbir şeye tabi değildir.
+    - Keşiften içe aktarılan ya da annotation'la kurulan monitor'ün kendi
+      host'unun yalnız çözümü denetlenmez: içe aktarmadaki gibi namespace'iyle
+      kapsamdadır (router VIP'ine çözülen on-prem Route adı dahil). Adından
+      reddedilen bir host (başka namespace'in Service adı, API sunucusu, kısa
+      ad) nesneden gelse de reddedilir. Kontrolün başka bağlantıları kayda
+      tabidir.
+    - Annotation'la kurulan monitor'ün kaydı **her kurulumda**, kapsamı
+      sınırlı kullanıcı olsun olmasın, nesnenin namespace'idir: hedefini
+      nesneyi düzenleyen belirler ve Kubeat onun kim olduğunu bilmez.
+      Eşitleme yönettiği sürece kimin kaydettiğine bakılmaz; başka bir kayıt
+      (ör. eşitleme kapalıyken yapılmış bir değişiklik) bir sonraki turda
+      geri yazılır.
   - **Reddedilince.** Kontrol DOWN olur. Sonucun hatası tek genel bir metindir,
     adres ya da neden söylemez; açıklaması arayüzde ve bildirimde, Türkçe ve
     İngilizce, bunun bir kapsam reddi olduğunu söyler. Ters (`inverted`)
@@ -1008,19 +1027,31 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     "Kapsam ihlali denetimi".
   - **0.51 öncesinden kalan monitor'ler.** Kayıtları yoktur; backend açılışta
     bakar:
-    - kapsamı sınırlı bir editör yoksa (yerel hesap, LDAP/OIDC grup eşlemesi,
-      `UPTIME_LDAP_DEFAULT_ROLE` ya da `UPTIME_OIDC_DEFAULT_ROLE` ile verilen
-      sınırlı varsayılan namespace'ler) bunlara her namespace'in kaydı yazılır
-      ve hiçbir şey değişmez; log: `monitors set up before the target scope
-      was recorded keep reaching every namespace`;
+    - annotation'la kurulan monitor'ler her kurulumda nesnenin namespace'ine
+      bağlanır (log: `annotation monitors set up before the target scope was
+      recorded are held to their object's namespace`). Kapsamı sınırlı
+      kullanıcısı olmayan kurulumda da değişen budur: kontrolü kendi
+      host'undan başka bir namespace'e ya da cluster içine, kurum aralığı
+      tanımlı değilse özel adresli bir kurum hostuna (ör. bir giriş sayfasına)
+      giden annotation monitor'ü DOWN olur. Çare kurum aralığı (yukarıda
+      "Kurum ağı") ya da monitor'ü elle kurmaktır;
+    - ötekiler için, kapsamı sınırlı bir editör yoksa (yerel hesap, LDAP/OIDC
+      grup eşlemesi, `UPTIME_LDAP_DEFAULT_ROLE` ya da
+      `UPTIME_OIDC_DEFAULT_ROLE` ile verilen sınırlı varsayılan namespace'ler)
+      her namespace'in kaydı yazılır ve değişen bir şey olmaz; log: `monitors
+      set up before the target scope was recorded keep reaching every
+      namespace`;
     - varsa her biri kendi namespace'inin kapsamına bağlanır (namespace'siz
       monitor hiçbir şeye tabi değildir, keşiften gelenin kendi host'u
       namespace'iyle kapsamdadır) ve açılış sayılarını bir `WARN` satırıyla
       yazar. Bir yöneticinin bir namespace'e koyup başka bir namespace'e ya da
       çıplak bir adrese bağlanan monitor'ü de böylece DOWN olur; yönetici onu
       bir kez kaydedince (formu değiştirmeden kaydetmek ya da hedefi aynı
-      değerle `PATCH` etmek) kaydı yazılır ve düzelir. Yükseltmeden önceki ön
-      kontrol: [docs/yukseltme.md](docs/yukseltme.md) "0.51'e yükseltme".
+      değerle `PATCH` etmek) kaydı yazılır ve düzelir. Kapsamı sınırlı bir
+      kullanıcının değiştirmeden kaydetmesi kaydı yazmaz.
+
+    Yükseltmeden önceki ön kontrol: [docs/yukseltme.md](docs/yukseltme.md)
+    "0.51'e yükseltme".
   - **Geri dönüş.** 0.50'ye `helm rollback` mümkündür, şema değişmedi. 0.50
     kaydı okumaz ve kaydettiği (duraklattığı dahil) monitor'ün kaydını siler;
     0.51'e dönünce o monitor yukarıdaki kurala düşer.
@@ -1031,10 +1062,11 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi kapatmak ise var olan monitor'lerin
       bir sonraki kontrolüne uygulanır ("Kurum ağı", "Sınır: ayarı daraltmak"
       bugün yalnız kanallar için geçerlidir).
-    - Vekile giden kontrolde çözüm hatası (SERVFAIL, zaman aşımı) da kapsam
-      reddi sayılır: CoreDNS kesintisinde kapsamı sınırlı monitor'lerin
-      vekilli kontrolleri DOWN olur ve bu red sayaçta gerçek bir reddinden
-      ayrılmaz (S82).
+    - Vekile giden kontrolde çözüm hatası (SERVFAIL, zaman aşımı) ve
+      kontrolün yöneldiği, ayarlarda yazılı olmayan bir adın çözüm hatası da
+      kapsam reddi sayılır: CoreDNS kesintisinde kapsamı sınırlı monitor'lerin
+      bu kontrolleri DOWN olur ve bu red sayaçta gerçek bir reddinden ayrılmaz
+      (S82).
     - Hassas aralıkları `UPTIME_TARGET_DENY_CIDRS` ile kapatmak her monitor ve
       kanal için derinlemesine savunma olarak geçerli kalır.
 
