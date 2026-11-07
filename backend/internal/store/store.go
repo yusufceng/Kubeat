@@ -97,8 +97,8 @@ type Monitor struct {
 	SlowSince time.Time
 
 	// Scope is the record of the target scope the monitor's checks are
-	// held to: the namespaces of whoever last set where they connect, as
-	// those were then (ADR-0003 c, 0.51). Nil for a monitor written before
+	// held to: the namespaces of whoever last changed how they run, as
+	// those were then (ADR-0003 c, 0.51; SameCheck, ObjectScope). Nil for a monitor written before
 	// the record existed, or saved since by a version that does not keep
 	// it; the checker then holds it to its namespace (see TargetScope).
 	Scope *TargetScope
@@ -189,9 +189,10 @@ type DNSOptions struct {
 // monitor's settings, in the JSON of its options, so no schema changes and
 // a version without it reads the monitor as before.
 //
-// It is a snapshot of the scope of whoever last set where the checks
-// connect — the target, or the options of the type — when they set it: a
-// later change of that user's namespaces does not reach it (S73 is to look
+// It is a snapshot of the scope of whoever last changed how the checks run —
+// the target, each pod or not, the options of the type (SameCheck) — when
+// they changed it, or for an annotation monitor its object's (ObjectScope):
+// a later change of that user's namespaces does not reach it (S73 is to look
 // again at the monitors of a scope that narrowed).
 type TargetScope struct {
 	// Namespaces are those namespaces; AllNamespaces alone for one who

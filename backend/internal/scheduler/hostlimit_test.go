@@ -3,6 +3,8 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"maps"
+	"reflect"
 	"testing"
 	"time"
 
@@ -704,5 +706,38 @@ func TestFailedConnectionKeepsTheRememberedLandings(t *testing.T) {
 	taken, ok := s.admit(m, t0)
 	if !ok || fmt.Sprint(taken) != "{[a.example victim.example] [203.0.113.5 198.51.100.7]}" {
 		t.Errorf("admit after a failed connection = %+v %v, want the victim charged in advance", taken, ok)
+	}
+}
+
+// pruningChecker is a checker that keeps something of each monitor, and
+// records what it is told to keep.
+type pruningChecker struct {
+	fakeChecker
+	kept []map[int64]bool
+}
+
+func (p *pruningChecker) Prune(enabled map[int64]bool) {
+	p.kept = append(p.kept, maps.Clone(enabled))
+}
+
+// A checker that keeps something of each monitor between its checks is told
+// every tick which monitors are enabled, so that it forgets those deleted
+// or paused.
+func TestTickTellsTheCheckerWhichMonitorsAreEnabled(t *testing.T) {
+	st := &fakeStore{}
+	paused := targeting(2, store.MonitorHTTP, "https://example.com/b")
+	paused.Enabled = false
+	st.setMonitors(targeting(1, store.MonitorHTTP, "https://example.com/a"), paused)
+	checker := &pruningChecker{}
+	s := New(st, checker, testOptions())
+	t0 := time.Unix(1_700_000_000, 0)
+	schedules := map[int64]*schedule{}
+	jobs := make(chan store.Monitor, 16)
+
+	s.tick(context.Background(), t0, false, schedules, jobs)
+	st.setMonitors()
+	s.tick(context.Background(), t0.Add(time.Second), false, schedules, jobs)
+	if want := []map[int64]bool{{1: true}, {}}; !reflect.DeepEqual(checker.kept, want) {
+		t.Errorf("told to keep %v, want %v", checker.kept, want)
 	}
 }

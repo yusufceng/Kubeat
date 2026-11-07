@@ -1009,11 +1009,10 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// A change of where the checks connect — the target, or the options of
-	// the type, which say what else a check reaches — makes p's scope the
-	// one the checks are held to (below), so the target is held to it here
-	// as a new monitor's is. Pausing, renaming or tagging keeps the scope
-	// the monitor has.
+	// A request that sets the target or the options of the type, which say
+	// what else a check reaches, is held to p's scope as a new monitor's
+	// is, as the form's every save is; whether it makes p's scope the one
+	// the checks are held to is decided below.
 	connects := req.Target != nil || req.checkOptions.given()
 	if connects {
 		retargeted := merged.monitor(current)
@@ -1040,6 +1039,8 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 			return
 		}
+	}
+	if h.recordsScope(p, current, change, connects) {
 		// A target taken from a cluster object stays one while it is left
 		// as it is; a monitor without a record counts a discovered one as
 		// such, as the checker does.
@@ -1143,6 +1144,33 @@ func validateEachPod(m store.Monitor) error {
 
 // managedError answers a change to what discovery owns on a managed monitor.
 const managedError = "this monitor follows the kubeat.io/* annotations of its cluster object; change those instead"
+
+// recordsScope reports whether p's change of current makes p's scope the one
+// its checks are held to (store.Monitor.Scope). The record is the scope of
+// whoever last changed how the checks run: the target, each pod or not, the
+// options of the type (store.SameCheck). A save that leaves those as they
+// are keeps it, the form's too, which sends them all every time: an
+// administrator who renames or tags a scoped user's monitor does not lift
+// its scope, nor does a scoped user narrow an administrator's. Two
+// exceptions:
+//
+//   - A monitor without a record (set up before 0.51, or saved since by
+//     0.50) takes the record of one who sees every namespace when they save
+//     it with its target, unchanged or not: the way back to every namespace
+//     after an upgrade (ADR-0003 c). Anyone else's unchanged save leaves it
+//     held to its namespace.
+//   - An annotation monitor keeps its object's record while the sync manages
+//     it (store.ObjectScope): the object sets where its checks connect,
+//     whoever saves it.
+func (h *handler) recordsScope(p auth.Principal, current, change store.Monitor, connects bool) bool {
+	if current.Managed && h.opts.Sync != nil {
+		return false
+	}
+	if !store.SameCheck(current, change) {
+		return true
+	}
+	return current.Scope == nil && connects && p.SeesAll()
+}
 
 // changesManagedSettings says whether the update touches what the syncer
 // keeps in step with the annotations: the target and the check timing.

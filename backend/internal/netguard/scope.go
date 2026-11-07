@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -198,13 +199,24 @@ func (r ScopeRules) resolvesRefused(ctx context.Context, name string, request *u
 // judged. A request handed to a proxy never connects to its host here: its
 // hosts are held to the full rule, resolution and the proxy exception
 // included, before it is handed over (Scope.Proxy).
+//
+// An external-looking name the check is led to that does not resolve — any
+// but those the monitor's settings name, which were judged when they were
+// set — is refused too, as the API refuses such a target: whether it would
+// land in the cluster cannot be told, and a failure of its own would tell a
+// name that does not exist from one that lands there.
 type Scope struct {
 	rules   ScopeRules
 	canRead func(string) bool
 	// own is the monitor's own host when its target was taken from a
-	// cluster object of its namespace (discovery), which is in scope by
-	// that namespace as an import judges it; "" otherwise.
+	// cluster object of its namespace (discovery) and is external by its
+	// spelling: in scope by that namespace wherever it resolves, as an
+	// import judges it; "" otherwise.
 	own string
+	// named are the hosts the monitor's settings name, as ScopeHost reads
+	// them: a name among them that does not resolve fails the check as it
+	// would without a scope.
+	named []string
 
 	mu      sync.Mutex
 	refused bool
@@ -212,14 +224,36 @@ type Scope struct {
 }
 
 // Connections returns the scope of one check, holding the namespaces canRead
-// accepts. own is the monitor's own host when it is in scope by the
-// monitor's namespace whatever it resolves to (a target taken from a cluster
-// object), or "".
-func (r ScopeRules) Connections(canRead func(string) bool, own string) *Scope {
+// accepts. named are the hosts the monitor's settings name — its target's
+// and any other endpoint of its — which were held to the scope when they
+// were set. own is the one of them taken from a cluster object of the
+// monitor's namespace (discovery), or "": it is in scope by that namespace
+// whatever it resolves to, as an import judges it, a router's address among
+// them. Only the resolution is spared, though: a host refused by its
+// spelling (another namespace's Service, the API server, a short name) is
+// refused, discovered or not, as an object's owner writes its host as they
+// like.
+func (r ScopeRules) Connections(canRead func(string) bool, own string, named ...string) *Scope {
+	s := &Scope{rules: r, canRead: canRead}
 	if own != "" {
-		own = ScopeHost(own)
+		if name, class := r.classify(own, canRead); class == hostExternal {
+			s.own = name
+		}
 	}
-	return &Scope{rules: r, canRead: canRead, own: own}
+	for _, host := range named {
+		if host != "" {
+			s.named = append(s.named, ScopeHost(host))
+		}
+	}
+	if own != "" {
+		s.named = append(s.named, ScopeHost(own))
+	}
+	return s
+}
+
+// names reports whether the monitor's settings name host.
+func (s *Scope) names(host string) bool {
+	return slices.Contains(s.named, ScopeHost(host))
 }
 
 // class reads host for this scope.
@@ -383,5 +417,12 @@ func (d *Dialer) dialScoped(ctx context.Context, network, address string) (net.C
 		}
 		return d.scope.Addr(host, addrPort.Addr())
 	}
-	return external.DialContext(ctx, network, address)
+	conn, err := external.DialContext(ctx, network, address)
+	// A name the check was led to that does not resolve is refused, the
+	// monitor's own names left to fail as they would (Scope).
+	var notResolved *net.DNSError
+	if err != nil && errors.As(err, &notResolved) && !d.scope.names(host) {
+		return nil, d.scope.refuse(host)
+	}
+	return conn, err
 }

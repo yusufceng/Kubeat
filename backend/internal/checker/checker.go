@@ -184,6 +184,8 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	scope := c.scope(m)
 	if scope != nil {
 		ctx = context.WithValue(ctx, scopeKey{}, scope)
+	} else {
+		c.drop(m.ID) // held to a scope no more, if it ever was
 	}
 	switch {
 	case scope != nil && spelledOut(scope, m):

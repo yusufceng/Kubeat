@@ -154,6 +154,42 @@ func TestSyncCreatesUpdatesAndRemovesManagedMonitors(t *testing.T) {
 	}
 }
 
+// An annotation monitor is held to its object's namespace whoever saved it
+// last: a record changed while the sync was off is set back on the next run,
+// and one without a record, which reads the same, is left as it is.
+func TestSyncHoldsAnnotationMonitorsToTheirObjectsNamespace(t *testing.T) {
+	ctx := context.Background()
+	cluster := &fakeCluster{candidates: []k8s.Candidate{serviceCandidate("api", 8080, "http", monitored(nil))}}
+	s, db := newSyncer(t, cluster)
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m := names(t, db)["shop/service/api:8080"]
+	m.Scope = &store.TargetScope{Namespaces: []string{store.AllNamespaces}, Discovered: true}
+	if _, err := db.UpdateMonitor(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); st.Updated != 1 {
+		t.Errorf("run after the record changed: %+v", st)
+	}
+	if got := names(t, db)["shop/service/api:8080"]; !reflect.DeepEqual(got.Scope, store.ObjectScope("shop")) {
+		t.Errorf("scope = %+v, want the object's", got.Scope)
+	}
+	m.Scope = nil
+	if _, err := db.UpdateMonitor(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); st.Updated != 0 {
+		t.Errorf("run with no record: %+v", st)
+	}
+}
+
 // An object that leads its monitor to another server, a Route to another
 // host or an Ingress without TLS, no longer takes the secrets stored with
 // the monitor along, nor its request body: they are dropped, and the audit

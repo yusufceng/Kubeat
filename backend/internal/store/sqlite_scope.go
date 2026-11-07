@@ -13,7 +13,44 @@ import (
 
 // withoutScope selects the monitors without a record: the key is absent, or
 // null.
-const withoutScope = "json_type(settings, '$.scope') IS NULL OR json_type(settings, '$.scope') = 'null'"
+const withoutScope = "(json_type(settings, '$.scope') IS NULL OR json_type(settings, '$.scope') = 'null')"
+
+// ObjectScope is the record of the target scope of a monitor discovery made
+// from an annotated object (Monitor.Managed): the object's namespace, its own
+// host as discovery found it. Whoever may annotate the object sets where the
+// checks connect, and owns that namespace; Kubeat cannot tell who that is,
+// so the record is the same in every install, whoever saves the monitor
+// (ADR-0003 c).
+func ObjectScope(namespace string) *TargetScope {
+	return &TargetScope{Namespaces: []string{namespace}, Discovered: true}
+}
+
+// HeldToObject reports whether m's checks are held as ObjectScope holds
+// them: its record is that one, or it has none, which reads the same for a
+// monitor with a source (Monitor.TargetScope).
+func HeldToObject(m Monitor) bool {
+	if m.Scope == nil {
+		return m.Source != ""
+	}
+	return m.Scope.Discovered && slices.Equal(m.Scope.Namespaces, []string{m.Namespace})
+}
+
+// SameCheck reports whether a and b are checked alike: of one type, at one
+// target, each pod or not alike, with the same options of their type as
+// they are stored, defaults filled in. Everything else of a monitor — its
+// name, tags, intervals, state and record of a scope — is left out: a save
+// that changes only those leaves the checks as they were.
+func SameCheck(a, b Monitor) bool {
+	if a.Type != b.Type || a.Target != b.Target || a.EachPod != b.EachPod {
+		return false
+	}
+	normalize(&a)
+	normalize(&b)
+	a.Scope, b.Scope = nil, nil
+	ea, errA := encodeSettings(a)
+	eb, errB := encodeSettings(b)
+	return errA == nil && errB == nil && ea == eb
+}
 
 // MonitorsWithoutScope returns how many monitors have no record of a target
 // scope.
@@ -25,15 +62,42 @@ func (s *SQLite) MonitorsWithoutScope(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// RecordScopes gives every monitor without a record of a target scope the
-// record scope, and returns how many it gave one. The rest of their settings,
-// sealed secrets among them, is left as it is.
+// RecordObjectScopes gives every monitor discovery made from an annotated
+// object (Monitor.Managed) without a record of a target scope its object's
+// (ObjectScope), and returns how many it gave one. The rest of their
+// settings, sealed secrets among them, is left as it is.
+func (s *SQLite) RecordObjectScopes(ctx context.Context) (int, error) {
+	res, err := s.write.ExecContext(ctx, "UPDATE monitors SET settings = json_set(settings, '$.scope', "+
+		"json_object('namespaces', json_array(namespace), 'discovered', json('true'))) WHERE managed = 1 AND "+withoutScope)
+	if err != nil {
+		return 0, fmt.Errorf("record target scopes of annotation monitors: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("record target scopes of annotation monitors: %w", err)
+	}
+	return int(n), nil
+}
+
+// RecordScopes gives every other monitor without a record of a target scope
+// the record scope — with Discovered for one whose target was taken from a
+// cluster object (Source), as a monitor without a record reads it — and
+// returns how many it gave one. Annotation monitors are left to
+// RecordObjectScopes. The rest of their settings, sealed secrets among them,
+// is left as it is.
 func (s *SQLite) RecordScopes(ctx context.Context, scope TargetScope) (int, error) {
-	record, err := json.Marshal(scope)
+	scope.Discovered = false
+	entered, err := json.Marshal(scope)
 	if err != nil {
 		return 0, fmt.Errorf("record target scopes: %w", err)
 	}
-	res, err := s.write.ExecContext(ctx, "UPDATE monitors SET settings = json_set(settings, '$.scope', json(?)) WHERE "+withoutScope, string(record))
+	scope.Discovered = true
+	discovered, err := json.Marshal(scope)
+	if err != nil {
+		return 0, fmt.Errorf("record target scopes: %w", err)
+	}
+	res, err := s.write.ExecContext(ctx, "UPDATE monitors SET settings = json_set(settings, '$.scope', "+
+		"json(CASE WHEN source != '' THEN ? ELSE ? END)) WHERE managed = 0 AND "+withoutScope, string(discovered), string(entered))
 	if err != nil {
 		return 0, fmt.Errorf("record target scopes: %w", err)
 	}

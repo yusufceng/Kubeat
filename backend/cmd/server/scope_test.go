@@ -19,7 +19,8 @@ import (
 // up before the target scope was recorded keep reaching every namespace;
 // where someone may — an account, a directory group, or the default role a
 // directory or an identity provider gives — they are held to their
-// namespaces, and the log says how many.
+// namespaces, and the log says how many. An annotation monitor is held to
+// its object's namespace in either install.
 func TestRecordTargetScopes(t *testing.T) {
 	ctx := context.Background()
 	setUp := func(t *testing.T) *store.SQLite {
@@ -28,6 +29,8 @@ func TestRecordTargetScopes(t *testing.T) {
 			{Name: "old", Type: store.MonitorHTTP, Target: "https://api.payments.svc/", Namespace: "shop", Enabled: true},
 			{Name: "new", Type: store.MonitorHTTP, Target: "https://api.shop.svc/", Namespace: "shop", Enabled: true,
 				Scope: &store.TargetScope{Namespaces: []string{"shop"}}},
+			{Name: "imported", Type: store.MonitorHTTP, Target: "https://orders.apps.example/", Namespace: "shop", Source: "route/orders", Enabled: true},
+			{Name: "annotated", Type: store.MonitorHTTP, Target: "https://web.example.com/", Namespace: "shop", Source: "ingress/web", Managed: true, Enabled: true},
 		} {
 			m.Interval, m.Timeout, m.FailureThreshold = time.Minute, 5*time.Second, 1
 			if _, err := db.CreateMonitor(ctx, m); err != nil {
@@ -52,6 +55,7 @@ func TestRecordTargetScopes(t *testing.T) {
 	}
 	all := &store.TargetScope{Namespaces: []string{store.AllNamespaces}}
 	shop := &store.TargetScope{Namespaces: []string{"shop"}}
+	object := store.ObjectScope("shop")
 
 	t.Run("nobody limited", func(t *testing.T) {
 		db := setUp(t)
@@ -59,10 +63,15 @@ func TestRecordTargetScopes(t *testing.T) {
 		if err := recordTargetScopes(ctx, db, config.Config{}, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
 			t.Fatal(err)
 		}
-		if got := scopes(t, db); !reflect.DeepEqual(got, map[string]*store.TargetScope{"old": all, "new": shop}) {
+		want := map[string]*store.TargetScope{
+			"old": all, "new": shop, "annotated": object,
+			"imported": {Namespaces: []string{store.AllNamespaces}, Discovered: true},
+		}
+		if got := scopes(t, db); !reflect.DeepEqual(got, want) {
 			t.Errorf("scopes = %+v", got)
 		}
-		if !strings.Contains(logs.String(), "level=INFO") || !strings.Contains(logs.String(), "monitors=1") {
+		if !strings.Contains(logs.String(), "level=INFO") || !strings.Contains(logs.String(), "monitors=2") ||
+			!strings.Contains(logs.String(), "annotation monitors") || strings.Contains(logs.String(), "level=WARN") {
 			t.Errorf("log: %s", logs.String())
 		}
 	})
@@ -93,10 +102,10 @@ func TestRecordTargetScopes(t *testing.T) {
 			if err := recordTargetScopes(ctx, db, cfg, slog.New(slog.NewTextHandler(&logs, nil))); err != nil {
 				t.Fatal(err)
 			}
-			if got := scopes(t, db); got["old"] != nil || !reflect.DeepEqual(got["new"], shop) {
-				t.Errorf("scopes = %+v, want old without a record", got)
+			if got := scopes(t, db); got["old"] != nil || got["imported"] != nil || !reflect.DeepEqual(got["new"], shop) || !reflect.DeepEqual(got["annotated"], object) {
+				t.Errorf("scopes = %+v, want old and imported without a record, annotated its object's", got)
 			}
-			if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "monitors=1") {
+			if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "monitors=2") {
 				t.Errorf("log: %s", logs.String())
 			}
 		})

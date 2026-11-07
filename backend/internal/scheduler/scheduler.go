@@ -27,6 +27,12 @@ type Checker interface {
 	Check(ctx context.Context, m store.Monitor) store.CheckResult
 }
 
+// Pruner is a Checker that keeps something of a monitor between its checks.
+// Every tick it is told which monitors are enabled, and forgets the rest.
+type Pruner interface {
+	Prune(enabled map[int64]bool)
+}
+
 // Options configures a Scheduler.
 type Options struct {
 	// Tick is how often the scheduler looks for due monitors and picks up
@@ -323,6 +329,9 @@ dispatch:
 		}
 	}
 	s.prune(seen)
+	if p, ok := s.checker.(Pruner); ok {
+		p.Prune(seen)
+	}
 	s.names.keep(hosts, now)
 	s.addrs.keep(s.peerSet(), now)
 

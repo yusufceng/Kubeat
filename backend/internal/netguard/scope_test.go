@@ -300,4 +300,21 @@ func TestScopeOwnHost(t *testing.T) {
 	if host, refused := none.Refused(); refused || host != "" || none.Host("api") != nil || none.Addr("api", netip.MustParseAddr("10.0.0.1")) != nil {
 		t.Error("a nil scope refused something")
 	}
+
+	// Only the resolution is spared: an object's owner writes its host as
+	// they like, and one refused by its spelling is refused, taken from an
+	// object or not.
+	for _, own := range []string{"api.payments.svc.cluster.local", "api.payments.svc", "kubernetes.default.svc", "api", "10.0.0.1", "fd00::1"} {
+		s := ScopeRules{}.Connections(shop, own, own)
+		if err := s.Host(own); !errors.Is(err, ErrScope) {
+			t.Errorf("own host %s: Host() = %v, want the scope's refusal", own, err)
+		}
+		if err := s.Addr(own, netip.MustParseAddr("10.96.0.1")); !errors.Is(err, ErrScope) {
+			t.Errorf("own host %s: Addr() = %v, want the scope's refusal", own, err)
+		}
+	}
+	// A Service of one's namespace is in scope by its name, as any is.
+	if err := (ScopeRules{}).Connections(shop, "api.shop.svc").Addr("api.shop.svc", netip.MustParseAddr("10.96.0.1")); err != nil {
+		t.Errorf("own host of one's namespace: %v", err)
+	}
 }

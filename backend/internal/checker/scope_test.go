@@ -204,6 +204,28 @@ func TestScopeEveryConnection_HTTP(t *testing.T) {
 		refusedByTheScope(t, "on to "+host, check(c, m), r, netguard.ScopeHost(host))
 	}
 
+	// A name the check is led to that does not resolve is refused as one
+	// that lands in the cluster is, with the same result: a result of its
+	// own would tell which names exist there.
+	landing := check(c, held(httpMonitor(at("public.example.test", "/to?host=api.payments"))))
+	missing := check(c, held(httpMonitor(at("public.example.test", "/to?host=nosuch.payments"))))
+	if landing.Error != missing.Error || !reflect.DeepEqual(landing.Diagnostics, missing.Diagnostics) || landing.Up || missing.Up {
+		t.Errorf("a name in the cluster and one that does not exist differ: %+v and %+v", landing, missing)
+	}
+	r.take()
+	for _, host := range []string{"nosuch.payments", "gone.example.test"} {
+		m := held(httpMonitor(at("public.example.test", "/to?host="+host)))
+		refusedByTheScope(t, "on to "+host+", which does not resolve", check(c, m), r, host)
+	}
+	// The monitor's own target that does not resolve fails as it would
+	// without a scope: it was held to the scope when it was set.
+	if got := check(c, held(httpMonitor(at("gone.example.test", "/ok")))); got.Up || got.Error == scopeRefusalText {
+		t.Errorf("a target that does not resolve: %+v, want its own failure", got)
+	}
+	if seen := r.take(); len(seen) != 0 {
+		t.Errorf("a target that does not resolve told refusals: %+v", seen)
+	}
+
 	// The target itself is held to the scope where the check connects: an
 	// answer that changed since it was set, and a monitor set up before
 	// its scope was recorded, which is held to its namespace.
@@ -413,6 +435,15 @@ func TestScopeEveryConnection_AdministratorUnchanged(t *testing.T) {
 	if seen := r.take(); len(seen) != 0 {
 		t.Errorf("an administrator's checks told refusals: %+v", seen)
 	}
+	// A name it is led to that does not resolve fails on its own.
+	missing := admins
+	missing.Target = "http://public.example.test:" + port + "/to?host=nosuch.payments"
+	if got := check(c, missing); got.Up || got.Error == scopeRefusalText {
+		t.Errorf("an administrator's monitor on to a name that does not resolve: %+v", got)
+	}
+	if seen := r.take(); len(seen) != 0 {
+		t.Errorf("an administrator's checks told refusals: %+v", seen)
+	}
 	// The same check of a held monitor is refused.
 	refusedByTheScope(t, "a held monitor on to a short name", check(c, held(onTo)), r, "localhost")
 }
@@ -467,6 +498,69 @@ func TestScopeEveryConnection_Discovered(t *testing.T) {
 	typed := route
 	typed.Scope = &store.TargetScope{Namespaces: []string{"shop"}}
 	refusedByTheScope(t, "the same host entered by hand", check(c, typed), r, "route.apps.example.test")
+
+	// The object's owner writes its host as they like: only its resolution
+	// is spared, and a host refused by its spelling is refused, taken from
+	// an object or not. An annotation monitor's record is its object's.
+	for _, host := range []string{"api.payments.svc.cluster.local", "kubernetes.default.svc", "api"} {
+		ingress := httpMonitor("http://" + net.JoinHostPort(host, port) + "/ok")
+		ingress.Namespace, ingress.Source, ingress.Managed, ingress.Scope = "shop", "ingress/web", true, store.ObjectScope("shop")
+		refusedByTheScope(t, "an object's host "+host, check(c, ingress), r, host)
+	}
+	annotated := route
+	annotated.Managed, annotated.Scope = true, store.ObjectScope("shop")
+	if got := check(c, annotated); !got.Up {
+		t.Errorf("an annotated Route's own host at the router: %+v", got)
+	}
+}
+
+// What the checker keeps of a monitor held to a scope — its transport, the
+// settings it was last refused under — goes once the monitor is held to
+// none, and when the scheduler says it is gone or paused.
+func TestScopeEveryConnection_KeptOnlyWhileHeld(t *testing.T) {
+	dns := scopeDNS(t)
+	_, port := scopeServer(t)
+	r := &refusals{}
+	c := scopedChecker(t, dns, true, r, Options{})
+	kept := func(id int64) (transport, refusal bool) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		_, transport = c.held[id]
+		_, refusal = c.reported[id]
+		return transport, refusal
+	}
+	up := held(httpMonitor("http://public.example.test:" + port + "/ok"))
+	up.ID = 21
+	refused := held(httpMonitor("http://public.example.test:" + port + "/to?host=api.payments.svc"))
+	refused.ID = 22
+	check(c, up)
+	check(c, refused)
+	if transport, _ := kept(21); !transport {
+		t.Fatal("no transport kept for a held monitor")
+	}
+	if _, refusal := kept(22); !refusal {
+		t.Fatal("no refusal kept for a refused monitor")
+	}
+
+	everywhere := up
+	everywhere.Scope = &store.TargetScope{Namespaces: []string{store.AllNamespaces}}
+	check(c, everywhere)
+	if transport, refusal := kept(21); transport || refusal {
+		t.Error("a monitor held to no scope any more kept its transport")
+	}
+
+	check(c, up)
+	c.Prune(map[int64]bool{21: true})
+	if transport, _ := kept(21); !transport {
+		t.Error("an enabled monitor's transport was pruned")
+	}
+	if transport, refusal := kept(22); transport || refusal {
+		t.Error("a monitor that is gone was not pruned")
+	}
+	c.Prune(map[int64]bool{})
+	if len(c.held) != 0 || len(c.reported) != 0 {
+		t.Errorf("after the last monitor went: held %d, reported %d", len(c.held), len(c.reported))
+	}
 }
 
 // A monitor refused check after check is one finding: it is told as the

@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The record of a monitor's target scope is kept with its settings, as it
@@ -200,6 +202,90 @@ func TestRecordScopes(t *testing.T) {
 	}
 	if n, err := s.RecordScopes(ctx, all); err != nil || n != 0 {
 		t.Errorf("RecordScopes again = %d, %v; want 0", n, err)
+	}
+}
+
+// An annotation monitor without a record is given its object's, in every
+// install; a monitor imported by hand is given the record asked for, its
+// target marked as taken from the object, as a monitor without a record
+// reads it; one entered by hand the record as it is.
+func TestRecordObjectScopes(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	annotated := newMonitor("annotated")
+	annotated.Namespace, annotated.Source, annotated.Managed = "shop", "ingress/web", true
+	imported := newMonitor("imported")
+	imported.Namespace, imported.Source = "shop", "route/orders"
+	entered := newMonitor("entered")
+	entered.Namespace = "shop"
+	for _, m := range []Monitor{annotated, imported, entered} {
+		if _, err := s.CreateMonitor(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := s.RecordObjectScopes(ctx); err != nil || n != 1 {
+		t.Fatalf("RecordObjectScopes = %d, %v; want 1", n, err)
+	}
+	all := TargetScope{Namespaces: []string{AllNamespaces}}
+	if n, err := s.RecordScopes(ctx, all); err != nil || n != 2 {
+		t.Fatalf("RecordScopes = %d, %v; want 2", n, err)
+	}
+	monitors, err := s.ListMonitors(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]*TargetScope{
+		"annotated": ObjectScope("shop"),
+		"imported":  {Namespaces: []string{AllNamespaces}, Discovered: true},
+		"entered":   &all,
+	}
+	for _, m := range monitors {
+		if !reflect.DeepEqual(m.Scope, want[m.Name]) {
+			t.Errorf("%s: Scope = %+v, want %+v", m.Name, m.Scope, want[m.Name])
+		}
+		if m.Name == "annotated" && !HeldToObject(m) {
+			t.Errorf("%s is not held to its object", m.Name)
+		}
+	}
+	if n, err := s.RecordObjectScopes(ctx); err != nil || n != 0 {
+		t.Errorf("RecordObjectScopes again = %d, %v; want 0", n, err)
+	}
+}
+
+// SameCheck tells a change of how a monitor is checked from a save that
+// leaves it as it was, defaults filled in, the rest of the monitor and its
+// record left out.
+func TestSameCheck(t *testing.T) {
+	base := newMonitor("a")
+	base.HTTP = HTTPOptions{Method: "GET", ExpectedStatus: "200-399", MaxRedirects: 10, Headers: map[string]string{"X-A": "1"}}
+	same := base
+	same.Name, same.Tags, same.Interval, same.Enabled = "b", []string{"x"}, time.Hour, false
+	same.Scope = &TargetScope{Namespaces: []string{"shop"}}
+	same.HTTP.Method, same.HTTP.ExpectedStatus = "", "" // the defaults, as stored
+	if !SameCheck(base, same) {
+		t.Error("a rename, tags, interval, pause and record count as a change of the check")
+	}
+	for name, change := range map[string]func(*Monitor){
+		"target":        func(m *Monitor) { m.Target += "x" },
+		"each pod":      func(m *Monitor) { m.EachPod = true },
+		"max redirects": func(m *Monitor) { m.HTTP.MaxRedirects = 0 },
+		"keyword":       func(m *Monitor) { m.HTTP.Keyword = "ok" },
+		"Host header":   func(m *Monitor) { m.HTTP.Headers = map[string]string{"X-A": "1", "Host": "other.example"} },
+		"secret":        func(m *Monitor) { m.HTTP.AuthSecret = "s" },
+		"type":          func(m *Monitor) { m.Type = MonitorWebSocket },
+	} {
+		changed := base
+		changed.HTTP.Headers = maps.Clone(base.HTTP.Headers)
+		change(&changed)
+		if SameCheck(base, changed) {
+			t.Errorf("a change of the %s counts as none", name)
+		}
+	}
+	dns := Monitor{Type: MonitorDNS, Target: "example.com", DNS: DNSOptions{RecordType: "A"}}
+	other := dns
+	other.DNS.Resolver = "10.96.0.10"
+	if SameCheck(dns, other) {
+		t.Error("a change of the DNS resolver counts as none")
 	}
 }
 

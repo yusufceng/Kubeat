@@ -732,14 +732,25 @@ func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, lo
 
 // recordTargetScopes settles the target scope of the monitors set up before
 // it was recorded with them, or saved since by a version that does not keep
-// it (ADR-0003 c, 0.51). Where nobody may edit monitors in only some
-// namespaces — no local account, directory group or default role of the
-// directory or the identity provider is such an editor — nobody could have
-// aimed one outside its namespace: they are given the record of every
-// namespace, and their checks stay as they were. Otherwise each is held to
-// its own namespace (store.Monitor.TargetScope) until it is saved again,
-// which the log says once, with how many.
+// it (ADR-0003 c, 0.51). An annotation monitor is held to its object's
+// namespace in every install: whoever may annotate the object set its
+// target, and Kubeat cannot tell who that is (store.ObjectScope). Of the
+// rest, where nobody may edit monitors in only some namespaces — no local
+// account, directory group or default role of the directory or the identity
+// provider is such an editor — nobody could have aimed one outside its
+// namespace: they are given the record of every namespace, and their checks
+// stay as they were. Otherwise each is held to its own namespace
+// (store.Monitor.TargetScope) until an administrator saves it, which the log
+// says once, with how many.
 func recordTargetScopes(ctx context.Context, db *store.SQLite, cfg config.Config, logger *slog.Logger) error {
+	annotated, err := db.RecordObjectScopes(ctx)
+	if err != nil {
+		return err
+	}
+	if annotated > 0 {
+		logger.Info("annotation monitors set up before the target scope was recorded are held to their object's namespace, as every annotation monitor is",
+			"monitors", annotated)
+	}
 	without, err := db.MonitorsWithoutScope(ctx)
 	if err != nil || without == 0 {
 		return err
@@ -752,7 +763,7 @@ func recordTargetScopes(ctx context.Context, db *store.SQLite, cfg config.Config
 		store.LimitedEditor(store.Role(cfg.LDAPDefaultRole), splitList(cfg.LDAPDefaultNamespaces)) ||
 		store.LimitedEditor(store.Role(cfg.OIDCDefaultRole), splitList(cfg.OIDCDefaultNamespaces))
 	if limited {
-		logger.Warn("monitors set up before the target scope was recorded are held to their own namespace until they are saved again, since some users may edit monitors in only some namespaces; one an administrator set up to reach elsewhere is down until an administrator saves it",
+		logger.Warn("monitors set up before the target scope was recorded are held to their own namespace until an administrator saves them, since some users may edit monitors in only some namespaces; one an administrator set up to reach elsewhere is down until then",
 			"monitors", without)
 		return nil
 	}

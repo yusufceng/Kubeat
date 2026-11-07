@@ -34,8 +34,8 @@ type ScopeOptions struct {
 	// first refusal of the monitor's present settings since the checker
 	// started, which is the one to write down: a monitor refused check
 	// after check is one finding, and its row is written once, not every
-	// check; a change of where it connects, or a restart, makes the next
-	// refusal a first one again.
+	// check; a change of where it connects, a pause or a restart makes the
+	// next refusal a first one again.
 	Refused func(m store.Monitor, host string, first bool)
 }
 
@@ -92,7 +92,48 @@ func (c *Checker) scope(m store.Monitor) *netguard.Scope {
 	if record.Discovered && canRead(m.Namespace) {
 		own = m.Host()
 	}
-	return c.opts.Scope.Rules.Connections(canRead, own)
+	named := []string{m.Host()}
+	if m.Type == store.MonitorDNS {
+		named = append(named, m.DNS.ResolverHost())
+	}
+	return c.opts.Scope.Rules.Connections(canRead, own, named...)
+}
+
+// drop forgets what the checker keeps of monitor id between its checks held
+// to a scope: the transport, closing its idle connections, and the settings
+// it was last refused under.
+func (c *Checker) drop(id int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dropLocked(id)
+}
+
+func (c *Checker) dropLocked(id int64) {
+	if held, ok := c.held[id]; ok {
+		held.transport.CloseIdleConnections()
+		delete(c.held, id)
+	}
+	delete(c.reported, id)
+}
+
+// Prune forgets what the checker keeps of the monitors not among enabled,
+// those deleted or paused, as a check of one does of a monitor no longer
+// held to a scope: the scheduler calls it every tick, so that what is kept
+// is bounded by the monitors there are, a check that finished after its
+// monitor went included.
+func (c *Checker) Prune(enabled map[int64]bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id := range c.held {
+		if !enabled[id] {
+			c.dropLocked(id)
+		}
+	}
+	for id := range c.reported {
+		if !enabled[id] {
+			delete(c.reported, id)
+		}
+	}
 }
 
 // spelledOut reports whether a host m's check names before it connects is
