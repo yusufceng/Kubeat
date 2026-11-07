@@ -81,6 +81,11 @@ func main() {
 		db.Close()
 		os.Exit(1)
 	}
+	// Not settling them leaves those monitors held to their namespaces,
+	// the safe side; the checks run either way.
+	if err := recordTargetScopes(ctx, db, cfg, logger); err != nil {
+		logger.Warn("the target scope of monitors set up before it was recorded could not be settled; they are held to their namespaces", "error", err)
+	}
 	ldapClient, err := ldapauth.New(ldapauth.Config{
 		URL: cfg.LDAPURL, StartTLS: cfg.LDAPStartTLS, CAFile: cfg.LDAPCAFile, InsecureSkipVerify: cfg.LDAPInsecureSkipVerify,
 		BindDN: cfg.LDAPBindDN, BindPassword: cfg.LDAPBindPassword, BaseDN: cfg.LDAPBaseDN, UserFilter: cfg.LDAPUserFilter,
@@ -235,7 +240,15 @@ func main() {
 		Endpoints:          endpoints,
 		RolloutGrace:       cfg.WorkloadRolloutGrace,
 		Guard:              guard,
-		Logger:             logger,
+		// The same rules the API holds a scoped user's targets to, for
+		// every connection of their monitors' checks.
+		Scope: checker.ScopeOptions{
+			Rules: netguard.ScopeRules{
+				External: scopeExternal, ResolveTimeout: cfg.TargetResolveTimeout, TrustProxy: cfg.TargetScopeTrustProxy,
+			},
+			Refused: scopeRefused(db, meter, cfg.Language, logger),
+		},
+		Logger: logger,
 	}), scheduler.Options{
 		Tick:                 cfg.SchedulerTick,
 		MaxJitter:            cfg.MaxJitter,
@@ -715,6 +728,75 @@ func bootstrapAdmin(ctx context.Context, db *store.SQLite, cfg config.Config, lo
 	}
 	logger.Warn("the admin password was reset from UPTIME_ADMIN_PASSWORD; unset UPTIME_ADMIN_PASSWORD_RESET again")
 	return nil
+}
+
+// recordTargetScopes settles the target scope of the monitors set up before
+// it was recorded with them, or saved since by a version that does not keep
+// it (ADR-0003 c, 0.51). An annotation monitor is held to its object's
+// namespace in every install: whoever may annotate the object set its
+// target, and Kubeat cannot tell who that is (store.ObjectScope). Of the
+// rest, where nobody may edit monitors in only some namespaces — no local
+// account, directory group or default role of the directory or the identity
+// provider is such an editor — nobody could have aimed one outside its
+// namespace: they are given the record of every namespace, and their checks
+// stay as they were. Otherwise each is held to its own namespace
+// (store.Monitor.TargetScope) until an administrator saves it, which the log
+// says once, with how many.
+func recordTargetScopes(ctx context.Context, db *store.SQLite, cfg config.Config, logger *slog.Logger) error {
+	annotated, err := db.RecordObjectScopes(ctx)
+	if err != nil {
+		return err
+	}
+	if annotated > 0 {
+		logger.Info("annotation monitors set up before the target scope was recorded are held to their object's namespace, as every annotation monitor is",
+			"monitors", annotated)
+	}
+	without, err := db.MonitorsWithoutScope(ctx)
+	if err != nil || without == 0 {
+		return err
+	}
+	limited, err := db.LimitedEditors(ctx)
+	if err != nil {
+		return err
+	}
+	limited = limited ||
+		store.LimitedEditor(store.Role(cfg.LDAPDefaultRole), splitList(cfg.LDAPDefaultNamespaces)) ||
+		store.LimitedEditor(store.Role(cfg.OIDCDefaultRole), splitList(cfg.OIDCDefaultNamespaces))
+	if limited {
+		logger.Warn("monitors set up before the target scope was recorded are held to their own namespace until an administrator saves them, since some users may edit monitors in only some namespaces; one an administrator set up to reach elsewhere is down until then",
+			"monitors", without)
+		return nil
+	}
+	n, err := db.RecordScopes(ctx, store.TargetScope{Namespaces: []string{store.AllNamespaces}})
+	if err != nil {
+		return err
+	}
+	logger.Info("monitors set up before the target scope was recorded keep reaching every namespace: no user may edit monitors in only some namespaces", "monitors", n)
+	return nil
+}
+
+// scopeRefused records the checks a monitor's target scope refused a
+// connection of: every one in kubeat_target_scope_denied_total
+// {reason="connection"}, and the first under each of a monitor's settings in
+// the log and the audit log, beside the writes the API refused, so that a
+// monitor which starts to reach outside its namespaces leaves one row, not
+// one a check.
+func scopeRefused(db *store.SQLite, meter *metrics.Metrics, language string, logger *slog.Logger) func(store.Monitor, string, bool) {
+	return func(m store.Monitor, host string, first bool) {
+		meter.TargetScopeDenied(metrics.ScopeDeniedConnection)
+		if !first {
+			return
+		}
+		logger.Warn("a check was refused a connection outside its monitor's target scope; the monitor is down while it is",
+			"monitor_id", m.ID, "monitor", m.Name, "host", host)
+		err := db.AppendAudit(context.Background(), store.AuditEntry{
+			At: time.Now().UTC(), Username: checker.ScopeActor, Action: "deny", ObjectType: "target-scope", ObjectID: m.ID,
+			Summary: checker.ScopeAuditSummary(language, m.Name, host),
+		})
+		if err != nil {
+			logger.Error("audit entry lost", "action", "deny", "object", "target-scope", "error", err)
+		}
+	}
 }
 
 // workloadReplicas hands the cluster's workload state to the checker in its

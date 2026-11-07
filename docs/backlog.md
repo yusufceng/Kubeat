@@ -1972,6 +1972,25 @@ kalır. Tetikleyici (S80, S81 ve S82'nin merge'ü) sprint 10 sonunda dolar;
 uygulama sprint 11 adayı (L). ADR kapsamı canlı okuyan bir kayıt seçerse S73'ün
 kapsamı yeniden değerlendirilir.
 
+Güncelleme (2026-11-07, S86 [#131](https://github.com/yusufceng/Kubeat/issues/131)): ADR-0003 (c) "Her bağlantıda kapsam" bir
+**anlık görüntü** seçti: monitor'ün `settings` JSON'unda, kontrolün nereye
+bağlandığını en son belirleyen kullanıcının o anki namespace'leri (`scope`),
+yazanın kimliği olmadan. Monitor'ler artık her bağlantıda bu kayda göre
+denetleniyor; S73'ün işi kapsam daralınca (rol, grup ya da namespace
+değişikliği) kayıtları kullanıcıların bugünkü kapsamıyla karşılaştırıp işaretlemek
+ve raporlamak olarak kalır. Bunun için kayda yazanın kimliği göçsüz eklenir
+(JSON alanı); kaydı olmayan ya da yazanı bilinmeyen monitor'ler için kural S73'ün
+ADR'sinde. Kanallar ayrı maddede ("Kanal hedeflerinde hedef kapsamını teslimat
+anında uygulamak").
+
+Kayıt kuralı asimetrik (ADR-0003 c): kayıt daha geniş bir kapsama yalnız
+kontrolün bağlandığı yeri adlandıran bir ayar değişince geçer; kaydın
+namespace'lerinin hepsini tutmayan birinin kontrolün herhangi bir ayarını
+değiştirmesi onu ortak namespace'lere daraltır. Formun bir seçeneği API'nin
+sakladığından farklı yazması (API'yle kurulmuş bir monitor'de) bu yüzden
+gereksiz bir daralma doğurabilir; bedeli erişilebilirliktir. Formla API'nin
+seçenek yazışını eşitlemek bu sınırı kaldırır (frontend, küçük; kanıt gelirse).
+
 ## Yeni giriş/dizin/throttle metrikleri için chart PrometheusRule ve throttle sessiz-etkisizlik metriği (S63/S72 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2048,6 +2067,17 @@ S82 sprint 10 kuyruğunda 1. sırada. `targetscope.go` zinciri S80 ([#132](https
 S86 ([#131](https://github.com/yusufceng/Kubeat/issues/131)) → S82; S86'nın kontrol anı reddi aynı etiket kümesini ve satır
 sınırını kullanacak. Müşteri A'nın sprint 8 bulgusu 3'ü (ayarı açmadan bir dış
 adın yerel çözüm sonucunu gösteren komut, pilot ön şart sınaması) S82'ye katıldı.
+
+Güncelleme (2026-11-07, S86): kontrol anı reddi `reason="connection"` ile her
+kontrolde sayılıyor; denetim satırı (`deny`/`target-scope`, kullanıcı `checker`)
+monitor başına, bağlandığı yeri belirleyen ayarları değişene ya da backend yeniden
+başlayana kadar bir kez yazılıyor. S82 bu yola da `resolve_error` ayrımını ve
+`auditCap`'in dakika sınırını getirir: vekile giden kontrolde SERVFAIL ve zaman
+aşımı, doğrudan bağlantıda ise kontrolün yöneldiği ama monitor'ün ayarlarında
+yazılı olmayan bir adın her çözüm hatası (NXDOMAIN dahil; iç-adres oracle'ı
+kapansın diye, oluşturmadaki kural) bugün `connection` sayılıyor. Ayrım
+sayaçta ve denetimde kalmalı, sonuçta değil: sonuç cluster içine düşen bir addan
+ayırt edilmemeli.
 
 ## Kapsam çözüm-hatası reddini gerçek cross-tenant reddinden ayırmak (reason/WARN, S77 takibi)
 

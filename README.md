@@ -750,8 +750,9 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     cluster içine bağlamasını sağlayamaz. Yönetici ve kapsamı `*` olan kullanıcı
     bir ad çözmediği için etkilenmez; var olan monitor'ler çalışmaya devam eder
     ("İzleme asla durmaz") — yalnız sınırlı kullanıcının yeni kapsam-dışı hedefi
-    reddedilir. Tek istisna, vekile giden bir isteğin NXDOMAIN'idir ve
-    varsayılan olarak kapalıdır (aşağıda "Vekilli kurulum").
+    reddedilir (kontrol anındaki kural için aşağıda "Her bağlantıda"). Tek
+    istisna, vekile giden bir isteğin NXDOMAIN'idir ve varsayılan olarak
+    kapalıdır (aşağıda "Vekilli kurulum").
   - **Zaman aşımı.** Çözüme ayrı bir sınır konur (`UPTIME_TARGET_RESOLVE_TIMEOUT`,
     varsayılan 5 sn); yavaş ya da takılı bir çözücü bir oluşturma ya da değiştirmeyi
     sunucunun yazma zaman aşımına (`UPTIME_HTTP_WRITE_TIMEOUT`, 2 dk) kadar
@@ -837,32 +838,48 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     - **Sınırlar.** Ayar yalnız NXDOMAIN'de işe yarar. Cluster DNS'i dış adlara
       SERVFAIL, REFUSED ya da zaman aşımıyla yanıt veriyorsa ad yine reddedilir;
       bu hata bugün denetim satırında ve sayaçta gerçek bir cross-tenant reddinden
-      ayrılmaz (S82). Kayıt anındaki karar `NO_PROXY` ve vekile göre verilir:
-      `NO_PROXY` sonradan değişirse var olan monitor'ler yeniden denetlenmez
-      (S73, backlog); ayarı kapatmak ya da 0.49'a dönmek de ayar açıkken kabul
-      edilmiş monitor ve kanalları yeniden denetlemez, bunlar çalışmaya devam
-      eder (S73).
+      ayrılmaz (S82). Kanalda karar kayıt anındaki `NO_PROXY` ve vekile göre
+      verilir: `NO_PROXY` sonradan değişirse ya da ayar kapatılırsa var olan
+      kanallar yeniden denetlenmez (S73, backlog). Monitor'ün kontrolü ise
+      0.51'den beri her bağlantıda o anki ayarlarla denetlenir (aşağıda "Her
+      bağlantıda"); 0.49'a dönmek ayar açıkken kabul edilmiş monitor'leri
+      yeniden denetlemez.
   - **Red mesajı.** Kapsam dışı hedefin reddi, nedenini ayırt etmeyen tek genel bir
     mesaj verir (hangi namespace olduğunu ya da adın iç adrese çözülüp çözülmediğini
     söylemez); aksi hâlde sınırlı bir kullanıcı bu mesajla keyfî bir adın cluster
     içine çözülüp çözülmediğini öğrenebilirdi (iç-adres oracle'ı). Arayüz bu reddi
     makine-okur `target_scope` koduyla tanır.
 
-  Çözüm karar başına bir kez yapılır; adı o an ile kontrolün bağlandığı an arasında
-  değişen bir hedef bu kapının dışındadır (DNS rebinding), bunun için deny-CIDR ve
-  çok kiracılı kurulumda düzenli bir prova derinlemesine savunma olarak kalır.
-- **Kapsam ihlali denetimi (0.49).** Kapsamı sınırlı bir kullanıcının kapsam dışı
-  bir hedefe ya da düzenleyemediği bir namespace'e monitor veya kanal kurma/değiştirme
-  girişimi yalnızca reddedilmekle kalmaz, bir denetim kaydı bırakır: `login_failed`
-  gibi, `deny`/`target-scope` eylemiyle ve 90 gün saklanan denetim kaydında görünür
-  (yöneticiye açık; "Hesaplar ve giriş" denetim kaydı). Ayrıca
-  `kubeat_target_scope_denied_total{reason}` sayacı artar — `reason=target` hedef
-  kapsam dışıyken, `reason=namespace` kullanıcı o namespace'i düzenleyemiyorken.
-  İstemci yine yalnızca aynı genel 403'ü görür; denetim kaydı ve metrik `/metrics`
-  token'ıyla korunan yüzeyde kalır ve bir enum sızdırmaz. Böylece cross-tenant bir
-  erişim girişimi (başka ekibin Service'ine ya da API sunucusuna monitor/kanal) iz
-  bırakır ve SOC'a bağlanabilir. Yönetici ve kapsamı `*` olan kullanıcı sayaca ya da
-  denetim kaydına düşmez (onlar için red oluşmaz).
+  Çözüm karar başına bir kez yapılır. Kapsamı sınırlı kullanıcının monitor'ünde
+  0.51'den beri kontrol de bağlandığı adresi denetler (aşağıda "Her
+  bağlantıda"); kanal hedefinde adı bu çözümle teslimat arasında değişen bir
+  hedef bu kapının dışındadır (DNS rebinding), bunun için deny-CIDR ve çok
+  kiracılı kurulumda düzenli bir prova derinlemesine savunma olarak kalır.
+- **Kapsam ihlali denetimi (0.49; kontrol anı 0.51).** Kapsamı sınırlı bir
+  kullanıcının kapsam dışı bir hedefe ya da düzenleyemediği bir namespace'e monitor
+  veya kanal kurma/değiştirme girişimi yalnızca reddedilmekle kalmaz, bir denetim
+  kaydı bırakır: `login_failed` gibi, `deny`/`target-scope` eylemiyle ve 90 gün
+  saklanan denetim kaydında görünür (yöneticiye açık; "Hesaplar ve giriş" denetim
+  kaydı). Ayrıca `kubeat_target_scope_denied_total{reason}` sayacı artar:
+  - `reason=target`: hedef kapsam dışı;
+  - `reason=namespace`: kullanıcı o namespace'i düzenleyemiyor;
+  - `reason=connection` (0.51): bir monitor'ün kontrolü kapsamın dışına
+    bağlanmak istedi ve reddedildi (aşağıda "Her bağlantıda"). Her reddedilen
+    kontrol sayılır; denetim kaydına ise monitor başına bir satır yazılır
+    (kullanıcı `checker`, nesne monitor'ün kimliği), monitor'ün bağlandığı yeri
+    belirleyen ayarları değişince, monitor duraklatılıp yeniden açılınca ya da
+    backend yeniden başlayınca bir satır daha. Satır sayısı böylece
+    monitor'lerin ve ayar değişikliklerinin sayısıyla sınırlıdır. Backend log'u
+    aynı anda bir `WARN` yazar.
+
+  Seriler açılışta 0'dan başlar. İstemci yine yalnızca aynı genel 403'ü ya da
+  sonuçta aynı genel hatayı görür; denetim kaydı ve metrik `/metrics` token'ıyla
+  korunan yüzeyde kalır ve bir enum sızdırmaz. Böylece cross-tenant bir erişim
+  girişimi (başka ekibin Service'ine ya da API sunucusuna monitor/kanal) iz bırakır
+  ve SOC'a bağlanabilir. Yönetici ve kapsamı `*` olan kullanıcı sayaca ya da denetim
+  kaydına düşmez (onlar için red oluşmaz); tek istisna, kaydı olmayan ve kendi
+  namespace'ine bağlanan bir yönetici monitor'üdür (aşağıda "0.51 öncesinden
+  kalan monitor'ler").
 - **Kurum ağı (0.51, opt-in).** Genel bir adrese çözülen cluster dışı hedefler
   (genel internet, genel adresli bir OpenShift Route adı) yalnızca hedef
   politikasına tabidir; kapsam onları kısıtlamaz. Özel adresli kurum ağı ise
@@ -960,13 +977,130 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     verir (üçü de kabul). Ayar boşken ya da VIP listede değilken içe aktarma
     Route'u alır; aynı monitor'ün klonu ve aynı host'a hedef değişikliği ise
     reddedilir.
-  - **Sınır: ayarı daraltmak.** Aralığı daraltmak, ayarı boşaltmak ya da 0.50'ye
-    dönmek, ayar açıkken kabul edilmiş monitor ve kanalları yeniden denetlemez;
-    bunlar çalışmaya devam eder (S73, backlog).
-- Kısıt hedef belirlenirken uygulanır (monitor/kanal oluşturma ve hedefini
-  değiştirme); var olan monitor'ler yükseltmede yeniden denetlenmez,
-  çalışmaya devam eder. Keşiften içe aktarma kullanıcının düzenleyebildiği
-  namespace'le sınırlı olduğu için zaten kapsam içindedir.
+  - **Sınır: ayarı daraltmak.** Aralığı daraltmak ya da ayarı boşaltmak, ayar
+    açıkken kabul edilmiş kanalları yeniden denetlemez, bunlar çalışmaya devam
+    eder (S73, backlog); kapsamı sınırlı kullanıcının monitor'leri ise bir
+    sonraki kontrolde yeni ayara tabidir (aşağıda "Her bağlantıda"). 0.50'ye
+    dönmek kontrol anındaki denetimi de kaldırır.
+- **Her bağlantıda (0.51).** Kanal hedefi kısıta oluşturma ve değiştirmede
+  tabidir. Monitor'de kısıt yalnız hedef belirlenirken değil, kontrolün yaptığı
+  her bağlantıda uygulanır (ADR-0003 c, "Her bağlantıda kapsam"):
+  - **Kural.** Kapsamı sınırlı bir kullanıcının kurduğu monitor'ün kontrolü
+    bağlandığı her yerde yukarıdaki kurala tabidir: adından cluster içi olan
+    host kapsamdaki bir namespace'te, çıplak cluster adresi ve kısa ad hiç, dış
+    görünen ad yalnız cluster dışına düşüyorsa kabul edilir; kurum aralıkları
+    ve vekilli kurulum ayarı aynen geçerlidir. Doğrudan bağlantıda karar
+    bağlanılan adrese verilir: yanıtı sonradan iç adrese dönen bir ad da
+    reddedilir. Vekile giden istekte host'lar yukarıdaki gibi backend'de
+    çözülüp denetlenir. Kontrolün yöneldiği, monitor'ün ayarlarında yazılı
+    olmayan bir ad çözülemezse bu da, oluşturmadaki gibi, kapsam reddidir
+    (sonuç, cluster içine düşen bir addan ayırt edilemez); ayarlardaki ad
+    çözülemezse monitor kendi hatasıyla DOWN olur. Kontrolün bağlandığı uç
+    noktalar oluşturma ve değiştirmede de denetlenir.
+  - **Kimin kapsamı.** Monitor'ün ayarlarında bir kapsam kaydı tutulur:
+    kontrolün bağlandığı yeri en son adlandıran kullanıcının o anki
+    namespace'leri (oluşturma, klon, içe aktarma, değiştirme). Bağlanılan
+    yeri hedef ve türün host adı taşıyan seçenekleri adlandırır; kontrolün ne
+    gönderdiği, yanıtı nasıl okuduğu ve her pod seçeneği host adlandırmaz.
+    - **Genişletme dar.** Kayıt daha geniş bir kapsama yalnız hedef ya da
+      host adı taşıyan bir seçenek değişince geçer. Kaydın namespace'lerini
+      tutan biri (yönetici, daha çok namespace'i olan editör) kontrolün öteki
+      seçeneklerini değiştirince ya da formu kaydedince kayıt olduğu gibi
+      kalır: yönetici kapsamı sınırlı kullanıcının monitor'ünü düzenleyince
+      kapsam kalkmaz. Kaydı kendine almak isteyen hedefi ya da host adı taşıyan
+      bir seçeneği değiştirir ya da monitor'ü kopyalar (kopya kopyalayanındır).
+      İstisna kaydı olmayan (0.51 öncesi) monitor'dür: her namespace'i gören
+      birinin her kaydı, formdan da, ona her namespace'in kaydını yazar;
+      kapsamı sınırlı kullanıcının kurduğu eski monitor dahil (aşağıda "Kaydı
+      olmayan monitor").
+    - **Daraltma geniş.** Kaydın namespace'lerinin hepsini tutmayan biri
+      kontrolün herhangi bir seçeneğini değiştirince kayıt ikisinin ortak
+      namespace'lerine daralır: kapsamı sınırlı kullanıcı yöneticinin
+      monitor'ünün gönderdiğini ya da okuduğunu değiştirirse kontrol onun
+      kapsamına bağlanır. Formun bir seçeneği saklanandan farklı yazması da
+      (ör. API'yle kurulmuş bir monitor'de) değişiklik sayılır. Böyle
+      daralmış bir monitor'ü sahibi de yönetici de yukarıdaki gibi geri alır:
+      hedefi ya da host adı taşıyan bir seçeneği farklı bir değere çevirir ya
+      da monitor'ü kopyalar; içerik değişikliği ya da hedefi aynı değerle
+      `PATCH` etmek kaydı geri yazmaz.
+    - Kontrolü değiştirmeyen bir kayıt kaydı korur: duraklatmak; ad, etiket ya
+      da aralık değiştirmek.
+    - Kapsamı sınırlı bir kullanıcı, hedefi kapsamının dışında olan bir
+      monitor'ün seçeneklerini değiştiremez (403); onu duraklatabilir.
+    - Yöneticinin, API token'ının ve kapsamı `*` olan kullanıcının kurduğu
+      monitor hiçbir şeye tabi değildir.
+    - Keşiften içe aktarılan ya da annotation'la kurulan monitor'ün kendi
+      host'unun yalnız çözümü denetlenmez: içe aktarmadaki gibi namespace'iyle
+      kapsamdadır (router VIP'ine çözülen on-prem Route adı dahil). Adından
+      reddedilen bir host (başka namespace'in Service adı, API sunucusu, kısa
+      ad) nesneden gelse de reddedilir. Kontrolün başka bağlantıları kayda
+      tabidir.
+    - Annotation'la kurulan monitor'ün kaydı **her kurulumda**, kapsamı
+      sınırlı kullanıcı olsun olmasın, nesnenin namespace'idir: hedefini
+      nesneyi düzenleyen belirler ve Kubeat onun kim olduğunu bilmez.
+      Eşitleme yönettiği sürece kimin kaydettiğine bakılmaz; başka bir kayıt
+      (ör. eşitleme kapalıyken yapılmış bir değişiklik) bir sonraki turda
+      geri yazılır.
+  - **Reddedilince.** Kontrol DOWN olur. Sonucun hatası tek genel bir metindir,
+    adres ya da neden söylemez; açıklaması arayüzde ve bildirimde, Türkçe ve
+    İngilizce, bunun bir kapsam reddi olduğunu söyler. Ters (`inverted`)
+    monitor bunu beklediği başarısızlık saymaz. Denetim ve sayaç: yukarıda
+    "Kapsam ihlali denetimi".
+  - **0.51 öncesinden kalan monitor'ler.** Kayıtları yoktur; backend açılışta
+    bakar:
+    - annotation'la kurulan monitor'ler her kurulumda nesnenin namespace'ine
+      bağlanır (log: `annotation monitors set up before the target scope was
+      recorded are held to their object's namespace`). Kapsamı sınırlı
+      kullanıcısı olmayan kurulumda da değişen budur: kontrolü kendi
+      host'undan başka bir namespace'e ya da cluster içine, kurum aralığı
+      tanımlı değilse özel adresli bir kurum hostuna (ör. bir giriş sayfasına)
+      giden annotation monitor'ü DOWN olur. Çare kurum aralığı (yukarıda
+      "Kurum ağı") ya da monitor'ü elle kurmaktır. Vekilli kurulumda
+      (backend'in çözücüsü genel adları çözemiyorsa) kontrolün ulaştığı,
+      backend'in çözemediği başka bir dış host da (ör. bir kimlik sağlayıcının
+      giriş sayfası) reddedilir ve monitor DOWN olur; çare
+      `UPTIME_TARGET_SCOPE_TRUST_PROXY`'dir (yukarıda "Vekilli kurulum"):
+      yalnız NXDOMAIN'i vekile bırakır, SERVFAIL ve zaman aşımı yine red
+      sayılır (S82);
+    - ötekiler için, kapsamı sınırlı bir editör yoksa (yerel hesap, LDAP/OIDC
+      grup eşlemesi, `UPTIME_LDAP_DEFAULT_ROLE` ya da
+      `UPTIME_OIDC_DEFAULT_ROLE` ile verilen sınırlı varsayılan namespace'ler)
+      her namespace'in kaydı yazılır ve değişen bir şey olmaz; log: `monitors
+      set up before the target scope was recorded keep reaching every
+      namespace`;
+    - varsa her biri kendi namespace'inin kapsamına bağlanır (namespace'siz
+      monitor hiçbir şeye tabi değildir, keşiften gelenin kendi host'u
+      namespace'iyle kapsamdadır) ve açılış sayılarını bir `WARN` satırıyla
+      yazar. Bir yöneticinin bir namespace'e koyup başka bir namespace'e ya da
+      çıplak bir adrese bağlanan monitor'ü de böylece DOWN olur; yönetici onu
+      bir kez kaydedince (formu değiştirmeden kaydetmek ya da hedefi aynı
+      değerle `PATCH` etmek) kaydı yazılır ve düzelir. Aynı kayıt kapsamı
+      sınırlı bir kullanıcının kurduğu eski monitor'ü de kapsamdan çıkarır:
+      ön kontrolün listelediği böyle bir monitor'ü yönetici kaydetmez,
+      kayıtsız kaldıkça namespace'ine bağlıdır. Kapsamı sınırlı bir
+      kullanıcının, hedefi ya da host adı taşıyan bir seçeneği değiştirmeyen
+      kaydı kaydı yazmaz; monitor namespace'ine bağlı kalır.
+
+    Yükseltmeden önceki ön kontrol: [docs/yukseltme.md](docs/yukseltme.md)
+    "0.51'e yükseltme".
+  - **Geri dönüş.** 0.50'ye `helm rollback` mümkündür, şema değişmedi. 0.50
+    kaydı okumaz ve kaydettiği (duraklattığı dahil) monitor'ün kaydını siler;
+    0.51'e dönünce o monitor yukarıdaki kurala düşer.
+  - **Sınırlar.**
+    - Kayıt yazıldığı anın görüntüsüdür: kullanıcının kapsamı sonradan
+      daralırsa monitor'leri eski kapsamla çalışır (S73, backlog).
+    - Kanallar yeniden denetlenmez (backlog). Kurum aralığını daraltmak ya da
+      `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi kapatmak ise var olan monitor'lerin
+      bir sonraki kontrolüne uygulanır ("Kurum ağı", "Sınır: ayarı daraltmak"
+      bugün yalnız kanallar için geçerlidir).
+    - Vekile giden kontrolde çözüm hatası (SERVFAIL, zaman aşımı) ve
+      kontrolün yöneldiği, ayarlarda yazılı olmayan bir adın çözüm hatası da
+      kapsam reddi sayılır: CoreDNS kesintisinde kapsamı sınırlı ve
+      annotation'la kurulan monitor'lerin bu kontrolleri DOWN olur, bildirim
+      DNS kesintisini kapsam reddi diye söyler ve bu red sayaçta gerçek bir
+      reddinden ayrılmaz (S82).
+    - Hassas aralıkları `UPTIME_TARGET_DENY_CIDRS` ile kapatmak her monitor ve
+      kanal için derinlemesine savunma olarak geçerli kalır.
 
 ```
 # Aynı node'daki bir ajanın 127.0.0.1'deki ucunu kontrol etmek

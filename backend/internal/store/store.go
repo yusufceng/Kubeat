@@ -96,6 +96,15 @@ type Monitor struct {
 	// is cleared when the monitor is paused or the threshold turned off.
 	SlowSince time.Time
 
+	// Scope is the record of the target scope the monitor's checks are
+	// held to: the namespaces of whoever last named where they connect, as
+	// those were then, narrowed by whoever changed how they run since
+	// (ADR-0003 c, 0.51; SameConnections, SameCheck, TargetScope.Within,
+	// ObjectScope). Nil for a monitor written before the record existed, or
+	// saved since by a version that does not keep it; the checker then holds
+	// it to its namespace (see TargetScope).
+	Scope *TargetScope
+
 	// The options of the check. Only the part of the monitor's own type is
 	// used and stored.
 	HTTP      HTTPOptions
@@ -174,6 +183,74 @@ type DNSOptions struct {
 	Resolver string `json:"resolver,omitempty"`
 	// Expected, if set, must appear in at least one of the records found.
 	Expected string `json:"expected,omitempty"`
+}
+
+// TargetScope is the record of the target scope a monitor's checks are held
+// to (ADR-0003 c, 0.51): which namespaces each connection of a check may
+// reach, read as the API reads a target a user sets. It is written with the
+// monitor's settings, in the JSON of its options, so no schema changes and
+// a version without it reads the monitor as before.
+//
+// It is a snapshot of the scope of whoever last named where the checks
+// connect (SameConnections) when they named it, held since to the scope of
+// anyone who changed how they run without holding all of it (SameCheck,
+// Within), or for an annotation monitor its object's (ObjectScope): a later
+// change of those users' namespaces does not reach it (S73 is to look again
+// at the monitors of a scope that narrowed).
+type TargetScope struct {
+	// Namespaces are those namespaces; AllNamespaces alone for one who
+	// sees every namespace, whose checks are held to nothing.
+	Namespaces []string `json:"namespaces"`
+	// Discovered says the target was taken from a cluster object of the
+	// monitor's namespace (an import or an annotation) rather than entered:
+	// the monitor's own host is in scope by that namespace, as the import
+	// judged it, whatever it resolves to. Every other host the check
+	// reaches is held to the namespaces.
+	Discovered bool `json:"discovered,omitempty"`
+}
+
+// All reports whether the scope holds every namespace.
+func (s TargetScope) All() bool { return slices.Contains(s.Namespaces, AllNamespaces) }
+
+// Within is s held to namespaces as well: the namespaces both hold, every
+// namespace only where both do (AllNamespaces). Discovered is s's. It is
+// the record of one with those namespaces who changes how checks held to s
+// run without changing where they connect (SameConnections): a narrower
+// scope narrows s, a wider one leaves it as it is.
+func (s TargetScope) Within(namespaces []string) TargetScope {
+	switch {
+	case slices.Contains(namespaces, AllNamespaces):
+		return TargetScope{Namespaces: slices.Clone(s.Namespaces), Discovered: s.Discovered}
+	case s.All():
+		within := slices.Clone(namespaces)
+		slices.Sort(within)
+		return TargetScope{Namespaces: slices.Compact(within), Discovered: s.Discovered}
+	}
+	within := []string{}
+	for _, ns := range s.Namespaces {
+		if slices.Contains(namespaces, ns) {
+			within = append(within, ns)
+		}
+	}
+	return TargetScope{Namespaces: within, Discovered: s.Discovered}
+}
+
+// TargetScope is the scope the monitor's checks are held to: its record or,
+// for a monitor without one, the scope its namespace gives. Only someone who
+// sees every namespace may write a monitor without a namespace, so that one
+// is held to nothing; any other was written by someone who may edit its
+// namespace, so it is held to that one, its own host by it alone when the
+// target came from a cluster object (Source). The scope of an administrator
+// who set the monitor up in a namespace is not told apart there: such a
+// monitor is held to the namespace until it is saved again (ADR-0003 c).
+func (m Monitor) TargetScope() TargetScope {
+	switch {
+	case m.Scope != nil:
+		return *m.Scope
+	case m.Namespace == "":
+		return TargetScope{Namespaces: []string{AllNamespaces}}
+	}
+	return TargetScope{Namespaces: []string{m.Namespace}, Discovered: m.Source != ""}
 }
 
 // GRPCOptions configures a gRPC health check.

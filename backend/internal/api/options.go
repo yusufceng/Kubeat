@@ -108,6 +108,11 @@ type databaseOptions struct {
 
 const maxQueryLength = 1000
 
+// given reports whether a request carries the options of any type.
+func (o checkOptions) given() bool {
+	return o.HTTP != nil || o.TCP != nil || o.DNS != nil || o.GRPC != nil || o.WebSocket != nil || o.Database != nil || o.Workload != nil
+}
+
 // toCheckOptions returns the options of the monitor's type, with secrets
 // masked.
 func toCheckOptions(m store.Monitor) checkOptions {

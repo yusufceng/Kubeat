@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/netip"
 	"net/url"
-	"strings"
+	"slices"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
@@ -44,145 +43,82 @@ func (e *scopeRefusal) Error() string { return e.msg }
 // wording changes nothing a client reads by code.
 const scopeRefused = "the target is outside your namespaces: a monitor's check or a channel's delivery may reach only a Service in a namespace you can read, named service.namespace.svc, or an address outside the cluster; ask an administrator for anything else"
 
-// targetInScope reports why host — a monitor's target host or a channel
-// webhook's host — is outside the caller's namespaces, or nil when the caller
-// may aim a check or a delivery at it. A non-nil error is a *scopeRefusal.
-// request is the URL of the HTTP request the check or the delivery sends to
-// host (monitorRequestURL, channelRequestURL), or nil for one that connects
-// to host directly; it matters only for the proxy exception below.
+// targetInScope reports why host — a monitor's target host, a channel
+// webhook's host, or another endpoint a monitor's check connects to — is
+// outside the caller's namespaces, or nil when the caller may aim a check or
+// a delivery at it. A non-nil error is a *scopeRefusal. request is the URL of
+// the HTTP request the check or the delivery sends to host
+// (monitorRequestURL, channelRequestURL), or nil for one that connects to
+// host directly; it matters only for the proxy exception.
 //
 // A caller who sees every namespace (an administrator, the service token, an
 // editor or a viewer of all) reaches any target, as before, so a
-// single-tenant install is unchanged.
+// single-tenant install is unchanged, and an empty host (a push monitor, a
+// channel without a URL) has nothing to hold.
 //
-// For a caller limited to some namespaces the check is made at the target's
-// reachability, not only its spelling (dial-time; ADR-0003 c, "Kapsamın kalan
-// boşluğu" closed in 0.48):
-//
-//   - A host that is cluster-internal by its name (ExternalRanges.InCluster:
-//     an address in a cluster range and not in the company's ranges below, a
-//     *.svc or pod name, a short name) is let through only when the namespace
-//     its name carries is one of theirs. The API server, another team's
-//     Service and a bare ClusterIP — which carries no namespace — are
-//     refused.
-//   - The company's own ranges, which the operator lists in
-//     Options.ScopeExternal (UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS, empty by
-//     default), are outside the cluster for this check although they are
-//     private: an address in them, written bare (10.50.1.1) or one an
-//     external-looking name resolves to, is let through as a public one is.
-//     Only addresses are read so: a *.svc or pod name and a short name stay
-//     cluster-internal by their spelling whatever they resolve to, and a
-//     name with one answer inside the cluster beside the company's is
-//     refused. netguard.ExternalRanges keeps the rule, the one every scope
-//     check asks, and config.Load refuses ranges that hold the API server's
-//     address or the backend's own.
-//   - A host that is external by its name is let through only when it provably
-//     resolves to addresses outside the cluster. A name that resolves into the
-//     cluster is refused — a two-label short name the pod's search domains turn
-//     into a Service ("api.payments", "kubernetes.default"), or a public name
-//     pointing at a cluster address ("172-30-0-1.sslip.io") — because its name
-//     carries no namespace the resolver honoured, so it cannot be attributed to
-//     the caller. A name the resolver cannot answer for — a CoreDNS outage, a
-//     SERVFAIL, a timeout, or an NXDOMAIN — is refused too: it cannot be
-//     proven external, and accepting it would leave the hole this closes,
-//     where a scoped caller registers an external-looking name during a
-//     resolver outage and the checker dials it into the cluster once the
-//     resolver recovers (ADR-0003 c, resolver-error fail-safe). The resolution
-//     is bounded by Options.ResolveTimeout (a few seconds) so a slow resolver
-//     does not hold a create or an edit open to the server's write timeout.
-//   - The one exception is an NXDOMAIN for a request handed to the proxy,
-//     behind Options.ScopeTrustProxy (UPTIME_TARGET_SCOPE_TRUST_PROXY, off by
-//     default). Where only the operator's proxy, outside the cluster, resolves
-//     external names, a local NXDOMAIN says nothing about where the request
-//     goes: the proxy resolves the name and connects, the backend never dials
-//     it. The request goes to the proxy when netguard.Proxied says so, the
-//     choice the checker's and the senders' transports make (HTTP_PROXY,
-//     HTTPS_PROXY, NO_PROXY). The name is still resolved, so one that
-//     resolves into the cluster is still refused, and so are a SERVFAIL and a
-//     timeout. A request NO_PROXY keeps away from the proxy, and a type that
-//     connects directly (TCP, DNS, gRPC, ping, the databases, a check of each
-//     pod), gets no exception.
-//
-// The host is first read as the proxy and the resolver read it (scopeHost):
-// in lower case and without its trailing dots, which only root a name and
-// which a proxy drops, as Squid does. A host made of numbers that is not an
-// address as written (172.30.1, 0xac.0x1e.0.1 and 2887647233 all spell
-// 172.30.0.1 to inet_aton; netguard.Numeric) is refused: a proxy and glibc
-// read it as an address, the pure-Go resolver as a name that does not exist,
-// and readers disagree on some forms (010 is 8 or 10), so the address it
-// reaches cannot be told. Read as written instead, "api.payments.svc.." or
-// "172.30.0.1.." would be an external name the resolver refuses without
-// asking (an NXDOMAIN, which the proxy exception accepts) and NO_PROXY's
-// patterns do not match, and "172.30.1" an external name that does not
-// resolve, while the proxy connects to the Service or the ClusterIP they
-// spell. The proxy exception also wants the host written without trailing
-// dots: NO_PROXY reads such a host as written, so the request would go to
-// the proxy for a name NO_PROXY means to keep away from it. A host that is
-// not ASCII is refused too, before it is classified: net/http and NO_PROXY's
-// matching take it through IDNA first, which drops a soft hyphen (U+00AD)
-// or a zero-width space (U+200B) and turns the Unicode full stops (U+3002,
-// U+FF0E, U+FF61) into dots, so "kubernetes.default­" reaches the API
-// server, while the pure-Go resolver refuses it without asking (an
-// NXDOMAIN). HTTP, WebSocket, ping and DNS monitors and the other webhook
-// types are held to ASCII already (asciiHost, validHost); an ntfy channel's
-// URL and a host:port target are not. An international name is written in
-// its xn-- form.
-//
-// An external target that resolves externally (the public Internet, the
-// company ranges of Options.ScopeExternal, an OpenShift Route's public host)
-// is left to the target policy, unchanged. Options.Resolver is the backend's own
-// (net.DefaultResolver when nil); only a scoped caller's external-looking
-// name is resolved, so single-tenant installs and administrators never pay a
-// lookup. A refusal carries the single generic scopeRefused message, so the
-// body does not become an internal-address oracle.
+// For a caller limited to some namespaces the rule is netguard's
+// (ScopeRules.Refuses), the one the checker holds every connection of their
+// monitors' checks to (ADR-0003 c): a cluster-internal name is let through
+// only in one of their namespaces, a bare cluster address or a short name
+// never, an external-looking name only where it provably resolves outside
+// the cluster (Options.ScopeExternal counting as outside), with the proxy
+// exception behind Options.ScopeTrustProxy. Options.Resolver is the
+// backend's own (net.DefaultResolver when nil); only a scoped caller's
+// external-looking name is resolved, so single-tenant installs and
+// administrators never pay a lookup. A refusal carries the single generic
+// scopeRefused message, so the body does not become an internal-address
+// oracle.
 func (h *handler) targetInScope(ctx context.Context, p auth.Principal, host string, request *url.URL) error {
 	if p.SeesAll() || host == "" {
 		return nil
 	}
-	name := scopeHost(host)
-	if name == "" {
-		return &scopeRefusal{scopeRefused} // nothing but dots: no host at all
-	}
-	for i := 0; i < len(host); i++ {
-		if host[i] >= 0x80 {
-			return &scopeRefusal{scopeRefused} // not ASCII: the proxy reads it through IDNA
-		}
-	}
-	if _, err := netip.ParseAddr(name); err != nil && netguard.Numeric(name) {
-		return &scopeRefusal{scopeRefused} // a number not written as an address
-	}
-	if h.opts.ScopeExternal.InCluster(name) {
-		if ns, ok := netguard.Namespace(name); !ok || !p.CanRead(ns) {
-			return &scopeRefusal{scopeRefused}
-		}
-		return nil
-	}
-	// host is external by its spelling. Bound the resolution so a slow or
-	// stuck resolver cannot hold the request open to HTTPWriteTimeout.
-	if h.opts.ResolveTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, h.opts.ResolveTimeout)
-		defer cancel()
-	}
-	inCluster, err := h.opts.ScopeExternal.ResolvesInCluster(ctx, h.opts.Resolver, name)
-	switch {
-	case inCluster:
+	if h.scopeRules().Refuses(ctx, p.CanRead, host, request) {
 		return &scopeRefusal{scopeRefused}
-	case err == nil:
-		return nil
-	case h.opts.ScopeTrustProxy && netguard.NotFound(err) && netguard.Proxied(h.opts.Proxy, request) &&
-		!strings.HasSuffix(request.Hostname(), "."):
-		return nil
 	}
-	return &scopeRefusal{scopeRefused}
+	return nil
+}
+
+// scopeRules are the operator's parts of the scope check, from the options.
+func (h *handler) scopeRules() netguard.ScopeRules {
+	return netguard.ScopeRules{
+		External: h.opts.ScopeExternal, Resolver: h.opts.Resolver, ResolveTimeout: h.opts.ResolveTimeout,
+		TrustProxy: h.opts.ScopeTrustProxy, Proxy: h.opts.Proxy,
+	}
 }
 
 // scopeHost is host as the scope check reads it, and as the audit entry of a
-// refused target names it: in lower case, without surrounding space and
-// without every trailing dot, as a proxy and the resolver read a name. It is
-// "" for a host made of dots alone.
-func scopeHost(host string) string {
-	return strings.ToLower(strings.TrimRight(strings.TrimSpace(host), "."))
+// refused target names it (netguard.ScopeHost): in lower case, without
+// surrounding space and without every trailing dot. It is "" for a host made
+// of dots alone.
+func scopeHost(host string) string { return netguard.ScopeHost(host) }
+
+// endpointsInScope reports why an endpoint a monitor's check connects to,
+// other than its target host, is outside the caller's namespaces, and which
+// one, as targetInScope does for the target: nil when every one is in
+// scope. The record of the scope the checks are then held to is
+// targetScopeRecord's.
+func (h *handler) endpointsInScope(ctx context.Context, p auth.Principal, m store.Monitor) (string, error) {
+	if m.Type == store.MonitorDNS {
+		if host := m.DNS.ResolverHost(); host != "" {
+			if err := h.targetInScope(ctx, p, host, nil); err != nil {
+				return host, err
+			}
+		}
+	}
+	return "", nil
+}
+
+// targetScopeRecord is the record of the scope a monitor's checks are held
+// to once p sets where they connect (ADR-0003 c, 0.51): p's namespaces as
+// they are now, or every namespace for one who sees all. It is a snapshot:
+// a later change to p's namespaces does not reach it (S73).
+func targetScopeRecord(p auth.Principal) *store.TargetScope {
+	if p.SeesAll() {
+		return &store.TargetScope{Namespaces: []string{store.AllNamespaces}}
+	}
+	namespaces := slices.Clone(p.Namespaces)
+	slices.Sort(namespaces)
+	return &store.TargetScope{Namespaces: slices.Compact(namespaces)}
 }
 
 // monitorRequestURL is the URL of the HTTP request a monitor's check sends,

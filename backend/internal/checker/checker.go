@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -64,6 +65,19 @@ type Options struct {
 	// The addresses it trusts, such as the proxy's, are reached as they
 	// are. Nil allows every address.
 	Guard *netguard.Policy
+	// Scope holds the checks of a monitor set up by a user limited to some
+	// namespaces to those namespaces, every connection of them (see
+	// ScopeOptions). Its zero value holds them with the default rules and
+	// tells nobody of a refusal; a monitor whose scope is every namespace
+	// is held to nothing.
+	Scope ScopeOptions
+	// Resolver is what the checks' own connections look names up with;
+	// nil is the pod's own resolver, net.DefaultResolver.
+	Resolver *net.Resolver
+	// Proxy decides whether an HTTP or WebSocket check's request goes to a
+	// proxy; nil is http.ProxyFromEnvironment (HTTP_PROXY, HTTPS_PROXY,
+	// NO_PROXY), the senders' choice too. A test supplies its own.
+	Proxy func(*http.Request) (*url.URL, error)
 	// Logger gets what a check keeps out of its result: the cluster API's
 	// own error, where the result says only what kind of failure it was.
 	// Nil logs with slog.Default.
@@ -78,9 +92,14 @@ type Checker struct {
 	dialer    *netguard.Dialer
 	opts      Options
 
-	// rollouts is when each workload target was first seen rolling out.
+	// rollouts is when each workload target was first seen rolling out;
+	// reported, the settings (scopeSettings) under which each monitor's
+	// check was last refused by its scope; held, the transport of each
+	// monitor held to a scope (heldTransport).
 	mu       sync.Mutex
 	rollouts map[string]time.Time
+	reported map[int64]string
+	held     map[int64]heldTransport
 	now      func() time.Time
 }
 
@@ -90,7 +109,7 @@ func New(opts Options) *Checker {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	dialer := opts.Guard.Dialer(&net.Dialer{})
+	dialer := opts.Guard.Dialer(&net.Dialer{Resolver: opts.Resolver})
 	transport := func(skipVerify bool) *http.Transport {
 		t := http.DefaultTransport.(*http.Transport).Clone()
 		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: skipVerify}
@@ -99,6 +118,9 @@ func New(opts Options) *Checker {
 		// checked like the first. Through a proxy the connection goes to
 		// the proxy, so the guard checks the target before that.
 		t.DialContext = dialer.DialContext
+		if opts.Proxy != nil {
+			t.Proxy = opts.Proxy
+		}
 		t.Proxy = opts.Guard.Proxy(t.Proxy)
 		return t
 	}
@@ -108,8 +130,19 @@ func New(opts Options) *Checker {
 		dialer:    dialer,
 		opts:      opts,
 		rollouts:  make(map[string]time.Time),
+		reported:  make(map[int64]string),
+		held:      make(map[int64]heldTransport),
 		now:       time.Now,
 	}
+}
+
+// resolver is what the checks look names up with: Options.Resolver, or the
+// pod's own.
+func (c *Checker) resolver() *net.Resolver {
+	if c.opts.Resolver != nil {
+		return c.opts.Resolver
+	}
+	return net.DefaultResolver
 }
 
 // outcome is what one check found, before it is turned into a result.
@@ -144,8 +177,18 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	start := time.Now()
 	result := store.CheckResult{MonitorID: m.ID, CheckedAt: start.UTC().Truncate(time.Millisecond)}
 
+	// The scope of a monitor set up by a user limited to some namespaces
+	// goes with the check to each connection it makes; a host it refuses
+	// by its spelling is not even asked for.
 	var out outcome
+	scope := c.scope(m)
+	if scope != nil {
+		ctx = context.WithValue(ctx, scopeKey{}, scope)
+	} else {
+		c.drop(m.ID) // held to a scope no more, if it ever was
+	}
 	switch {
+	case scope != nil && spelledOut(scope, m):
 	case eachPod(m):
 		out = c.checkEachPod(ctx, m)
 	case m.Type == store.MonitorHTTP:
@@ -173,6 +216,9 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	default:
 		out = failedf("unsupported monitor type %q", m.Type)
 	}
+	if host, refused := scope.Refused(); refused {
+		out = c.refusedByScope(m, out, host)
+	}
 
 	result.Latency = time.Since(start)
 	if out.hasTime {
@@ -194,10 +240,11 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 		result.Detail = truncate(out.detail, maxDetail)
 	}
 
-	// A connection the target policy refused never left Kubeat: whether
-	// the network would have let it through is unknown, so it is not the
-	// failure an inverted monitor expects, and the policy's error stands.
-	if m.Inverted && !errors.Is(out.err, netguard.ErrBlocked) {
+	// A connection the target policy or the target scope refused never left
+	// Kubeat: whether the network would have let it through is unknown, so
+	// it is not the failure an inverted monitor expects, and the refusal
+	// stands.
+	if m.Inverted && !errors.Is(out.err, netguard.ErrBlocked) && !errors.Is(out.err, netguard.ErrScope) {
 		invert(&result)
 	}
 	// A successful check keeps nothing more; a failed one what it found out
@@ -236,19 +283,29 @@ func invert(r *store.CheckResult) {
 // through. A library may dial from goroutines of its own; hence the lock.
 type dials struct {
 	host string
+	// dialer is the checker's, held to the check's scope as connections
+	// to the one host they are all for, which a library may resolve itself
+	// before it dials.
+	dialer *netguard.Dialer
 
 	mu      sync.Mutex
 	hops    []store.Hop
 	refusal error
 }
 
-// dials returns the recorder of a check of m.
-func (c *Checker) dials(m store.Monitor) *dials { return &dials{host: m.Host()} }
+// dials returns the recorder of a check of m, under way in ctx.
+func (c *Checker) dials(ctx context.Context, m store.Monitor) *dials {
+	as := m.Host()
+	if m.Type == store.MonitorDNS {
+		as = m.DNS.ResolverHost()
+	}
+	return &dials{host: m.Host(), dialer: c.dialer.In(scopeOf(ctx), as)}
+}
 
 // dial connects through the checker's dialer and records what came of it.
 func (d *dials) dial(c *Checker) func(ctx context.Context, network, address string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		conn, err := c.dialer.DialContext(ctx, network, address)
+		conn, err := d.dialer.DialContext(ctx, network, address)
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		switch {
@@ -357,9 +414,14 @@ func (c *Checker) checkTCP(ctx context.Context, m store.Monitor) outcome {
 	return c.checkTCPAt(ctx, m, m.Target)
 }
 
-// checkTCPAt connects to addr; the TLS server name stays the target's.
+// checkTCPAt connects to addr; the TLS server name stays the target's. An
+// address other than the target is a pod's, behind the monitor's Service.
 func (c *Checker) checkTCPAt(ctx context.Context, m store.Monitor, addr string) outcome {
-	conn, err := c.dialer.DialContext(ctx, "tcp", addr)
+	as := ""
+	if addr != m.Target {
+		as = eachPodHost(m)
+	}
+	conn, err := c.dialer.In(scopeOf(ctx), as).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return failed(err)
 	}

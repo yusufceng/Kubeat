@@ -66,9 +66,10 @@ const MaxThrottledHosts = 100
 const OtherHost = "other"
 
 // Reasons for kubeat_target_scope_denied_total: why a scoped caller's
-// monitor or channel write was refused. The label set is fixed and small, so
-// the series cannot grow without bound, and it carries nothing a client could
-// not already tell from its own 403.
+// monitor or channel write was refused, or a check of a scoped monitor. The
+// label set is fixed and small, so the series cannot grow without bound, and
+// it carries nothing a client could not already tell from its own 403 or the
+// monitor's result.
 const (
 	// ScopeDeniedTarget: the monitor's target host or the channel's delivery
 	// host is outside the caller's namespaces (a cross-tenant attempt at
@@ -77,6 +78,10 @@ const (
 	// ScopeDeniedNamespace: the caller may not edit in the namespace they
 	// aimed the monitor or channel at.
 	ScopeDeniedNamespace = "namespace"
+	// ScopeDeniedConnection: a check of a monitor held to a scope was
+	// refused a connection outside it, after the monitor was set up (see
+	// checker.ScopeOptions). Every refused check counts.
+	ScopeDeniedConnection = "connection"
 )
 
 // New returns Metrics with the Go runtime and process collectors registered.
@@ -153,11 +158,11 @@ func New(version string) *Metrics {
 	}, []string{"kind"})
 	m.targetScopeDenied = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "kubeat_target_scope_denied_total",
-		Help: "Monitor or channel writes a scoped caller was refused because the target or its namespace was outside their scope, by reason: \"target\" (the monitor's target host or a channel's delivery host is outside the caller's namespaces, a cross-tenant attempt at another team's Service or the API server) or \"namespace\" (the caller may not edit in the namespace they aimed at). Only a caller limited to some namespaces raises it; administrators and single-tenant installs never do. The refused request still gets the same 403, so this leaks nothing a client could not already tell.",
+		Help: "Monitor or channel writes a scoped caller was refused because the target or its namespace was outside their scope, and checks refused a connection outside the scope of whoever set up the monitor, by reason: \"target\" (the monitor's target host or a channel's delivery host is outside the caller's namespaces, a cross-tenant attempt at another team's Service or the API server), \"namespace\" (the caller may not edit in the namespace they aimed at) or \"connection\" (a check of such a monitor was refused a connection outside its scope; the monitor is down, every refused check counts). Only a caller limited to some namespaces raises it; administrators and single-tenant installs never do. The refused request still gets the same 403, and the refused check the same generic error, so this leaks nothing a client could not already tell.",
 	}, []string{"reason"})
 	// The series the audit and any alerting watch are there from the start,
 	// at 0, so a first denial reads as an increase, not a series appearing.
-	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace} {
+	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace, ScopeDeniedConnection} {
 		m.targetScopeDenied.WithLabelValues(reason)
 	}
 	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -276,7 +281,8 @@ func (m *Metrics) TargetThrottled(host string) {
 
 // TargetScopeDenied records a monitor or channel write a scoped caller was
 // refused because the target host or the namespace it aimed at was outside
-// their scope. reason is ScopeDeniedTarget or ScopeDeniedNamespace.
+// their scope, or a check refused a connection outside its monitor's scope.
+// reason is ScopeDeniedTarget, ScopeDeniedNamespace or ScopeDeniedConnection.
 func (m *Metrics) TargetScopeDenied(reason string) {
 	if m != nil {
 		m.targetScopeDenied.WithLabelValues(reason).Inc()

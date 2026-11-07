@@ -312,6 +312,8 @@ export const monitorPage = defineMessages(
     "monitorPage.why.code.http_504": "Uygulamanın önündeki proxy yanıtını çok uzun bekledi: uygulama yavaş ya da takılmış.",
     "monitorPage.why.code.blocked_by_policy":
       "Kubeat'in hedef politikası bu adrese izin vermiyor (loopback, link-local ya da yöneticinin yasakladığı bir aralık); UPTIME_TARGET_ALLOW_CIDRS izin verebilir.",
+    "monitorPage.why.code.blocked_by_scope":
+      "Kubeat'in hedef kapsamı bu kontrolün bir bağlantısını reddetti: bağlantı monitor'ü kuranın namespace'lerinin dışına gidiyor; monitor'ü bir yönetici kurabilir.",
     "monitorPage.why.code.dns_service_not_found":
       "{namespace} namespace'inde {service} adında bir Service yok: adresteki iki adı da kontrol edin.",
     "monitorPage.why.code.dns_not_found": "{host} adı çözülmüyor: yazımını ve gösterdiği şeyin var olduğunu kontrol edin.",
@@ -685,6 +687,8 @@ export const monitorPage = defineMessages(
       "A proxy in front of the application waited too long for its answer: the application is slow or hanging.",
     "monitorPage.why.code.blocked_by_policy":
       "Kubeat's target policy does not allow this address (loopback, link-local or a range the operator denied); UPTIME_TARGET_ALLOW_CIDRS can allow it.",
+    "monitorPage.why.code.blocked_by_scope":
+      "Kubeat's target scope refused a connection of this check: it leads outside the namespaces of whoever set up the monitor; an administrator can set it up.",
     "monitorPage.why.code.dns_service_not_found":
       "There is no Service {service} in the namespace {namespace}: check both names in the address.",
     "monitorPage.why.code.dns_not_found": "The name {host} does not resolve: check its spelling, and that what it names exists.",

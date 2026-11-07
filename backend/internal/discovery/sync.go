@@ -325,7 +325,7 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 			}
 			monitors = replace(monitors, current.ID, created, ok)
 			counts.Updated++
-		case differs(current, want):
+		case differs(current, want) || !store.HeldToObject(current):
 			// A target moved to another external host is one more monitor
 			// on it.
 			if moved := current; moved.Target != want.Target {
@@ -338,6 +338,9 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 			before, from := current.Destination(), current.Target
 			current.Target, current.Interval, current.Timeout, current.FailureThreshold = want.Target, want.Interval, want.Timeout, want.FailureThreshold
 			current.GRPC.Service, current.EachPod = want.GRPC.Service, want.EachPod
+			// The object sets where the checks connect: they are held to
+			// its namespace, whoever saved the monitor last (create).
+			current.Scope = store.ObjectScope(want.Namespace)
 			// Stored secrets go only to the server they were entered for. An
 			// object that now leads elsewhere, to another host or back to
 			// plain HTTP, takes the monitor's secrets and request body with
@@ -393,6 +396,10 @@ func differs(current, want store.Monitor) bool {
 // create makes the monitor and reports it, and whether it was made: a
 // name already taken by a monitor made by hand is left be.
 func (s *Syncer) create(ctx context.Context, want store.Monitor) (store.Monitor, bool, error) {
+	// Whoever may annotate the object owns its namespace, and Kubeat cannot
+	// tell who that is: in every install the checks are held to it, the
+	// object's own host as discovery found it (ADR-0003 c).
+	want.Scope = store.ObjectScope(want.Namespace)
 	m, err := s.opts.Store.CreateMonitor(ctx, want)
 	if errors.Is(err, store.ErrConflict) {
 		s.opts.Logger.Warn("discovery sync: name taken", "name", want.Name)

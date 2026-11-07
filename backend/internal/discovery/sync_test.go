@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -94,6 +95,11 @@ func TestSyncCreatesUpdatesAndRemovesManagedMonitors(t *testing.T) {
 	if !api.Managed || api.Interval != 20*time.Second || api.Timeout != 3*time.Second || api.FailureThreshold != 2 || api.Namespace != "shop" || !api.Enabled {
 		t.Errorf("api monitor = %+v", api)
 	}
+	// Whoever may annotate the object owns its namespace: the checks are
+	// held to it, the object's own host as discovery found it.
+	if want := (store.TargetScope{Namespaces: []string{"shop"}, Discovered: true}); api.Scope == nil || !reflect.DeepEqual(*api.Scope, want) {
+		t.Errorf("api monitor's scope = %+v, want %+v", api.Scope, want)
+	}
 	if _, ok := got["shop/plain"]; ok {
 		t.Error("the unannotated service was monitored")
 	}
@@ -135,7 +141,7 @@ func TestSyncCreatesUpdatesAndRemovesManagedMonitors(t *testing.T) {
 	if st := s.Status(); st.Updated != 1 || st.Created != 0 {
 		t.Errorf("fourth run: %+v", st)
 	}
-	if after := names(t, db)["shop/service/api:8080"]; after.ID != api.ID || after.Target != "http://api.shop.svc:8080/ready" {
+	if after := names(t, db)["shop/service/api:8080"]; after.ID != api.ID || after.Target != "http://api.shop.svc:8080/ready" || after.Scope == nil || !after.Scope.Discovered {
 		t.Errorf("after target change: %+v (was id %d)", after, api.ID)
 	}
 
@@ -145,6 +151,42 @@ func TestSyncCreatesUpdatesAndRemovesManagedMonitors(t *testing.T) {
 	}
 	if len(audit) == 0 || audit[0].Username != Actor || audit[0].ObjectType != "monitor" {
 		t.Errorf("audit = %+v", audit)
+	}
+}
+
+// An annotation monitor is held to its object's namespace whoever saved it
+// last: a record changed while the sync was off is set back on the next run,
+// and one without a record, which reads the same, is left as it is.
+func TestSyncHoldsAnnotationMonitorsToTheirObjectsNamespace(t *testing.T) {
+	ctx := context.Background()
+	cluster := &fakeCluster{candidates: []k8s.Candidate{serviceCandidate("api", 8080, "http", monitored(nil))}}
+	s, db := newSyncer(t, cluster)
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m := names(t, db)["shop/service/api:8080"]
+	m.Scope = &store.TargetScope{Namespaces: []string{store.AllNamespaces}, Discovered: true}
+	if _, err := db.UpdateMonitor(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); st.Updated != 1 {
+		t.Errorf("run after the record changed: %+v", st)
+	}
+	if got := names(t, db)["shop/service/api:8080"]; !reflect.DeepEqual(got.Scope, store.ObjectScope("shop")) {
+		t.Errorf("scope = %+v, want the object's", got.Scope)
+	}
+	m.Scope = nil
+	if _, err := db.UpdateMonitor(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); st.Updated != 0 {
+		t.Errorf("run with no record: %+v", st)
 	}
 }
 

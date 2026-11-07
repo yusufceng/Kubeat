@@ -258,6 +258,11 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 		monitor.Timeout = time.Duration(settings.TimeoutSeconds) * time.Second
 		monitor.FailureThreshold = settings.FailureThreshold
 		monitor.Enabled = true
+		// The target is the object's, in a namespace the importer may edit:
+		// its own host is in scope by that namespace, every other
+		// connection of the checks is held to the importer's scope.
+		monitor.Scope = targetScopeRecord(principal(r))
+		monitor.Scope.Discovered = true
 		if _, msg := h.admit(monitor, existing); msg != "" {
 			resp.Skipped = append(resp.Skipped, importSkip{Source: source, Reason: msg})
 			continue

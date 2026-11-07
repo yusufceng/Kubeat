@@ -16,11 +16,11 @@ var DNSRecordTypes = []string{"A", "AAAA", "CNAME", "MX", "NS", "TXT", "SRV", "P
 // defaultDNSPort is used when a monitor's resolver names no port.
 const defaultDNSPort = "53"
 
-// resolver returns the resolver for a monitor: the system's, or one that
-// asks only the given server, connecting to it with dial.
-func resolver(server string, dial func(ctx context.Context, network, address string) (net.Conn, error)) *net.Resolver {
+// resolver returns the resolver for a monitor: the system's (system), or one
+// that asks only the given server, connecting to it with dial.
+func resolver(system *net.Resolver, server string, dial func(ctx context.Context, network, address string) (net.Conn, error)) *net.Resolver {
 	if server == "" {
-		return net.DefaultResolver
+		return system
 	}
 	if _, _, err := net.SplitHostPort(server); err != nil {
 		server = net.JoinHostPort(server, defaultDNSPort)
@@ -40,17 +40,22 @@ func resolver(server string, dial func(ctx context.Context, network, address str
 // connections made to it, at the address each reached; the system's
 // resolver is asked without a connection of the check's.
 func (c *Checker) checkDNS(ctx context.Context, m store.Monitor) outcome {
-	d := c.dials(m)
+	d := c.dials(ctx, m)
 	return d.made(c.dnsLookup(ctx, m, d))
 }
 
 func (c *Checker) dnsLookup(ctx context.Context, m store.Monitor, d *dials) outcome {
-	records, err := lookup(ctx, resolver(m.DNS.Resolver, d.dial(c)), m.DNS.RecordType, m.Target)
+	records, err := lookup(ctx, resolver(c.resolver(), m.DNS.Resolver, d.dial(c)), m.DNS.RecordType, m.Target)
 	if err != nil {
 		return failed(d.wrap(err))
 	}
 	if len(records) == 0 {
 		return failedf("no %s records for %s", m.DNS.RecordType, m.Target)
+	}
+	// What the lookup found is what the check reads: held to the scope as
+	// a connection to it would be.
+	if err := answersInScope(scopeOf(ctx), m, records); err != nil {
+		return failed(err)
 	}
 	sort.Strings(records)
 	found := strings.Join(records, ", ")
