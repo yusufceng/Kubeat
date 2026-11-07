@@ -1169,6 +1169,13 @@ bakım sonu 2026-03). Ajan sınırında doğrulanmadı; S87 ([#133](https://gith
 varsayım olarak yazar, release manager yayımdan önce duyuru bağlantısını açıp
 doğrular. Bu cümle S87 merge edilince güncellenir.
 
+Güncelleme (S87, [#133](https://github.com/yusufceng/Kubeat/issues/133)): README "Cluster'a kurulum" GKE paragrafı
+`ingress-nginx`'i artık "önerilen yol" diye değil, emekliye ayrılmış ve mevcut
+kurulumlar için diye anıyor; cümlenin yanında, kaynakta, varsayım notu (HTML
+yorumu) var ve release manager duyuruyu doğrulayınca kalkar. GKE Gateway
+README'de üçüncü yol olarak anıldı (HTTPRoute'u kullanıcı yazar) ve hop
+tablosuna "ölçülmedi" satırıyla girdi. Keşif tarafı (bu madde) değişmedi.
+
 ## Chart'a isteğe bağlı Gateway API `httpRoute` şablonu
 
 2026-11-07'de ertelendi (sprint 9 planı; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
@@ -2179,6 +2186,16 @@ Route: 1" satırını README, ADR-0004, `values.yaml` ve `docs/yukseltme.md`'de
 prova (a) ile Calico'lu ve ingress addon'lu minikube'da ölçülür ve ortamıyla
 etiketlenir. Prova sonrası madde kapanır; gerçek GKE satırları, WAF'lı Route
 ve port-forward satırı kullanıcıda kalır.
+
+Güncelleme (S87, [#133](https://github.com/yusufceng/Kubeat/issues/133)): düz Route satırı README, ADR-0004, `values.yaml` ve
+`docs/yukseltme.md`'de (0.49 ve 0.50 bölümleri) "ölçüldü (sandbox, 2026-11-07)"
+oldu. Tabloya üç satır "ölçülmedi" ile eklendi: router `Replace`, router
+`IfNone`/`Never` (Route annotation'ıyla `1`) ve GKE Gateway
+(`gke-l7-global-external-managed`, `2`); WAF'lı Route satırına router `Append`
+şartı yazıldı. Kurulum notunun
+`ingress.className`'e göre önerdiği değerler (`nginx` `1`, `gce` `2`) prova
+(a)'da ve kullanıcının GKE provasında ölçülür; ölçülmeyen satır "ölçülmedi"
+kalır.
 
 ## Arayüz sırrı değişince pod'ları kendiliğinden yeniden başlatmak (checksum annotation)
 

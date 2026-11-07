@@ -137,8 +137,9 @@ oc -n kubeat create configmap kubeat-ldap-ca --from-file=ca.crt=ad-ca.pem
 ### 2. values-pilot.yaml
 
 Köşeli parantezli yerler cluster'a göre doldurulur. Vekil gerekmiyorsa
-`backend.extraEnv` bloğu silinir; user workload monitoring yoksa
-`metrics` ve `prometheus` blokları silinir.
+`backend.extraEnv` altındaki `HTTPS_PROXY` ve `NO_PROXY` satırları silinir,
+`UPTIME_TRUST_PROXY_HOPS` kalır; user workload monitoring yoksa `metrics` ve
+`prometheus` blokları silinir.
 
 ```yaml
 language: tr
@@ -174,10 +175,12 @@ backend:
       mountPath: /etc/kubeat/ldap-ca
       readOnly: true
   extraEnv:
+    # Giriş throttle'ının kaynağı: düz Route'ta 1 (aşağıda "Hop değeri")
+    UPTIME_TRUST_PROXY_HOPS: "1"
     HTTPS_PROXY: http://proxy.sirket.local:3128
     NO_PROXY: .svc,.cluster.local,.sirket.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
-    # Yalnız vekil cluster dışındaysa (0.50'den beri; README "Vekilli kurulum")
-    UPTIME_TARGET_SCOPE_TRUST_PROXY: "true"
+    # Kapalı kalır; açmadan önce aşağıdaki "Vekilli kapsam"daki iki onay
+    # UPTIME_TARGET_SCOPE_TRUST_PROXY: "true"
 
 backup:
   enabled: true
@@ -202,17 +205,42 @@ prometheus:
 çıkışı (Slack, Teams) vekil üzerindense `NO_PROXY`'de cluster içi adlar ve
 aralıklar olmalıdır, yoksa kontroller de vekile gider.
 
-`UPTIME_TARGET_SCOPE_TRUST_PROXY`, pod'lar dış adları çözemiyor ve vekil
-cluster dışında çalışıyorsa açılır. O zaman namespace'le sınırlı bir editör,
-yalnız vekilin çözdüğü bir dış ada (Slack, Teams ya da bir SaaS'ın durum
-adresi) HTTP monitor'ü ve kanal kurabilir. Vekil cluster içindeyse satırı
-silin: o vekil cluster'ın adlarını çözüp ClusterIP'lere bağlanabilir. Ayar
-açıkken kapsamı sınırlı kullanıcı, vekilin ulaştığı her adrese (node
-IP'leri/NodePort, router, API ve LoadBalancer VIP'leri, kurumun özel
-aralıkları) bir adla ulaşır. Vekilin ACL'i bunları kapatmalı, yoksa ayar
-kapalı kalmalı. Ayar kapalıyken ve vekil verilmişken backend açılışta bir
-`WARN` yazar; satırı sildiyseniz aşağıdaki "Uyarı ve hata" kontrolünde
-yalnız bu satır beklenir. 0.49 bu ayarı tanımaz ve yok sayar.
+**Hop değeri.** `UPTIME_TRUST_PROXY_HOPS`, giriş throttle'ının (CWE-307,
+0.50) tarayıcının adresini okuması içindir; chart'ın varsayılanı `0`'dır ve
+`0`'da her tarayıcı arayüz pod'una sayılır, ad başına tek paylaşılan kilit
+kalır (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
+
+- Düz Route'ta, router'ın varsayılan `forwardedHeaderPolicy: Append`'iyle `1`
+  (sandbox'ta ölçüldü, 2026-11-07).
+- Route'un önünde `X-Forwarded-For`'u yazan bir WAF ya da L7 çalışan bir F5
+  (ör. `X-Forwarded-For` ekleyen bir HTTP profili) varsa `2` (router `Append`
+  iken; ölçülmedi). Yalnız TCP geçiren (L4) bir F5 başlığı yazmaz, sayılmaz:
+  `1` kalır. Emin değilseniz `1` bırakın: eksik değerin maliyeti paylaşılan
+  kilit, fazla değerinki bypass'tır. İki durumu da "Kurulum sonrası
+  kontrol"deki iki giriş satırı ayırır.
+- Router'ın politikası `IfNone` ya da `Never` ise istemcinin yazdığı başlık
+  olduğu gibi geçer: `route.annotations` altına
+  `haproxy.router.openshift.io/set-forwarded-headers: append` ekleyin (README
+  "Vekil-hop rehberi", politikanın nasıl okunacağı orada).
+
+**Vekilli kapsam.** `UPTIME_TARGET_SCOPE_TRUST_PROXY` (0.50; README "Hedef
+politikası", "Vekilli kurulum") örnekte yorum satırıdır ve kapalı kalır.
+Açıkken namespace'le sınırlı bir editör, yalnız vekilin çözdüğü bir dış ada
+(Slack, Teams ya da bir SaaS'ın durum adresi) HTTP monitor'ü ve kanal
+kurabilir; ama vekilin ulaştığı her adrese de (node IP'leri/NodePort, router,
+API ve LoadBalancer VIP'leri, kurumun özel aralıkları) bir adla ulaşır. Satırı yalnız şu ikisini ağ ekibinden yazılı
+aldıktan sonra açın ve onayı kurulum kaydına yazın:
+
+- [ ] Vekil cluster dışında çalışıyor: cluster'ın adlarını çözemez,
+  ClusterIP'lere ve pod adreslerine bağlanamaz. Cluster içindeki bir vekille
+  ayar kapalı kalır.
+- [ ] Vekilin ACL'i node IP'lerini ve NodePort'ları, router, API ve
+  LoadBalancer VIP'lerini ve kurumun özel aralıklarını kapatıyor.
+
+Ayar kapalıyken ve vekil verilmişken backend açılışta bir `WARN` yazar
+(`HTTP_PROXY/HTTPS_PROXY is set and UPTIME_TARGET_SCOPE_TRUST_PROXY is off`);
+aşağıdaki "Uyarı ve hata" kontrolünde yalnız bu satır beklenir. 0.49 bu ayarı
+tanımaz ve yok sayar.
 
 ### 3. Kurulum
 
@@ -236,7 +264,9 @@ eksik olduğunu yazar; saklayın.
 | Keşif | aynı log, `cluster discovery enabled` | `mode: in-cluster`; namespace'le sınırlıysa namespace'ler |
 | Yedek | `oc -n kubeat exec deploy/kubeat-backend -- ls /backup` | İlk kopya açılışta alınır: `kubeat-<tarih>.db` |
 | Route | Tarayıcıda `https://kubeat.apps.<cluster-domain>` | Giriş sayfası; HTTP'den HTTPS'e yönlendirme |
-| Uyarı ve hata | `oc -n kubeat logs deploy/kubeat-backend \| grep -E '"level":"(WARN\|ERROR)"'` | Boş |
+| Giriş kaynağı | Masaüstünüzdeki tarayıcıdan bir kez `admin`'e yanlış parola, sonra `oc -n kubeat logs deploy/kubeat-backend \| grep 'sign-in refused'` | Satırın `source`'u masaüstünüzün adresi (kurumun ağında görünen adresiniz); router, WAF ya da arayüz pod'unun adresi değil (README "Görülen kaynağı doğrulamak") |
+| Uydurma başlık | Aynı yanlış parolalı isteği tarayıcının geliştirici araçlarından (Network) "Copy as cURL" ile alın, `-H 'X-Forwarded-For: 192.0.2.99'` ekleyip masaüstünden çalıştırın; sonra aynı log | Yeni satırın `source`'u `192.0.2.99` **değil**, yine masaüstünüzün adresi. `192.0.2.99` ise istemci kaynağını seçebiliyor: hop değeri fazla ya da router `IfNone`/`Never` (yukarıda "Hop değeri") |
+| Uyarı ve hata | `oc -n kubeat logs deploy/kubeat-backend \| grep -E '"level":"(WARN\|ERROR)"'` | Vekil verildiyse yalnız kapsam ayarının açılış satırı (`HTTP_PROXY/HTTPS_PROXY is set and UPTIME_TARGET_SCOPE_TRUST_PROXY is off`, yukarıda "Vekilli kapsam"); vekilsiz kurulumda boş. Hop ya da arayüz sırrıyla ilgili bir satır (`UPTIME_TRUST_PROXY_HOPS`, `X-Frontend-Token`) görünüyorsa README "Yanlış ayar sessizce etkisiz kalmaz" |
 | Ekip namespace'inde politika | Ekibin bir Service'ine monitor ekleyin (keşif ya da `kubeat.io/monitor` annotation'ı) | İlk kontrol yeşil; ekip namespace'indeki bir Service monitor'ü `connect_timeout` vermiyor. Veriyorsa namespace'in varsayılan-ret politikası Kubeat'i engelliyor: ön koşullardaki `allow-from-kubeat` (README "Ağ erişimi", İzlenen namespace'ler) |
 
 Bir şey eksikse `helm upgrade` aynı komutla tekrarlanır; backend 10–20
@@ -437,6 +467,16 @@ Ekiple son görüşme, üç karar sorusu:
   Kubeat kendisi düşerse haberiniz olsun.
 - `networkPolicy.enabled=true`: backend'e yalnızca arayüz ve Prometheus
   bağlanır.
+- `frontend.networkPolicy.enabled=true`: arayüze yalnız router bağlanır;
+  cluster içindeki bir pod arayüz Service'ine uydurma bir `X-Forwarded-For`
+  ile gelip giriş kaynağını seçemez. Router host ağındaysa `from`'a ikinci bir
+  girdi gerekir; `networkPolicy.enabled` ile birlikte push gönderen
+  namespace'ler de `from`'a girer. Açtıktan sonra başka bir namespace'ten
+  arayüze giden isteğin zaman aşımına düştüğünü görün (README "Hesaplar ve
+  giriş", "Arayüzün ağ politikası").
+- `frontendToken.existingSecret`: arayüzün backend'e kendini tanıttığı sır da,
+  öteki Secret'lar gibi, kasadaki bir Secret'tan gelir (kurulum GitOps'a
+  geçecekse şart; README "GitOps ile kurulum").
 - `admin` hesabının parolası değiştirilir ve Secret kasaya kaldırılır.
 - Lisans süresi ve kapsamı sözleşmeye göre yenilenir.
 

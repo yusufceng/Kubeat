@@ -243,8 +243,9 @@ arayüz Service'ine doğrudan gelen uydurma başlık kalır (aşağıda). Ayrıc
 vekilli kurulum için opt-in bir kapsam ayarı getirir ve yedeğin cluster dışına
 alınmasını doğrulamalı tek bir bloğa bağlar. Şema değişmez (26), migration
 yok; chart kurulumunda yeni zorunlu ayar yok. Arayüz yolu `go test` ve chart
-testleriyle sınandı; gerçek bir Route arkasındaki prova sürümden sonradır ve
-aşağıdaki hop değerlerinin hiçbiri henüz gerçek bir cluster'da ölçülmedi.
+testleriyle sınandı; gerçek bir Route arkasındaki prova sürümden sonradır.
+Aşağıdaki hop değerlerinden düz OpenShift Route `1` ölçüldü (sandbox,
+2026-11-07); ötekiler henüz gerçek bir cluster'da ölçülmedi.
 
 ### Yapılacak
 
@@ -413,7 +414,8 @@ görünür kılar. Şema değişmez (26); hiçbir madde yeni zorunlu ayar getirm
   olan Route `2`, GKE `ingress-nginx` (L4 LoadBalancer, `externalTrafficPolicy:
   Local`, varsayılan ayarlar) `1`, önde L7 GCLB + `ingress-nginx`
   (`use-forwarded-headers` ve `compute-full-forwarded-for`) `3`, GKE'nin kendi
-  Ingress'i (GCE) `2`; hiçbiri henüz ölçülmedi. 0.50'ye geçerken 0.48–0.49
+  Ingress'i (GCE) `2`; düz Route `1` ölçüldü (sandbox, 2026-11-07), ötekiler
+  henüz ölçülmedi. 0.50'ye geçerken 0.48–0.49
   rehberiyle verilmiş değerleri gözden geçirin (düz Route `1` ve WAF'lı Route
   `2` aynı kalır; `2`'yi yalnız WAF başlığı yazıyorsa seçin): GKE'nin kendi
   Ingress'i (yalnız GCLB) `1` → `2`; GCLB + `ingress-nginx` yalnız
