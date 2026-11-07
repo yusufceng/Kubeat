@@ -28,7 +28,7 @@ tamamlayıcıdır. Ingress controller'ı ve cert-manager'ı olan bir cluster'a
 kurulum (OpenShift'te "OpenShift" bölümündeki komut):
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
   -n kubeat --create-namespace \
   --set podSecurityContext.fsGroup=1001 \
   --set ingress.enabled=true --set ingress.className=<kümenin sınıfı> \
@@ -68,7 +68,7 @@ Kubeat'in kendisi düşerse cluster dışındaki bir heartbeat alıcısı haber 
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum".
@@ -85,7 +85,7 @@ beri imajlar ve chart imzalıdır; sürümün GitHub Release'i digest'leri ve
 SBOM'ları taşır (bkz. "Tedarik zinciri"). 0.44.0 ve öncesi imzasızdır. Herhangi bir cluster'a kurulum:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
   --set podSecurityContext.fsGroup=1001 \
   -n kubeat --create-namespace
 ```
@@ -309,7 +309,7 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
@@ -799,8 +799,11 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     (`kube-dns`/`openshift-dns`) izin vermelidir, aksi hâlde kapsamı sınırlı bir
     kullanıcının meşru dış hedef oluşturması güvenli tarafta reddedilir ve kapsama
     bağlı monitor'lerin kontrolü (annotation monitor'leri her kurulumda) DOWN
-    olabilir; ikisi de sayaçta `reason="resolve_error"` ile, gerçek bir cross-tenant
-    reddinden ayrı görünür (aşağıda "Kapsam ihlali denetimi"). Çözüm
+    olabilir. API'deki ret ve vekile giden kontroldeki ret sayaçta
+    `reason="resolve_error"` ile, gerçek bir cross-tenant reddinden ayrı görünür
+    (aşağıda "Kapsam ihlali denetimi"). Doğrudan bağlanan kontrolde monitor'ün
+    yazılı hedefinin çözüm hatası kapsam reddi değildir: kontrol sıradan DNS
+    hatasıyla biter ve sayılmaz (minikube'da ölçüldü, 2026-11-08). Çözüm
     pod'un kendi çözücüsünü ve arama alanlarını (`ndots`) kullanır — checker'ın
     hedefi bağlarken kullanacağı çözümün aynısı — ve hedef politikasına tabi
     değildir. `HTTP_PROXY`/`HTTPS_PROXY` verilse de kapsam çözümü yine backend'de
@@ -939,7 +942,9 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       istedi ve reddedildi (aşağıda "Her bağlantıda").
     - `resolve_error` (0.52): dış görünen bir ad çözülemediği için reddedildi
       (SERVFAIL, vekil istisnası dışındaki NXDOMAIN, çözüm zaman aşımı); API'de
-      de, kontrolün açtığı bir bağlantıda da. Çoğu zaman bir girişim değil,
+      de, kontrolde vekile giden ya da ayarlarda yazılı olmayan bir ada yönelen
+      bağlantıda da (doğrudan bağlanan kontrolde yazılı hedefin çözüm hatası
+      sıradan DNS hatasıdır, sayılmaz). Çoğu zaman bir girişim değil,
       cluster DNS'inin ya da egress'in arızasıdır (yukarıda "Egress ve DNS").
       Ret değişmez: istemci aynı 403'ü, kontrol aynı `blocked_by_scope`
       sonucunu alır. Adından reddedilen biçimler hiç çözülmediği için bir DNS
@@ -4242,7 +4247,7 @@ satır:
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 ### Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`

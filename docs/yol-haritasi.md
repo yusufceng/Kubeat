@@ -324,7 +324,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   sunucusunun ya da backend'in kendi adresini içeren aralık backend'i
   başlatmıyor; koruma pod'un o açılıştaki adresine baktığı için pod başka bir
   node'a taşınınca (drain) ilk açılışta geçen bir aralık backend'i
-  başlatmayabilir; ortama bağlı denetimlerde ayarı yok sayıp izlemeyi sürdüren
+  başlatmayabilir (iki node'lu minikube'da ölçüldü, 2026-11-08: öteki node'un pod
+  ağını içeren aralıkla taşınan pod CrashLoopBackOff'a girdi, izleme durdu); ortama bağlı denetimlerde ayarı yok sayıp izlemeyi sürdüren
   geri düşüş sprint 11 adayı (S96; S80'in "backend başlamaz" kararı bu
   denetimler için değişti, biçim hataları yine başlatmaz); pod ve Service ağının geri kalanı, node ağı ve API VIP'iyle
   çakışma operatörün sorumluluğunda, router VIP'i yalnız bilerek (node
