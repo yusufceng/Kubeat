@@ -240,6 +240,52 @@ NEEDS_HTTPS="SSO needs HTTPS in front of the ingress controller"
 notes "TLS-off Ingress with SSO" says "$NEEDS_HTTPS" "${SSO[@]}" --set ingress.enabled=true --set ingress.tls.enabled=false
 notes "TLS-off Ingress without SSO" omits "$NEEDS_HTTPS" --set ingress.enabled=true --set ingress.tls.enabled=false
 
+# The sign-in throttle behind the Route or Ingress: the notes give README
+# "Hesaplar ve giriş"'s hop values while UPTIME_TRUST_PROXY_HOPS is 0, and
+# the network policy while it is off; without a Route or Ingress, neither.
+THROTTLE="Sign-in throttle:"
+HOPS_ZERO="UPTIME_TRUST_PROXY_HOPS is 0"
+SET_HOPS="--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1"
+NEEDS_POLICY="--set networkPolicy.enabled=true"
+# Turning the policy on cuts push jobs sending to the backend from other
+# namespaces, and outside OpenShift the Prometheus scrape: the notes say so.
+POLICY_PUSH='"Ağ erişimi": push jobs in other namespaces must send to the frontend'
+POLICY_METRICS="outside OpenShift set networkPolicy.metricsFrom to your Prometheus namespace"
+# A value too high is no longer the safe side: behind a proxy that appends,
+# a client lengthening the header picks its source, so the notes ask for the
+# lower value when unsure.
+HOPS_LOWER="If unsure, take the lower value and check the source it keys on"
+INGRESS=(--set ingress.enabled=true)
+notes "Route, hops unset" says "$HOPS_ZERO" "${ROUTE[@]}"
+notes "Route, hops unset" says "a plain Route: 1; a Route behind a WAF" "${ROUTE[@]}"
+notes "Route, hops unset" omits "ingress-nginx" "${ROUTE[@]}"
+notes "Route, hops unset" says "$HOPS_LOWER" "${ROUTE[@]}"
+notes "Route, hops unset" says "$SET_HOPS" "${ROUTE[@]}"
+notes "Route, hops unset" says "$NEEDS_POLICY" "${ROUTE[@]}"
+notes "Route, hops unset" says "$POLICY_PUSH" "${ROUTE[@]}"
+notes "Route, hops unset" says "$POLICY_METRICS" "${ROUTE[@]}"
+notes "Ingress, hops unset" says "$HOPS_ZERO" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "ingress-nginx with its default settings: 1; GKE's own Ingress (GCE): 2;" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "use-forwarded-headers and compute-full-forwarded-for: 3" "${INGRESS[@]}"
+notes "Ingress, hops unset" omits "a plain Route" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "$HOPS_LOWER" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "$NEEDS_POLICY" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "$POLICY_PUSH" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "$POLICY_METRICS" "${INGRESS[@]}"
+notes "neither Route nor Ingress" omits "$THROTTLE"
+notes "neither Route nor Ingress, policy off" omits "$NEEDS_POLICY"
+notes "Route, hops 0 given" says "$HOPS_ZERO" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=0
+notes "Ingress, hops empty" says "$HOPS_ZERO" "${INGRESS[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=
+notes "Route, hops 1" omits "$HOPS_ZERO" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
+notes "Route, hops 1" omits "$HOPS_LOWER" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
+notes "Route, hops 1" says "$NEEDS_POLICY" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
+notes "Ingress, hops 2 as a number" omits "$HOPS_ZERO" "${INGRESS[@]}" --set backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+notes "Route, hops 1, policy on" omits "$THROTTLE" "${ROUTE[@]}" \
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1 --set networkPolicy.enabled=true
+notes "Route, hops unset, policy on" says "$HOPS_ZERO" "${ROUTE[@]}" --set networkPolicy.enabled=true
+notes "Route, hops unset, policy on" omits "$NEEDS_POLICY" "${ROUTE[@]}" --set networkPolicy.enabled=true
+notes "Route, hops unset, policy on" omits "$POLICY_PUSH" "${ROUTE[@]}" --set networkPolicy.enabled=true
+
 # The license: mounted whole, so that a renewed Secret reaches the file.
 helm template kubeat "$CHART" --set license.existingSecret=kubeat-license >"$WORK/license.yaml" 2>"$WORK/err" ||
   failed "license: refused: $(cat "$WORK/err")"

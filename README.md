@@ -1100,63 +1100,172 @@ sahibin kendi hataları tavana ulaşmaz; tavan ancak çok sayıda ayrı kaynakta
 gelen toplam denemeyle tetiklenir ve o zaman hesap, meşru sahip dahil, kilit
 süresince kilitlenir (ADR-0004 "Sonuçlar", kabul edilen taviz).
 
-Kaynak adresi `UPTIME_TRUST_PROXY_HOPS` ile belirlenir: önünüzdeki kendi
-vekillerinizin (Ingress, Route, yük dengeleyici) sayısı. `0` (varsayılan)
+Kaynak adresi `UPTIME_TRUST_PROXY_HOPS` ile belirlenir. `0` (varsayılan)
 hiçbir `X-Forwarded-For` başlığına güvenmez ve bağlanan eşi (peer) kullanır.
-Bir vekil arkasında eş hep vekilin tek adresidir, tüm istemciler için aynı; o
-yüzden **internete açık bir girişte bu değeri gerçek vekil sayısına ayarlayın**,
-yoksa throttle kaynakları ayırt edemez ve tek bir paylaşılan, ada-başına kilide
-geriler (0.47.0 davranışı). `N` ayarlandığında istemci `X-Forwarded-For`'un
-sağdan N girdisine (vekillerinizin eklediği) göre okunur; solundaki girdiler
-(istemcinin uydurabileceği) yok sayılır.
+`N` ayarlandığında istemci `X-Forwarded-For`'un sağdan N girdisine (sizin
+vekillerinizin yazdığı) göre okunur; solundaki girdiler (istemcinin
+uydurabileceği) yok sayılır. Bir vekil arkasında eş, tüm istemciler için aynı
+tek adrestir; o yüzden **internete açık bir girişte bu değeri aşağıdaki
+rehbere göre ayarlayın**, yoksa throttle kaynakları ayırt edemez ve tek bir
+paylaşılan, ada-başına kilide geriler (0.47.0 davranışı).
 
-**Değer tam olarak önünüzdeki kendi vekillerinizin sayısıdır.** Girişe ulaşan
-her vekil `X-Forwarded-For`'a bir girdi ekler:
+**Arayüz başlığı taşır (0.50).** Tarayıcı backend'e hiç doğrudan gelmez: Route
+ve Ingress yalnız arayüze gider, backend'i arayüz pod'u çağırır. Backend'in eşi
+bu yüzden her istemci için arayüz pod'udur; kaynak ancak arayüzün taşıdığı
+başlıktan okunur:
 
-- Düz OpenShift Route (HAProxy router): `1`.
-- Önünde WAF ya da harici bir yük dengeleyici olan OpenShift Route: router + o
-  katman, `2`.
-- GKE: Google Cloud yük dengeleyici (GCLB) + `ingress-nginx`, `2`; yalnız
-  GCLB/Container-native LB (ingress-nginx yoksa) `1`.
+- Arayüz giriş, parola değiştirme ve durum sayfası kilidi isteklerinde
+  tarayıcı isteğinin `X-Forwarded-For` başlığını backend'e **aynen** taşır:
+  girdi eklemez, silmez, sırasını değiştirmez; başlık yoksa eklemez.
+- Önde başlığı yazan bir vekil yoksa (port-forward) ve istemci de başlık
+  göndermediyse Next.js başlığı kendi gördüğü eşle yazar. Gelen bir başlığa,
+  bir vekilin ya da istemcinin yazdığına, dokunmaz.
+- Arayüz böylece backend'e en yakın vekilin yerini alır: kendisi bir girdi
+  yazmaz ve sayılmaz.
+- Parola değiştirme ve durum sayfası kilidinin sayaçları bugün kaynağa göre
+  değil, hesaba ve sayfaya göredir; başlık orada ileride kullanılacak (S76).
 
-**Bilinen sınır (0.48–0.49): arayüz istemci adresini taşımaz.** Route ve
-Ingress yalnız arayüze gider; arayüz giriş, parola değiştirme ve durum sayfası
-kilidi isteklerini backend'e `X-Forwarded-For` olmadan iletir. Bu sürümlerde
-backend tarayıcıdan gelen her denemenin kaynağını arayüz pod'unun adresi olarak
-görür:
+**Vekil-hop rehberi.** Değer, arayüzün önündeki vekillerinizin
+`X-Forwarded-For`'a yazdığı girdi sayısıdır; hiçbiri yazmıyorsa `1`'dir (girdiyi
+Next.js yazar; yalnız port-forward'da, aşağıdaki ilk madde). Backend zinciri
+"başlıktaki girdiler + arayüz pod'u" olarak görür ve istemciyi sağdan o kadar
+girdi geriden okur. Değerler vekillerin belgelenmiş varsayılan davranışından
+türetildi; "Ölçüm" sütunu değerin arayüz yolunda (tarayıcı → vekil → arayüz →
+backend) ölçülüp ölçülmediğini yazar:
 
-- `UPTIME_TRUST_PROXY_HOPS` kaç olursa olsun, arayüzden gelen girişte
-  kaynak-başına throttle ad-başına tek paylaşılan kilide geriler; adını bilen
-  biri bir hesabı arayüzü kullanan herkes için kilitleyebilir.
-- `0` iken aşağıdaki WARN bu yolda düşmez; `1` iken "zincir kısa" WARN'ı düşer
-  ama kaynak yine arayüz pod'udur.
-- Yukarıdaki hop değerleri bugün yalnız backend'e doğrudan gelen istekte
-  (port-forward, API) geçerlidir.
+| Kurulum | Değer | Başlıktaki girdiler, soldan (yazan) | Ölçüm |
+| --- | --- | --- | --- |
+| Vekilsiz: arayüze `kubectl port-forward` | `1` | `127.0.0.1` (Next.js) | ölçülmedi |
+| Düz OpenShift Route (HAProxy router, varsayılan `forwardedHeaderPolicy: Append`) | `1` | istemci (router) | ölçülmedi |
+| Önünde başlığı yazan bir WAF ya da L7 yük dengeleyici olan Route | `2` | istemci (WAF), WAF (router) | ölçülmedi |
+| GKE `ingress-nginx`: L4 LoadBalancer Service, `externalTrafficPolicy: Local`, varsayılan ayarlar | `1` | istemci (`ingress-nginx`; gelen başlığı kendi eşiyle değiştirir) | ölçülmedi |
+| Önde L7 Google Cloud yük dengeleyici (GCLB) + `ingress-nginx` (`use-forwarded-headers: "true"`, `compute-full-forwarded-for: "true"`) | `3` | istemci ve yük dengeleyicinin adresi (GCLB), GCLB vekili (`ingress-nginx`) | ölçülmedi |
+| GKE'nin kendi Ingress'i (GCE) | `2` | istemci ve yük dengeleyicinin adresi (GCLB) | ölçülmedi |
 
-Düzeltme 0.50 için planlandı
-([#118](https://github.com/yusufceng/Kubeat/issues/118)); o zamana dek kilitli
-bir hesap için aşağıdaki "Kilitli hesaba girmek" yolları geçerlidir.
+Dikkat edilecekler:
 
-**Yanlış ayar sessizce etkisiz kalmaz (0.49) — ama 0.48–0.49'da yalnız
-backend'e doğrudan gelen istekte** (yukarıdaki bilinen sınır; arayüzden gelen
-girişte `0` iken WARN düşmez). Giriş, yayımlanmış bir DoS
-düzeltmesi olduğu için ayar eksik ya da fazla olduğunda loga dakikada en fazla
-bir kez WARN yazılır:
+- `1` (vekilsiz) yalnız arayüze, başlığı yazan ya da değiştiren bir vekilden
+  geçmeden hiçbir güvenilmeyen istemci ulaşamıyorsa geçerlidir (port-forward).
+  Next.js istemcinin gönderdiği başlığa dokunmaz: arayüz Service'ini önünde
+  böyle bir vekil olmadan doğrudan dışarı açtıysanız (`frontend.service.type`
+  `LoadBalancer` ya da `NodePort`) değer `0` kalmalıdır. `1` verilirse her
+  istemci başlığı kendisi yazıp her denemede kaynağını seçer: kaynak-başına
+  sınır atlanır (yalnız hesap tavanı kalır) ve adresi bilinen bir kurban
+  kilitlenebilir. `0`'da WARN sürer, çünkü throttle gerçekten tek paylaşılan
+  kilittedir; kaynakları ayırmak için arayüzün önüne başlığı yazan bir vekil
+  (Route, Ingress) koyun.
+- Vekilsiz kurulumda `0` bırakılırsa aşağıdaki WARN düşer, çünkü Next.js
+  başlığı her istekte yazar; port-forward'da bütün istemciler zaten tek
+  kaynaktır (`127.0.0.1`), pratik bir fark yoktur.
+- Başlığı yazmayan bir katman (L4 yük dengeleyici, TCP geçişli WAF) sayılmaz:
+  arkasındaki vekil istemciyi değil o katmanı görür (PROXY protocol yoksa),
+  throttle o katmanın adresine anahtarlanır ve WARN düşmez. GKE'de L4
+  Service'in `externalTrafficPolicy: Cluster` (varsayılan) olması da böyledir:
+  `ingress-nginx` istemciyi değil node'u görür. İkisini de aşağıdaki log
+  satırının `source` alanından görürsünüz.
+- Değer doğrusundan büyükse güvenli tarafa düşmez (0.50). Başlığa ekleyen bir
+  vekilin (Route `Append`, GCLB) arkasında istemci başlığı fazladan bir girdiyle
+  uzatıp kaynağını seçer: kaynak-başına sınır atlanır (yalnız hesap tavanı
+  kalır), adresi bilinen bir kurban kilitlenebilir ve bu isteklerde WARN düşmez.
+  Eksik değerin maliyeti paylaşılan kilit, fazla değerinki bypass'tır: emin
+  değilseniz (ör. önünüzdeki WAF'ın başlığı yazıp yazmadığını bilmiyorsanız)
+  küçük değeri seçin ve `source` alanıyla doğrulayın. Arayüzden gelen girişte
+  "zincir kısa" WARN'ı sürüyorsa (WARN'ın yazdığı eş arayüz pod'uysa) değer
+  fazladır: düşürün. 0.49'da bu WARN arayüz yolunda beklenen durumdu.
+- `ingress-nginx`'te `use-forwarded-headers`'ı `compute-full-forwarded-for`
+  olmadan açmayın: varsayılan `proxy-real-ip-cidr` (`0.0.0.0/0`) ile controller
+  başlığı istemcinin yazabileceği en soldaki girdiyle değiştirir ve her istek
+  kendi kaynağını seçer.
+- Backend'e doğrudan gelen giriş (backend Service'ine port-forward, API
+  betikleri) başlık taşımaz: değer `1` ya da üstündeyken kaynak eşe düşer ve
+  "zincir kısa" WARN'ı düşer. Bu beklenen durumdur.
+- Değer `0`'dan büyükken cluster içindeki bir pod backend'e ya da arayüze
+  doğrudan bağlanıp kendi yazdığı bir `X-Forwarded-For` ile kaynağını
+  seçebilir. Arayüz `NodePort` ise (ör. GCE Ingress için) node portuna yük
+  dengeleyiciyi atlayıp node üzerinden gelen bir istemci de (aynı VPC'deki bir
+  makine gibi) böyledir. Backend'e doğrudan geleni `networkPolicy.enabled=true`
+  kapatır (backend'e yalnız arayüz, Prometheus ve
+  `networkPolicy.backendIngressFrom` bağlanır; push işlerine etkisi "Ağ
+  erişimi"nde). Arayüz Service'ine ya da node portuna doğrudan gelen uydurma
+  başlık bugün kapanmaz (bilinen sınır,
+  [#119](https://github.com/yusufceng/Kubeat/issues/119)).
+
+Chart'ın varsayılanı `0`'dır. `route.enabled` ya da `ingress.enabled` açıkken
+kurulum notu (NOTES) değerin `0` kaldığını söyler ve yukarıdaki satırlardan o
+giriş türüne uyanları önerir: Route için `1` (önünde başlığı yazan bir WAF ya da
+L7 yük dengeleyiciyle `2`); Ingress için `ingress-nginx` varsayılanlarıyla `1`,
+GCE Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`. Emin değilseniz
+küçük değeri seçip `source` alanıyla doğrulamanızı söyler (fazla değer
+atlatılabilir, yukarıda). Ağ politikası
+kapalıysa `networkPolicy.enabled=true`'yu da önerir ve açmadan önce "Ağ
+erişimi"ni okumanızı söyler: politika açılınca başka namespace'lerdeki push
+işleri arayüze göndermelidir, OpenShift dışında `networkPolicy.metricsFrom`
+Prometheus'unuzun namespace'ini seçmelidir (yoksa push monitor'leri yanlış
+DOWN düşer, scrape kesilir). Değeri
+`--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` ile verin.
+
+**Görülen kaynağı doğrulamak.** Her başarısız giriş backend loguna bilgi
+satırı olarak yazılır; satırın `source` alanı throttle'ın anahtarladığı
+adrestir ve ayar doğruyken de görünür. Değeri ayarladıktan sonra arayüzden bir
+kez yanlış parola deneyin ve satıra bakın:
+
+```
+kubectl -n kubeat logs deploy/kubeat-backend | grep 'sign-in refused'
+{"time":"2026-11-07T09:12:03.512Z","level":"INFO","msg":"sign-in refused","user":"admin","reason":"wrong password","attempt":1,"source":"203.0.113.7"}
+```
+
+- `source` sizin adresinizse (tarayıcınızın internete çıktığı adres) değer
+  doğrudur.
+- Bir vekilin (WAF, yük dengeleyici, GCLB) adresiyse değer eksiktir: o
+  katmanın yazdığı girdi kadar artırın. Önde L7 GCLB ve varsayılan ayarlı
+  `ingress-nginx` varken `source` GCLB vekiliyse artırmak işe yaramaz
+  (`ingress-nginx` GCLB'nin girdilerini siler): tablodaki iki ayarı açıp `3`
+  verin.
+- Arayüz pod'unun adresiyse değer `0`'dır ya da fazladır; ikisinde de
+  aşağıdaki iki WARN'dan biri de düşer.
+- Bir node'un adresiyse önde başlığı yazmayan bir L4 katmanı vardır (yukarıda).
+
+Satır yalnız operatör logudur: denetim kaydı ve istemci yanıtı adresi taşımaz,
+yanıt hep genel 401 ya da 429'dur (enum sızmaz). Dizinde parolası doğru olup
+burada rolü olmayan birinin reddi (`"reason":"no role"`) de aynı alanı yazar.
+
+**Yanlış ayar sessizce etkisiz kalmaz.** Giriş, yayımlanmış bir DoS düzeltmesi
+olduğu için ayar eksik ya da fazla olduğunda loga dakikada en fazla bir kez
+WARN yazılır; 0.50'den beri bu arayüzden gelen girişte de böyledir:
 
 - `X-Forwarded-For` geldiği hâlde `UPTIME_TRUST_PROXY_HOPS=0` ise (önde bir
   vekil var ama güvenilmiyor): throttle tek paylaşılan ada-başına kilide
-  gerilemiştir; WARN, anahtarlanan eş adresini yazar.
-- `X-Forwarded-For` zinciri `UPTIME_TRUST_PROXY_HOPS`'tan kısa gelirse (hop
-  sayısı gerçek vekil sayısından büyük ya da bir istek vekili atlıyor): görülen
-  kaynak artık istemcinin ayarlayabileceği en soldaki girdiye değil, hiçbir
-  istemcinin denetlemediği eşe (peer) düşer. Böylece uydurma bir
-  `X-Forwarded-For` ile ne her istekte taze bir kaynak gibi görünüp throttle
-  atlanabilir ne de bir kurban kilitlenebilir; o eş/NAT yalnızca paylaşılan bir
-  kilide geriler.
+  gerilemiştir; WARN, anahtarlanan eş adresini yazar. Arayüzden gelen girişte
+  bu eş arayüz pod'udur.
+- `X-Forwarded-For` zinciri `UPTIME_TRUST_PROXY_HOPS`'tan kısa gelirse (değer
+  gerçek girdi sayısından büyük ya da bir istek vekili atlıyor): görülen kaynak
+  istemcinin ayarlayabileceği en soldaki girdiye değil, hiçbir istemcinin
+  denetlemediği eşe (peer) düşer. Böylece uydurma bir `X-Forwarded-For` ile ne
+  her istekte taze bir kaynak gibi görünüp throttle atlanabilir ne de bir kurban
+  kilitlenebilir; o eş/NAT yalnızca paylaşılan bir kilide geriler. Bu yalnız
+  zinciri kısa gelen istek için geçerlidir: başlığa ekleyen bir vekilin
+  arkasında zincirini uzatan istemci WARN almadan kaynağını seçer (yukarıda
+  "Dikkat edilecekler").
 
-Görülen kaynak adresinin beklediğiniz değer olduğunu bu WARN satırından
-doğrulayın (denetim kaydı ve istemci yanıtı enum sızdırmamak için adresi
-taşımaz).
+Değerin eksik olması (ör. WAF'lı Route'ta `1`) WARN vermez: throttle o vekilin
+adresine anahtarlanır. Bunu yukarıdaki `source` alanından görürsünüz.
+
+**Bilinen sınır (0.48–0.49): arayüz istemci adresini taşımıyordu.** 0.48 ve
+0.49'da arayüz giriş, parola değiştirme ve durum sayfası kilidi isteklerini
+backend'e `X-Forwarded-For` olmadan iletiyordu; backend tarayıcıdan gelen her
+denemenin kaynağını arayüz pod'unun adresi olarak görüyordu:
+
+- `UPTIME_TRUST_PROXY_HOPS` kaç olursa olsun, arayüzden gelen girişte
+  kaynak-başına throttle ad-başına tek paylaşılan kilide geriliyordu; adını
+  bilen biri bir hesabı arayüzü kullanan herkes için kilitleyebiliyordu.
+- `0` iken yukarıdaki WARN bu yolda düşmüyordu; `1` iken "zincir kısa" WARN'ı
+  düşüyor ama kaynak yine arayüz pod'u oluyordu.
+- O sürümlerin belgelediği hop değerleri yalnız backend'e doğrudan gelen
+  istekte (port-forward, API) geçerliydi.
+
+0.50 bunu düzeltir ([#118](https://github.com/yusufceng/Kubeat/issues/118)).
+0.48 ya da 0.49'da kalan bir kurulumda kilitli bir hesap için aşağıdaki
+"Kilitli hesaba girmek" yolları geçerlidir.
 
 **Paylaşılan kurumsal NAT ya da ileri vekil.** `X-Forwarded-For` doğru okunsa
 bile, aynı kurumsal NAT ya da ileri vekil arkasındaki kullanıcılar aynı kaynak
@@ -1241,9 +1350,10 @@ her isteği kullanıcının oturumuyla yapar.
 **Kilitli hesaba girmek.** Kilit artık kaynak adrese göredir (CWE-307,
 [ADR-0004](docs/adr/0004-giris-kilitleme-stratejisi.md)): adını bilen biri tek
 bir kaynaktan bir hesabı, örneğin her zaman var olan `admin`'i, herkes için
-kilitleyemez; meşru sahip başka bir adresten girmeye devam eder (0.48–0.49'da
-bu, arayüzden gelen girişte geçerli değil: yukarıdaki "Bilinen sınır
-(0.48–0.49)"). Yine de bir
+kilitleyemez; meşru sahip başka bir adresten girmeye devam eder. Arayüzden
+gelen girişte bu, `UPTIME_TRUST_PROXY_HOPS` doğruyken ve 0.50'den beri
+geçerlidir (yukarıdaki "Vekil-hop rehberi" ve "Bilinen sınır (0.48–0.49)").
+Yine de bir
 hesap tümüyle kilitlenebilir — kendi adresinizden art arda yanlış yazdığınızda
 (`UPTIME_LOGIN_MAX_FAILURES`), ya da çok sayıda ayrı kaynaktan gelen dağıtık
 bir tahmin hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, varsayılan 50)
@@ -1593,6 +1703,11 @@ S59 satırı).
   Connect)"). TLS'i yalnızca TLS Ingress'in önünde, bir yük dengeleyicide
   bitiyorsa kapatın; o durumda `publicURL` değerini `https://` adresle
   verin. TLS kapalıyken kurulum notları uyarır.
+
+Route ya da Ingress arkasında giriş throttle'ının istemcileri ayırt etmesi için
+`UPTIME_TRUST_PROXY_HOPS` ayarlanmalıdır: değerler "Hesaplar ve giriş"teki
+vekil-hop rehberinde, kurulum notu Route ya da Ingress açıkken ve değer `0`
+iken önerir.
 
 **Yükseltme notu:** Ingress bu sürümle varsayılan olarak TLS ile sunulur ve
 chart adresi `https://<ingress.host>` olarak türetir; adres `https://`
@@ -4242,7 +4357,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
 | `UPTIME_LOGIN_MAX_FAILURES` | `10` | Tek bir kaynak adresin bir kullanıcı adına yönelik girişlerini kilitleyen hatalı deneme sayısı (kaynak-başına; CWE-307, ADR-0004) |
 | `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` | `50` | Bir adın tüm kaynaklardaki hatalı denemeleri için gevşek, çok yüksek tavan; dağıtık tahmini sınırlar, meşru sahibi kendi hatalarıyla kilitlemez. `0` kapatır (yalnız kaynak-başına throttle kalır) |
-| `UPTIME_TRUST_PROXY_HOPS` | `0` | Önünüzdeki kendi vekillerinizin sayısı; kaynak adresi `X-Forwarded-For`'un sağdan bu kadar girdisinden okunur. `0` başlığa güvenmez, bağlanan eşi kullanır. Ingress/yük dengeleyici arkasında kaynakları ayırt etmek için ayarlanmalı (bkz. "Hesaplar ve giriş") |
+| `UPTIME_TRUST_PROXY_HOPS` | `0` | Arayüzün önündeki vekillerinizin `X-Forwarded-For`'a yazdığı girdi sayısı; hiçbiri yazmıyorsa ve arayüze yalnız port-forward ile ulaşılıyorsa `1` (girdiyi Next.js yazar), arayüz Service'i doğrudan dışarı açıksa `0` kalır. Kaynak adres başlığın sağdan bu kadar girdisinden okunur; `0` başlığa güvenmez, eşi kullanır (arayüzden gelen girişte arayüz pod'u). Değerler: "Hesaplar ve giriş", "Vekil-hop rehberi" |
 | `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi; denemesi bundan eski adlar bu aralıkla sayaçtan silinir |
 | `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu, kilitli olmayan en fazla kullanıcı adı; doluyken yeni bir ad, en az denenmiş adlardan en uzun süredir denenmeyenin yerini alır, kilitli adlar unutulmaz. Aynı zamanda sürmekte olan (sağlayıcıya gidip henüz dönmemiş) SSO girişlerinin en fazla sayısı; aşılınca en eskileri unutulur |
 | `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan bcrypt karşılaştırması sayısı; `0` CPU sayısının yarısı, en az 1, LDAP açıkken en az 2 (her dizin girişi de bir karşılaştırma harcar). Dizine bağlanmaların ayrı sırası vardır (aynı anda 16) |

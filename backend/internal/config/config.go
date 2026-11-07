@@ -69,13 +69,14 @@ type Config struct {
 	// owner's own mistakes never reach it. Zero turns the ceiling off,
 	// leaving only the per-source throttle.
 	LoginAccountMaxFailures int // UPTIME_LOGIN_ACCOUNT_MAX_FAILURES
-	// TrustProxyHops is how many reverse proxies of your own stand in front
-	// of the backend. The sign-in throttle and the audit log then read the
-	// client's address from X-Forwarded-For, trusting only the rightmost
-	// that many entries those proxies appended. Zero (the default) trusts no
-	// such header and uses the peer that connected; behind an ingress or a
-	// load balancer that is the proxy's own address, the same for every
-	// client, so set this to tell sources apart (CWE-307, ADR-0004).
+	// TrustProxyHops is how many X-Forwarded-For entries the proxies in
+	// front of the UI write, or 1 with none (Next.js writes its own peer
+	// then); the UI passes the header on with the browser's sign-in. The
+	// sign-in throttle then reads the client's address from X-Forwarded-For,
+	// trusting only the rightmost that many entries. Zero (the default)
+	// trusts no such header and uses the peer that connected; for a browser
+	// that is the UI pod, the same for every client, so set this to tell
+	// sources apart (CWE-307, ADR-0004; README, "Hesaplar ve giriş").
 	TrustProxyHops int // UPTIME_TRUST_PROXY_HOPS
 
 	// LDAP; see ldapauth.Config. Empty LDAPURL means local accounts only.

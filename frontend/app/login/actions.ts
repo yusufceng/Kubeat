@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ApiError, login, logout, setup } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
@@ -56,9 +57,11 @@ function refusal(err: unknown, t: T): string {
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const t = await getT();
+  // The browser's address, for the backend's per-source throttle.
+  const forwardedFor = (await headers()).get("x-forwarded-for");
   let session;
   try {
-    session = await login(String(formData.get("username") ?? "").trim(), String(formData.get("password") ?? ""));
+    session = await login(String(formData.get("username") ?? "").trim(), String(formData.get("password") ?? ""), forwardedFor);
   } catch (err) {
     return { error: refusal(err, t) };
   }

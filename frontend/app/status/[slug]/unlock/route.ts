@@ -32,7 +32,8 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/status/[slu
 
   if (!password) return back("wrong");
   try {
-    const session = await unlockStatusPage(slug, password);
+    // The visitor's address goes along, for the backend's throttle.
+    const session = await unlockStatusPage(slug, password, request.headers.get("x-forwarded-for"));
     await keepStatusPageToken(slug, session.token, session.expires_at);
   } catch (err) {
     if (err instanceof ApiError) {

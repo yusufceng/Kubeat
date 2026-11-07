@@ -1,7 +1,7 @@
 "use server";
 
 import { type ChannelEvent, channelEventLabels } from "@/lib/channel-types";
-import { cookies } from "next/headers";
+import { cookies, headers as requestHeaders } from "next/headers";
 import { getT, LOCALE_COOKIE } from "@/lib/i18n/server";
 import { type Locale, locales } from "@/lib/i18n/messages";
 import type { T } from "@/lib/i18n/translate";
@@ -488,8 +488,10 @@ export async function deleteGroupRoleAction(formData: FormData): Promise<void> {
 export async function changePasswordAction(_prev: Outcome, formData: FormData): Promise<Outcome> {
   const next = String(formData.get("new_password") ?? "");
   if (next !== String(formData.get("new_password_again") ?? "")) return { error: (await getT())("monitorForm.actions.passwordMismatch") };
+  // The browser's address, for the backend's throttle of wrong current passwords.
+  const forwardedFor = (await requestHeaders()).get("x-forwarded-for");
   try {
-    await changePassword(String(formData.get("current_password") ?? ""), next);
+    await changePassword(String(formData.get("current_password") ?? ""), next, forwardedFor);
   } catch (err) {
     return { error: await describe(err) };
   }

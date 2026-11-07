@@ -101,13 +101,29 @@ backend:
     # UPTIME_NOTIFY_QUEUE_SIZE: "1000" # notifications waiting for delivery; at least the number of monitors, or an outage of them all overflows it (the backend warns once when more are enabled); 1000 take about 1 MiB of memory, 2 MiB full
     # UPTIME_SHUTDOWN_TIMEOUT: 10s     # stopping waits this long for open requests and for the notifications still waiting; keep terminationGracePeriodSeconds 5s longer
     # Sign-in throttle, keyed per source address + name so one source cannot
-    # lock a name out for everyone (CWE-307, ADR-0004). Behind an ingress set
-    # the hop count, or every client looks like the ingress and the throttle
-    # falls back to one shared per-name lock. A misconfigured value is warned
-    # (rate-limited): X-Forwarded-For seen while 0, or a chain shorter than the
-    # hops (which then safely falls back to the peer). OpenShift Route=1 (WAF/LB
-    # in front +1); GKE GCLB+ingress-nginx=2.
-    # UPTIME_TRUST_PROXY_HOPS: "1"              # reverse proxies of your own in front; source read from the rightmost this many X-Forwarded-For entries (0: trust none, use the peer)
+    # lock a name out for everyone (CWE-307, ADR-0004). Browsers reach the
+    # backend through the UI, which passes their X-Forwarded-For on as it got
+    # it (Next.js writes its own peer there when no proxy did), so the hop
+    # count is the X-Forwarded-For entries your proxies in front of the UI
+    # write, or 1 with none. Left at 0 every browser looks like the UI pod and
+    # the throttle falls back to one shared per-name lock. Values (README,
+    # "Hesaplar ve giriş"; derived, none measured yet): port-forward to the UI
+    # 1; plain OpenShift Route 1; Route behind a WAF/L7 LB that writes the
+    # header 2; GKE ingress-nginx (L4 LoadBalancer, externalTrafficPolicy:
+    # Local, default settings) 1; L7 GCLB + ingress-nginx with
+    # use-forwarded-headers and compute-full-forwarded-for 3; GKE's own GCE
+    # Ingress 2. The 1 with none holds for a port-forward only: Next.js keeps
+    # a header a client sent, so with frontend.service.type LoadBalancer or
+    # NodePort and no such proxy in front keep 0, a shared lock rather than a
+    # bypass. Above 0 turn networkPolicy.enabled on, or any pod can reach
+    # the backend with an X-Forwarded-For of its own. A misconfigured value is
+    # warned (rate-limited): X-Forwarded-For seen while 0, or a chain shorter
+    # than the hops (which then safely falls back to the peer). But too high
+    # behind a proxy that appends (Route, GCLB), a client lengthening the
+    # header picks its source, unwarned: if unsure, take the lower value. A
+    # value too low is not warned either, but every refused sign-in logs the
+    # source it keyed on.
+    # UPTIME_TRUST_PROXY_HOPS: "1"              # X-Forwarded-For entries your proxies in front of the UI write (1 with none); source read from the rightmost this many (0: trust none, use the peer)
     # UPTIME_LOGIN_MAX_FAILURES: "10"           # per-source failures that lock a source's attempts at a name
     # UPTIME_LOGIN_ACCOUNT_MAX_FAILURES: "50"   # loose, very high ceiling on a name's failures across all sources; 0 turns it off
     # UPTIME_RECOVERY_THRESHOLD: "1"
