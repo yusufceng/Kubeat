@@ -153,12 +153,6 @@ dışında da yapabilir, elle başlatılan yükseltme pencereye bakmaz; kalıcı
 
 GKE'de arayüzü dışarı açmanın yolları:
 
-<!-- Varsayım (S87, sprint 9): ingress-nginx'in emekliye ayrılması ve tarihleri
-ajan sınırında doğrulanmadı. Release manager yayımdan önce Kubernetes
-projesinin duyurusunu açıp doğrular (aday bağlantı:
-https://kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/);
-doğrulanmazsa bu cümle sürüm PR'ında yumuşatılır. -->
-
 - **`ingress-nginx`, mevcut kurulumlar için.** Kubernetes projesi
   `ingress-nginx`'i emekliye ayırdı (duyuru 2025-11; bakımı 2026-03'te
   bitti): yeni bir kurulum için onu önermiyoruz. Controller'ı zaten çalışan
