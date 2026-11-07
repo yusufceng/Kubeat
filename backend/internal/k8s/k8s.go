@@ -222,6 +222,75 @@ func (c *Client) Candidates(ctx context.Context, namespace string) ([]Candidate,
 	return c.candidates(ctx, namespace)
 }
 
+// NamespaceError is a namespace whose objects could not be read, and why.
+type NamespaceError struct {
+	Namespace string
+	Err       error
+}
+
+func (e *NamespaceError) Error() string { return e.Namespace + ": " + e.Err.Error() }
+
+func (e *NamespaceError) Unwrap() error { return e.Err }
+
+// Scan is what a read of every namespace the client may see found.
+type Scan struct {
+	// Candidates are those of the namespaces that were read.
+	Candidates []Candidate
+	// Skipped are the namespaces that could not be read, in order. Only a
+	// client limited to namespaces (Restrict) skips one: the whole cluster
+	// is read at once otherwise.
+	Skipped []NamespaceError
+}
+
+// Scan lists the candidates of every namespace the client may see, for a
+// reader that can go on without some of them. A client limited to
+// namespaces reads them one by one and goes past one the cluster API
+// answers for with an error: a refusal (the namespace's Role was taken
+// away, or the namespace was deleted together with its RoleBinding), not
+// found, a failure of the server's own. That namespace is in Skipped and
+// the others' candidates are returned.
+//
+// The error is set when the cluster could not be read at all, and the
+// candidates are then none: the whole cluster at once, or every one of the
+// namespaces (Skipped still says why for each), or a request that got no
+// answer or whose credentials were refused, which says nothing of one
+// namespace but of the cluster.
+func (c *Client) Scan(ctx context.Context) (Scan, error) {
+	if len(c.only) == 0 {
+		all, err := c.candidates(ctx, "")
+		if err != nil {
+			return Scan{}, err
+		}
+		return Scan{Candidates: all}, nil
+	}
+	var scan Scan
+	for _, ns := range c.only {
+		found, err := c.candidates(ctx, ns)
+		if err == nil {
+			scan.Candidates = append(scan.Candidates, found...)
+			continue
+		}
+		if ctx.Err() != nil || !answeredFor(err) {
+			return Scan{}, &NamespaceError{Namespace: ns, Err: err}
+		}
+		scan.Skipped = append(scan.Skipped, NamespaceError{Namespace: ns, Err: err})
+	}
+	if len(scan.Skipped) == len(c.only) {
+		return Scan{Skipped: scan.Skipped}, fmt.Errorf("no namespace could be read: %w", &scan.Skipped[0])
+	}
+	return scan, nil
+}
+
+// answeredFor reports whether err is the cluster API's answer about the
+// objects of one namespace, which says nothing of another's: any status
+// but 401, which refuses Kubeat's credentials for every namespace alike. A
+// request that got no answer in time, no connection or an untrusted
+// certificate is about the cluster.
+func answeredFor(err error) bool {
+	var status apierrors.APIStatus
+	return errors.As(err, &status) && !apierrors.IsUnauthorized(err)
+}
+
 func (c *Client) candidates(ctx context.Context, namespace string) ([]Candidate, error) {
 	services, err := c.serviceCandidates(ctx, namespace)
 	if err != nil {

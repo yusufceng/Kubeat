@@ -3240,7 +3240,7 @@ eklenmelidir.
 | `GET` | `/api/v1/monitors/{id}/grid?range=24h` | Kontrol geçmişi zaman dilimlerine bölünmüş: dilim başına kontrol, başarısız, ortalama yanıt, en sık hata; aralığın en sık hataları |
 | `GET` | `/api/v1/monitors/{id}/channels` | Monitor'un alarmının gittiği etkin kanallar; her birinin `delay_seconds` ve `repeat_seconds` değeriyle |
 | `POST` | `/api/v1/monitors/{id}/test-notification` | Monitor'u adıyla anan bir test bildirimini, alarmının gittiği her etkin kanala birer deneme olarak gönderir; kanal başına sonuçla döner (`channel_id`, `name`, `type`, `delivered`, kanalı yönetebilenlere `error`). Kapsamı tutan kanal yoksa `422`. Monitor'u değiştirebilenler kullanabilir, denetim kaydına yazılır |
-| `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı |
+| `GET` | `/api/v1/discovery` | Keşfin kullanılabilir olup olmadığı ve annotation eşitlemesinin son turu (`sync`): sayılar, atlanan nesneler (`skipped`) ve okunamayan namespace'ler (`skipped_namespaces`: `namespace`, `reason`, `error`; bkz. "Keşif" → "Okunamayan namespace"). Kapsamı sınırlı kullanıcıya yalnız kendi namespace'leri |
 | `GET` | `/api/v1/discovery/namespaces` | Cluster'daki namespace'ler |
 | `GET` | `/api/v1/discovery/candidates?namespace=x` | Namespace'teki izlenebilir hedefler |
 | `POST` | `/api/v1/discovery/import` | Seçilen hedefleri monitor'a çevirir |
@@ -3944,6 +3944,8 @@ yayınlar. Başlıcaları:
 | `kubeat_backup_last_success_timestamp_seconds` | En yeni yedek kopyanın zamanı; yeniden başlatmada yedek dizinindeki en yeni dosyadan okunur (bkz. "Yedekleme ve geri yükleme") |
 | `kubeat_backup_last_failure_timestamp_seconds` | Son başarısız yedek denemesinin zamanı, süreç açıldığından beri; yoksa 0. Son başarılı kopyadan yeniyse yedekleme başarısızdır (`KubeatBackupFailing`) |
 | `kubeat_license_expiry_timestamp_seconds` | Kubeat Enterprise lisansının bitiş zamanı; lisans yoksa 0 |
+| `kubeat_discovery_namespaces_skipped` | Annotation eşitlemesinin son turda okuyamayıp atladığı namespace sayısı (namespace sınırlı keşifte); hepsi okunduysa ve cluster geneli keşifte 0. Hiç yanıt alamayan tur değeri değiştirmez. Namespace adları etiket değildir, keşif durumunda ve log'dadır (bkz. "Keşif" → "Okunamayan namespace") |
+| `kubeat_discovery_sync_errors_total{reason}` | Annotation eşitlemesinin yapamadığı cluster okumaları, nedenine göre: `forbidden` (`403`: Role kaldırıldı ya da namespace RoleBinding'iyle silindi), `not_found` (`404`: istenen kaynak türü sunulmuyor), `timeout` (`UPTIME_KUBE_TIMEOUT` içinde yanıt yok), `other` (ulaşılamayan API sunucusu, reddedilen kimlik bilgisi, sunucu tarafı hata). Namespace sınırlı keşifte atlanan her namespace için turda bir, hiç yanıt alamayan ya da cluster geneli keşifte okunamayan tur için bir artar; dört seri de açılışta 0'dan başlar |
 
 Chart'ta `metrics.serviceMonitor.enabled=true` bir ServiceMonitor oluşturur;
 böylece monitor durumları cluster'ın kendi Prometheus'unda sorgulanabilir
@@ -3977,6 +3979,7 @@ yapılır. Kurallar:
 | `KubeatBackupFailing` | Son yedek denemesi başarısız oldu ve o zamandan beri başarılı kopya yok (`kubeat_backup_last_failure_timestamp_seconds` son başarılı kopyadan yeni). İlk başarısız denemede yanar ve bir kopya başarılı olana kadar açık kalır: dolu volume'un bir aralık süren beklemesi ve hiç kopya olmaması dahil; yeniden başlatmada da, yeniden başlama ve ilk deneme 10 dakikayı aşmadıkça (bkz. "Scrape boşluğu" ve "Yedekleme ve geri yükleme") |
 | `KubeatBackupStale` | `backup.interval` değerinin iki katı süredir başarılı yedek yok; yalnızca `backup.enabled=true` iken üretilir |
 | `KubeatLicenseExpiring` | Kubeat Enterprise lisansının bitişine 30 günden az kaldı ya da lisans bitti; 7 günden az kalınca aynı adla ikinci bir kural `critical` ile yanar (bkz. "Kubeat Enterprise lisansı") |
+| `KubeatDiscoveryNamespaceSkipped` | `kubeat.discovery` grubunda, `warning`: namespace sınırlı keşifte annotation eşitlemesi 10 dakikadır en az bir namespace'i okuyamayıp atlıyor (`kubeat_discovery_namespaces_skipped > 0`); o namespace'in monitor'leri olduğu gibi kalıyor. Kuruluma göre tektir; namespace adını taşımaz, adlar keşif durumunda ve log'dadır. Bir ya da iki turluk aksamada yanmaz; Recreate'te (yükseltme) 10 dakika yeni pod'un ilk turundan yeniden başlar (bkz. "Keşif" → "Okunamayan namespace") |
 
 `kubeat.monitors` grubundaki ilk iki kural `severity` etiketini
 `metrics.prometheusRule.severity` değerinden, `kubeat.signin` grubundaki
@@ -4570,7 +4573,10 @@ helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat -n ekibim \
 oluşturmaz: sayılan her namespace'e salt okunur bir Role ve RoleBinding
 koyar, backend de yalnızca o namespace'leri görür (`UPTIME_DISCOVERY_NAMESPACES`).
 Keşif, annotation eşitlemesi, pod bazlı kontrol, workload monitor'lar ve
-olaylar bu namespace'lerde aynen çalışır.
+olaylar bu namespace'lerde aynen çalışır. Listedeki bir namespace
+okunamazsa (Role'ü kaldırıldı, namespace silindi) annotation eşitlemesi onu
+atlar ve ötekilerde sürer (aşağıda "Annotation ile sürekli keşif" →
+"Okunamayan namespace").
 
 Pod CPU/belleği için Thanos Querier'ın **9092** portu kullanılır: bu uç
 her sorguda bir namespace ister ve yalnızca o namespace'i yanıtlar; Role'deki
@@ -4604,7 +4610,9 @@ keşif sayfasındaki tabloyla aynı kuralla seçilir; `kubeat.io/path` verilirse
 Service portuna o yola HTTP isteği yapılır. Annotation kaldırılınca ya da
 nesne silinince monitor, geçmişiyle birlikte kaldırılır; hedef ya da
 annotation değişince monitor güncellenir. Cluster okunamazsa hiçbir şey
-değiştirilmez. Eşitleme "Hedef yükü" bölümündeki yük sınırlarına tabidir:
+değiştirilmez; namespace sınırlı keşifte okunamayan bir namespace ise
+atlanır ve tur ötekilerde sürer (aşağıda "Okunamayan namespace").
+Eşitleme "Hedef yükü" bölümündeki yük sınırlarına tabidir:
 dış bir Ingress ya da Route host'u için 30 saniyeden kısa bir
 `kubeat.io/interval` (ya da 30 saniyenin altında bir
 `UPTIME_DISCOVERY_DEFAULT_INTERVAL`), dolu bir host, namespace ya da kurulum
@@ -4649,6 +4657,53 @@ değildir. Ingress'ten HTTPRoute'a geçerken Ingress silinince monitor
 geçmişiyle birlikte kalkar; geçişten önce elle monitor oluşturun
 ([yol haritası, "Bilinen sınırlar"](docs/yol-haritasi.md#bilinen-sınırlar),
 S49 satırı).
+
+#### Okunamayan namespace
+
+Keşif `discovery.namespaces` (`UPTIME_DISCOVERY_NAMESPACES`) ile
+sınırlıyken eşitleme namespace'leri tek tek okur. Biri okunamazsa:
+
+- **Atlanır, tur sürer.** Namespace'in Role'ü kaldırılmışsa ya da namespace
+  RoleBinding'iyle birlikte silinmişse API sunucusu `403` döner (var olmayan
+  bir namespace'teki liste `404` değil, boş bir listedir; RoleBinding'i
+  gidince istek `403` alır). Eşitleme o namespace'i atlar, öteki namespace'leri her zamanki
+  gibi eşitler.
+- **Atlanan namespace'in monitor'leri değişmez.** Silinmez, güncellenmez;
+  oradaki "Kubeat'te silindi" kayıtları da korunur. Bu sürede o
+  namespace'teki yeni annotation'lar izlenmez, kaldırılanların monitor'ü
+  yerinde kalır.
+- **Düzelince uygulanır.** Namespace yeniden okunabilince sonraki tur
+  (`UPTIME_DISCOVERY_SYNC_INTERVAL`) bekleyen değişiklikleri uygular.
+- **Silinen namespace.** Monitor'leri genelde namespace `discovery.namespaces`
+  listesinden çıkarılana kadar kalır; çıkarıldıktan sonraki ilk tur onları
+  geçmişleriyle birlikte kaldırır. Kesin değildir: Kubernetes bir namespace'in
+  nesnelerini sabit olmayan bir sırayla siler. RoleBinding nesnelerden sonra
+  silinirse o birkaç saniyeye denk gelen bir tur boş liste okur ve
+  monitor'leri geçmişleriyle daha erken kaldırır.
+- **Hiçbiri okunamazsa** tur hiçbir şeyi değiştirmez, keşif durumu "Cluster
+  okunamadı" der ve atlanan namespace'lerin hepsini listeler.
+- **Namespace'in değil cluster'ın hatası.** Yanıt alınamayan bir istek
+  (API sunucusuna ulaşılamıyor, `UPTIME_KUBE_TIMEOUT` içinde yanıt yok,
+  sertifikası güvenilmiyor) ya da reddedilen kimlik bilgisi (`401`) bir
+  namespace'e özgü değildir: tur, hangi namespace'te olursa olsun, hiçbir
+  şeyi değiştirmeden biter. Cluster geneli keşifte (`discovery.namespaces`
+  boş) cluster tek seferde okunur; okunamazsa da öyle.
+- **Nerede görünür.** Namespace'in adı ve nedeni keşif durumunda
+  (`GET /api/v1/discovery`, `sync.skipped_namespaces`: `namespace`,
+  `reason`, `error`), Keşif sayfasında ve backend log'undaki `WARN`
+  satırında (`discovery sync skipped a namespace it could not read`)
+  görünür. Kapsamı sınırlı kullanıcı yalnız kendi namespace'lerini görür;
+  API sunucusunun kendi cümlesi yalnız yöneticiye gider, öteki kullanıcılar
+  hatanın türünü okur. Metriklerde namespace adı yoktur:
+  `kubeat_discovery_namespaces_skipped` son turda atlanan namespace
+  sayısıdır, `kubeat_discovery_sync_errors_total{reason}` başarısız
+  okumaları nedenine göre sayar (`forbidden`, `not_found`, `timeout`,
+  `other`). `metrics.prometheusRule.enabled` ile gelen
+  `KubeatDiscoveryNamespaceSkipped` alarmı bir namespace 10 dakika atlanınca
+  yanar (bkz. "Aracın kendi sağlığı").
+- **Çare.** Role'ü ve RoleBinding'i geri koyun (aynı values ile
+  `helm upgrade` chart'ınkileri yeniden oluşturur) ya da silinen
+  namespace'i `discovery.namespaces` listesinden çıkarın.
 
 ## Alarm
 

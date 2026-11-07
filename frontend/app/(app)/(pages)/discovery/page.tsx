@@ -81,12 +81,13 @@ function ScanForm({ namespaces, namespace, t }: { namespaces: string[]; namespac
 
 /**
  * How the monitors asked for with annotations are doing: whether the sync
- * runs, the line to put into a manifest, and the objects it passed over.
- * For a user who does not see every namespace (scoped), the backend counts
- * and lists only theirs.
+ * runs, the line to put into a manifest, and the namespaces and objects it
+ * passed over. For a user who does not see every namespace (scoped), the
+ * backend counts and lists only theirs.
  */
 async function SyncPanel({ sync, canEdit, scoped }: { sync: DiscoveryStatus["sync"]; canEdit: boolean; scoped: boolean }) {
   const t = await getT();
+  const unread = sync?.skipped_namespaces ?? [];
   const state: { glyph: GlyphKind; label: string } =
     sync === null
       ? { glyph: "paused", label: "discovery.sync.stateOff" }
@@ -94,7 +95,9 @@ async function SyncPanel({ sync, canEdit, scoped }: { sync: DiscoveryStatus["syn
         ? { glyph: "down", label: "discovery.sync.stateError" }
         : sync.last_run_at.startsWith("0001")
           ? { glyph: "pending", label: "discovery.sync.stateWaiting" }
-          : { glyph: "up", label: "discovery.sync.stateOn" };
+          : unread.length > 0
+            ? { glyph: "warn", label: "discovery.sync.stateSkipping" }
+            : { glyph: "up", label: "discovery.sync.stateOn" };
   return (
     <section className="panel" aria-labelledby="sync-title">
       <div className="pg-provider-head">
@@ -152,6 +155,24 @@ async function SyncPanel({ sync, canEdit, scoped }: { sync: DiscoveryStatus["syn
               <span className="pg-mono break-all">{sync.error}</span>
             </span>
           </p>
+        )}
+        {unread.length > 0 && (
+          <div role="status" className="pg-callout pg-callout-warn">
+            <span className="pg-callout-icon" aria-hidden>
+              <WarningIcon />
+            </span>
+            <div className="pg-callout-body">
+              <span className="pg-callout-title">{t.n("discovery.sync.unreadTitle", unread.length)}</span>
+              <span className="block">{t("discovery.sync.unreadLead")}</span>
+              <ul className="mt-1">
+                {unread.map((n) => (
+                  <li key={n.namespace}>
+                    <span className="pg-mono">{n.namespace}</span>: <span className="pg-mono break-all">{n.error}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         )}
       </div>
       {sync && sync.skipped.length > 0 && (

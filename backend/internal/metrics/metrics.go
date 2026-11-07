@@ -56,6 +56,9 @@ type Metrics struct {
 	// (UndeliveredOutages); read at scrape time.
 	undeliveredMu sync.Mutex
 	undelivered   map[int64]int
+
+	// discovery are the annotation sync's series (discovery.go).
+	discovery discoveryMetrics
 }
 
 // MaxThrottledHosts bounds the host labels of kubeat_target_throttled_total:
@@ -250,6 +253,7 @@ func New(version string) *Metrics {
 		Name: "kubeat_license_expiry_timestamp_seconds",
 		Help: "When the Kubeat Enterprise license ends; 0 without a usable license.",
 	})
+	m.discovery = newDiscoveryMetrics(m.registry)
 
 	build := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "kubeat_build_info",

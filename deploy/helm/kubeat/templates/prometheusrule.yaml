@@ -269,4 +269,25 @@ spec:
           annotations:
             summary: {{ `"Kubeat Enterprise license {{ if lt $value 0.0 }}has expired{{ else }}expires in {{ $value | humanizeDuration }}{{ end }}"` }}
             description: "When the license ends, signing in through LDAP and OIDC, namespace-limited users, the audit log and the extra status pages stop; monitoring itself goes on. A renewed license Secret takes effect within minutes, without a restart."
+    - name: kubeat.discovery
+      rules:
+        # With discovery limited to namespaces (discovery.namespaces), the
+        # annotation sync reads them one by one and goes past one it cannot
+        # read: its Role was taken away, or it was deleted with its
+        # RoleBinding. That namespace's monitors stay as they are, so new
+        # annotations there are not picked up and removed ones keep their
+        # monitors, while the other namespaces are kept in step. The gauge
+        # holds between runs; 10 minutes leave out a namespace a run or two
+        # could not read. The names are in the discovery status and the
+        # backend's log, never in a label. One alert per installation, as
+        # KubeatUnhealthy; a Recreate, whose new pod reports from its first
+        # run, starts the 10 minutes over.
+        - alert: KubeatDiscoveryNamespaceSkipped
+          expr: max {{ $byInstallation }} (kubeat_discovery_namespaces_skipped) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: {{ `"Kubeat's annotation discovery is skipping {{ $value }} of its namespaces"` }}
+            description: "For 10 minutes the annotation sync could not read some of the namespaces discovery is limited to (forbidden: a Role taken away, or a namespace deleted with its RoleBinding; kubeat_discovery_sync_errors_total says why), and left their monitors as they were: new annotations there are not monitored and removed ones keep their monitors. GET /api/v1/discovery and the backend's log (discovery sync skipped a namespace) name them; restore the Role, or take a deleted namespace off discovery.namespaces."
 {{- end }}

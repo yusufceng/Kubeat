@@ -17,8 +17,9 @@ type discoveryStatusResponse struct {
 	// is unavailable otherwise; empty for all but administrators.
 	Detail string `json:"detail"`
 	// Sync is the state of the monitors kept in step with annotated
-	// objects; null when that is off. Its counts and skipped objects cover
-	// only the namespaces the user may see, unless they see all.
+	// objects; null when that is off. Its counts, skipped objects and
+	// skipped namespaces cover only the namespaces the user may see, unless
+	// they see all.
 	Sync *discovery.Status `json:"sync"`
 }
 
@@ -32,6 +33,15 @@ func (h *handler) discoveryStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if st.Error != "" && !p.IsAdmin() {
 			st.Error = upstreamReason(p, st.Cause)
+		}
+		if !p.IsAdmin() {
+			// A copy: the list is the syncer's own.
+			namespaces := make([]discovery.NamespaceSkip, len(st.SkippedNamespaces))
+			for i, n := range st.SkippedNamespaces {
+				n.Error = upstreamReason(p, n.Cause)
+				namespaces[i] = n
+			}
+			st.SkippedNamespaces = namespaces
 		}
 		resp.Sync = &st
 	}

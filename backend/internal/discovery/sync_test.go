@@ -15,16 +15,20 @@ import (
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
+// fakeCluster answers a scan as k8s.Client.Scan does: the candidates of the
+// namespaces it read and those it skipped; with err, none of the
+// candidates, as when the cluster could not be read at all.
 type fakeCluster struct {
 	candidates []k8s.Candidate
+	skipped    []k8s.NamespaceError
 	err        error
 }
 
-func (f *fakeCluster) Candidates(_ context.Context, namespace string) ([]k8s.Candidate, error) {
-	if namespace != "" {
-		panic("the syncer reads the whole cluster at once")
+func (f *fakeCluster) Scan(context.Context) (k8s.Scan, error) {
+	if f.err != nil {
+		return k8s.Scan{Skipped: f.skipped}, f.err
 	}
-	return f.candidates, f.err
+	return k8s.Scan{Candidates: f.candidates, Skipped: f.skipped}, nil
 }
 
 func monitored(extra map[string]string) map[string]string {

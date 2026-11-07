@@ -378,12 +378,22 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   `backend.resources.limits.memory` artırılmalı ya da keşif
   `discovery.namespaces` ile sınırlanmalıdır (S42, [backlog](backlog.md)
   "Keşif eşitlemesinde bellek sınırı ve OOMKill döngüsü (S42)").
-- Annotation eşitlemesinin hatası yalnızca WARN olarak loglanır; metriği ve
-  alarmı yoktur. Namespace sınırlı keşifte listedeki tek bir namespace
-  okunamazsa (silinmiş ya da 403) bütün tur bırakılır: öteki
-  namespace'lerde yeni annotation'lar izlenmez, kaldırılanların monitor'leri
-  yerinde kalır (S43, sprint 10, [#147](https://github.com/yusufceng/Kubeat/issues/147);
-  S42'den önce).
+- Namespace sınırlı keşifte okunamayan bir namespace (403 ya da silinmiş)
+  0.52'den beri atlanır ve tur öteki namespace'lerde sürer; atlanan
+  namespace'in monitor'leri, namespace yeniden okunabilene ya da
+  `discovery.namespaces`'tan çıkarılana kadar olduğu gibi kalır (S43,
+  [#147](https://github.com/yusufceng/Kubeat/issues/147); README "Keşif" →
+  "Okunamayan namespace"). Sinyal `kubeat_discovery_namespaces_skipped`,
+  `kubeat_discovery_sync_errors_total{reason}` ve `KubeatDiscoveryNamespaceSkipped`
+  alarmı; namespace adı yalnız keşif durumunda ve WARN'da. Kalanlar:
+  cluster'ın hiç okunamadığı tur (yanıt yok, `401`, cluster geneli keşifte
+  okuma hatası) yalnız sayaçta ve WARN'da görünür, chart kuralı yoktur;
+  alarmın 10 dakikası Recreate'te baştan başlar ([backlog](backlog.md)
+  "Annotation eşitlemesinin cluster'ı hiç okuyamadığı tur için chart kuralı
+  (S43 takibi)"). Chart dışı bir kurulumda ClusterRole'le birlikte
+  `UPTIME_DISCOVERY_NAMESPACES` verilmişse silinen namespace boş liste döner
+  ve monitor'leri "nesne silindi" diye kaldırılır (chart, `discovery.namespaces`
+  ile yalnız Role kurar; orada silinen namespace 403 verir ve atlanır).
 - Gateway API HTTPRoute okunmaz; keşif adayı ya da annotation hedefi
   değildir. Ingress'ten HTTPRoute'a geçerken Ingress silinince monitor
   geçmişiyle birlikte kalkar; geçişten önce elle monitor oluşturun (S49,

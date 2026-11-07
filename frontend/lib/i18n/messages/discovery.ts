@@ -42,6 +42,11 @@ export const discovery = defineMessages(
     "discovery.sync.readError": "Cluster okunamadı, hiçbir şey değiştirilmedi:",
     "discovery.sync.dismissed": "Kubeat'te silindi; nesnesindeki annotation durduğu hâlde izlenmiyor.",
     "discovery.sync.restore": "Yeniden izle",
+    "discovery.sync.stateSkipping": "Bazı namespace'ler okunamıyor",
+    "discovery.sync.unreadTitle.one": "{count} namespace okunamadı, atlandı:",
+    "discovery.sync.unreadTitle.other": "{count} namespace okunamadı, atlandı:",
+    "discovery.sync.unreadLead":
+      "Monitor'leri olduğu gibi kalır; oradaki annotation değişiklikleri namespace yeniden okunabilince uygulanır.",
     "discovery.candidates.object": "Nesne",
     "discovery.candidates.check": "Önerilen kontrol",
     "discovery.candidates.status": "Durum",
@@ -195,6 +200,11 @@ export const discovery = defineMessages(
     "discovery.sync.readError": "The cluster could not be read; nothing was changed:",
     "discovery.sync.dismissed": "Deleted in Kubeat; not monitored although its object still carries the annotation.",
     "discovery.sync.restore": "Monitor again",
+    "discovery.sync.stateSkipping": "Some namespaces cannot be read",
+    "discovery.sync.unreadTitle.one": "{count} namespace could not be read and was skipped:",
+    "discovery.sync.unreadTitle.other": "{count} namespaces could not be read and were skipped:",
+    "discovery.sync.unreadLead":
+      "Their monitors stay as they are; annotation changes there apply once the namespace can be read again.",
     "discovery.candidates.object": "Object",
     "discovery.candidates.check": "Suggested check",
     "discovery.candidates.status": "Status",

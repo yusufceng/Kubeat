@@ -967,6 +967,13 @@ export type SyncStatus = {
   removed: number;
   /** dismissed: the monitor was deleted here although the annotation still asks for it. */
   skipped: { namespace: string; source: string; reason: string; dismissed: boolean }[];
+  /**
+   * The namespaces the run could not read, with discovery limited to namespaces: it went on in the
+   * others and left their monitors as they were. reason is forbidden, not_found, timeout or other;
+   * error the cluster's own words for administrators, the kind of failure for everyone else. Absent
+   * from a backend older than 0.52.
+   */
+  skipped_namespaces?: { namespace: string; reason: string; error: string }[];
 };
 
 /** Undoes the deletion of an annotated object's monitor; the next sync creates it again. */
