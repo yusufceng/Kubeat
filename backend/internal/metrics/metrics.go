@@ -154,7 +154,7 @@ func New(version string) *Metrics {
 	}, []string{"reason"})
 	m.signInThrottled = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "kubeat_signin_throttled_total",
-		Help: "Sign-ins the throttle refused with 429, by kind: \"source\" (the per-source-and-name throttle, UPTIME_LOGIN_MAX_FAILURES) or \"account\" (the looser per-name ceiling across all sources, UPTIME_LOGIN_ACCOUNT_MAX_FAILURES, which makes the distributed-guess lockout ADR-0004 leaves open visible). The client response is the same 429 for any key (the enum is never exposed, #78).",
+		Help: "Sign-ins the throttle refused with 429, by kind: \"source\" (the per-source-and-name throttle, UPTIME_LOGIN_MAX_FAILURES), \"account\" (the looser per-name ceiling across all sources, UPTIME_LOGIN_ACCOUNT_MAX_FAILURES, which makes the distributed-guess lockout ADR-0004 leaves open visible) or \"source_total\" (one source's failures across all names, UPTIME_LOGIN_SOURCE_MAX_FAILURES, off by default: a password spray from one source, or many users behind one NAT). The client response is the same 429 for any key (the enum is never exposed, #78).",
 	}, []string{"kind"})
 	m.targetScopeDenied = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "kubeat_target_scope_denied_total",
@@ -191,7 +191,7 @@ func New(version string) *Metrics {
 	for _, reason := range []string{SignInWrongPassword, SignInRejected, SignInDirectoryUnreachable} {
 		m.signInFailures.WithLabelValues(reason)
 	}
-	for _, kind := range []string{ThrottleSource, ThrottleAccount} {
+	for _, kind := range []string{ThrottleSource, ThrottleAccount, ThrottleSourceTotal} {
 		m.signInThrottled.WithLabelValues(kind)
 	}
 
@@ -237,10 +237,12 @@ const (
 // Sign-in throttle kinds: the fixed values of the kind label of
 // kubeat_signin_throttled_total. ThrottleSource is the per-source-and-name
 // throttle, ThrottleAccount the looser per-name ceiling across all sources
-// (the admin-lockout moment ADR-0004 leaves open).
+// (the admin-lockout moment ADR-0004 leaves open), ThrottleSourceTotal the
+// ceiling on one source's failures across all names (a password spray).
 const (
-	ThrottleSource  = "source"
-	ThrottleAccount = "account"
+	ThrottleSource      = "source"
+	ThrottleAccount     = "account"
+	ThrottleSourceTotal = "source_total"
 )
 
 // SignInFailed records a refused sign-in by why it failed (a SignIn* reason).
@@ -253,7 +255,7 @@ func (m *Metrics) SignInFailed(reason string) {
 }
 
 // SignInThrottled records a sign-in the throttle refused with 429, by kind
-// (ThrottleSource or ThrottleAccount).
+// (ThrottleSource, ThrottleAccount or ThrottleSourceTotal).
 func (m *Metrics) SignInThrottled(kind string) {
 	if m != nil {
 		m.signInThrottled.WithLabelValues(kind).Inc()

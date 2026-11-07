@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -9,10 +10,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
+	"github.com/yusufceng/Kubeat/backend/internal/ldapauth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
@@ -927,4 +930,306 @@ func TestGuessWarningsShareTheMinute(t *testing.T) {
 		!strings.Contains(got, "one shared per-account lock") {
 		t.Errorf("want a second WARN a minute on, naming the password change, got %d: %q", n, got)
 	}
+}
+
+// countingLDAP is a fakeLDAP that counts the binds it is asked for, so that
+// a test can tell a sign-in never reached the directory.
+type countingLDAP struct {
+	fakeLDAP
+	binds atomic.Int64
+}
+
+func (c *countingLDAP) Authenticate(ctx context.Context, username, password string) (ldapauth.Identity, error) {
+	c.binds.Add(1)
+	return c.fakeLDAP.Authenticate(ctx, username, password)
+}
+
+// directoryOf is a directory in which each of names has the password
+// "s3cret" and no group.
+func directoryOf(names ...string) *countingLDAP {
+	d := &countingLDAP{fakeLDAP: fakeLDAP{users: map[string]struct {
+		password string
+		groups   []string
+	}{}}}
+	for _, name := range names {
+		d.users[name] = struct {
+			password string
+			groups   []string
+		}{"s3cret", nil}
+	}
+	return d
+}
+
+// sourceCeilingAPI is throttledAPI (three failures lock a source's attempts
+// at a name; account failures at a name across sources lock it, zero for no
+// such ceiling) with ceiling failures from one source across all names
+// locking that source (UPTIME_LOGIN_SOURCE_MAX_FAILURES), directory as the
+// LDAP server unless it is nil, giving its users the viewer role in the
+// namespace "public", and the
+// sign-ins counted by the returned meter. It makes the administrator "admin"
+// (password "parola-123") from a source of its own.
+func sourceCeilingAPI(t *testing.T, ceiling, account int, directory LDAP) (*httptest.Server, *fakeClock, *metrics.Metrics) {
+	t.Helper()
+	meter := metrics.New("test")
+	srv, _, clock, _ := throttledAPI(t, account, func(o *Options) {
+		o.SourceThrottle = &auth.Throttle{MaxFailures: ceiling, Lockout: guessLockout}
+		o.SignIns = meter
+		if directory != nil {
+			o.LDAP = directory
+			o.LDAPDefaultRole, o.LDAPDefaultNamespaces = store.RoleViewer, []string{"public"}
+		}
+	})
+	if rec := fromBrowserAt(srv, "203.0.113.250", "", "POST", "/api/v1/auth/setup",
+		`{"username":"admin","password":"parola-123"}`); rec.Code != http.StatusOK {
+		t.Fatalf("setup: status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	return srv, clock, meter
+}
+
+// signInAt signs in as username with password from a browser at source.
+func signInAt(srv *httptest.Server, source, username, password string) *httptest.ResponseRecorder {
+	return fromBrowserAt(srv, source, "", "POST", "/api/v1/auth/login", `{"username":"`+username+`","password":"`+password+`"}`)
+}
+
+// wantSignInStatus fails unless each sign-in as one of names with password
+// from source is answered with want.
+func wantSignInStatus(t *testing.T, srv *httptest.Server, source, password string, want int, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		if rec := signInAt(srv, source, name, password); rec.Code != want {
+			t.Fatalf("%s as %s: status = %d, want %d", source, name, rec.Code, want)
+		}
+	}
+}
+
+// wantThrottledKinds fails unless kubeat_signin_throttled_total has counted
+// source, account and sourceTotal refusals of the three kinds.
+func wantThrottledKinds(t *testing.T, meter *metrics.Metrics, source, account, sourceTotal float64) {
+	t.Helper()
+	got, err := meter.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for kind, want := range map[string]float64{
+		metrics.ThrottleSource: source, metrics.ThrottleAccount: account, metrics.ThrottleSourceTotal: sourceTotal,
+	} {
+		if key := "kubeat_signin_throttled_total{kind=" + kind + "}"; got[key] != want {
+			t.Errorf("%s = %v, want %v", key, got[key], want)
+		}
+	}
+}
+
+// One source trying a password at many names, a password spray, is held by
+// the ceiling on its failures across all names: past it every attempt from
+// that source waits, at any name and with the right password too, and is
+// refused before any password is checked, so no bind reaches the directory
+// (whose own lockout each bind counts toward) and no local password is
+// compared. The answer is the throttle's usual 429 with Retry-After, counted
+// as kind="source_total"; another source signs in as before (S88).
+func TestSignInSourceCeilingAcrossNames(t *testing.T) {
+	const sprayer, other = "203.0.113.1", "203.0.113.2"
+	directory := directoryOf("ayse", "mehmet", "zeynep", "can")
+	srv, clock, meter := sourceCeilingAPI(t, 3, 0, directory)
+
+	// One password at three names, a minute apart: a bind each.
+	for _, name := range []string{"ayse", "mehmet", "zeynep"} {
+		wantSignInStatus(t, srv, sprayer, "Sonbahar2026", http.StatusUnauthorized, name)
+		clock.advance(time.Minute)
+	}
+	// Then the sprayer is refused until its first failure ages out: at a
+	// fresh name, at a made-up one, with a directory user's right password
+	// and with the local administrator's.
+	for _, try := range []struct{ name, password string }{
+		{"can", "Sonbahar2026"}, {"made-up", "Sonbahar2026"}, {"ayse", "s3cret"}, {"admin", "parola-123"},
+	} {
+		wantThrottled(t, "the sprayer as "+try.name, signInAt(srv, sprayer, try.name, try.password), guessLockout-3*time.Minute)
+	}
+	if n := directory.binds.Load(); n != 3 {
+		t.Errorf("%d binds reached the directory, want 3: none past the ceiling", n)
+	}
+	// Another source is not held by the sprayer's ceiling.
+	wantSignInStatus(t, srv, other, "s3cret", http.StatusOK, "ayse")
+	wantSignInStatus(t, srv, other, "parola-123", http.StatusOK, "admin")
+	if n := directory.binds.Load(); n != 4 {
+		t.Errorf("%d binds reached the directory, want 4", n)
+	}
+	wantThrottledKinds(t, meter, 0, 0, 4)
+
+	// The window slides: once the first failure is a lockout period old,
+	// the sprayer has one attempt again.
+	clock.advance(guessLockout - 3*time.Minute)
+	wantSignInStatus(t, srv, sprayer, "s3cret", http.StatusOK, "can")
+}
+
+// The ceiling is off by default (UPTIME_LOGIN_SOURCE_MAX_FAILURES=0, no
+// SourceThrottle): one source may try a password at any number of names,
+// each held only by its own per-source-and-name limit, as before 0.52.
+func TestSignInSourceCeilingOff(t *testing.T) {
+	names := make([]string, 20)
+	for i := range names {
+		names[i] = fmt.Sprintf("user-%d", i)
+	}
+	directory := directoryOf(names...)
+	meter := metrics.New("test")
+	srv, _, _, _ := throttledAPI(t, 0, func(o *Options) {
+		o.LDAP = directory
+		o.SignIns = meter
+	})
+	wantSignInStatus(t, srv, "203.0.113.1", "Sonbahar2026", http.StatusUnauthorized, names...)
+	if n := directory.binds.Load(); n != int64(len(names)) {
+		t.Errorf("%d binds, want %d", n, len(names))
+	}
+	wantThrottledKinds(t, meter, 0, 0, 0)
+}
+
+// The order of the three limits: the source's own at a name first, then the
+// source's ceiling across names, then the name's ceiling across sources. An
+// attempt refused by one is taken back from those before it, so it counts
+// toward none: a source locked at a name, or refused by a name's ceiling,
+// keeps its ceiling across names as it was, and a source past its ceiling
+// adds nothing to the names it tries.
+func TestSignInSourceCeilingOrder(t *testing.T) {
+	const s1, s2, s3 = "203.0.113.1", "203.0.113.2", "203.0.113.3"
+	// Three at a name from a source, five from a source, four at a name.
+	srv, _, meter := sourceCeilingAPI(t, 5, 4, nil)
+
+	// s1 locks itself at admin: three failures, three of its five.
+	wantSignInStatus(t, srv, s1, "yanlis", http.StatusUnauthorized, "admin", "admin", "admin")
+	wantThrottled(t, "s1 at admin, locked there", signInAt(srv, s1, "admin", "yanlis"), guessLockout)
+	wantThrottledKinds(t, meter, 1, 0, 0)
+	// s2's failure is admin's fourth across sources: its ceiling.
+	wantSignInStatus(t, srv, s2, "yanlis", http.StatusUnauthorized, "admin")
+	wantThrottled(t, "s3 at admin, past its ceiling", signInAt(srv, s3, "admin", "parola-123"), guessLockout)
+	wantThrottledKinds(t, meter, 1, 1, 0)
+
+	// The refusal at admin did not count toward s1's ceiling: two more
+	// failures at other names fit, then s1 is past it.
+	wantSignInStatus(t, srv, s1, "yanlis", http.StatusUnauthorized, "b1", "b2")
+	wantThrottled(t, "s1 at b3, past its ceiling", signInAt(srv, s1, "b3", "yanlis"), guessLockout)
+	wantThrottledKinds(t, meter, 1, 1, 1)
+	// Locked at admin and past its ceiling, s1 is refused by the first.
+	wantThrottled(t, "s1 at admin", signInAt(srv, s1, "admin", "parola-123"), guessLockout)
+	wantThrottledKinds(t, meter, 2, 1, 1)
+
+	// s2 past its ceiling, at admin past admin's too: the source's ceiling
+	// comes first.
+	wantSignInStatus(t, srv, s2, "yanlis", http.StatusUnauthorized, "d1", "d2", "d3", "d4")
+	wantThrottled(t, "s2 at admin", signInAt(srv, s2, "admin", "parola-123"), guessLockout)
+	wantThrottledKinds(t, meter, 2, 1, 2)
+
+	// admin's ceiling refused s3, and the attempt was taken back from s3's
+	// ceiling as well: five failures fit, then s3 is past it.
+	wantSignInStatus(t, srv, s3, "yanlis", http.StatusUnauthorized, "e1", "e2", "e3", "e4", "e5")
+	wantThrottled(t, "s3 at e6", signInAt(srv, s3, "e6", "yanlis"), guessLockout)
+	wantThrottledKinds(t, meter, 2, 1, 3)
+}
+
+// A source past its ceiling adds nothing to its own counter at the name it
+// tries: refused there more times than that counter allows, it signs in at
+// the name once its ceiling's window has moved on.
+func TestSignInSourceCeilingLeavesTheNameCounter(t *testing.T) {
+	const source = "203.0.113.1"
+	directory := directoryOf("ayse", "mehmet", "zeynep", "can")
+	srv, clock, _ := sourceCeilingAPI(t, 3, 0, directory)
+	for _, name := range []string{"ayse", "mehmet", "zeynep"} {
+		wantSignInStatus(t, srv, source, "Sonbahar2026", http.StatusUnauthorized, name)
+		clock.advance(time.Minute)
+	}
+	for range 4 {
+		wantThrottled(t, "the source at can", signInAt(srv, source, "can", "s3cret"), guessLockout-3*time.Minute)
+	}
+	clock.advance(guessLockout - 3*time.Minute)
+	wantSignInStatus(t, srv, source, "s3cret", http.StatusOK, "can")
+}
+
+// A right password does not wipe out the source's failures at other names:
+// one hit in a spray must not clear the misses before it. It counts as no
+// failure either, so the right passwords of many users behind one NAT do not
+// add up to the ceiling; and it forgets its source's failures at its name,
+// as it did before (ADR-0004).
+func TestSignInRightPasswordKeepsTheSourceCeiling(t *testing.T) {
+	const source = "203.0.113.1"
+	srv, _, meter := sourceCeilingAPI(t, 4, 0, nil)
+
+	wantSignInStatus(t, srv, source, "yanlis", http.StatusUnauthorized, "admin", "admin")
+	wantSignInStatus(t, srv, source, "parola-123", http.StatusOK, "admin", "admin", "admin")
+	// admin's failures from the source are forgotten: two more fit under
+	// its three. They are the source's third and fourth across names: the
+	// right passwords took nothing of the ceiling, and cleared nothing.
+	wantSignInStatus(t, srv, source, "yanlis", http.StatusUnauthorized, "admin", "admin")
+	wantThrottled(t, "the source at another name", signInAt(srv, source, "other", "yanlis"), guessLockout)
+	wantThrottledKinds(t, meter, 0, 0, 1)
+}
+
+// What turns out not to be a guess is taken back from the source's ceiling
+// as from the other limits: a directory that cannot be reached, which still
+// counts as directory_unreachable (S63), and the right password of a
+// disabled account.
+func TestSignInSourceCeilingSkipsNoGuesses(t *testing.T) {
+	const source = "203.0.113.1"
+	directory := directoryOf("ayse", "mehmet", "zeynep")
+	srv, _, meter := sourceCeilingAPI(t, 2, 0, directory)
+
+	directory.down = true
+	wantSignInStatus(t, srv, source, "s3cret", http.StatusUnauthorized, "ayse", "mehmet", "zeynep", "ayse", "mehmet")
+	directory.down = false
+	got, err := meter.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := got["kubeat_signin_failures_total{reason=directory_unreachable}"]; n != 5 {
+		t.Errorf("directory_unreachable = %v, want 5", n)
+	}
+
+	disabled := addUser(t, srv.URL, "yerel", store.RoleViewer, "shop")
+	if code := do(t, "PATCH", srv.URL+"/api/v1/users/"+itoa(disabled.ID), `{"enabled":false}`, nil); code != http.StatusOK {
+		t.Fatalf("disable: status = %d", code)
+	}
+	wantSignInStatus(t, srv, source, "parola-123", http.StatusForbidden, "yerel", "yerel", "yerel")
+
+	// None of them counted: two failures fit, then the source is past it.
+	wantSignInStatus(t, srv, source, "yanlis", http.StatusUnauthorized, "ayse", "zeynep")
+	wantThrottled(t, "the source at a third name", signInAt(srv, source, "mehmet", "s3cret"), guessLockout)
+	wantThrottledKinds(t, meter, 0, 0, 1)
+}
+
+// A directory sign-in that finds every directory slot taken is refused with
+// 503 and taken back from the source's ceiling too: the busy answers count
+// toward nothing (S88). Every request comes from the test's one address; the
+// throttle runs on a fake clock, only the queue wait on the real one.
+func TestSignInSourceCeilingSkipsBusy(t *testing.T) {
+	meter := metrics.New("test")
+	clock := &fakeClock{at: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}
+	base, directory, release := newBlockedAPI(t, func(o *Options) {
+		o.now = clock.now
+		o.LoginConcurrency, o.LoginQueueWait = directoryConcurrency+1, 100*time.Millisecond
+		// Room for the held sign-ins and two more.
+		o.SourceThrottle = &auth.Throttle{MaxFailures: directoryConcurrency + 2, Lockout: guessLockout}
+		o.SignIns = meter
+	})
+	held := holdDirectory(t, base, directory, directoryConcurrency)
+	// More busy answers than the ceiling has room for.
+	for i := range 4 {
+		code, msg := send("", "POST", base+"/api/v1/auth/login", fmt.Sprintf(`{"username":"dirk-%d","password":"anything"}`, i))
+		if code != http.StatusServiceUnavailable || !strings.HasPrefix(msg, "too many sign-ins") {
+			t.Fatalf("attempt %d while busy: %d %q, want 503", i+1, code, msg)
+		}
+	}
+	release()
+	for range directoryConcurrency {
+		if code := <-held; code != http.StatusUnauthorized {
+			t.Errorf("a directory sign-in that held a slot: status = %d, want 401", code)
+		}
+	}
+	// The held ones were failures, the busy ones were not: two fit.
+	for i := range 2 {
+		if code, _ := send("", "POST", base+"/api/v1/auth/login",
+			fmt.Sprintf(`{"username":"late-%d","password":"anything"}`, i)); code != http.StatusUnauthorized {
+			t.Fatalf("failure %d after the slots came free: status = %d, want 401", i+1, code)
+		}
+	}
+	if code, _ := send("", "POST", base+"/api/v1/auth/login", `{"username":"late-2","password":"anything"}`); code != http.StatusTooManyRequests {
+		t.Errorf("past the ceiling: status = %d, want 429", code)
+	}
+	wantThrottledKinds(t, meter, 0, 0, 1)
 }

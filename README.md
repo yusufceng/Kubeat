@@ -1480,6 +1480,42 @@ birinin kendi sayacı vardır, yeni ayar yoktur:
   `UPTIME_LOGIN_MAX_FAILURES`, sayfanın tüm kaynaklardaki hataları için
   `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` ("Durum sayfaları" → "Parola").
 
+**Kaynak tavanı (0.52, isteğe bağlı).** Üçüncü bir sınır bir kaynağın **bütün
+adlardaki** hatalı girişlerini sayar (`UPTIME_LOGIN_SOURCE_MAX_FAILURES`;
+varsayılan `0`, kapalı):
+
+- Bir kaynaktan `UPTIME_LOGIN_LOCKOUT` içinde bu kadar hatalı giriş, adı ne
+  olursa olsun, o kaynağın bütün girişlerini kapatır: tek bir kaynak bir
+  parolayı çok sayıda ada deneyemez (parola spreyi). Pencere kayar: en eski
+  hata süreyi doldurunca bir deneme açılır.
+- Yanıt öteki kilitlerle aynı 429 + `Retry-After`'dır (enum sızmaz).
+  Kilitliyken hiçbir parola denenmez: dizine bind gitmez, yerel parola da
+  karşılaştırılmaz; doğru parola da reddedilir.
+- Sıra: önce kaynak + ad sınırı, sonra kaynak tavanı, en son adın tüm
+  kaynaklardaki tavanı. Birine takılan deneme öncekilerden geri alınır, hiçbir
+  sayaca yazılmaz.
+- Doğru giriş tavandaki sayacı sıfırlamaz (spreydeki tek bir isabet öncesini
+  silmez) ama kendisi de sayılmaz; o adın kaynak + ad sayacı ve adın tüm
+  kaynaklardaki tavanı, önceden olduğu gibi, sıfırlanır. Dizine ulaşılamaması,
+  meşgul (503) yanıtı ve devre dışı hesabın doğru parolası sayılmaz. Rolü
+  olmayan dizin hesabının doğru parolası (403) ise, S76'daki gibi, sayılır.
+- **Taviz.** Aynı NAT ya da kurumsal vekil (PAC) arkasındaki kullanıcılar tek
+  kaynaktır: tavan dolunca o ağın arkasındaki herkesin girişi kilit süresince
+  birlikte kapanır. Varsayılanın kapalı olması bu yüzdendir; öneri ve LDAP
+  açılış uyarısı aşağıda "LDAP" → "Dizin hesap kilidi"nde.
+- **Önce hop değeri.** `UPTIME_TRUST_PROXY_HOPS` `0` ise ya da
+  `UPTIME_FRONTEND_TOKEN` yoksa her tarayıcı arayüz pod'u olarak görünür:
+  tavan o zaman bütün girişler için tek kilittir ve herhangi birinden gelen bu
+  kadar hata herkesi kilit süresince dışarıda bırakır. Backend bu durumda
+  açılışta WARN yazar ("cannot tell sources apart"). Tavanı açmadan önce hop
+  değerini `sign-in refused` satırının `source` alanıyla doğrulayın (aşağıda
+  "Vekil-hop rehberi"); kilitlenince yol "Kilitli hesaba girmek"tedir.
+  Gerekenden küçük bir değer de tavanı tek kilide çevirir: kaynak, önünüzdeki
+  vekilin ya da yük dengeleyicinin adresi olur ve açılışta uyarı yoktur.
+  `source` alanında tarayıcıların kendi adreslerini görmeden tavanı açmayın.
+- Yalnız girişi kapsar: durum sayfası kilidi ve parola değiştirme kendi
+  kaynak + kapsam sınırlarıyla kalır.
+
 LDAP açıkken dizindeki bir adın her yanlış parolası dizine bir bind'dir ve
 dizinin kendi hesap kilidine de sayılır: `UPTIME_LOGIN_MAX_FAILURES`'ı
 dizinin kilit eşiğinin altında tutun (aşağıda "LDAP" → "Dizin hesap
@@ -1794,7 +1830,8 @@ verirsiniz. `route.enabled` ya da `ingress.enabled` açıkken kurulum notu
     Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`.
 
   Emin değilseniz küçük değeri seçip `source` alanıyla doğrulamanızı söyler
-  (fazla değer atlatılabilir, yukarıda); değeri
+  (fazla değer atlatılabilir, yukarıda; kaynak tavanı açıkken küçük değer de
+  bütün girişleri tek kilide bağlar, "Kaynak tavanı" → "Önce hop değeri"); değeri
   `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` gibi verirsiniz.
 - Route'ta, değer ne olursa olsun, `IfNone`/`Never` notunu, politikayı okuyan
   `oc` komutunu ve yetkisi olmayana Route annotation'ını yazar (yukarıda
@@ -2020,7 +2057,9 @@ Yine de bir
 hesap tümüyle kilitlenebilir — kendi adresinizden art arda yanlış yazdığınızda
 (`UPTIME_LOGIN_MAX_FAILURES`), ya da çok sayıda ayrı kaynaktan gelen dağıtık
 bir tahmin hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, varsayılan 50)
-tetiklediğinde. Kilit sürerken açık oturumlar çalışmaya devam eder. Bu durumlar
+tetiklediğinde, ya da kaynak tavanı (`UPTIME_LOGIN_SOURCE_MAX_FAILURES`)
+açıkken bulunduğunuz kaynağın (aynı NAT ya da vekil, yanlış hop değeri)
+bütün adlardaki hataları tavanı doldurduğunda. Kilit sürerken açık oturumlar çalışmaya devam eder. Bu durumlar
 için başka yollar önceden hazır tutulmalıdır:
 
 - API anahtarı (`UPTIME_API_TOKEN`; chart onu `<release>-api-token`
@@ -2062,17 +2101,22 @@ anahtarıyla korunan yüzeyde, bkz. "Metrik anahtarı"); istemci yanıtı deği�
   artar; gerçek neden ayrıca logdadır ("ldap sign-in failed"). Bu sırada yerel
   `admin` ile girin.
 - `kubeat_signin_throttled_total{kind}` — throttle'ın 429 ile reddettiği
-  girişler: `source` (kaynak-ve-ad başına throttle, `UPTIME_LOGIN_MAX_FAILURES`)
-  ya da `account` (tüm kaynaklardaki gevşek ad tavanı,
-  `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`). `account` artışı, ADR-0004'ün bilerek
-  açık bıraktığı "dağıtık saldırıyla hesap kilitleniyor" anını görünür kılar.
+  girişler: `source` (kaynak-ve-ad başına throttle, `UPTIME_LOGIN_MAX_FAILURES`),
+  `account` (tüm kaynaklardaki gevşek ad tavanı,
+  `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`) ya da `source_total` (0.52; bir kaynağın
+  bütün adlardaki tavanı, `UPTIME_LOGIN_SOURCE_MAX_FAILURES`). `account` artışı,
+  ADR-0004'ün bilerek açık bıraktığı "dağıtık saldırıyla hesap kilitleniyor"
+  anını görünür kılar; `source_total` artışı tek kaynaktan bir parola spreyini
+  ya da tavanı dolan bir NAT'ı. `source_total` serisi tavan kapalıyken de
+  açılışta 0'dan başlar.
   Yalnız girişleri sayar: durum sayfası kilidinin ve parola değiştirmenin
   429'ları bu sayaca girmez. Logdaki ret satırları (`status page unlock
   refused`, `password change refused`) yalnız yanlış parolada yazılır; 429'lar,
   sayfanın ya da hesabın tavan kilidi dahil, yalnız throttle'ın dakikalık
   `sign-in attempts refused` WARN'ında görünür. O satırın `name` alanı son
   reddedilen anahtardır: `sp:<slug>` ya da `pw:<id>`, kaynağın kilidinde önünde
-  kaynak adresle.
+  kaynak adresle. Kaynak tavanının aynı satırı `throttle=source_total` alanını
+  taşır ve `name` alanı yalnız kaynak adrestir.
 
 Her iki sayacın serisi açılışta 0'dan başlar, böylece ilk olayı `increase()`
 ile yakalarsınız; etiket değerleri kapalı bir kümeden gelir ve kullanıcı adı
@@ -2162,16 +2206,33 @@ spreyine aracı olur mu" sorusunun bugünkü cevabı:
   tutmayın: Kubeat'in sınırı kendi süresi içinde sayar, daha kısa bir süre
   dizinin penceresine birden çok tur sığdırır. Aynı değer parola değiştirme ve
   durum sayfası kilidinin kaynak başına sınırıdır; onlar da sıkılaşır.
+- **Parola spreyi: kaynak tavanı (0.52).** Tek bir kaynak bir parolayı çok
+  sayıda ada denerse dizinde bulunan her ad için bir bind gider.
+  `UPTIME_LOGIN_SOURCE_MAX_FAILURES` bir kaynağın bütün adlardaki hatalarını
+  sınırlar; tavanı dolan kaynaktan dizine bind gitmez (yukarıda "Deneme
+  sınırı" → "Kaynak tavanı"). Varsayılan `0`, kapalıdır.
+- **Öneri (dizinli ve internete açık kurulum):**
+  `UPTIME_LOGIN_SOURCE_MAX_FAILURES=20` (varsayılan
+  `UPTIME_LOGIN_MAX_FAILURES`'ın iki katı).
+- **Taviz.** NAT ya da kurumsal vekil (PAC) arkasındaki bütün kullanıcılar tek
+  kaynak sayılır: o ağdan 15 dakikada toplam 20 hatalı giriş, o ağın
+  arkasındaki herkesin girişini kilit süresince kapatır. Kullanıcıların çoğu
+  böyle bir ağdan geliyorsa değeri o popülasyonun hatalarına göre yükseltin ya
+  da `0`'da bırakın.
+- **Açılış uyarısı.** LDAP tanımlıyken (`UPTIME_LDAP_URL`) ayar hiç
+  verilmemişse backend açılışta bir `WARN` yazar ("LDAP is on and
+  UPTIME_LOGIN_SOURCE_MAX_FAILURES is not set"); tavanı bilerek kapalı tutmak
+  için `0` verin, satır `INFO`'ya iner. Değer verilmişse ya da LDAP yoksa bu
+  satır yoktur; değer verilmiş ama hop değeri `0` ise yukarıdaki "Önce hop
+  değeri" WARN'ı düşer.
 - **Bilinen sınırlar.** Çok sayıda ayrı kaynaktan bir ada gelen denemeler
-  toplamda dizinin eşiğini yine aşabilir. Hesap tavanı
-  (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, 50) yerel hesapları da kapsadığından
-  onu dizinin eşiğinin altına çekmek `admin`'i birkaç kaynaktan herkese
-  kilitlenebilir yapar; önerilmez. Bir kaynağın **bütün adlardaki**
-  denemelerine tavan da henüz yoktur: tek bir kaynak bir parolayı çok sayıda
-  ada deneyebilir (parola spreyi) ve dizinde bulunan her ad için bir bind
-  gider. Kaynak başına, adlardan bağımsız tavan planlıdır (S88, sprint 10
-  kuyruğu; yol haritası "Bilinen sınırlar",
-  [ADR-0004](docs/adr/0004-giris-kilitleme-stratejisi.md) "Sonuçlar").
+  toplamda dizinin eşiğini yine aşabilir; kaynak tavanı bunu sınırlamaz. Hesap
+  tavanı (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, 50) yerel hesapları da
+  kapsadığından onu dizinin eşiğinin altına çekmek `admin`'i birkaç kaynaktan
+  herkese kilitlenebilir yapar; önerilmez. Çok sayıda kaynağa yayılan bir sprey
+  (IPv6'da tek bir `/64` dahil) kaynak başına tavanı aşmadan sürebilir
+  ([ADR-0004](docs/adr/0004-giris-kilitleme-stratejisi.md) "Sonuçlar"). Önerilen
+  değer gerçek bir AD/OIDC dizininde ölçülmedi.
 
 Gerçek bir dizine karşı test: `KUBEAT_TEST_LDAP=ldap://127.0.0.1:3893 go test
 ./internal/ldapauth/` (glauth ile; kullanıcılar `deploy/demo` altında değil,
@@ -3694,7 +3755,7 @@ yayınlar. Başlıcaları:
 | `kubeat_channel_last_delivery_ok{channel,channel_type}` | Kanalın son teslimat denemesi başarılıysa 1, değilse 0; her scrape'te kanal satırındaki **Son gönderim**'den okunur. Kanal testi de deneme sayılır; yeniden başlatma ve kanalı düzenlemek değeri değiştirmez. Etkin ve en az bir kez denenmiş her kanal için; kanal adı `channel` etiketindedir |
 | `kubeat_channel_undelivered_outages{channel,channel_type}` | Kanalın almadığı ve yeniden gönderilmeyi bekleyen kesinti (`down`) bildirimi sayısı: reddettiği ya da ulaşılamayan, ve almıyor sayıldığı sürece bekletilenler; yoksa 0. Etkin ve en az bir kez denenmiş ya da böyle bir kesintisi bekleyen her kanal için (bkz. "Alarm") |
 | `kubeat_signin_failures_total{reason}` | Başarısız parola girişleri, nedenine göre: `wrong_password` (yerel hesabın parolası yanlış), `rejected` (dizin reddetti ya da adın burada hesabı yok/başka yolla giriyor), `directory_unreachable` (dizine ulaşılamadı). İstemci yanıtı hep genel 401'dir (enum açılmaz, #78); sayaç bir dizin kesintisini parola spreyinden ayırmaya yarar. Her reason serisi açılışta 0'dan başlar (bkz. "Hesaplar ve giriş" → "Giriş gözlemlenebilirliği") |
-| `kubeat_signin_throttled_total{kind}` | Throttle'ın 429 ile reddettiği girişler: `source` (kaynak-ve-ad başına, `UPTIME_LOGIN_MAX_FAILURES`) ya da `account` (tüm kaynaklardaki gevşek ad tavanı, `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`; ADR-0004'ün açık bıraktığı dağıtık kilidi görünür kılar). İstemci yanıtı değişmez; iki seri de açılışta 0'dan başlar |
+| `kubeat_signin_throttled_total{kind}` | Throttle'ın 429 ile reddettiği girişler: `source` (kaynak-ve-ad başına, `UPTIME_LOGIN_MAX_FAILURES`), `account` (tüm kaynaklardaki gevşek ad tavanı, `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`; ADR-0004'ün açık bıraktığı dağıtık kilidi görünür kılar) ya da `source_total` (0.52; bir kaynağın bütün adlardaki tavanı, `UPTIME_LOGIN_SOURCE_MAX_FAILURES`; tek kaynaktan parola spreyi). İstemci yanıtı değişmez; üç seri de açılışta 0'dan başlar |
 | `kubeat_backups_total{result}` | Yedek denemeleri, `ok` ya da `failed`; iki seri de açılışta 0'dan başlar |
 | `kubeat_backup_last_success_timestamp_seconds` | En yeni yedek kopyanın zamanı; yeniden başlatmada yedek dizinindeki en yeni dosyadan okunur (bkz. "Yedekleme ve geri yükleme") |
 | `kubeat_backup_last_failure_timestamp_seconds` | Son başarısız yedek denemesinin zamanı, süreç açıldığından beri; yoksa 0. Son başarılı kopyadan yeniyse yedekleme başarısızdır (`KubeatBackupFailing`) |
@@ -5170,6 +5231,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
 | `UPTIME_LOGIN_MAX_FAILURES` | `10` | Tek bir kaynak adresin bir kullanıcı adına yönelik girişlerini kilitleyen hatalı deneme sayısı (kaynak-başına; CWE-307, ADR-0004). 0.51'den beri bir kaynağın bir durum sayfasına ve bir hesabın parola değiştirmesine yönelik denemelerini de aynı sayıda kilitler. LDAP açıkken dizinin kilit eşiğinin altında tutun ("LDAP" → "Dizin hesap kilidi") |
 | `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` | `50` | Bir adın tüm kaynaklardaki hatalı denemeleri için gevşek, çok yüksek tavan; dağıtık tahmini sınırlar, meşru sahibi kendi hatalarıyla kilitlemez. 0.51'den beri bir durum sayfasının ve bir hesabın parola değiştirmesinin tüm kaynaklardaki denemeleri için de ayrı birer tavandır. `0` kapatır (yalnız kaynak-başına throttle kalır) |
+| `UPTIME_LOGIN_SOURCE_MAX_FAILURES` | `0` | 0.52: tek bir kaynağın `UPTIME_LOGIN_LOCKOUT` içinde **bütün adlardaki** hatalı girişleri için tavan (parola spreyi); dolunca o kaynağın her girişi 429 alır ve dizine bind gitmez. `0` kapatır. NAT ya da PAC vekili arkasındaki kullanıcılar tek kaynak sayılır. LDAP tanımlıyken verilmemişse açılışta WARN, açıkça `0` ise INFO düşer; değer verilmiş ama `UPTIME_TRUST_PROXY_HOPS` `0` ya da `UPTIME_FRONTEND_TOKEN` boşsa tavan bütün girişler için tek kilit olur ve açılışta WARN düşer. Dizinli ve internete açık kurulumda önerilen `20` ("LDAP" → "Dizin hesap kilidi"). Yalnız girişi kapsar |
 | `UPTIME_TRUST_PROXY_HOPS` | `0` | Arayüzün önündeki vekillerinizin `X-Forwarded-For`'a yazdığı girdi sayısı; hiçbiri yazmıyorsa ve arayüze yalnız port-forward ile ulaşılıyorsa `1` (girdiyi Next.js yazar), arayüz Service'i doğrudan dışarı açıksa `0` kalır. Kaynak adres başlığın sağdan bu kadar girdisinden okunur; `0` başlığa güvenmez, eşi kullanır (arayüzden gelen girişte arayüz pod'u). Başlık yalnız arayüzden (`UPTIME_FRONTEND_TOKEN`) gelen istekte okunur. Değerler: "Hesaplar ve giriş", "Vekil-hop rehberi" |
 | `UPTIME_FRONTEND_TOKEN` | – | Arayüzün her backend isteğinde `X-Frontend-Token` başlığıyla sunduğu sır; backend `X-Forwarded-For`'u yalnız bunu sunan istekte okur, öteki eşlerde kaynak eştir. Arayüzün `FRONTEND_TOKEN`'ıyla aynı olmalı; yazdırılabilir ASCII, boşluksuz (başka bir karakter içeren değer yok sayılır). `UPTIME_TRUST_PROXY_HOPS` `0`'dan büyükken boşsa başlığa hiçbir eşten güvenilmez ve açılışta WARN düşer. Chart `<release>-frontend-token` Secret'ından verir. "Hesaplar ve giriş", "Güvenilir eş" |
 | `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi; denemesi bundan eski adlar bu aralıkla sayaçtan silinir |

@@ -219,8 +219,15 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   (LDAP/AD) hesap kilidiyle etkileşim belgelendi (README "LDAP" → "Dizin hesap
   kilidi", ADR-0004): dizinde bulunan bir adın her yanlış parolası dizine bir
   bind'dir; ara önlem `UPTIME_LOGIN_MAX_FAILURES`'ı dizinin eşiğinin altında
-  tutmak. Bir kaynağın bütün adlardaki denemelerine tavan yoktur (S88, sprint
-  10, [#145](https://github.com/yusufceng/Kubeat/issues/145)). Paylaşılan kurumsal NAT ayrımı
+  tutmak. S88 ([#145](https://github.com/yusufceng/Kubeat/issues/145), 0.52.0)
+  bir kaynağın bütün adlardaki hatalı girişlerine opt-in bir tavan ekler
+  (`UPTIME_LOGIN_SOURCE_MAX_FAILURES`, `kind="source_total"`): varsayılan `0`
+  kapalıdır, çünkü NAT ya da PAC vekili arkasındaki kullanıcılar tek kaynaktır;
+  LDAP tanımlıyken ayar verilmemişse açılışta `WARN`, açıkça `0` ise `INFO`
+  düşer. Kalanlar: tavan kapalıyken tek kaynaktan sprey sürer, çok kaynağa
+  yayılan sprey (IPv6'da tek `/64` dahil) kaynak tavanını aşmadan sürebilir,
+  README'nin önerdiği değer gerçek bir AD/OIDC dizininde ölçülmedi (sprint 10
+  "Kullanıcıda kalanlar"); kapsam yalnız giriştir. Paylaşılan kurumsal NAT ayrımı
   backlog'da ([backlog](backlog.md) "Giriş throttle için güvenilir-vekil IP
   allowlist").
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve

@@ -233,6 +233,30 @@ func TestLoginConcurrencyMayBeZero(t *testing.T) {
 	}
 }
 
+// The ceiling on one source's failures across names is off unless set, and
+// off at 0; whether it was given at all is kept apart, for the start to warn
+// of it left unset with LDAP on and only note a 0 given on purpose.
+func TestLoginSourceMaxFailures(t *testing.T) {
+	for _, tt := range []struct {
+		value string
+		want  int
+		set   bool
+	}{{"", 0, false}, {"0", 0, true}, {"20", 20, true}} {
+		t.Setenv("UPTIME_LOGIN_SOURCE_MAX_FAILURES", tt.value)
+		cfg, err := Load()
+		if err != nil || cfg.LoginSourceMaxFailures != tt.want || cfg.LoginSourceMaxFailuresSet != tt.set {
+			t.Errorf("UPTIME_LOGIN_SOURCE_MAX_FAILURES=%q: %d (set %v), %v; want %d (set %v)", tt.value,
+				cfg.LoginSourceMaxFailures, cfg.LoginSourceMaxFailuresSet, err, tt.want, tt.set)
+		}
+	}
+	for _, bad := range []string{"-1", "many"} {
+		t.Setenv("UPTIME_LOGIN_SOURCE_MAX_FAILURES", bad)
+		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), "UPTIME_LOGIN_SOURCE_MAX_FAILURES: ") {
+			t.Errorf("UPTIME_LOGIN_SOURCE_MAX_FAILURES=%q: err = %v, want a refusal naming the variable", bad, err)
+		}
+	}
+}
+
 // The UI's token tells it from other peers: X-Forwarded-For is read only
 // from a request that carries it. With hops trusted and no token, no peer
 // is trusted, and the start says so once, as it does of a token a header
