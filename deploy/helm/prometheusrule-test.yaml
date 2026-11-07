@@ -828,3 +828,45 @@ tests:
       - eval_time: 25m
         alertname: KubeatNotificationsFailing
         exp_alerts: []
+
+  - name: KubeatDiscoveryNamespaceSkipped fires for a namespace skipped for 10 minutes and resolves when it is read again
+    interval: 1m
+    input_series:
+      # A namespace's Role is taken away at 2m and is back at 15m.
+      - series: 'kubeat_discovery_namespaces_skipped{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 1x12 0x5'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: KubeatDiscoveryNamespaceSkipped
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: KubeatDiscoveryNamespaceSkipped
+        exp_alerts:
+          - exp_labels: &discovery-skipped-labels
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+            exp_annotations:
+              summary: "Kubeat's annotation discovery is skipping 1 of its namespaces"
+              description: "For 10 minutes the annotation sync could not read some of the namespaces discovery is limited to (forbidden: a Role taken away, or a namespace deleted with its RoleBinding; kubeat_discovery_sync_errors_total says why), and left their monitors as they were: new annotations there are not monitored and removed ones keep their monitors. GET /api/v1/discovery and the backend's log (discovery sync skipped a namespace) name them; restore the Role, or take a deleted namespace off discovery.namespaces."
+      - eval_time: 15m
+        alertname: KubeatDiscoveryNamespaceSkipped
+        exp_alerts: []
+
+  - name: KubeatDiscoveryNamespaceSkipped stays silent for a namespace a run or two could not read
+    interval: 1m
+    input_series:
+      # A run at 2m could not read a namespace, one at 9m two of them; the
+      # runs after them read every one.
+      - series: 'kubeat_discovery_namespaces_skipped{job="kubeat-backend", namespace="kubeat", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 1 0 0 0 0 0 0 2 0x15'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: KubeatDiscoveryNamespaceSkipped
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: KubeatDiscoveryNamespaceSkipped
+        exp_alerts: []
+      - eval_time: 24m
+        alertname: KubeatDiscoveryNamespaceSkipped
+        exp_alerts: []

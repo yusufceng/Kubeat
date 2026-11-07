@@ -760,7 +760,7 @@ rules "KubeatUnhealthy reads the self-health gauge" has 'expr: max without (inst
 rules "kubeat.signin between kubeat.monitors and kubeat.self" has '- name: kubeat.signin'
 if helm template kubeat "$CHART" --show-only templates/prometheusrule.yaml "${RULES[@]}" >"$WORK/rules" 2>"$WORK/err"; then
   groups="$(grep -E '^    - name: ' "$WORK/rules" | sed 's/^    - name: //' | tr '\n' ' ')"
-  [ "$groups" = "kubeat.monitors kubeat.signin kubeat.self " ] || failed "rule groups in order: $groups"
+  [ "$groups" = "kubeat.monitors kubeat.signin kubeat.self kubeat.discovery " ] || failed "rule groups in order: $groups"
 else
   failed "rule groups: refused: $(cat "$WORK/err")"
 fi
@@ -769,16 +769,23 @@ rules "KubeatSignInSourceDegraded on the four reasons" has 'increase(kubeat_sign
 rules "KubeatSignInSourceDegraded severity from values" has 'severity: "critical"' --set metrics.prometheusRule.signInSeverity=critical
 rules "KubeatSignInSourceDegraded severity missing from older values" has 'severity: "warning"' \
   --set metrics.prometheusRule.signInSeverity=null --set metrics.prometheusRule.severity=info
+# KubeatDiscoveryNamespaceSkipped, in a group of its own, reads the
+# namespaces the annotation sync skipped, one alert per installation as
+# KubeatUnhealthy; no label of it names a namespace.
+rules "KubeatDiscoveryNamespaceSkipped in its group" has '- name: kubeat.discovery'
+rules "KubeatDiscoveryNamespaceSkipped reads the skipped namespaces" has 'expr: max without (instance, pod, endpoint, container, service) (kubeat_discovery_namespaces_skipped) > 0'
 
 # metrics.prometheusRule.clusterLabel, for rules evaluated over the series of
 # several clusters in one store. Empty, the rules it changes render as 0.44
 # rendered them, and KubeatUnhealthy and KubeatNotificationsFailing, whose
-# expressions came with 0.45, without the scrape labels as those do; given,
+# expressions came with 0.45, and KubeatSignInSourceDegraded and
+# KubeatDiscoveryNamespaceSkipped, which came with 0.52, without the scrape
+# labels as those do; given,
 # they group by it beside namespace and job and keep no other label a store
 # adds, and every other rule renders the same either way. promtool below
 # shows how they behave over two clusters' series.
 CLUSTER=(--set metrics.prometheusRule.clusterLabel=cluster)
-BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing|KubeatSignInSourceDegraded): '
+BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped): '
 # exprs FILE: the expression of every rule in a rendered PrometheusRule, each
 # of its lines after the rule's alert name.
 exprs() {
@@ -848,7 +855,7 @@ if helm template kubeat "$CHART" --namespace kubeat --show-only templates/promet
   --set backup.enabled=true >"$WORK/rules-plain" 2>"$WORK/err" &&
   helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" \
     --set backup.enabled=true "${CLUSTER[@]}" >"$WORK/rules-cluster" 2>"$WORK/err"; then
-  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing|KubeatSignInSourceDegraded): ' |
+  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped): ' |
     diff "$WORK/exprs-0.44" - >"$WORK/diff" ||
     failed "clusterLabel empty: the rules differ from 0.44's: $(cat "$WORK/diff")"
   exprs "$WORK/rules-plain" | grep '^KubeatNotificationsFailing: ' | diff "$WORK/channels-plain" - >"$WORK/diff" ||
@@ -872,6 +879,7 @@ rules "outages held per cluster" has 'unless on (namespace, job, cluster) (kubea
 rules "outages per cluster and monitor" has 'max by (namespace, job, cluster, monitor, monitor_namespace, type) (kubeat_monitor_incident_open) == 1' "${CLUSTER[@]}"
 rules "KubeatUnhealthy per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_self_healthy) == 0' "${CLUSTER[@]}"
 rules "KubeatSignInSourceDegraded per cluster and reason" has 'sum by (namespace, job, cluster, reason) (' "${CLUSTER[@]}"
+rules "KubeatDiscoveryNamespaceSkipped per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_discovery_namespaces_skipped) > 0' "${CLUSTER[@]}"
 rules "no store label kept but the cluster's" lacks 'without (' "${CLUSTER[@]}"
 for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace channel channel_type reason surface severity; do
   refuses "clusterLabel $label" "metrics.prometheusRule.clusterLabel is \"$label\"" "${RULES[@]}" --set-string metrics.prometheusRule.clusterLabel="$label"
@@ -883,7 +891,8 @@ done
 # The rules as Prometheus reads them: promtool checks the rule groups and
 # runs the scenarios of prometheusrule-test.yaml (no backend target, a failed
 # scrape, a Recreate, an outage that closes, a failing backup, a backend that
-# stores no result, a channel that does not take notifications) against the
+# stores no result, a channel that does not take notifications, a namespace
+# the annotation sync cannot read) against the
 # rules rendered for release "kubeat" in namespace "kubeat", and those of
 # prometheusrule-cluster-test.yaml (two clusters, one of them failing, gone,
 # in a scrape gap or recreated, and an HA pair the store does not
