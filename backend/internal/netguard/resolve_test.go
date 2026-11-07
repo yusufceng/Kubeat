@@ -2,6 +2,7 @@ package netguard
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
 	"strings"
@@ -110,6 +111,35 @@ func TestResolvesInCluster(t *testing.T) {
 		if r.calls != wantCalls {
 			t.Errorf("ResolvesInCluster(%q) made %d lookups, want %d", host, r.calls, wantCalls)
 		}
+	}
+}
+
+// NotFound tells a name that does not exist (NXDOMAIN) from a resolver that
+// could not answer: only the first may be let through behind a proxy (S81);
+// a SERVFAIL, a refusal, a timeout and a cancelled lookup stay unsafe.
+func TestNotFound(t *testing.T) {
+	nxdomain := &net.DNSError{Err: "no such host", Name: "status.vendor.example", IsNotFound: true}
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"nxdomain":         {nxdomain, true},
+		"wrapped nxdomain": {fmt.Errorf("lookup: %w", nxdomain), true},
+		"servfail":         {&net.DNSError{Err: "server misbehaving", Name: "x", IsTemporary: true}, false},
+		"refused":          {&net.DNSError{Err: "server misbehaving", Name: "x"}, false},
+		"dns timeout":      {&net.DNSError{Err: "i/o timeout", Name: "x", IsTimeout: true}, false},
+		"deadline":         {context.DeadlineExceeded, false},
+		"cancelled":        {context.Canceled, false},
+		"nil":              {nil, false},
+	} {
+		if got := NotFound(tc.err); got != tc.want {
+			t.Errorf("NotFound(%s) = %v, want %v", name, got, tc.want)
+		}
+	}
+	// What ResolvesInCluster returns for a name the resolver does not know.
+	_, err := ResolvesInCluster(context.Background(), &countingResolver{}, "status.vendor.example")
+	if !NotFound(err) {
+		t.Errorf("ResolvesInCluster's NXDOMAIN: NotFound(%v) = false, want true", err)
 	}
 }
 

@@ -202,6 +202,22 @@ func EnvironmentProxies() []string {
 	return out
 }
 
+// Proxied reports whether a request for u is handed to a proxy by proxy, a
+// Transport's Proxy function. Nil is http.ProxyFromEnvironment: the choice
+// the checker's transports and the senders' make (HTTP_PROXY, HTTPS_PROXY
+// and NO_PROXY), so a caller deciding by it decides as they will. A nil u,
+// and a proxy function that fails, mean the request is not proxied.
+func Proxied(proxy func(*http.Request) (*url.URL, error), u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
+	to, err := proxy(&http.Request{URL: u})
+	return err == nil && to != nil
+}
+
 // blockedError names the refused address and the denied range it is in.
 type blockedError struct {
 	addr   netip.Addr // as connected to
@@ -308,7 +324,9 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 // that do not go to the host itself, where Control never sees its address:
 // a request handed to a proxy, which then connects on its own. A name that
 // does not resolve here is left to the proxy, which may know names this
-// network does not.
+// network does not. That is the target policy; the per-user scope check
+// refuses such a name for a user limited to some namespaces unless
+// UPTIME_TARGET_SCOPE_TRUST_PROXY is on (api.targetInScope).
 //
 // A host made of numbers is not a name, though: a proxy that reads it as
 // inet_aton does takes 2852039166, 0xa9.0xfe.0xa9.0xfe and 169.254.43518
@@ -356,6 +374,16 @@ func (p *Policy) CheckHost(ctx context.Context, host string) error {
 	}
 	return nil
 }
+
+// Numeric reports whether host is written the way inet_aton reads an IPv4
+// address (2852039166, 0xa9.0xfe.0xa9.0xfe, 127.1, 010.0.0.1, or plain
+// 10.0.0.1), whether or not it spells one; trailing dots are the caller's to
+// drop first, as a proxy does. A proxy and glibc read such a host as an
+// address, the pure-Go resolver refuses it as a name, and readers disagree on
+// some forms (inet_aton reads 010 as 8). The per-user scope check
+// (api.targetInScope) refuses one that is not an address as written, since
+// it cannot tell which address the request reaches.
+func Numeric(host string) bool { return numeric(host) }
 
 // numeric reports whether host is written the way inet_aton reads an IPv4
 // address: one to four parts separated by dots, each decimal, octal (with

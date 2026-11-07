@@ -1985,3 +1985,16 @@ sprint 9 kuyruğunda ve önce gelir: sprint 3'ün "S42 → S43" sırası tersine
 görünür kılan metrik ve rehber; sayfalama/akış ikinci dilim. Tetikleyici: S43
 merge edildikten sonra 3 binden fazla pod'lu gerçek bir kurulum ya da bir OOMKill
 gözlemi. Yol haritasının "Bilinen sınırlar" satırı bu maddeye bağlanır.
+
+## Açıkça kapatılmış `UPTIME_TARGET_SCOPE_TRUST_PROXY` için açılış WARN'ını INFO'ya indirmek
+
+2026-11-07'de ertelendi (S81 [#121](https://github.com/yusufceng/Kubeat/issues/121)
+incelemesinin düşük bulgusu). 0.50'de `HTTP_PROXY`/`HTTPS_PROXY` verilmiş ve ayar
+kapalıysa backend her açılışta bir `WARN` yazar; değişken açıkça `false`
+yazıldığında da. Sınırlı kullanıcısı olmayan tek kiracılı kurulumda ya da vekili
+cluster içinde olduğu için ayarı bilerek kapalı tutan kurulumda bu kalıcı bir
+satırdır ve log tabanlı uyarıda gürültü yapar. Öneri: değişken açıkça verildiyse
+(`os.LookupEnv`) satırı `INFO`'ya indirmek; verilmemişse `WARN` kalır (kabul
+ölçütü, sessizce etkisiz kalan güvenlik ayarı olmasın diye). Ertelendi, çünkü
+kabul ölçütü bugünkü davranışı istiyor ve gürültü bildiren bir kurulum yok.
+Tetikleyici: log tabanlı uyarıda bu satırdan şikâyet eden bir kurulum.

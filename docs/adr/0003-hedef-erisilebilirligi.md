@@ -36,7 +36,9 @@ sınırlayacağımızdır.
 ## Karar
 
 **(a) ve (b) önce (0.46 turu, #80/#81); (c) ve (d) sprint 5'te (#84/#85);
-(c)'nin kalan boşluğu çözüm anında denetimle sprint 6'da (0.48, #95).**
+(c)'nin kalan boşluğu çözüm anında denetimle sprint 6'da (0.48, #95); çözüm
+hatasında güvenli taraf sprint 7'de (0.49, #107), vekilli topolojideki
+daraltması sprint 8'de (0.50, #121).**
 
 - **(a)** `UPTIME_TARGET_DENY_CIDRS`'in rolü belgelendi: bir monitor ya da
   kanal webhook'u politikanın izin verdiği her adrese ulaşır; hassas ya da
@@ -107,7 +109,69 @@ sınırlayacağımızdır.
   kapsam-aşımına izin vermektense yeni kurulumu bekletmeyi yeğleyen bilinçli bir
   seçimdir (işaretle-ve-izin bypass'ı açık bırakacağı için seçilmedi). Var olan
   monitor'ler çalışmaya devam eder ("İzleme asla durmaz"); yalnız sınırlı
-  kullanıcının yeni kapsam-dışı create'i reddedilir.
+  kullanıcının yeni kapsam-dışı create'i reddedilir. Bu taviz bir **kesinti
+  anı** için tartıldı; kalıcı vekilli topoloji için aşağıdaki daraltma geçerlidir.
+
+  **Vekilli topolojide NXDOMAIN (0.50, #121).** Hava boşluklu ya da egress'i
+  kısıtlı bir kurumda pod'lar dış adları kalıcı olarak çözemez; çözümü ve
+  bağlantıyı cluster dışındaki kurumsal vekil yapar (`HTTPS_PROXY`, `NO_PROXY`).
+  0.49'un fail-safe'i bu topolojide kapsamı sınırlı kullanıcının bütün dış HTTP
+  monitor ve webhook'larını yerel NXDOMAIN'e bakarak reddediyor, her deneme de
+  sahte bir cross-tenant denetim satırı (`deny`/`target-scope`, `reason=target`)
+  bırakıyordu. PO kararı S77'nin kararını açıkça daraltır: **vekile gidecek bir
+  hedefte yerel NXDOMAIN bir kapsam sinyali değildir**, çünkü isteği backend
+  değil vekil çözer ve bağlar. 0.50'de opt-in `UPTIME_TARGET_SCOPE_TRUST_PROXY`
+  (varsayılan `false`) açıkken, kapsam çözümü yalnız NXDOMAIN verirse ve istek
+  vekile gidiyorsa hedef reddedilmez. Vekile gidip gitmediği checker'ın ve
+  kanalların kullandığı `http.ProxyFromEnvironment` kararıyla aynıdır
+  (`netguard.Proxied`, `NO_PROXY` dahil); yalnız HTTP/HTTPS (anahtar kelime ve
+  JSON dahil), WebSocket monitor'leri ve webhook türü kanallar vekile gider.
+  Çözüm yine yapılır ve karar o yanıta dayanır:
+  - cluster içine çözülen ad (iki etiketli `api.payments`, `kubernetes.default`),
+    SERVFAIL, REFUSED ve zaman aşımı yine reddedilir; fail-safe korunur. İç
+    adrese çözülen genel ad yalnız backend onu çözebiliyorsa reddedilir;
+    vekilli topolojide backend genel adları çözemez, ad NXDOMAIN alır ve vekile
+    bırakılır (aşağıda "Şart");
+  - `NO_PROXY`'ye uyan ad ve doğrudan bağlanan türler (TCP, DNS, gRPC, ping,
+    veritabanı, `each_pod`) istisna almaz;
+  - adından cluster içi olan biçimler (çıplak ClusterIP, kısa ad, `.svc`/FQDN,
+    API sunucusu adı) zaten çözüme gelmeden ad-sınıflamayla karar bulur;
+  - host sınıflanmadan önce vekilin okuduğu gibi okunur: küçük harfe çevrilir ve
+    sondaki noktaların hepsi atılır. Rakamlardan oluşan ama adres gibi
+    yazılmamış host (`172.30.1`, `0xac.0x1e.0.1`) sınırlı kullanıcı için
+    reddedilir, çünkü vekil ve glibc onu bir adres okur, Go'nun çözücüsü ise
+    yok sayar ve okuyucular bazı biçimlerde (`010`) anlaşamaz. ASCII olmayan
+    host sınırlı kullanıcı için reddedilir; uluslararası ad `xn--` biçiminde
+    yazılır. Vekil ve `NO_PROXY` eşlemesi host'u önce IDNA ile okur (yumuşak
+    tire U+00AD ve sıfır genişlikli boşluk U+200B silinir, U+3002, U+FF0E ve
+    U+FF61 nokta olur), Go'nun çözücüsü ise böyle bir adı sorgusuz NXDOMAIN
+    sayar; HTTP/WebSocket monitor'leri ve öteki webhook türleri zaten ASCII
+    ister, ntfy kanalının URL'si istemiyordu. Sonunda nokta olan bir ad istisna
+    almaz: `NO_PROXY` adı yazıldığı gibi eşler. İnceleme turlarında
+    `api.payments.svc..`, `172.30.0.1..` ve `172.30.1` gibi yazımlar ve ntfy
+    kanalında yumuşak tireli ya da Unicode noktalı `kubernetes.default` Go
+    çözücüsünden sorgusuz bir NXDOMAIN alıp `NO_PROXY`'yi atladığı için
+    istisnadan geçiyordu (inceleme bulguları); bu okuma onları kapatır.
+
+  Çözümü tamamen atlamak (Müşteri A'nın önerisi) seçilmedi: var olan
+  monitor'ler yeniden denetlenmediği için (S73) `NO_PROXY` ya da vekil sonradan
+  değişirse kayıtlı hedef ileride cluster içine çözülmeye başlayabilir. Ayarın
+  otomatik açılması da seçilmedi: vekilin cluster dışında olduğunu yalnız
+  operatör bilir. **Şart: vekil cluster dışında olmalı**, cluster'ın adlarını
+  çözememeli ve ClusterIP/pod adreslerine ulaşamamalı. Cluster içindeki bir vekil
+  cluster DNS'ini ve kendi arama alanlarını kullanır: backend'de bugün NXDOMAIN
+  alan bir ad (Service'i sonradan oluşturulan `api.payments`, vekilin kendi
+  namespace'ine göre çözülen bir ad) vekilde ClusterIP'ye çözülüp oraya
+  bağlanabilir; böyle bir kurulumda ayar kapalı kalır. Ayar açıkken kapsamı
+  sınırlı kullanıcı, vekilin ulaştığı her adrese (node IP'leri/NodePort, router,
+  API ve LoadBalancer VIP'leri, kurumun özel aralıkları) bir adla ulaşır: iç
+  adrese işaret eden genel bir ad backend'de NXDOMAIN alır ve vekile bırakılır.
+  Vekilin ACL'i bunları kapatmalı, yoksa ayar kapalı kalmalı; ayar açıkken
+  kapsamın sınırı vekilin ulaşabildiği yerdir. Vekil verilmiş ve ayar
+  kapalıyken backend açılışta bir kez `WARN` yazar. Kalan sınırlar: cluster DNS'i
+  dış adlara NXDOMAIN değil SERVFAIL ya da zaman aşımıyla yanıt veriyorsa ayar
+  yardım etmez ve bu red denetimde gerçek bir cross-tenant reddinden ayrılmaz
+  (S82); gerçek hava boşluklu cluster provası kullanıcıdadır.
 
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
@@ -161,3 +225,7 @@ sınırlayacağımızdır.
   tek genel mesaja indirilerek iç-adres oracle'ı daraltıldı. Yönetici ve kapsamı
   `*` olan kullanıcı etkilenmez. Bilinçli taviz yukarıda (c), "Çözüm hatasında
   güvenli taraf".
+- **Vekilli topolojide daraltma (0.50).** Cluster dışındaki bir vekile giden
+  HTTP isteğinde yerel NXDOMAIN, opt-in `UPTIME_TARGET_SCOPE_TRUST_PROXY` ile
+  kapsam reddi sayılmaz; cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine
+  reddedilir (yukarıda (c), "Vekilli topolojide NXDOMAIN").

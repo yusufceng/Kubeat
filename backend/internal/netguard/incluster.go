@@ -2,6 +2,7 @@ package netguard
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"strings"
@@ -99,7 +100,8 @@ type Resolver interface {
 //   - (false, err) the lookup failed — a resolver outage, a timeout or an
 //     NXDOMAIN — so whether host reaches the cluster could not be decided.
 //     The caller must not read this as "external": the dial-time scope check
-//     treats it as unsafe (ADR-0003 c, resolver-error fail-safe).
+//     treats it as unsafe (ADR-0003 c, resolver-error fail-safe), except an
+//     NXDOMAIN (NotFound) for a request the operator's proxy resolves.
 //
 // A host that is already an address is classified without a lookup and never
 // returns an error.
@@ -135,6 +137,19 @@ func ResolvesInCluster(ctx context.Context, r Resolver, host string) (bool, erro
 		}
 	}
 	return false, nil
+}
+
+// NotFound reports whether err, a lookup error from ResolvesInCluster, says
+// that the name does not exist (NXDOMAIN, *net.DNSError with IsNotFound), as
+// opposed to a resolver that could not answer: a SERVFAIL, a refusal, a
+// timeout or a cancelled lookup, for which it is false. A local NXDOMAIN
+// tells where a name lands only for a connection the backend makes itself:
+// a request handed to a proxy outside the cluster is resolved there, so the
+// scope check may let it through behind UPTIME_TARGET_SCOPE_TRUST_PROXY
+// (api.targetInScope, ADR-0003 c). Every other failure stays unsafe.
+func NotFound(err error) bool {
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr) && dnsErr.IsNotFound && !dnsErr.IsTimeout
 }
 
 // Namespace returns the Kubernetes namespace a cluster-internal target names,

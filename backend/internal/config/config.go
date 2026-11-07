@@ -178,6 +178,14 @@ type Config struct {
 	// HTTPWriteTimeout; a lookup that does not finish in time is treated as
 	// unresolved, and the scoped user's target is refused on the safe side.
 	TargetResolveTimeout time.Duration // UPTIME_TARGET_RESOLVE_TIMEOUT
+	// TargetScopeTrustProxy lets that scope check accept an external-looking
+	// name the backend's resolver does not know (NXDOMAIN) when the check or
+	// the delivery is an HTTP request handed to the proxy of HTTP_PROXY or
+	// HTTPS_PROXY (NO_PROXY keeping it away decides otherwise): only for a
+	// proxy outside the cluster, which resolves such names on its side and
+	// cannot reach the cluster's. Off by default. A name that resolves into
+	// the cluster, a SERVFAIL and a timeout are refused either way.
+	TargetScopeTrustProxy bool // UPTIME_TARGET_SCOPE_TRUST_PROXY
 
 	MinCheckInterval time.Duration // UPTIME_MIN_CHECK_INTERVAL
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
@@ -627,6 +635,10 @@ func Load() (Config, error) {
 	if err := checkCIDRs("UPTIME_TARGET_ALLOW_CIDRS", cfg.TargetAllowCIDRs); err != nil {
 		return Config{}, err
 	}
+	if cfg.TargetScopeTrustProxy, err = envBool("UPTIME_TARGET_SCOPE_TRUST_PROXY", false); err != nil {
+		return Config{}, err
+	}
+	cfg.Warnings = append(cfg.Warnings, scopeProxyWarnings(cfg.TargetScopeTrustProxy)...)
 	if cfg.AdminPasswordReset, err = envBool("UPTIME_ADMIN_PASSWORD_RESET", false); err != nil {
 		return Config{}, err
 	}
@@ -740,6 +752,33 @@ func envPositiveInt(key string, def int) (int, error) {
 		return 0, fmt.Errorf("%s: must be positive, got %s", key, v)
 	}
 	return n, nil
+}
+
+// scopeProxyWarnings is what the start says about the proxy and
+// UPTIME_TARGET_SCOPE_TRUST_PROXY (S81): with a proxy named and the setting
+// off, a user limited to some namespaces is refused an external name only
+// the proxy resolves, which an operator behind such a proxy should hear of
+// before the users do; with the setting on and no proxy, it does nothing.
+// The proxy is read as net/http reads it, either spelling of the variable.
+func scopeProxyWarnings(trustProxy bool) []string {
+	proxied := false
+	for _, key := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"} {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			proxied = true
+		}
+	}
+	switch {
+	case proxied && !trustProxy:
+		return []string{"HTTP_PROXY/HTTPS_PROXY is set and UPTIME_TARGET_SCOPE_TRUST_PROXY is off: " +
+			"a user limited to some namespaces cannot aim a monitor or a webhook at an external name " +
+			"that only the proxy resolves (NXDOMAIN here); it is refused as outside their namespaces. " +
+			"If the proxy runs outside the cluster and cannot reach its addresses, set UPTIME_TARGET_SCOPE_TRUST_PROXY=true " +
+			"(README, \"Hedef politikası\")"}
+	case trustProxy && !proxied:
+		return []string{"UPTIME_TARGET_SCOPE_TRUST_PROXY is on but neither HTTP_PROXY nor HTTPS_PROXY is set: " +
+			"no check or delivery goes through a proxy, so the setting changes nothing"}
+	}
+	return nil
 }
 
 // checkCIDRs checks a comma-separated list of CIDRs, such as

@@ -5,11 +5,17 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"golang.org/x/net/http/httpproxy"
+
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -447,5 +453,479 @@ func TestScopeDenialSummaryLocalised(t *testing.T) {
 	}
 	if d := denials[0]; d.Action != "deny" || d.ObjectType != "target-scope" || !strings.Contains(d.Summary, "namespace'lerinizin dışında") {
 		t.Errorf("tr deny row = %+v, want deny/target-scope with a Turkish summary", d)
+	}
+}
+
+// corpProxy is the choice http.ProxyFromEnvironment makes with
+// HTTPS_PROXY=http://proxy.corp.example:3128 and the given NO_PROXY: the same
+// httpproxy code net/http runs for the checker and the senders, without the
+// process environment, which net/http reads only once.
+func corpProxy(noProxy string) func(*http.Request) (*url.URL, error) {
+	proxyFor := (&httpproxy.Config{HTTPSProxy: "http://proxy.corp.example:3128", NoProxy: noProxy}).ProxyFunc()
+	return func(r *http.Request) (*url.URL, error) { return proxyFor(r.URL) }
+}
+
+// corpNoProxy is the NO_PROXY of a proxied install (docs/pilot.md): the
+// cluster's names and Service range, and the company's own zone, which is
+// reached directly.
+const corpNoProxy = ".svc,.cluster.local,172.30.0.0/16,.corp.example"
+
+// corpResolver answers like the backend's resolver behind such a proxy: the
+// cluster's names, two-label short names included (ndots), resolve; every
+// other name is NXDOMAIN, since only the proxy resolves external names. The
+// one public name in it, 172-30-0-1.sslip.io pointing at a cluster address,
+// stands for a cluster DNS that does answer for some public names (one that
+// forwards them, or a company zone it serves): there the name is refused.
+// Where the backend cannot resolve it, it is an NXDOMAIN like any other and
+// is left to the proxy (TestScopeTrustProxyLeavesUnresolvedNamesToTheProxy).
+func corpResolver(t *testing.T) fakeResolver {
+	return fakeResolver{
+		"api.payments":        ipList(t, "172.30.44.9"), // another team's Service, via ndots
+		"kubernetes.default":  ipList(t, "172.30.0.1"),  // the API server, via ndots
+		"hooks.payments":      ipList(t, "172.30.44.10"),
+		"172-30-0-1.sslip.io": ipList(t, "172.30.0.1"),
+	}
+}
+
+// signInScoped adds an editor limited to the namespace shop and signs in.
+func signInScoped(t *testing.T, base string) string {
+	t.Helper()
+	addUser(t, base, "dev", store.RoleEditor, "shop")
+	token, code := signIn(t, base, "dev", "parola-123")
+	if code != http.StatusOK {
+		t.Fatalf("sign in: %d", code)
+	}
+	return token
+}
+
+// With UPTIME_TARGET_SCOPE_TRUST_PROXY on, a scoped user may aim an HTTP,
+// keyword, JSON or WebSocket monitor and every webhook-type channel at an
+// external name that is NXDOMAIN for the backend's resolver when the request
+// goes to the proxy (HTTPS_PROXY, outside NO_PROXY): the proxy resolves it
+// outside the cluster (S81, ADR-0003 c). Create, clone and retarget all take
+// it, and none of them leaves a deny audit row or counts a scope denial.
+func TestScopeTrustProxyAcceptsProxiedNXDOMAIN(t *testing.T) {
+	meter := metrics.New("test")
+	srv, db := newTestAPIWith(t, func(o *Options) {
+		o.Resolver = corpResolver(t)
+		o.ScopeTrustProxy = true
+		o.Proxy = corpProxy(corpNoProxy)
+		o.Meter = meter
+	})
+	base := srv.URL
+	token := signInScoped(t, base)
+
+	var first monitorResponse
+	for _, tc := range []struct{ name, typ, target, extra string }{
+		{"status", "http", "https://status.vendor.example/health", ""},
+		{"keyword", "http", "https://keyword.vendor.example/", `"http":{"keyword":"ok"}`},
+		{"json", "http", "https://json.vendor.example/health", `"http":{"json_path":"status","json_operator":"==","json_expected":"ok"}`},
+		{"websocket", "websocket", "wss://stream.vendor.example/socket", ""},
+	} {
+		extra := `"namespace":"shop"`
+		if tc.extra != "" {
+			extra += "," + tc.extra
+		}
+		var created monitorResponse
+		if code := doAs(t, token, "POST", base+"/api/v1/monitors", monitorJSON(tc.name, tc.typ, tc.target, extra), &created); code != http.StatusCreated {
+			t.Errorf("%s monitor at a proxied NXDOMAIN name: status = %d, want 201", tc.name, code)
+			continue
+		}
+		if first.ID == 0 {
+			first = created
+		}
+	}
+	if first.ID == 0 {
+		t.Fatal("no proxied monitor was created")
+	}
+	// Its clone, and a retarget to another proxied NXDOMAIN name, pass too.
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors/"+itoa(first.ID)+"/clone", `{"name":"status-2"}`, nil); code != http.StatusCreated {
+		t.Errorf("cloning the proxied monitor: status = %d, want 201", code)
+	}
+	if code := doAs(t, token, "PATCH", base+"/api/v1/monitors/"+itoa(first.ID), `{"target":"https://moved.vendor.example/"}`, nil); code != http.StatusOK {
+		t.Errorf("retargeting at another proxied NXDOMAIN name: status = %d, want 200", code)
+	}
+
+	// Every webhook-type channel is delivered through the same proxy.
+	var hook channelResponse
+	for _, tc := range []struct{ typ, target, secret string }{
+		{"webhook", "https://hooks.vendor.example/kubeat", ""},
+		{"slack", "https://hooks.slack.vendor.example/services/T0/B0/x", ""},
+		{"teams", "https://teams.vendor.example/workflows/x", ""},
+		{"discord", "https://discord.vendor.example/api/webhooks/1/x", ""},
+		{"mattermost", "https://chat.vendor.example/hooks/x", ""},
+		{"googlechat", "https://chat.google.vendor.example/v1/spaces/x/messages", ""},
+		{"gotify", "https://gotify.vendor.example", "app-token"},
+		{"ntfy", "https://ntfy.vendor.example/alerts", ""},
+	} {
+		body := `{"name":"` + tc.typ + `","type":"` + tc.typ + `","target":"` + tc.target + `","secret":"` + tc.secret + `","namespaces":["shop"]}`
+		var created channelResponse
+		if code := doAs(t, token, "POST", base+"/api/v1/channels", body, &created); code != http.StatusCreated {
+			t.Errorf("%s channel at a proxied NXDOMAIN name: status = %d, want 201", tc.typ, code)
+			continue
+		}
+		if tc.typ == "webhook" {
+			hook = created
+		}
+	}
+	if hook.ID == 0 {
+		t.Fatal("the proxied webhook channel was not created")
+	}
+	if code := doAs(t, token, "PATCH", base+"/api/v1/channels/"+itoa(hook.ID), `{"target":"https://moved-hooks.vendor.example/kubeat"}`, nil); code != http.StatusOK {
+		t.Errorf("retargeting the webhook at another proxied NXDOMAIN name: status = %d, want 200", code)
+	}
+
+	// No accepted target is a denial: no audit row, no count.
+	if rows := auditDenials(t, db); len(rows) != 0 {
+		t.Errorf("proxied NXDOMAIN targets left %d deny rows (%v), want 0", len(rows), rows)
+	}
+	got, err := meter.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := got["kubeat_target_scope_denied_total{reason=target}"]; n != 0 {
+		t.Errorf("reason=target = %v, want 0", n)
+	}
+}
+
+// The proxy exception is for a proxied NXDOMAIN alone. With the setting on,
+// every other form stays refused for a scoped user, each with code
+// target_scope: a name NO_PROXY sends directly (.svc, .cluster.local,
+// 172.30.0.0/16, the company zone); a plain http:// request when only
+// HTTPS_PROXY is set; every type that connects directly (TCP, DNS, gRPC,
+// ping, the databases); a bare ClusterIP; a short name; a two-label name the
+// pod's search domains (ndots) turn into a Service or the API server, though
+// it would go to the proxy; the full .svc and FQDN forms and the API server's
+// names; and a public name that resolves to a cluster address (S81). Each of
+// them also written as the proxy reads it but the resolver and NO_PROXY do
+// not — with trailing dots, as a number inet_aton reads as an address
+// (172.30.1, 0xac.0x1e.0.1), or with characters that are not ASCII on an
+// ntfy channel — and a proxied name with trailing dots.
+func TestScopeTrustProxyKeepsRefusing(t *testing.T) {
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.Resolver = corpResolver(t)
+		o.ScopeTrustProxy = true
+		o.Proxy = corpProxy(corpNoProxy)
+	})
+	base := srv.URL
+	token := signInScoped(t, base)
+
+	for _, tc := range []struct{ name, typ, target, extra string }{
+		// NO_PROXY keeps the request away from the proxy: it is dialed here,
+		// so an NXDOMAIN here is the answer the check would get.
+		{"no-proxy-zone", "http", "https://intranet.corp.example/", ""},
+		{"no-proxy-svc", "http", "https://ghost.payments.svc/", ""},
+		{"no-proxy-cluster-local", "http", "https://ghost.payments.svc.cluster.local/", ""},
+		{"no-proxy-cidr", "http", "https://172.30.12.34/", ""},
+		// Only HTTPS_PROXY is set: a plain http:// request is not proxied.
+		{"plain-http", "http", "http://plain.vendor.example/", ""},
+		{"plain-ws", "websocket", "ws://plain-stream.vendor.example/socket", ""},
+		// Types that connect directly, whatever HTTPS_PROXY says.
+		{"tcp", "tcp", "status.vendor.example:443", ""},
+		{"dns", "dns", "status.vendor.example", ""},
+		{"grpc", "grpc", "status.vendor.example:443", ""},
+		{"ping", "ping", "status.vendor.example", ""},
+		{"postgres", "postgres", "db.vendor.example:5432", `"database":{"username":"probe"}`},
+		{"mysql", "mysql", "db.vendor.example:3306", `"database":{"username":"probe"}`},
+		{"redis", "redis", "cache.vendor.example:6379", ""},
+		// Cluster addresses and names, proxied or not.
+		{"bare-clusterip", "http", "https://172.30.0.1/", ""},
+		{"short-name", "http", "https://api/", ""},
+		{"two-label-service", "http", "https://api.payments/", ""},
+		{"two-label-apiserver", "http", "https://kubernetes.default/healthz", ""},
+		{"svc", "http", "https://api.payments.svc/", ""},
+		{"fqdn", "http", "https://api.payments.svc.cluster.local/", ""},
+		{"apiserver-short", "http", "https://kubernetes/healthz", ""},
+		{"apiserver-svc", "http", "https://kubernetes.default.svc/healthz", ""},
+		{"apiserver-fqdn", "http", "https://kubernetes.default.svc.cluster.local/healthz", ""},
+		{"public-name-internal-ip", "http", "https://172-30-0-1.sslip.io/", ""},
+		{"websocket-two-label", "websocket", "wss://api.payments/socket", ""},
+		// The same names and addresses with trailing dots, which the proxy
+		// drops: the resolver refuses such a name without asking and NO_PROXY
+		// does not match it, so read as written it was a proxied NXDOMAIN.
+		{"fqdn-dots", "http", "https://api.payments.svc.cluster.local.../", ""},
+		{"svc-dots", "http", "https://api.payments.svc../", ""},
+		{"bare-clusterip-dots", "http", "https://172.30.0.1.../", ""},
+		{"short-name-dots", "http", "https://api../", ""},
+		{"two-label-dots", "http", "https://api.payments../", ""},
+		{"apiserver-svc-dots", "http", "https://kubernetes.default.svc../healthz", ""},
+		{"apiserver-two-label-dots", "http", "https://KUBERNETES.default../healthz", ""},
+		{"websocket-fqdn-dots", "websocket", "wss://api.payments.svc.cluster.local../socket", ""},
+		// A number not written as an address; the dots get it past the
+		// monitor's own "write an address as one" check.
+		{"inet-aton-short-dots", "http", "https://172.30.1../", ""},
+		{"inet-aton-hex-dots", "http", "https://0xac.0x1e.0.1../", ""},
+		{"inet-aton-number-dots", "http", "https://2887647233../", ""},
+		// A proxied NXDOMAIN name written with trailing dots: NO_PROXY reads it
+		// as written, so the exception is not given.
+		{"proxied-name-dot", "http", "https://status.vendor.example./", ""},
+		{"proxied-name-dots", "http", "https://status.vendor.example../", ""},
+	} {
+		extra := `"namespace":"shop"`
+		if tc.extra != "" {
+			extra += "," + tc.extra
+		}
+		var problem errorBody
+		if code := doAsError(t, token, "POST", base+"/api/v1/monitors", monitorJSON(tc.name, tc.typ, tc.target, extra), &problem); code != http.StatusForbidden {
+			t.Errorf("%s (%s %s): status = %d, want 403 (%q)", tc.name, tc.typ, tc.target, code, problem.Error)
+			continue
+		}
+		if problem.Code != codeTargetScope {
+			t.Errorf("%s: code = %q, want %q", tc.name, problem.Code, codeTargetScope)
+		}
+	}
+
+	// A webhook is held to the same forms.
+	for i, target := range []string{
+		"https://hooks.corp.example/kubeat",  // NO_PROXY
+		"http://hooks.vendor.example/kubeat", // plain http, only HTTPS_PROXY
+		"https://hooks.payments/kubeat",      // two-label, resolves into the cluster
+		"https://hooks.payments.svc/kubeat",  // another team's Service
+		"https://172-30-0-1.sslip.io/kubeat", // public name, cluster address
+		// Trailing dots, which the proxy drops.
+		"https://kubernetes.default.svc../hook",
+		"https://ghost.payments.svc.cluster.local../hook",
+		"https://hooks.payments.svc../hook",
+		"https://hooks.payments../hook",
+		"https://172.30.0.1../hook",
+		"https://api../hook",
+		"https://.../hook",
+		// A number not written as an address, which a proxy reads as one.
+		"https://172.30.1/hook",
+		"https://0xac.0x1e.0.1/hook",
+		"https://2887647233/hook",
+		"https://010.0.0.1/hook",
+		"https://172.30.0.256/hook",
+		"https://3405803777/hook", // 203.0.113.1, external, still not written as an address
+		// A proxied NXDOMAIN name written with trailing dots.
+		"https://hooks.vendor.example./kubeat",
+		"https://hooks.vendor.example../kubeat",
+	} {
+		body := `{"name":"hook-` + strconv.Itoa(i) + `","type":"webhook","target":"` + target + `","namespaces":["shop"]}`
+		if code := doAs(t, token, "POST", base+"/api/v1/channels", body, nil); code != http.StatusForbidden {
+			t.Errorf("webhook at %s: status = %d, want 403", target, code)
+		}
+	}
+
+	// An ntfy channel's URL is not held to ASCII as the other webhook types'
+	// are (webURL), so its host reaches the scope check as written. The
+	// proxy reads it as net/http hands it over, through IDNA: a soft hyphen
+	// (U+00AD) and a zero-width space (U+200B) are dropped, and the
+	// ideographic, fullwidth and halfwidth full stops (U+3002, U+FF0E, U+FF61)
+	// become dots. The pure-Go resolver refuses such a name without asking (an
+	// NXDOMAIN) and NO_PROXY does not match it, so read as written each of
+	// these with an ASCII dot was a proxied NXDOMAIN that reached the Service,
+	// the API server or the address it spells. A scoped user is refused any
+	// host that is not ASCII, with the setting on or off, even one that would
+	// name their own namespace; an international name is written in its xn--
+	// form.
+	for _, mode := range []struct {
+		name  string
+		trust bool
+	}{{"setting on", true}, {"setting off", false}} {
+		t.Run("ntfy not ASCII, "+mode.name, func(t *testing.T) {
+			srv, _ := newTestAPIWith(t, func(o *Options) {
+				o.Resolver = corpResolver(t)
+				o.ScopeTrustProxy = mode.trust
+				o.Proxy = corpProxy(corpNoProxy)
+			})
+			base := srv.URL
+			token := signInScoped(t, base)
+			for i, target := range []string{
+				"https://kubernetes.default\u00ad/alerts",             // soft hyphen: the API server
+				"https://api.payments\u200b/alerts",                   // zero-width space: another team's Service
+				"https://api.payments.svc.cluster.local\u3002/alerts", // ideographic full stop
+				"https://kubernetes.default.svc\uff0e/alerts",         // fullwidth full stop
+				"https://hooks.payments.svc\uff61/alerts",             // halfwidth ideographic full stop
+				"https://api\uff0epayments/alerts",                    // dots between the labels: no ASCII dot, so already a short name
+				"https://kubernetes\u3002default\u3002svc/alerts",     // the same; kept against a later reading of such dots
+				"https://172.30.0.1\u3002/alerts",                     // a bare ClusterIP
+				"https://10.0.0.5\uff61/alerts",                       // an address the proxy may reach
+				"https://ntfy\u00ad.shop.svc/alerts",                  // even one naming their own namespace
+				"https://ntfy.vendor\u200b.example/alerts",            // a proxied external name
+			} {
+				body := `{"name":"ntfy-` + strconv.Itoa(i) + `","type":"ntfy","target":"` + target + `","namespaces":["shop"]}`
+				var problem errorBody
+				if code := doAsError(t, token, "POST", base+"/api/v1/channels", body, &problem); code != http.StatusForbidden {
+					t.Errorf("ntfy at %+q: status = %d, want 403 (%q)", target, code, problem.Error)
+					continue
+				}
+				if problem.Code != codeTargetScope {
+					t.Errorf("ntfy at %+q: code = %q, want %q", target, problem.Code, codeTargetScope)
+				}
+			}
+
+			// A retarget is held to the same rule: an ntfy channel at the
+			// user's own Service may not be moved to such a host.
+			var own channelResponse
+			body := `{"name":"ntfy-own","type":"ntfy","target":"https://ntfy.shop.svc/alerts","namespaces":["shop"]}`
+			if code := doAs(t, token, "POST", base+"/api/v1/channels", body, &own); code != http.StatusCreated {
+				t.Fatalf("ntfy at the user's own Service: status = %d, want 201", code)
+			}
+			if code := doAs(t, token, "PATCH", base+"/api/v1/channels/"+itoa(own.ID), `{"target":"https://kubernetes.default\u00ad/alerts"}`, nil); code != http.StatusForbidden {
+				t.Errorf("retargeting ntfy at a host with a soft hyphen: status = %d, want 403", code)
+			}
+		})
+	}
+}
+
+// Where the backend's resolver cannot answer for public names, as behind a
+// proxy that alone resolves them, a public name pointing at an address the
+// proxy reaches (a node, a VIP, a company range; here 10.0.0.5 by
+// 10-0-0-5.sslip.io) is an NXDOMAIN like any other, so with the setting on it
+// is left to the proxy and accepted. This is the condition README and
+// ADR-0003 put on the setting: the proxy's own ACL, not the scope check,
+// keeps such an address closed (S81).
+func TestScopeTrustProxyLeavesUnresolvedNamesToTheProxy(t *testing.T) {
+	srv, _ := newTestAPIWith(t, func(o *Options) {
+		o.Resolver = fakeResolver{} // the backend resolves no public name
+		o.ScopeTrustProxy = true
+		o.Proxy = corpProxy(corpNoProxy)
+	})
+	base := srv.URL
+	token := signInScoped(t, base)
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors",
+		monitorJSON("node", "http", "https://10-0-0-5.sslip.io/", `"namespace":"shop"`), nil); code != http.StatusCreated {
+		t.Errorf("a public name the backend cannot resolve: status = %d, want 201 (left to the proxy)", code)
+	}
+}
+
+// Whatever the setting, the scope check reads a host as the proxy and the
+// resolver read it: without its trailing dots and in lower case, and a host
+// made of numbers that is not written as an address is refused. A scoped
+// user's own Service written with trailing dots is in scope, and the audit
+// entry of a refusal names the host in that one spelling.
+func TestScopeReadsHostAsTheProxyDoes(t *testing.T) {
+	srv, db := newTestAPIWith(t, func(o *Options) { o.Resolver = corpResolver(t) })
+	base := srv.URL
+	token := signInScoped(t, base)
+
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors",
+		monitorJSON("apiserver", "http", "https://Kubernetes.Default.SVC../healthz", `"namespace":"shop"`), nil); code != http.StatusForbidden {
+		t.Errorf("API server with trailing dots: status = %d, want 403", code)
+	}
+	hook := `{"name":"hook","type":"webhook","target":"https://0xac.0x1e.0.1/hook","namespaces":["shop"]}`
+	if code := doAs(t, token, "POST", base+"/api/v1/channels", hook, nil); code != http.StatusForbidden {
+		t.Errorf("webhook at a numeric host: status = %d, want 403", code)
+	}
+	denials := auditDenials(t, db)
+	var summaries []string
+	for _, d := range denials {
+		summaries = append(summaries, d.Summary)
+	}
+	for _, want := range []string{"target kubernetes.default.svc is outside your namespaces", "target 0xac.0x1e.0.1 is outside your namespaces"} {
+		if !slices.Contains(summaries, want) {
+			t.Errorf("deny summaries = %q, want one %q", summaries, want)
+		}
+	}
+
+	if code := doAs(t, token, "POST", base+"/api/v1/monitors",
+		monitorJSON("own", "http", "https://api.shop.svc../", `"namespace":"shop"`), nil); code != http.StatusCreated {
+		t.Errorf("own Service with trailing dots: status = %d, want 201", code)
+	}
+}
+
+// The proxy exception covers an NXDOMAIN only: a resolver that fails (a
+// SERVFAIL, an outage) or does not answer in time keeps a proxied target
+// refused with the setting on (the resolver-error fail-safe, ADR-0003 c).
+func TestScopeTrustProxyKeepsResolverFailSafe(t *testing.T) {
+	for name, resolver := range map[string]netguard.Resolver{
+		"servfail": failingResolver{},
+		"timeout":  blockingResolver{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, db := newTestAPIWith(t, func(o *Options) {
+				o.Resolver = resolver
+				o.ResolveTimeout = 50 * time.Millisecond
+				o.ScopeTrustProxy = true
+				o.Proxy = corpProxy(corpNoProxy)
+			})
+			base := srv.URL
+			token := signInScoped(t, base)
+			var problem errorBody
+			if code := doAsError(t, token, "POST", base+"/api/v1/monitors",
+				monitorJSON("status", "http", "https://status.vendor.example/", `"namespace":"shop"`), &problem); code != http.StatusForbidden {
+				t.Errorf("proxied monitor: status = %d, want 403", code)
+			}
+			if problem.Code != codeTargetScope {
+				t.Errorf("code = %q, want %q", problem.Code, codeTargetScope)
+			}
+			hook := `{"name":"hook","type":"webhook","target":"https://hooks.vendor.example/x","namespaces":["shop"]}`
+			if code := doAs(t, token, "POST", base+"/api/v1/channels", hook, nil); code != http.StatusForbidden {
+				t.Errorf("proxied webhook: status = %d, want 403", code)
+			}
+			if rows := auditDenials(t, db); len(rows) != 2 {
+				t.Errorf("deny rows = %d, want 2", len(rows))
+			}
+		})
+	}
+}
+
+// With the setting off (the default), a proxied NXDOMAIN name is refused as in
+// 0.49 and leaves its deny row; the setting on where nothing is proxied
+// changes nothing either. An administrator never resolves and is unaffected.
+func TestScopeTrustProxyOffIsUnchanged(t *testing.T) {
+	for name, customize := range map[string]func(*Options){
+		"setting off, proxy set": func(o *Options) { o.Proxy = corpProxy(corpNoProxy) },
+		"setting on, no proxy": func(o *Options) {
+			o.ScopeTrustProxy = true
+			o.Proxy = func(*http.Request) (*url.URL, error) { return nil, nil }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, db := newTestAPIWith(t, func(o *Options) {
+				o.Resolver = corpResolver(t)
+				customize(o)
+			})
+			base := srv.URL
+			token := signInScoped(t, base)
+			if code := doAs(t, token, "POST", base+"/api/v1/monitors",
+				monitorJSON("status", "http", "https://status.vendor.example/", `"namespace":"shop"`), nil); code != http.StatusForbidden {
+				t.Errorf("proxied NXDOMAIN monitor: status = %d, want 403", code)
+			}
+			hook := `{"name":"hook","type":"webhook","target":"https://hooks.vendor.example/x","namespaces":["shop"]}`
+			if code := doAs(t, token, "POST", base+"/api/v1/channels", hook, nil); code != http.StatusForbidden {
+				t.Errorf("proxied NXDOMAIN webhook: status = %d, want 403", code)
+			}
+			if rows := auditDenials(t, db); len(rows) != 2 {
+				t.Errorf("deny rows = %d, want 2", len(rows))
+			}
+			if code := do(t, "POST", base+"/api/v1/monitors", monitorJSON("admin", "http", "https://status.vendor.example/", `"namespace":"shop"`), nil); code != http.StatusCreated {
+				t.Errorf("administrator: status = %d, want 201", code)
+			}
+		})
+	}
+}
+
+// monitorRequestURL is the request a proxy may be handed: an HTTP monitor's
+// URL, a WebSocket monitor's with ws/wss read as http/https as the checker
+// sends the handshake, and nothing for a type that connects directly or for a
+// check of each pod.
+func TestMonitorRequestURL(t *testing.T) {
+	for _, tc := range []struct {
+		m    store.Monitor
+		want string
+	}{
+		{store.Monitor{Type: store.MonitorHTTP, Target: "https://status.vendor.example/health"}, "https://status.vendor.example/health"},
+		{store.Monitor{Type: store.MonitorHTTP, Target: "http://status.vendor.example/"}, "http://status.vendor.example/"},
+		{store.Monitor{Type: store.MonitorWebSocket, Target: "wss://stream.vendor.example/s"}, "https://stream.vendor.example/s"},
+		{store.Monitor{Type: store.MonitorWebSocket, Target: "ws://stream.vendor.example/s"}, "http://stream.vendor.example/s"},
+		{store.Monitor{Type: store.MonitorWebSocket, Target: "ftp://stream.vendor.example/s"}, ""},
+		{store.Monitor{Type: store.MonitorWebSocket, Target: "https://stream.vendor.example/s"}, ""},
+		{store.Monitor{Type: store.MonitorHTTP, Target: "ftp://files.vendor.example/"}, ""},
+		{store.Monitor{Type: store.MonitorHTTP, Target: "https://api.shop.svc/", EachPod: true}, ""},
+		{store.Monitor{Type: store.MonitorTCP, Target: "status.vendor.example:443"}, ""},
+		{store.Monitor{Type: store.MonitorGRPC, Target: "status.vendor.example:443"}, ""},
+		{store.Monitor{Type: store.MonitorDNS, Target: "status.vendor.example"}, ""},
+		{store.Monitor{Type: store.MonitorPing, Target: "status.vendor.example"}, ""},
+		{store.Monitor{Type: store.MonitorPostgres, Target: "db.vendor.example:5432"}, ""},
+	} {
+		got := ""
+		if u := monitorRequestURL(tc.m); u != nil {
+			got = u.String()
+		}
+		if got != tc.want {
+			t.Errorf("monitorRequestURL(%s %s) = %q, want %q", tc.m.Type, tc.m.Target, got, tc.want)
+		}
 	}
 }

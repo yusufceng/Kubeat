@@ -261,9 +261,17 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   ad ve özel adrese çözülen on-prem Route adı cluster içi sayılıp reddediliyor
   (0.48'den beri; çıplak kurum IP'si 0.47'den beri); keşiften içe aktarma ise
   yalnız namespace'e baktığı için bu hedefe izin veriyor (S80, sprint 9
-  kuyruğu); (b) vekilli kurulumda yerelde NXDOMAIN alan dış ad reddediliyor
-  (0.49'dan beri; S81 [#121](https://github.com/yusufceng/Kubeat/issues/121),
-  sprint 8); (c) denetim ve sayaç çözüm hatasını gerçek cross-tenant reddinden
+  kuyruğu); (b) vekilli kurulumda yerelde NXDOMAIN alan dış ad 0.49'da
+  reddediliyor; 0.50'de opt-in `UPTIME_TARGET_SCOPE_TRUST_PROXY` (yalnız vekil
+  cluster dışındaysa) vekile giden HTTP/WebSocket monitor'ü ve webhook'ta
+  NXDOMAIN'i reddetmiyor (S81 [#121](https://github.com/yusufceng/Kubeat/issues/121),
+  sprint 8). Cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine reddediliyor;
+  cluster DNS'i dış adlara SERVFAIL ya da zaman aşımıyla yanıt veriyorsa ayar
+  yardım etmiyor; ayar açıkken kapsamın sınırı vekilin ulaştığı yer (iç adrese
+  işaret eden genel ad backend'de NXDOMAIN alıp vekile gidiyor), bu yüzden node
+  IP'lerini, VIP'leri ve kurum aralıklarını vekilin ACL'i kapatmalı;
+  minikube provası release manager'da, gerçek hava boşluklu
+  cluster provası kullanıcıda; (c) denetim ve sayaç çözüm hatasını gerçek cross-tenant reddinden
   ayırmıyor ve denetim satırlarının sınırı yok (S82, sprint 9 kuyruğu); (d)
   kapsam daralınca var olan monitor'ler yeniden denetlenmiyor (S73, backlog;
   S80–S82'ye bağlı).

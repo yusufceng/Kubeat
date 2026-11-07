@@ -659,6 +659,16 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   (`api`) — sınırlı bir kullanıcı için reddedilir; kullanıcı Service'i
   `servis.namespace.svc` biçiminde adlandırmalı ya da bir yöneticiden
   istemelidir.
+- **Host'un yazılışı (0.50).** Kapsam host'u vekilin ve çözücünün okuduğu gibi
+  okur: büyük/küçük harf fark etmez ve sondaki noktaların hepsi atılır
+  (`api.odeme.svc..` `api.odeme.svc`'dir, `172.30.0.1..` çıplak ClusterIP'dir).
+  Rakamlardan oluşan ama adres gibi yazılmamış bir host (`172.30.1`,
+  `0xac.0x1e.0.1`, `2887647233`; vekil ve glibc üçünü de `172.30.0.1` okur)
+  sınırlı kullanıcı için reddedilir; adres `172.30.0.1` gibi yazılır. ASCII
+  olmayan host sınırlı kullanıcı için reddedilir; uluslararası ad `xn--`
+  biçiminde yazılır (vekil böyle bir host'u IDNA ile okur: yumuşak tire ve
+  sıfır genişlikli boşluk silinir, `。`, `．`, `｡` nokta olur). Denetim satırı
+  host'u bu tek yazılışla kaydeder.
 - **Çözüm anında (dial-time) denetim (0.48; çözüm hatasında güvenli taraf 0.49).**
   Kapsam yalnızca adın yazılışına bakmaz: kapsamı sınırlı bir kullanıcı bir hedef
   belirlediğinde (monitor/kanal oluşturma ya da hedefini değiştirme), adı cluster
@@ -678,7 +688,8 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     cluster içine bağlamasını sağlayamaz. Yönetici ve kapsamı `*` olan kullanıcı
     bir ad çözmediği için etkilenmez; var olan monitor'ler çalışmaya devam eder
     ("İzleme asla durmaz") — yalnız sınırlı kullanıcının yeni kapsam-dışı hedefi
-    reddedilir.
+    reddedilir. Tek istisna, vekile giden bir isteğin NXDOMAIN'idir ve
+    varsayılan olarak kapalıdır (aşağıda "Vekilli kurulum").
   - **Zaman aşımı.** Çözüme ayrı bir sınır konur (`UPTIME_TARGET_RESOLVE_TIMEOUT`,
     varsayılan 5 sn); yavaş ya da takılı bir çözücü bir oluşturma ya da değiştirmeyi
     sunucunun yazma zaman aşımına (`UPTIME_HTTP_WRITE_TIMEOUT`, 2 dk) kadar
@@ -697,9 +708,78 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     kullanıcının meşru dış hedef oluşturması güvenli tarafta reddedilir. Çözüm
     pod'un kendi çözücüsünü ve arama alanlarını (`ndots`) kullanır — checker'ın
     hedefi bağlarken kullanacağı çözümün aynısı — ve hedef politikasına tabi
-    değildir. `HTTP_PROXY`/`HTTPS_PROXY` verilse de kapsam çözümü yine backend'de yapılır,
-    vekile bırakılmaz: bir isteğin hedefi daha sonra vekilde çözülse bile kapsam
-    kararı backend'in bu çözümüne dayanır.
+    değildir. `HTTP_PROXY`/`HTTPS_PROXY` verilse de kapsam çözümü yine backend'de
+    yapılır: bir isteğin hedefi daha sonra vekilde çözülse bile kapsam kararı
+    backend'in bu çözümüne dayanır. Backend'in çözücüsünün tanımadığı (NXDOMAIN)
+    bir dış ad bu yüzden varsayılan olarak reddedilir. Dış adları yalnız vekilin
+    çözdüğü bir kurulumda bu ad, `UPTIME_TARGET_SCOPE_TRUST_PROXY` açıksa ve istek
+    vekile gidiyorsa reddedilmez (aşağıda "Vekilli kurulum").
+  - **Vekilli kurulum (0.50, opt-in).** Hava boşluklu ya da egress'i kısıtlı bir
+    kurumda pod'lar dış adları çözemez; çözümü ve bağlantıyı cluster dışındaki
+    kurumsal vekil yapar (`HTTPS_PROXY`, `NO_PROXY`; ör.
+    [docs/pilot.md](docs/pilot.md) "2. values-pilot.yaml"). Burada yerel bir
+    NXDOMAIN bir kapsam sinyali değildir: isteği backend değil vekil çözer ve
+    bağlar. `UPTIME_TARGET_SCOPE_TRUST_PROXY=true` iken:
+    - **Ne kabul edilir.** Kapsamı sınırlı kullanıcının hedefi backend'in
+      çözücüsünde **yalnız NXDOMAIN** alıyorsa ve istek vekile gidiyorsa
+      reddedilmez. Bu HTTP/HTTPS, anahtar kelime ve JSON monitor'lerinde,
+      WebSocket monitor'lerinde ve webhook türü kanallarda (webhook, Slack, Teams,
+      Discord, Mattermost, Google Chat, Gotify, ntfy) geçerlidir. Oluşturma, klon
+      ve hedef değişikliği için de aynıdır; denetim satırı ve sayaç artışı olmaz.
+    - **Vekile gidip gitmediği.** Karar checker'ın ve kanalların kullandığı
+      `http.ProxyFromEnvironment` kararıyla aynıdır. `https://` istek
+      `HTTPS_PROXY`'ye, düz `http://` istek `HTTP_PROXY`'ye gider; `ws://` ve
+      `wss://` da `http://` ve `https://` gibi okunur. `NO_PROXY`'ye uyan ad ya da
+      adres vekile gitmez, doğrudan bağlanılır.
+    - **Ne yine reddedilir.** Ad çözülmeye devam eder, istisna yalnız
+      NXDOMAIN'dedir:
+      - cluster içine çözülen ad: iki etiketli `api.odeme` ya da
+        `kubernetes.default` (vekile gidecek olsa da `ndots` onu Service'e ya da
+        API sunucusuna çözer);
+      - iç adrese çözülen genel ad (`172-30-0-1.sslip.io`), **yalnız backend bu
+        adı çözebiliyorsa**. Vekilli kurulumda backend genel adları çözemez;
+        ad NXDOMAIN alır ve vekile bırakılır (aşağıda "Şart");
+      - SERVFAIL, REFUSED ve zaman aşımı (fail-safe korunur);
+      - `NO_PROXY`'ye uyan ve burada NXDOMAIN alan ad (ör. kurumun kendi alanı
+        `.sirket.local`): doğrudan bağlanılacağı için istisna almaz;
+      - doğrudan bağlanan türler: TCP, DNS, gRPC, ping, veritabanı ve `each_pod`
+        kontrolü;
+      - cluster içi biçimler, eskisi gibi adlarındaki namespace'e göre: çıplak
+        ClusterIP (`172.30.0.0/16` gibi bir `NO_PROXY` aralığında da), kısa ad
+        (`api`), başka namespace'in `.svc` ya da tam adı, API sunucusunun
+        adları; sondaki noktalarla, rakamla ya da ASCII olmayan karakterle
+        yazılmış hâlleri de (`kubernetes.default.svc..`, `172.30.1`,
+        `kubernetes.default` ardından yumuşak tire; yukarıda "Host'un yazılışı");
+      - sonunda nokta olan bir ad (`durum.saglayici.example.`): `NO_PROXY` adı
+        yazıldığı gibi eşler, bu yüzden böyle bir ad istisna almaz; ad noktasız
+        yazılır.
+    - **Şart: vekil cluster dışında.** Ayar yalnız vekil cluster **dışında**
+      çalışıyor, cluster'ın adlarını çözemiyor ve ClusterIP ya da pod
+      adreslerine ulaşamıyorsa açılır. Cluster içindeki bir vekil cluster DNS'ini
+      ve kendi arama alanlarını (`ndots`) kullanır: backend'de bugün NXDOMAIN
+      alan bir ad (ör. Service'i sonradan oluşturulan `api.odeme` ya da vekilin
+      kendi namespace'ine göre çözülen bir ad) vekilde ClusterIP'ye çözülüp
+      oraya bağlanabilir. Böyle bir kurulumda ayar kapalı kalmalıdır. Ayar
+      açıkken kapsamı sınırlı kullanıcı, vekilin ulaştığı her adrese (node
+      IP'leri/NodePort, router, API ve LoadBalancer VIP'leri, kurumun özel
+      aralıkları) bir adla ulaşır: iç adrese işaret eden genel bir ad
+      (`10-0-0-5.sslip.io` ya da kullanıcının kendi alanı) backend'de NXDOMAIN
+      alır ve vekile bırakılır. Vekilin ACL'i bunları kapatmalı, yoksa ayar
+      kapalı kalmalı.
+    - **Uyarı.** `HTTP_PROXY`/`HTTPS_PROXY` verilmiş ve ayar kapalıysa backend
+      açılışta bir kez `WARN` yazar: kapsamı sınırlı kullanıcının yalnız vekilin
+      çözdüğü dış hedefleri reddedilir, vekil cluster dışındaysa ayar açılabilir.
+      Vekil cluster içindeyse ayar kapalı kalır ve bu satır bilgi içindir. Ayar
+      açık ama vekil verilmemişse de bir `WARN` gelir: ayar hiçbir şeyi
+      değiştirmez.
+    - **Sınırlar.** Ayar yalnız NXDOMAIN'de işe yarar. Cluster DNS'i dış adlara
+      SERVFAIL, REFUSED ya da zaman aşımıyla yanıt veriyorsa ad yine reddedilir;
+      bu hata bugün denetim satırında ve sayaçta gerçek bir cross-tenant reddinden
+      ayrılmaz (S82). Kayıt anındaki karar `NO_PROXY` ve vekile göre verilir:
+      `NO_PROXY` sonradan değişirse var olan monitor'ler yeniden denetlenmez
+      (S73, backlog); ayarı kapatmak ya da 0.49'a dönmek de ayar açıkken kabul
+      edilmiş monitor ve kanalları yeniden denetlemez, bunlar çalışmaya devam
+      eder (S73).
   - **Red mesajı.** Kapsam dışı hedefin reddi, nedenini ayırt etmeyen tek genel bir
     mesaj verir (hangi namespace olduğunu ya da adın iç adrese çözülüp çözülmediğini
     söylemez); aksi hâlde sınırlı bir kullanıcı bu mesajla keyfî bir adın cluster
@@ -731,13 +811,14 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     çıplak bir kurum IP'si de (0.47'den beri). Aynı hedefin klonu ya da hedef
     değişikliği de reddedilir.
   - Vekilli bir kurulumda yalnız vekilin çözebildiği, burada NXDOMAIN alan bir
-    dış ad da bu kullanıcı için reddedilir (0.49'dan beri; yukarıda "Egress ve
-    DNS").
+    dış ad 0.49'da bu kullanıcı için reddedilir. 0.50'de vekile giden HTTP
+    isteğinde `UPTIME_TARGET_SCOPE_TRUST_PROXY` ile kabul edilir (yukarıda
+    "Vekilli kurulum"); ayar kapalıyken red sürer. Ayar açıkken kurum ağına
+    işaret eden ama backend'in çözemediği bir ad da vekile gider: o zaman
+    yukarıdaki kısıtı vekilin ACL'i sağlar.
   - Yönetici ve kapsamı `*` olan kullanıcı etkilenmez. Böyle bir hedefi yönetici
     kurar ya da keşiften içe aktarılır (içe aktarma yalnız namespace'e bakar).
-    Vekilli kurulum için opt-in bir ayar 0.50'de planlandı
-    ([#121](https://github.com/yusufceng/Kubeat/issues/121)); kurum aralıkları
-    için ayar sonraki sprintin adayı.
+    Kurum aralıkları için ayar sonraki sprintin adayı.
 - Kısıt hedef belirlenirken uygulanır (monitor/kanal oluşturma ve hedefini
   değiştirme); var olan monitor'ler yükseltmede yeniden denetlenmez,
   çalışmaya devam eder. Keşiften içe aktarma kullanıcının düzenleyebildiği
@@ -766,8 +847,10 @@ değilse reddedilir. Host'un sonundaki noktalar (`169.254.169.254..`,
 onlarsız denetler. Düz `http://` bir istekte vekil, URL'deki host'a değil
 istek satırına yazılan `Host` header'ına gider; monitor'un `Host`
 header'ı da bu yüzden aynı biçimde denetlenir. Burada çözülemeyen bir ad
-ise vekile bırakılır; vekil adı yeniden çözer ve nereye ulaşacağı onun
-ağına bağlıdır.
+ise hedef politikasınca vekile bırakılır; vekil adı yeniden çözer ve nereye
+ulaşacağı onun ağına bağlıdır. Kapsamı sınırlı bir kullanıcı için kapsam
+denetimi böyle bir adı ayrıca reddeder, `UPTIME_TARGET_SCOPE_TRUST_PROXY`
+açık değilse (yukarıda "Vekilli kurulum").
 Lokal geliştirmede `make backend` loopback'i istisna tutar
 (`TARGET_ALLOW_CIDRS`), böylece makinedeki servisler kontrol edilebilir.
 
@@ -4428,6 +4511,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_TARGET_DENY_CIDRS` | – | Kontrollerin ve bildirimlerin bağlanmayacağı, yerleşik listeye (loopback, link-local, metadata, multicast) eklenen aralıklar; virgülle ayrılmış CIDR. Bkz. "Hedef politikası" |
 | `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
 | `UPTIME_TARGET_RESOLVE_TIMEOUT` | `5s` | Kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Bkz. "Hedef politikası" → "Çözüm anında denetim". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
+| `UPTIME_TARGET_SCOPE_TRUST_PROXY` | `false` | `true` iken kapsamı sınırlı kullanıcının hedefi backend'in çözücüsünde yalnız NXDOMAIN alıyor ve istek vekile gidiyorsa (`HTTP_PROXY`/`HTTPS_PROXY`, `NO_PROXY` dışında; HTTP, anahtar kelime, JSON, WebSocket monitor'leri ve webhook türü kanallar) reddedilmez. Yalnız vekil cluster dışındaysa açın. Cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine reddedilir. Vekil verilmiş ve ayar kapalıysa açılışta bir `WARN` gelir. Bkz. "Hedef politikası" → "Vekilli kurulum" |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL` | `30s` | Hedefi cluster dışında olan bir monitor'un en kısa kontrol (ve tekrar) aralığı; `UPTIME_MIN_CHECK_INTERVAL`'dan kısa olamaz, `0` ayrı kural yok demektir. Bkz. "Hedef yükü" |
 | `UPTIME_TARGET_MAX_RATE` | `60` | Cluster dışındaki bir host'a tüm monitor'ların birlikte dakikada yapabileceği en fazla kontrol; fazlası sonraki tick'i bekler. `0` sınırsız |

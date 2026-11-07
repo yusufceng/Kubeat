@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/http/httpproxy"
 )
 
 func mustNew(t *testing.T, extraDeny, allow []string) *Policy {
@@ -431,6 +433,43 @@ func TestEnvironmentProxies(t *testing.T) {
 	}
 }
 
+// Proxied decides as the transport's Proxy function does, NO_PROXY and the
+// scheme included: what the scope check relies on to tell a request the
+// proxy resolves from one the backend dials itself (S81).
+func TestProxied(t *testing.T) {
+	proxyFor := (&httpproxy.Config{
+		HTTPSProxy: "http://proxy.corp.example:3128",
+		NoProxy:    ".svc,.cluster.local,172.30.0.0/16,.corp.example",
+	}).ProxyFunc()
+	proxy := func(r *http.Request) (*url.URL, error) { return proxyFor(r.URL) }
+	for raw, want := range map[string]bool{
+		"https://status.vendor.example/health":    true,
+		"https://status.vendor.example:8443/":     true,
+		"https://api.payments/":                   true,  // two-label: not in NO_PROXY
+		"http://status.vendor.example/":           false, // HTTPS_PROXY only
+		"https://api.payments.svc/":               false,
+		"https://api.payments.svc.cluster.local/": false,
+		"https://172.30.0.1/":                     false, // in NO_PROXY's range
+		"https://intranet.corp.example/":          false,
+		"https://localhost/":                      false, // never proxied
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := Proxied(proxy, u); got != want {
+			t.Errorf("Proxied(%s) = %v, want %v", raw, got, want)
+		}
+	}
+	if Proxied(proxy, nil) {
+		t.Error("Proxied(nil URL) = true, want false")
+	}
+	failing := func(*http.Request) (*url.URL, error) { return nil, errors.New("invalid proxy address") }
+	if Proxied(failing, &url.URL{Scheme: "https", Host: "status.vendor.example"}) {
+		t.Error("a failing proxy function = proxied, want not")
+	}
+}
+
 // A host made of numbers is read as inet_aton reads it, or refused.
 func TestNumericHosts(t *testing.T) {
 	for host, want := range map[string]string{
@@ -462,6 +501,22 @@ func TestNumericHosts(t *testing.T) {
 	err := mustNew(t, nil, nil).CheckHost(context.Background(), "2852039166")
 	if err == nil || !strings.HasPrefix(err.Error(), "2852039166: 169.254.169.254 is blocked by the target policy") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// Numeric exports the same test for the scope check: a host in one of
+// inet_aton's forms is numeric whether or not it spells an address, and a
+// name is not. Trailing dots are the caller's to drop.
+func TestNumericExported(t *testing.T) {
+	for _, host := range []string{"172.30.1", "0xac.0x1e.0.1", "2887647233", "010.0.0.1", "10.0.0.5", "172.30.0.256", "08"} {
+		if !Numeric(host) {
+			t.Errorf("Numeric(%s) = false, want true", host)
+		}
+	}
+	for _, host := range []string{"", "status.vendor.example", "172.30.0.1.", "172-30-0-1.sslip.io", "fd00::1"} {
+		if Numeric(host) {
+			t.Errorf("Numeric(%q) = true, want false", host)
+		}
 	}
 }
 

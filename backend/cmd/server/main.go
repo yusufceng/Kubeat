@@ -384,6 +384,7 @@ func main() {
 			StatsWindow:      cfg.StatsWindow,
 			MaxResults:       cfg.MaxResults,
 			ResolveTimeout:   cfg.TargetResolveTimeout,
+			ScopeTrustProxy:  cfg.TargetScopeTrustProxy,
 
 			MinCheckIntervalExternal: cfg.MinCheckIntervalExternal,
 			MaxMonitorsPerHost:       cfg.MaxMonitorsPerHost,
