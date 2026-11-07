@@ -89,11 +89,14 @@ geri dönüş başladığınız sürüme olur.
    izin verin, yoksa kapsamı sınırlı kullanıcıların dış hedef create'i güvenli
    tarafta reddedilir.
 9. 0.50'nin adımları ("0.50'ye yükseltme", Yapılacak): `UPTIME_TRUST_PROXY_HOPS`'u
-   arayüz yoluna göre yeniden türetilen rehbere göre ayarlayın (fazla değer
-   artık güvenli taraf değildir, emin değilseniz küçüğünü seçin) ve
-   `sign-in refused` satırının `source` alanıyla doğrulayın; chart dışı
-   kurulumda değer `0`'dan büyükse backend'e `UPTIME_FRONTEND_TOKEN`, arayüze
-   `FRONTEND_TOKEN` olarak aynı değeri verin; vekilli kurulumda, vekil cluster
+   (7. ve 8. adımlardaki hop değerinin yerine) arayüz yoluna göre yeniden
+   türetilen rehbere göre ayarlayın (fazla değer artık güvenli taraf değildir,
+   emin değilseniz küçüğünü seçin) ve `sign-in refused` satırının `source`
+   alanıyla doğrulayın; chart dışı kurulumda değer `0`'dan büyükse backend'e
+   `UPTIME_FRONTEND_TOKEN`, arayüze `FRONTEND_TOKEN` olarak aynı değeri verin;
+   GitOps ile kuruyorsanız beşinci Secret'ı (`token` anahtarı) oluşturup
+   `frontendToken.existingSecret` ile verin; isteğe bağlı
+   `frontend.networkPolicy.enabled`'ı ve vekilli kurulumda, vekil cluster
    dışındaysa, isteğe bağlı `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi değerlendirin.
 10. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46–0.50'de değişmedi:
     yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi Alertmanager
@@ -120,7 +123,7 @@ geri dönüş başladığınız sürüme olur.
 2. Sonra "0.42'den 0.50'ye"deki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
-0.43, 0.44 ya da 0.45'ten gelirken başladığınız sürümden sonraki bölümleri
+0.43–0.49'dan gelirken başladığınız sürümden sonraki bölümleri
 eskiden yeniye okuyun. 0.40 ya da öncesinden gelirken de öyle; şemayı
 yükselten 0.38, 0.39 ve 0.40'tan dönüş yalnızca yedekle olur.
 
@@ -251,7 +254,8 @@ aşağıdaki hop değerlerinin hiçbiri henüz gerçek bir cluster'da ölçülme
   "Vekil-hop rehberi"):
   - düz OpenShift Route `1`; önünde başlığı yazan bir WAF ya da L7 yük
     dengeleyici olan Route `2` (`2`'yi yalnız WAF başlığı yazıyorsa seçin);
-  - GKE `ingress-nginx` (L4 LoadBalancer, varsayılan ayarlar) `1`; GKE'nin
+  - GKE `ingress-nginx` (L4 LoadBalancer, `externalTrafficPolicy: Local`,
+    varsayılan ayarlar) `1`; GKE'nin
     kendi Ingress'i (GCE) `2`; önde L7 GCLB + `ingress-nginx` yalnız
     `use-forwarded-headers` ve `compute-full-forwarded-for` açıksa `3`,
     varsayılanlarla `1` (kaynak o zaman GCLB vekilidir);
@@ -259,8 +263,9 @@ aşağıdaki hop değerlerinin hiçbiri henüz gerçek bir cluster'da ölçülme
     Service'i önünde vekil olmadan doğrudan dışarı açıksa (`LoadBalancer`,
     `NodePort`) `0`.
 
-  0.48–0.49 rehberiyle verilmiş değerlerden GKE'nin kendi Ingress'i `1` → `2`
-  olur; düz Route `1` ve WAF'lı Route `2` aynı kalır. **Fazla değer artık
+  0.48–0.49 rehberiyle verilmiş değerlerden GKE'nin kendi Ingress'i `1` → `2`;
+  GCLB + `ingress-nginx` `2` → iki ayar açıksa `3`, varsayılanlarla `1`; düz
+  Route `1` ve WAF'lı Route `2` aynı kalır. **Fazla değer artık
   güvenli taraf değildir:** başlığa ekleyen bir vekilin (Route `Append`, GCLB)
   arkasında istemci başlığı fazladan bir girdiyle uzatıp kaynağını seçebilir
   ve bu isteklerde `WARN` düşmez. Eksik değer `WARN` vermez, throttle'ı vekilin
@@ -275,9 +280,12 @@ aşağıdaki hop değerlerinin hiçbiri henüz gerçek bir cluster'da ölçülme
   rastgele değer (ör. `openssl rand -hex 24`; yazdırılabilir ASCII, boşluksuz).
   Verilmezse backend açılışta `WARN` yazar ve `X-Forwarded-For`'a hiçbir eşten
   güvenmez: her tarayıcı arayüz pod'una anahtarlanır (tek paylaşılan kilit,
-  bypass değil). Chart sırrı kendisi üretir (`<release>-frontend-token`);
-  GitOps'ta Secret'ı kendiniz oluşturup `frontendToken.existingSecret` ile
-  verin.
+  bypass değil). Chart sırrı kendisi üretir (`<release>-frontend-token`).
+- **GitOps ile kuruyorsanız beşinci Secret'ı oluşturun:** `token` anahtarlı
+  bir Secret'ı `frontendToken.existingSecret` ile verin; yoksa her eşitleme
+  yeni sır yazar ve pod'lardan yalnız biri yeniden başladığında tarayıcı
+  girişleri arayüz pod'una anahtarlanır (tek paylaşılan kilit, `WARN`; README
+  "GitOps ile kurulum").
 - **İsteğe bağlı: arayüzün ağ politikası.** Değer `0`'dan büyükken cluster
   içindeki bir pod arayüz Service'ine kendi yazdığı bir `X-Forwarded-For` ile
   bağlanıp kaynağını seçebilir; bunu yalnız `frontend.networkPolicy.enabled=true`
@@ -326,8 +334,10 @@ aşağıdaki hop değerlerinin hiçbiri henüz gerçek bir cluster'da ölçülme
   büyükken backend başlığı yalnız arayüzün sırrını (`X-Frontend-Token`) sunan
   istekte okur. Başka bir eşte (backend'e doğrudan bağlanan bir pod, bir betik,
   backend'e port-forward) kaynak o eştir ve dakika-sınırlı bir "güvenilmeyen
-  eş" `WARN`'ı düşer: cluster içindeki bir pod uydurma kaynaklarla hesap
-  tavanını doldurup `admin`'i kilitleyemez. Chart sırrı `<release>-frontend-token`
+  eş" `WARN`'ı düşer: cluster içindeki bir pod backend'e doğrudan bağlanarak
+  uydurma kaynaklarla hesap tavanını doldurup `admin`'i kilitleyemez; arayüz
+  Service'i üzerinden gelen yolu yalnız `frontend.networkPolicy.enabled`
+  kapatır (yukarıda). Chart sırrı `<release>-frontend-token`
   Secret'ında üretir ve iki pod'a verir. Değer `0` iken bir şey değişmez.
 - **Yükseltme sırasında kısa bir pencere.** Backend `Recreate` ile, arayüz
   rolling update ile yenilenir. Değer `0`'dan büyükse yeni backend açıldığında
@@ -357,9 +367,10 @@ aşağıdaki hop değerlerinin hiçbiri henüz gerçek bir cluster'da ölçülme
 ### Geri dönüş
 
 Şema aynı (26), `helm rollback` ile 0.49.0'a. `<release>-frontend-token`
-Secret'ı yetim kalır (chart varsayılanında `helm.sh/resource-policy: keep`
-taşır); 0.49 onu okumaz, zararsızdır ve 0.50'ye yeniden geçişte aynı sır
-kullanılır. Dönüşte arayüzün `X-Forwarded-For` taşıması, backend'in başlığa
+Secret'ı yetim kalır: chart varsayılanında `helm.sh/resource-policy: keep`
+taşır, 0.49 onu okumaz ve 0.50'ye yeniden geçişte aynı sır kullanılır
+(`backend.persistence.keepOnUninstall=false` ise rollback Secret'ı siler;
+0.50'ye yeniden geçişte yenisi üretilir, zararsız). Dönüşte arayüzün `X-Forwarded-For` taşıması, backend'in başlığa
 yalnız arayüzden güvenmesi, `frontend.networkPolicy`,
 `UPTIME_TARGET_SCOPE_TRUST_PROXY`, host yazılışı denetimi, `source` alanı ve
 zamanlayıcı düzeltmesi kalkar; "0.49'a yükseltme"deki iki giriş sınırı geri
