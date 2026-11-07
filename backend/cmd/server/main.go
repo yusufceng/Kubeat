@@ -219,7 +219,7 @@ func main() {
 					DefaultFailureThreshold: cfg.DefaultFailureThreshold, MinInterval: cfg.MinCheckInterval,
 					MinIntervalExternal: cfg.MinCheckIntervalExternal, MaxMonitors: cfg.MaxMonitors,
 					MaxMonitorsPerNamespace: cfg.MaxMonitorsPerNamespace, MaxMonitorsPerHost: cfg.MaxMonitorsPerHost,
-					Logger: logger,
+					Logger: logger, Metrics: meter,
 				})
 				sync = syncer
 				background.Add(1)

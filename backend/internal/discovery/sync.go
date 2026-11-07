@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"sort"
 	"strconv"
@@ -15,8 +16,11 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/yusufceng/Kubeat/backend/internal/guardrails"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -43,9 +47,10 @@ const (
 // Actor is recorded in the audit log for the syncer's changes.
 const Actor = "discovery"
 
-// Cluster lists the monitorable objects; an empty namespace means all.
+// Cluster lists the monitorable objects of every namespace discovery may
+// see, and the namespaces it could not read (k8s.Client.Scan).
 type Cluster interface {
-	Candidates(ctx context.Context, namespace string) ([]k8s.Candidate, error)
+	Scan(ctx context.Context) (k8s.Scan, error)
 }
 
 // Store is the part of the monitor store the syncer uses.
@@ -85,6 +90,9 @@ type Options struct {
 	MaxMonitorsPerNamespace int
 	MaxMonitorsPerHost      int
 	Logger                  *slog.Logger
+	// Metrics counts the reads of the cluster that failed and the
+	// namespaces skipped; nil records nothing.
+	Metrics *metrics.Metrics
 }
 
 // limits are the guardrails the syncer's monitors are held to.
@@ -105,6 +113,19 @@ type Skip struct {
 	Dismissed bool `json:"dismissed"`
 }
 
+// NamespaceSkip is a namespace a run could not read, and went on without.
+type NamespaceSkip struct {
+	Namespace string `json:"namespace"`
+	// Reason is the kind of failure, as kubeat_discovery_sync_errors_total
+	// names it: forbidden, not_found, timeout or other.
+	Reason string `json:"reason"`
+	// Error is the cluster API's answer. Cause is the error it was written
+	// from, so that a reader who may not see its text can still be told
+	// what kind of failure it was.
+	Error string `json:"error"`
+	Cause error  `json:"-"`
+}
+
 // Status is the outcome of the last run.
 type Status struct {
 	IntervalSeconds int `json:"interval_seconds"`
@@ -122,6 +143,12 @@ type Status struct {
 	Updated int    `json:"updated"`
 	Removed int    `json:"removed"`
 	Skipped []Skip `json:"skipped"`
+	// SkippedNamespaces are the namespaces the run could not read, with
+	// discovery limited to namespaces: it went on in the others and left
+	// the monitors of these as they were. When it could read none of them
+	// it changed nothing (Error), and they are all here; when it got no
+	// answer at all, these are the last run's.
+	SkippedNamespaces []NamespaceSkip `json:"skipped_namespaces"`
 	// ByNamespace splits the counts above by namespace, for a reader who
 	// may see only some namespaces (see Within).
 	ByNamespace map[string]Counts `json:"-"`
@@ -142,6 +169,13 @@ func (st Status) Within(visible func(namespace string) bool) Status {
 			skipped = append(skipped, s)
 		}
 	}
+	namespaces := make([]NamespaceSkip, 0, len(st.SkippedNamespaces))
+	for _, n := range st.SkippedNamespaces {
+		if visible(n.Namespace) {
+			namespaces = append(namespaces, n)
+		}
+	}
+	st.SkippedNamespaces = namespaces
 	byNamespace := make(map[string]Counts)
 	for ns, n := range st.ByNamespace {
 		if visible(ns) {
@@ -178,7 +212,8 @@ func New(opts Options) *Syncer {
 		opts.Logger = slog.Default()
 	}
 	return &Syncer{opts: opts, status: Status{
-		IntervalSeconds: int(opts.Interval / time.Second), Skipped: []Skip{}, ByNamespace: map[string]Counts{},
+		IntervalSeconds: int(opts.Interval / time.Second), Skipped: []Skip{}, SkippedNamespaces: []NamespaceSkip{},
+		ByNamespace: map[string]Counts{},
 	}}
 }
 
@@ -207,7 +242,9 @@ func (s *Syncer) Run(ctx context.Context) {
 
 // Sync reads the cluster once and applies the difference. When the cluster
 // cannot be read nothing is changed, so a cluster that is briefly away does
-// not take its monitors with it.
+// not take its monitors with it; a namespace that cannot be read, with
+// discovery limited to namespaces, keeps its monitors as they are while
+// the others are kept in step.
 func (s *Syncer) Sync(ctx context.Context) error {
 	st := Status{
 		IntervalSeconds: int(s.opts.Interval / time.Second), LastRunAt: time.Now().UTC(),
@@ -222,6 +259,11 @@ func (s *Syncer) Sync(ctx context.Context) error {
 		// Keep the counts of the last run that did something.
 		st.Managed, st.Created, st.Updated, st.Removed, st.Skipped = s.status.Managed, s.status.Created, s.status.Updated, s.status.Removed, s.status.Skipped
 		st.ByNamespace = s.status.ByNamespace
+		// A run that got no answer from the cluster knows nothing of its
+		// namespaces (sync leaves them nil): the last run's stand.
+		if st.SkippedNamespaces == nil {
+			st.SkippedNamespaces = s.status.SkippedNamespaces
+		}
 	}
 	s.status = st
 	s.mu.Unlock()
@@ -232,10 +274,21 @@ func (s *Syncer) Sync(ctx context.Context) error {
 func key(namespace, source string) string { return namespace + "/" + source }
 
 func (s *Syncer) sync(ctx context.Context, st *Status) error {
-	candidates, err := s.opts.Cluster.Candidates(ctx, "")
-	if err != nil {
+	scan, err := s.opts.Cluster.Scan(ctx)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return err // the run is ending, not the cluster failing
+	case err != nil && len(scan.Skipped) == 0:
+		s.opts.Metrics.DiscoverySyncFailed(skipReason(err))
 		return fmt.Errorf("read the cluster: %w", err)
 	}
+	// The namespaces that could not be read keep their monitors and their
+	// dismissals as they are: what their objects ask for is not known.
+	unread := s.skipNamespaces(scan.Skipped, st)
+	if err != nil {
+		return fmt.Errorf("read the cluster: %w", err) // none could be read
+	}
+	candidates := scan.Candidates
 	monitors, err := s.opts.Store.ListMonitors(ctx)
 	if err != nil {
 		return err
@@ -260,7 +313,7 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 	// A dismissal lasts as long as the annotation it overrules: once the
 	// object stops asking, annotating it again starts afresh.
 	for _, d := range dismissals {
-		if annotated[key(d.Namespace, d.Source)] {
+		if annotated[key(d.Namespace, d.Source)] || unread[d.Namespace] {
 			continue
 		}
 		if err := s.opts.Store.RestoreSource(ctx, d.Namespace, d.Source); err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -375,6 +428,12 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 		if _, still := wanted[key(m.Namespace, m.Source)]; still {
 			continue
 		}
+		if unread[m.Namespace] {
+			counts := st.ByNamespace[m.Namespace]
+			counts.Managed++
+			st.ByNamespace[m.Namespace] = counts
+			continue
+		}
 		if err := s.remove(ctx, m, "annotation removed or object gone"); err != nil {
 			return err
 		}
@@ -384,6 +443,42 @@ func (s *Syncer) sync(ctx context.Context, st *Status) error {
 	}
 	st.total()
 	return nil
+}
+
+// skipNamespaces reports the namespaces a run could not read, in the status,
+// the log (with their names) and the metrics (without them), and returns
+// them as a set.
+func (s *Syncer) skipNamespaces(skipped []k8s.NamespaceError, st *Status) map[string]bool {
+	st.SkippedNamespaces = make([]NamespaceSkip, 0, len(skipped))
+	unread := make(map[string]bool, len(skipped))
+	reasons := make([]string, 0, len(skipped))
+	for _, e := range skipped {
+		reason := skipReason(e.Err)
+		st.SkippedNamespaces = append(st.SkippedNamespaces, NamespaceSkip{Namespace: e.Namespace, Reason: reason, Error: e.Err.Error(), Cause: e.Err})
+		unread[e.Namespace] = true
+		reasons = append(reasons, reason)
+		s.opts.Logger.Warn("discovery sync skipped a namespace it could not read; its monitors are left as they are",
+			"namespace", e.Namespace, "reason", reason, "error", e.Err)
+	}
+	s.opts.Metrics.DiscoveryNamespacesSkipped(reasons)
+	return unread
+}
+
+// skipReason is the kind of failure err, a failed read of the cluster, was:
+// a metrics.Discovery* reason.
+func skipReason(err error) string {
+	var netErr net.Error
+	switch {
+	case apierrors.IsForbidden(err):
+		return metrics.DiscoveryForbidden
+	case apierrors.IsNotFound(err):
+		return metrics.DiscoveryNotFound
+	case apierrors.IsTimeout(err), apierrors.IsServerTimeout(err), errors.Is(err, context.DeadlineExceeded),
+		errors.As(err, &netErr) && netErr.Timeout():
+		return metrics.DiscoveryTimeout
+	default:
+		return metrics.DiscoveryOther
+	}
 }
 
 // differs says whether the settings the syncer owns changed.
