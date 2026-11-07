@@ -2270,3 +2270,23 @@ sırasında yapılan her bağlantıda uygular. Kanal (webhook türü) hedefleri 
 sertleştirmenin dışında kaldı; kanalların kapsamı bugünkü gibi oluşturma ve
 değiştirmede denetlenir. Kanıt gelirse ayrı madde olur. Tetikleyici: S86'nın SRE
 incelemesindeki değerlendirme.
+
+## Kurum aralığı açılış korumasını node ağına ve cluster ağlarının tamamına genişletmek
+
+2026-11-07'de ertelendi (S80 [#132](https://github.com/yusufceng/Kubeat/issues/132); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
+0.51'de `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` aralıklarından biri API sunucusunun
+adresini (`KUBERNETES_SERVICE_HOST`) ya da backend'in kendi adresini içeriyorsa
+backend başlamaz. Koruma yalnız bu iki örneğe, o açılıştaki hâlleriyle bakar:
+aralık pod ya da Service ağının başka bir parçasını, node (makine) ağını ya da
+API VIP'ini içeriyorsa backend başlar ve kapsamı sınırlı kullanıcı oralara
+namespace'siz ulaşır (README "Hedef politikası", "Kurum ağı", "Şart"). Pod
+ağının başka bir parçasını içeren aralık ise pod o parçaya taşınınca (drain,
+yeniden zamanlama) backend'i durdurur; ağın tamamını okumak bunu ilk açılışta
+yakalar. Router VIP'i on-prem Route'lar için bilerek eklenebildiğinden koruma
+onu reddetmemeli.
+Seçenekler: chart'ın Downward API ile `status.hostIP`'yi vermesi, operatörün
+cluster ağlarını ayrı bir ayarla beyan etmesi ya da OpenShift'te
+`network.config/cluster`'ı okumak (küme düzeyinde okuma yetkisi ister). Router
+VIP'ini kendiliğinden bulmak S80'in kapsam dışıydı. Tetikleyici: pilotta ya da
+provada aralığın node ağı veya API VIP'iyle çakıştığının görülmesi, ya da bunu
+isteyen bir kurulum.

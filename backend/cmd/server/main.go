@@ -132,6 +132,18 @@ func main() {
 	// PagerDuty are trusted the same way by their own senders alone.
 	guard = guard.Trust(netguard.EnvironmentProxies()...)
 	logger.Info("target policy in effect", "target_policy", guard)
+	// The company's ranges the per-user scope check counts as outside the
+	// cluster. Load has checked them, and that none holds the API server's
+	// address or the backend's own; the target policy does not read them.
+	scopeExternal, err := netguard.ParseExternalRanges(splitList(cfg.TargetScopeExternalCIDRs))
+	if err != nil {
+		logger.Error("invalid target scope ranges", "error", err)
+		db.Close()
+		os.Exit(1)
+	}
+	if !scopeExternal.Empty() {
+		logger.Info("target scope external ranges in effect", "external", scopeExternal.String())
+	}
 
 	senders := alert.NewRouter(guard, userAgent, alert.SMTPConfig{
 		Host:     cfg.SMTPHost,
@@ -385,6 +397,7 @@ func main() {
 			MaxResults:       cfg.MaxResults,
 			ResolveTimeout:   cfg.TargetResolveTimeout,
 			ScopeTrustProxy:  cfg.TargetScopeTrustProxy,
+			ScopeExternal:    scopeExternal,
 
 			MinCheckIntervalExternal: cfg.MinCheckIntervalExternal,
 			MaxMonitorsPerHost:       cfg.MaxMonitorsPerHost,

@@ -3,6 +3,7 @@ package netguard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"strings"
@@ -89,6 +90,151 @@ type Resolver interface {
 	LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
 }
 
+// ExternalRanges are the operator's own address ranges that the per-user
+// scope check counts as outside the cluster although they are private
+// (UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS): the company's network, which the
+// cluster reaches but which is not part of it. InClusterAddr counts every
+// private address as inside the cluster, so without them a user limited to
+// some namespaces cannot aim a monitor at a company host, by its address or
+// by a name that resolves to it. The zero value holds no range, and every
+// private address is inside the cluster, as before.
+//
+// This is the one place the rule is kept, for every scope check to ask, at
+// create and edit (api.targetInScope) or wherever else a connection is held
+// to the scope, so that two checks never classify one address apart: an
+// address is inside the cluster for the scope when InClusterAddr says so and
+// none of the ranges holds it (ExternalRanges.InClusterAddr). Only addresses
+// are read this way — a host written as an address, and the addresses a name
+// resolves to. A name that is cluster-internal by its spelling (a *.svc or
+// pod name, a short name) stays so whatever it resolves to, and a name with
+// one answer inside the cluster beside the company's is inside. Only the
+// scope reads the ranges: the target policy and the load guardrails
+// (guardrails.External, the scheduler's host limits) classify as InCluster
+// does.
+//
+// The ranges must stay outside the cluster's pod, Service and node networks
+// and its API VIP: an address of theirs listed here is one a scoped user
+// reaches with no namespace to answer for. The router's VIP (and a
+// LoadBalancer Service's VIP, for that Service alone) is the one cluster
+// address an operator may list, and only on purpose: as a /32 when it sits in
+// the node network, or within the company range that holds a load balancer
+// outside the cluster in front of the router. Either way every Route behind
+// that VIP then opens to scoped users. config.Load
+// refuses ranges that hold the API server's address or one of the backend's
+// own; the rest is the operator's to keep out (README, "Hedef politikası").
+type ExternalRanges struct{ prefixes []netip.Prefix }
+
+// mappedIPv4 is where IPv6 writes IPv4 addresses (::ffff:10.50.0.1).
+// Contains reads such an address as IPv4, so a range written in it would
+// hold nothing.
+var mappedIPv4 = netip.MustParsePrefix("::ffff:0:0/96")
+
+// ParseExternalRanges reads ExternalRanges from CIDRs such as
+// "10.50.0.0/16", one range each; an entry that is not a CIDR is an error.
+// So is one written in, or over, mappedIPv4 (::ffff:10.50.0.0/112): it
+// would match no address, and the operator would not see why. The error
+// gives the IPv4 spelling.
+func ParseExternalRanges(cidrs []string) (ExternalRanges, error) {
+	var e ExternalRanges
+	for _, entry := range cidrs {
+		entry = strings.TrimSpace(entry)
+		prefix, err := netip.ParsePrefix(entry)
+		if err != nil {
+			return ExternalRanges{}, fmt.Errorf("scope external range %q: %w", entry, err)
+		}
+		prefix = prefix.Masked()
+		if prefix.Overlaps(mappedIPv4) {
+			if prefix.Bits() >= mappedIPv4.Bits() {
+				return ExternalRanges{}, fmt.Errorf("scope external range %q is an IPv4 range written as IPv6, which no address matches; write it as %s",
+					entry, netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-mappedIPv4.Bits()))
+			}
+			return ExternalRanges{}, fmt.Errorf("scope external range %q holds %s, where IPv6 writes IPv4 addresses, which no address matches; write IPv4 ranges as IPv4, such as 10.50.0.0/16",
+				entry, mappedIPv4)
+		}
+		e.prefixes = append(e.prefixes, prefix)
+	}
+	return e, nil
+}
+
+// Empty reports whether e holds no range.
+func (e ExternalRanges) Empty() bool { return len(e.prefixes) == 0 }
+
+// String lists the ranges, comma-separated, for the start's log.
+func (e ExternalRanges) String() string {
+	parts := make([]string, len(e.prefixes))
+	for i, prefix := range e.prefixes {
+		parts[i] = prefix.String()
+	}
+	return strings.Join(parts, ",")
+}
+
+// Contains reports whether addr is in one of the ranges. An IPv4 address
+// written as IPv6 (::ffff:10.50.0.1) is taken as that IPv4 address, and a
+// zone is dropped, as InClusterAddr reads them.
+func (e ExternalRanges) Contains(addr netip.Addr) bool {
+	_, ok := e.Holding(addr)
+	return ok
+}
+
+// Holding returns the first range that holds addr, read as Contains reads
+// it, for config.Load to name the range its start guard refuses.
+func (e ExternalRanges) Holding(addr netip.Addr) (netip.Prefix, bool) {
+	plain := addr.Unmap().WithZone("")
+	if !plain.IsValid() {
+		return netip.Prefix{}, false
+	}
+	for _, prefix := range e.prefixes {
+		if prefix.Contains(plain) {
+			return prefix, true
+		}
+	}
+	return netip.Prefix{}, false
+}
+
+// InClusterAddr is the scope's reading of an address: inside the cluster
+// when InClusterAddr says so and none of the ranges holds it.
+func (e ExternalRanges) InClusterAddr(addr netip.Addr) bool {
+	return InClusterAddr(addr) && !e.Contains(addr)
+}
+
+// InCluster is InCluster for the scope check: a host written as an address
+// is classified by e.InClusterAddr, so one in the ranges is outside the
+// cluster; a name is classified by its spelling, as InCluster does.
+func (e ExternalRanges) InCluster(host string) bool {
+	if addr, err := netip.ParseAddr(strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))); err == nil {
+		return e.InClusterAddr(addr)
+	}
+	return InCluster(host)
+}
+
+// ResolvesInCluster is the package's ResolvesInCluster with the ranges read
+// as outside the cluster: host resolves into the cluster when one of its
+// addresses is inside it by e.InClusterAddr. A name that resolves only to
+// company and public addresses does not; one with a cluster address among
+// them does.
+func (e ExternalRanges) ResolvesInCluster(ctx context.Context, r Resolver, host string) (bool, error) {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "" {
+		return false, nil
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return e.InClusterAddr(addr), nil
+	}
+	if r == nil {
+		r = net.DefaultResolver
+	}
+	addrs, err := r.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return false, err
+	}
+	for _, addr := range addrs {
+		if e.InClusterAddr(addr) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ResolvesInCluster reports whether host, a monitor target's host name,
 // resolves to a cluster-internal address. It looks host up once through r
 // (net.DefaultResolver when r is nil) and returns one of three outcomes:
@@ -116,27 +262,12 @@ type Resolver interface {
 // that one answer: a name whose answer changes between this lookup and the
 // dial a check makes later is beyond this gate (TOCTOU), which is why
 // ADR-0003 keeps the deny-CIDR and a mandatory multi-tenant proof.
+//
+// It reads every private address as inside the cluster; the scope check asks
+// ExternalRanges.ResolvesInCluster, which leaves the operator's company
+// ranges outside.
 func ResolvesInCluster(ctx context.Context, r Resolver, host string) (bool, error) {
-	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	if host == "" {
-		return false, nil
-	}
-	if addr, err := netip.ParseAddr(host); err == nil {
-		return InClusterAddr(addr), nil
-	}
-	if r == nil {
-		r = net.DefaultResolver
-	}
-	addrs, err := r.LookupNetIP(ctx, "ip", host)
-	if err != nil {
-		return false, err
-	}
-	for _, addr := range addrs {
-		if InClusterAddr(addr) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return ExternalRanges{}.ResolvesInCluster(ctx, r, host)
 }
 
 // NotFound reports whether err, a lookup error from ResolvesInCluster, says
