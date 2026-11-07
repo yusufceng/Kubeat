@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -821,5 +823,111 @@ func TestTargetCIDRs(t *testing.T) {
 			}
 		}
 		t.Setenv(key, "")
+	}
+}
+
+// pretendOwnAddrs makes the backend's own addresses those given (or the
+// error), as a pod's interfaces would have them, for the rest of the test.
+func pretendOwnAddrs(t *testing.T, err error, ips ...string) {
+	t.Helper()
+	saved := ownAddrs
+	t.Cleanup(func() { ownAddrs = saved })
+	addrs := make([]netip.Addr, len(ips))
+	for i, ip := range ips {
+		addrs[i] = netip.MustParseAddr(ip)
+	}
+	ownAddrs = func() ([]netip.Addr, error) { return addrs, err }
+}
+
+// UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS is empty by default and reads nothing
+// then. Set, it takes CIDRs only, and the backend does not start while one of
+// its ranges holds the API server's address (KUBERNETES_SERVICE_HOST, in the
+// Service network) or one of the backend's own (its pod IP or loopback, in
+// the pod network); the error names the range and the address. Emptying the
+// setting lets it start again (S80, PO decision: an error, not a WARN).
+func TestTargetScopeExternalCIDRs(t *testing.T) {
+	const key = "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS"
+	t.Setenv("KUBERNETES_SERVICE_HOST", "172.30.0.1")
+	pretendOwnAddrs(t, nil, "127.0.0.1", "::1", "10.128.2.15", "fd01::2:15", "fe80::1%eth0")
+
+	cfg, err := Load()
+	if err != nil || cfg.TargetScopeExternalCIDRs != "" {
+		t.Fatalf("default: %q, %v; want empty and no error", cfg.TargetScopeExternalCIDRs, err)
+	}
+
+	// Company ranges clear of the cluster's networks are taken as written.
+	t.Setenv(key, "10.50.0.0/16, 192.168.0.0/16,fd50::/16")
+	if cfg, err := Load(); err != nil || cfg.TargetScopeExternalCIDRs != "10.50.0.0/16, 192.168.0.0/16,fd50::/16" {
+		t.Errorf("company ranges: %q, %v; want them and no error", cfg.TargetScopeExternalCIDRs, err)
+	}
+
+	// A mistake names the variable, and a bare address the CIDR meant.
+	for value, want := range map[string]string{
+		"10.50.0.0/16,corp": `"corp" is not a CIDR`,
+		"10.50.0.0/33":      `"10.50.0.0/33" is not a CIDR`,
+		"10.50.0.1":         "write it as 10.50.0.1/32",
+	} {
+		t.Setenv(key, value)
+		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), key+": ") || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s=%q: err = %v, want one naming the variable and saying %q", key, value, err, want)
+		}
+	}
+
+	// A range over the API server's address or one of the backend's own.
+	for _, tc := range []struct{ apiServer, value, want string }{
+		{"172.30.0.1", "10.50.0.0/16,172.16.0.0/12", "172.16.0.0/12 holds the API server's address 172.30.0.1"},
+		{"10.96.0.1", "10.0.0.0/8", "10.0.0.0/8 holds the API server's address 10.96.0.1"},
+		{"fd00:10:96::1", "fd00::/8", "fd00::/8 holds the API server's address fd00:10:96::1"},
+		{"172.30.0.1", "10.128.0.0/14", "10.128.0.0/14 holds 10.128.2.15, an address of the backend's own pod"},
+		{"172.30.0.1", "10.0.0.0/8", "10.0.0.0/8 holds 10.128.2.15"},
+		{"172.30.0.1", "fd01::/16", "fd01::/16 holds fd01::2:15"},
+		{"172.30.0.1", "127.0.0.0/8", "127.0.0.0/8 holds 127.0.0.1"},
+		{"172.30.0.1", "fe80::/10", "fe80::/10 holds fe80::1,"},
+		{"172.30.0.1", "0.0.0.0/0", "0.0.0.0/0 holds the API server's address 172.30.0.1"},
+		{"", "10.0.0.0/8", "10.0.0.0/8 holds 10.128.2.15"}, // outside a pod, the own addresses still count
+	} {
+		t.Setenv("KUBERNETES_SERVICE_HOST", tc.apiServer)
+		t.Setenv(key, tc.value)
+		_, err := Load()
+		if err == nil || !strings.HasPrefix(err.Error(), key+": ") || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("API server %q, %s=%q: err = %v, want one saying %q", tc.apiServer, key, tc.value, err, tc.want)
+		}
+	}
+	// Emptied, the setting lets the backend start again.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+	t.Setenv(key, "")
+	if _, err := Load(); err != nil {
+		t.Errorf("setting emptied: %v, want none", err)
+	}
+	// A KUBERNETES_SERVICE_HOST that is not an address is not compared.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+	t.Setenv(key, "10.50.0.0/16")
+	if _, err := Load(); err != nil {
+		t.Errorf("API server given by name: %v, want none", err)
+	}
+
+	// Own addresses that cannot be read keep a set range from starting the
+	// backend, and are not read while the setting is empty.
+	pretendOwnAddrs(t, errors.New("no interfaces"))
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "cannot be read") {
+		t.Errorf("own addresses unreadable: err = %v, want one saying so", err)
+	}
+	t.Setenv(key, "")
+	if _, err := Load(); err != nil {
+		t.Errorf("own addresses unreadable, setting empty: %v, want none", err)
+	}
+}
+
+// The backend's own addresses are read from its interfaces, IPv4 ones as
+// IPv4, so a range is compared with them as the scope check compares it.
+func TestOwnAddrs(t *testing.T) {
+	addrs, err := ownAddrs()
+	if err != nil {
+		t.Skipf("this machine's interfaces cannot be read: %v", err)
+	}
+	for _, addr := range addrs {
+		if !addr.IsValid() || addr.Is4In6() {
+			t.Errorf("own address %v: want a valid address, IPv4 unmapped", addr)
+		}
 	}
 }

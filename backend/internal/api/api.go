@@ -288,6 +288,12 @@ type Options struct {
 	// resolves it outside the cluster (UPTIME_TARGET_SCOPE_TRUST_PROXY; see
 	// targetInScope). Off, such a name is refused like any unresolved one.
 	ScopeTrustProxy bool
+	// ScopeExternal are the company's ranges the scope check counts as
+	// outside the cluster although they are private, for an address written
+	// bare and for one a name resolves to (UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS;
+	// see targetInScope). The zero value holds none: every private address
+	// is inside the cluster.
+	ScopeExternal netguard.ExternalRanges
 	// Proxy decides whether a request goes to a proxy, for that exception.
 	// Nil is http.ProxyFromEnvironment, the checker's and the senders' own
 	// choice; a test supplies its own.

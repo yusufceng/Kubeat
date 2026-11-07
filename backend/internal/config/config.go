@@ -196,6 +196,15 @@ type Config struct {
 	// cannot reach the cluster's. Off by default. A name that resolves into
 	// the cluster, a SERVFAIL and a timeout are refused either way.
 	TargetScopeTrustProxy bool // UPTIME_TARGET_SCOPE_TRUST_PROXY
+	// TargetScopeExternalCIDRs are the company's own ranges that the scope
+	// check counts as outside the cluster although they are private
+	// (netguard.ExternalRanges): a scoped user may aim a monitor or a
+	// webhook at an address in them, written bare or resolved from a name,
+	// as at a public one. Comma-separated CIDRs, empty by default; the
+	// target policy and the load guardrails do not read them. A range that
+	// holds the API server's address (KUBERNETES_SERVICE_HOST) or one of the
+	// backend's own is refused (checkScopeExternal).
+	TargetScopeExternalCIDRs string // UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS
 
 	MinCheckInterval time.Duration // UPTIME_MIN_CHECK_INTERVAL
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
@@ -402,9 +411,10 @@ func Load() (Config, error) {
 		OIDCDefaultRole:       envString("UPTIME_OIDC_DEFAULT_ROLE", ""),
 		OIDCDefaultNamespaces: envString("UPTIME_OIDC_DEFAULT_NAMESPACES", ""),
 
-		TargetDenyCIDRs:  envString("UPTIME_TARGET_DENY_CIDRS", ""),
-		TargetAllowCIDRs: envString("UPTIME_TARGET_ALLOW_CIDRS", ""),
-		UserAgent:        strings.TrimSpace(envString("UPTIME_USER_AGENT", "")),
+		TargetDenyCIDRs:          envString("UPTIME_TARGET_DENY_CIDRS", ""),
+		TargetAllowCIDRs:         envString("UPTIME_TARGET_ALLOW_CIDRS", ""),
+		TargetScopeExternalCIDRs: envString("UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS", ""),
+		UserAgent:                strings.TrimSpace(envString("UPTIME_USER_AGENT", "")),
 
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
 		BackupDir:    envString("UPTIME_BACKUP_DIR", ""),
@@ -649,6 +659,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.Warnings = append(cfg.Warnings, scopeProxyWarnings(cfg.TargetScopeTrustProxy)...)
+	if err := checkCIDRs("UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS", cfg.TargetScopeExternalCIDRs); err != nil {
+		return Config{}, err
+	}
+	if err := checkScopeExternal(cfg.TargetScopeExternalCIDRs); err != nil {
+		return Config{}, err
+	}
 	if cfg.AdminPasswordReset, err = envBool("UPTIME_ADMIN_PASSWORD_RESET", false); err != nil {
 		return Config{}, err
 	}
@@ -839,6 +855,80 @@ func checkCIDRs(key, list string) error {
 			return fmt.Errorf("%s: %q is an address, not a CIDR; write it as %s/%d", key, entry, addr, addr.BitLen())
 		}
 		return fmt.Errorf("%s: %q is not a CIDR such as 10.0.0.0/8", key, entry)
+	}
+	return nil
+}
+
+// ownAddrs returns the addresses of the backend's own network interfaces:
+// in a pod, its pod IPs and its loopback. A variable, so that a test does not
+// depend on the machine it runs on.
+var ownAddrs = func() ([]netip.Addr, error) {
+	ifaceAddrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+	var out []netip.Addr
+	for _, a := range ifaceAddrs {
+		if ipNet, ok := a.(*net.IPNet); ok {
+			if addr, ok := netip.AddrFromSlice(ipNet.IP); ok {
+				out = append(out, addr.Unmap())
+			}
+		}
+	}
+	return out, nil
+}
+
+// checkScopeExternal refuses UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS, already
+// checked to be CIDRs, when one of its ranges holds an address of the
+// cluster's own: the API server's, which Kubernetes gives every pod as
+// KUBERNETES_SERVICE_HOST and which is in the Service network, or one of the
+// backend's own, in the pod network. Counted as outside the cluster, such a
+// range would let a user limited to some namespaces reach the Services or
+// the pods in it by address, with no namespace to answer for, so the backend
+// does not start until the range is narrowed or the setting emptied. It
+// catches the plain mistake (10.0.0.0/8 over a cluster's networks), not every
+// overlap: the rest of the pod and Service networks, the node network and
+// the cluster's VIPs are the operator's to keep out (README, "Hedef
+// politikası"). An empty setting reads nothing.
+func checkScopeExternal(list string) error {
+	const key = "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS"
+	var ranges []netip.Prefix
+	for _, entry := range strings.Split(list, ",") {
+		if prefix, err := netip.ParsePrefix(strings.TrimSpace(entry)); err == nil {
+			ranges = append(ranges, prefix)
+		}
+	}
+	if len(ranges) == 0 {
+		return nil
+	}
+	holding := func(addr netip.Addr) (netip.Prefix, bool) {
+		addr = addr.Unmap().WithZone("")
+		for _, prefix := range ranges {
+			if prefix.Contains(addr) {
+				return prefix.Masked(), true
+			}
+		}
+		return netip.Prefix{}, false
+	}
+	const advice = "list only the company's ranges outside the cluster's pod, Service and node networks, or leave it empty " +
+		"(README, \"Hedef politikası\")"
+	if host := strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_HOST")); host != "" {
+		if addr, err := netip.ParseAddr(host); err == nil {
+			if prefix, ok := holding(addr); ok {
+				return fmt.Errorf("%s: %s holds the API server's address %s (KUBERNETES_SERVICE_HOST), in the cluster's Service network: "+
+					"a user limited to some namespaces could reach every Service in it by its ClusterIP; %s", key, prefix, addr, advice)
+			}
+		}
+	}
+	own, err := ownAddrs()
+	if err != nil {
+		return fmt.Errorf("%s: the backend's own addresses, which no range may hold, cannot be read: %w", key, err)
+	}
+	for _, addr := range own {
+		if prefix, ok := holding(addr); ok {
+			return fmt.Errorf("%s: %s holds %s, an address of the backend's own pod (its pod IP or loopback): "+
+				"a user limited to some namespaces could reach the pods in it by address; %s", key, prefix, addr.WithZone(""), advice)
+		}
 	}
 	return nil
 }

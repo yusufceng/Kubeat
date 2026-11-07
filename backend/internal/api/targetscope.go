@@ -59,11 +59,23 @@ const scopeRefused = "the target is outside your namespaces: a monitor's check o
 // reachability, not only its spelling (dial-time; ADR-0003 c, "Kapsamın kalan
 // boşluğu" closed in 0.48):
 //
-//   - A host that is cluster-internal by its name (netguard.InCluster: an
-//     address in a cluster range, a *.svc or pod name, a short name) is let
-//     through only when the namespace its name carries is one of theirs. The
-//     API server, another team's Service and a bare ClusterIP — which carries
-//     no namespace — are refused.
+//   - A host that is cluster-internal by its name (ExternalRanges.InCluster:
+//     an address in a cluster range and not in the company's ranges below, a
+//     *.svc or pod name, a short name) is let through only when the namespace
+//     its name carries is one of theirs. The API server, another team's
+//     Service and a bare ClusterIP — which carries no namespace — are
+//     refused.
+//   - The company's own ranges, which the operator lists in
+//     Options.ScopeExternal (UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS, empty by
+//     default), are outside the cluster for this check although they are
+//     private: an address in them, written bare (10.50.1.1) or one an
+//     external-looking name resolves to, is let through as a public one is.
+//     Only addresses are read so: a *.svc or pod name and a short name stay
+//     cluster-internal by their spelling whatever they resolve to, and a
+//     name with one answer inside the cluster beside the company's is
+//     refused. netguard.ExternalRanges keeps the rule, the one every scope
+//     check asks, and config.Load refuses ranges that hold the API server's
+//     address or the backend's own.
 //   - A host that is external by its name is let through only when it provably
 //     resolves to addresses outside the cluster. A name that resolves into the
 //     cluster is refused — a two-label short name the pod's search domains turn
@@ -117,8 +129,8 @@ const scopeRefused = "the target is outside your namespaces: a monitor's check o
 // its xn-- form.
 //
 // An external target that resolves externally (the public Internet, the
-// company network outside the cluster, an OpenShift Route's public host) is
-// left to the target policy, unchanged. Options.Resolver is the backend's own
+// company ranges of Options.ScopeExternal, an OpenShift Route's public host)
+// is left to the target policy, unchanged. Options.Resolver is the backend's own
 // (net.DefaultResolver when nil); only a scoped caller's external-looking
 // name is resolved, so single-tenant installs and administrators never pay a
 // lookup. A refusal carries the single generic scopeRefused message, so the
@@ -139,7 +151,7 @@ func (h *handler) targetInScope(ctx context.Context, p auth.Principal, host stri
 	if _, err := netip.ParseAddr(name); err != nil && netguard.Numeric(name) {
 		return &scopeRefusal{scopeRefused} // a number not written as an address
 	}
-	if netguard.InCluster(name) {
+	if h.opts.ScopeExternal.InCluster(name) {
 		if ns, ok := netguard.Namespace(name); !ok || !p.CanRead(ns) {
 			return &scopeRefusal{scopeRefused}
 		}
@@ -152,7 +164,7 @@ func (h *handler) targetInScope(ctx context.Context, p auth.Principal, host stri
 		ctx, cancel = context.WithTimeout(ctx, h.opts.ResolveTimeout)
 		defer cancel()
 	}
-	inCluster, err := netguard.ResolvesInCluster(ctx, h.opts.Resolver, name)
+	inCluster, err := h.opts.ScopeExternal.ResolvesInCluster(ctx, h.opts.Resolver, name)
 	switch {
 	case inCluster:
 		return &scopeRefusal{scopeRefused}

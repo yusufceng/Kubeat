@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/net/http/httpproxy"
 
+	"github.com/yusufceng/Kubeat/backend/internal/k8s"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
@@ -892,6 +893,240 @@ func TestScopeTrustProxyOffIsUnchanged(t *testing.T) {
 			}
 			if code := do(t, "POST", base+"/api/v1/monitors", monitorJSON("admin", "http", "https://status.vendor.example/", `"namespace":"shop"`), nil); code != http.StatusCreated {
 				t.Errorf("administrator: status = %d, want 201", code)
+			}
+		})
+	}
+}
+
+// companyRanges is UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS=10.50.0.0/16: the
+// company network of the tests below, outside the cluster's networks
+// (OpenShift's Service network 172.30.0.0/16 and pod network 10.128.0.0/14,
+// a Kubernetes Service network 10.96.0.0/12).
+func companyRanges(t *testing.T) netguard.ExternalRanges {
+	t.Helper()
+	ranges, err := netguard.ParseExternalRanges([]string{"10.50.0.0/16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ranges
+}
+
+// companyResolver answers like the backend's resolver on a company network:
+// company names resolve into 10.50.0.0/16, an on-prem Route's host to the
+// router's VIP there; the cluster's two-label names (ndots) and public names
+// pointing at cluster addresses resolve into the cluster; a name with answers
+// in both, and a private name outside the listed range, are there too.
+func companyResolver(t *testing.T) fakeResolver {
+	return fakeResolver{
+		"intranet.corp.example":    ipList(t, "10.50.0.10"),
+		"orders.apps.corp.example": ipList(t, "10.50.0.20"), // an on-prem Route's host, at the router's VIP
+		"hooks.corp.example":       ipList(t, "10.50.0.30"),
+		"split.corp.example":       ipList(t, "10.50.0.13", "172.30.44.9"),
+		"other.corp.example":       ipList(t, "10.51.0.1"),
+		"api.payments":             ipList(t, "172.30.44.9"), // another team's Service, via ndots
+		"kubernetes.default":       ipList(t, "172.30.0.1"),  // the API server, via ndots
+		"hooks.payments":           ipList(t, "172.30.44.10"),
+		"172-30-0-1.sslip.io":      ipList(t, "172.30.0.1"),
+		"10-96-0-1.sslip.io":       ipList(t, "10.96.0.1"),
+	}
+}
+
+// With UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS=10.50.0.0/16 a scoped user may aim
+// a monitor or a webhook at the company network: a name that resolves into
+// the range, and a bare address in it, are outside the cluster for the scope,
+// for create, clone and retarget alike, and leave no deny row. Every form
+// that reaches the cluster stays refused, each with code target_scope: a bare
+// ClusterIP or pod IP, a short name, a two-label name the pod's search
+// domains (ndots) turn into a Service or the API server, the full .svc and
+// FQDN forms and the API server's names, a pod name spelling a company
+// address, a public name resolving to a cluster address, a name with a
+// cluster answer beside a company one, a private address or name outside the
+// range, a number not written as an address, and a name that does not
+// resolve. With the setting empty the company targets are refused as in 0.50,
+// and the rest is the same (S80).
+func TestScopeExternalCIDRs(t *testing.T) {
+	refused := []struct{ name, typ, target string }{
+		{"bare-clusterip", "http", "https://172.30.0.1/"},
+		{"bare-clusterip-kubernetes", "http", "https://10.96.0.1/"},
+		{"bare-pod-ip", "tcp", "10.128.2.15:8080"},
+		{"short-name", "http", "https://api/"},
+		{"two-label-service", "http", "https://api.payments/"},
+		{"two-label-apiserver", "http", "https://kubernetes.default/healthz"},
+		{"svc", "http", "https://api.payments.svc/"},
+		{"fqdn", "http", "https://api.payments.svc.cluster.local/"},
+		{"apiserver-short", "http", "https://kubernetes/healthz"},
+		{"apiserver-svc", "http", "https://kubernetes.default.svc/healthz"},
+		{"apiserver-fqdn", "http", "https://kubernetes.default.svc.cluster.local/healthz"},
+		{"pod-name-company-address", "http", "https://10-50-0-10.payments.pod.cluster.local/"},
+		{"public-name-internal-ip", "http", "https://172-30-0-1.sslip.io/"},
+		{"public-name-kubernetes-clusterip", "http", "https://10-96-0-1.sslip.io/"},
+		{"company-and-cluster-answers", "http", "https://split.corp.example/"},
+		{"private-name-outside-the-range", "http", "https://other.corp.example/"},
+		{"bare-private-outside-the-range", "http", "https://10.51.0.1/"},
+		{"inet-aton-company-dots", "http", "https://10.50.1../"},
+		{"unresolved", "http", "https://nowhere.corp.example/"},
+	}
+	company := []struct{ name, typ, target string }{
+		{"company-name", "http", "https://intranet.corp.example/health"},
+		{"company-route", "http", "https://orders.apps.corp.example/"},
+		{"company-name-tcp", "tcp", "intranet.corp.example:443"},
+		{"company-ip", "http", "https://10.50.1.1/"},
+		{"company-ip-ping", "ping", "10.50.1.1"},
+		{"company-ip-tcp", "tcp", "10.50.1.1:5432"},
+		{"company-ip-mapped", "http", "https://[::ffff:10.50.1.1]/"},
+	}
+	refusedHooks := []string{
+		"https://hooks.payments/kubeat",     // two-label, resolves into the cluster
+		"https://hooks.payments.svc/kubeat", // another team's Service
+		"https://172.30.0.1/kubeat",         // a bare ClusterIP
+		"https://10.50.1/kubeat",            // a number inet_aton reads as 10.50.0.1
+	}
+	companyHooks := []string{
+		"https://hooks.corp.example/kubeat",
+		"https://10.50.0.30/kubeat",
+	}
+
+	for _, mode := range []struct {
+		name     string
+		external bool
+	}{{"setting 10.50.0.0/16", true}, {"setting empty", false}} {
+		t.Run(mode.name, func(t *testing.T) {
+			meter := metrics.New("test")
+			srv, db := newTestAPIWith(t, func(o *Options) {
+				o.Resolver = companyResolver(t)
+				o.Meter = meter
+				if mode.external {
+					o.ScopeExternal = companyRanges(t)
+				}
+			})
+			base := srv.URL
+			token := signInScoped(t, base)
+			denials := 0
+			expect := func(what string, code, accepted int) {
+				t.Helper()
+				want := accepted
+				if !mode.external {
+					want = http.StatusForbidden
+				}
+				if code != want {
+					t.Errorf("%s: status = %d, want %d", what, code, want)
+				}
+				if code == http.StatusForbidden {
+					denials++
+				}
+			}
+
+			for _, tc := range refused {
+				var problem errorBody
+				code := doAsError(t, token, "POST", base+"/api/v1/monitors", monitorJSON(tc.name, tc.typ, tc.target, `"namespace":"shop"`), &problem)
+				if code != http.StatusForbidden || problem.Code != codeTargetScope {
+					t.Errorf("%s (%s %s): status = %d, code = %q, want 403 %s (%q)", tc.name, tc.typ, tc.target, code, problem.Code, codeTargetScope, problem.Error)
+				}
+				denials++
+			}
+			var first monitorResponse
+			for _, tc := range company {
+				var created monitorResponse
+				code := doAs(t, token, "POST", base+"/api/v1/monitors", monitorJSON(tc.name, tc.typ, tc.target, `"namespace":"shop"`), &created)
+				expect(tc.name+" ("+tc.target+")", code, http.StatusCreated)
+				if first.ID == 0 && code == http.StatusCreated {
+					first = created
+				}
+			}
+			for i, target := range refusedHooks {
+				body := `{"name":"refused-` + strconv.Itoa(i) + `","type":"webhook","target":"` + target + `","namespaces":["shop"]}`
+				if code := doAs(t, token, "POST", base+"/api/v1/channels", body, nil); code != http.StatusForbidden {
+					t.Errorf("webhook at %s: status = %d, want 403", target, code)
+				}
+				denials++
+			}
+			for i, target := range companyHooks {
+				body := `{"name":"company-` + strconv.Itoa(i) + `","type":"webhook","target":"` + target + `","namespaces":["shop"]}`
+				expect("webhook at "+target, doAs(t, token, "POST", base+"/api/v1/channels", body, nil), http.StatusCreated)
+			}
+
+			// A monitor of the user's own Service may be moved to the company
+			// network, and a company monitor cloned; neither to the cluster.
+			var own monitorResponse
+			if code := doAs(t, token, "POST", base+"/api/v1/monitors", monitorJSON("own", "http", "https://api.shop.svc/", `"namespace":"shop"`), &own); code != http.StatusCreated {
+				t.Fatalf("a Service in the user's namespace: status = %d", code)
+			}
+			expect("retarget at a company name", doAs(t, token, "PATCH", base+"/api/v1/monitors/"+itoa(own.ID), `{"target":"https://intranet.corp.example/"}`, nil), http.StatusOK)
+			expect("retarget at a company address", doAs(t, token, "PATCH", base+"/api/v1/monitors/"+itoa(own.ID), `{"target":"https://10.50.2.2/"}`, nil), http.StatusOK)
+			if code := doAs(t, token, "PATCH", base+"/api/v1/monitors/"+itoa(own.ID), `{"target":"https://api.payments/"}`, nil); code != http.StatusForbidden {
+				t.Errorf("retarget at a two-label cluster name: status = %d, want 403", code)
+			}
+			denials++
+			if mode.external {
+				if code := doAs(t, token, "POST", base+"/api/v1/monitors/"+itoa(first.ID)+"/clone", `{"name":"company-2"}`, nil); code != http.StatusCreated {
+					t.Errorf("cloning the company monitor: status = %d, want 201", code)
+				}
+			}
+
+			// Only the refusals left a deny row and a count.
+			if rows := auditDenials(t, db); len(rows) != denials {
+				t.Errorf("deny rows = %d, want %d", len(rows), denials)
+			}
+			got, err := meter.Gather()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := got["kubeat_target_scope_denied_total{reason=target}"]; n != float64(denials) {
+				t.Errorf("reason=target = %v, want %d", n, denials)
+			}
+			// An administrator reaches every one of them, as before.
+			if code := do(t, "POST", base+"/api/v1/monitors", monitorJSON("admin", "http", "https://api.payments/", `"namespace":"shop"`), nil); code != http.StatusCreated {
+				t.Errorf("administrator at a two-label cluster name: status = %d, want 201", code)
+			}
+		})
+	}
+}
+
+// A monitor imported from discovery, a clone of it and a retarget at its
+// host agree for an on-prem Route whose host resolves into the company range
+// when the range is listed: all three are taken. Without the setting they
+// differ, as README "Hedef politikası" says: the import looks at the
+// namespace alone and takes the Route, while its clone and a retarget at the
+// same host are refused for the private address it resolves to (S80).
+func TestScopeExternalCIDRsImportCloneRetarget(t *testing.T) {
+	route := k8s.Candidate{Kind: k8s.KindRoute, Namespace: "shop", Name: "orders", Type: store.MonitorHTTP,
+		Target: "https://orders.apps.corp.example/", Reason: k8s.ReasonRouteHost}
+	for _, mode := range []struct {
+		name     string
+		external bool
+		want     int // the clone's and the retarget's status
+	}{{"setting 10.50.0.0/16", true, http.StatusOK}, {"setting empty", false, http.StatusForbidden}} {
+		t.Run(mode.name, func(t *testing.T) {
+			srv, _ := newTestAPIWith(t, func(o *Options) {
+				o.Resolver = companyResolver(t)
+				o.Discovery, o.DiscoveryStatus = &fakeDiscovery{candidates: []k8s.Candidate{route}}, "in-cluster"
+				if mode.external {
+					o.ScopeExternal = companyRanges(t)
+				}
+			})
+			base := srv.URL
+			token := signInScoped(t, base)
+
+			var result importResponse
+			body := `{"namespace":"shop","sources":["` + route.Source() + `"],"interval_seconds":60,"timeout_seconds":5,"failure_threshold":3}`
+			if code := doAs(t, token, "POST", base+"/api/v1/discovery/import", body, &result); code != http.StatusOK || len(result.Created) != 1 {
+				t.Fatalf("import: status = %d, result = %+v", code, result)
+			}
+			imported := result.Created[0]
+
+			wantClone := http.StatusCreated
+			if mode.want == http.StatusForbidden {
+				wantClone = http.StatusForbidden
+			}
+			if code := doAs(t, token, "POST", base+"/api/v1/monitors/"+itoa(imported.ID)+"/clone", `{"name":"orders-2"}`, nil); code != wantClone {
+				t.Errorf("cloning the imported Route monitor: status = %d, want %d", code, wantClone)
+			}
+			var own monitorResponse
+			if code := doAs(t, token, "POST", base+"/api/v1/monitors", monitorJSON("own", "http", "https://api.shop.svc/", `"namespace":"shop"`), &own); code != http.StatusCreated {
+				t.Fatalf("a Service in the user's namespace: status = %d", code)
+			}
+			if code := doAs(t, token, "PATCH", base+"/api/v1/monitors/"+itoa(own.ID), `{"target":"`+route.Target+`"}`, nil); code != mode.want {
+				t.Errorf("retargeting at the Route's host: status = %d, want %d", code, mode.want)
 			}
 		})
 	}
