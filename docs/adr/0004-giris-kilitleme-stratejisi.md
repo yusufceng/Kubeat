@@ -152,13 +152,16 @@ herkese kilitleyebiliyordu.
   küçük kalsın) ve arayüzün kendi gördüğü eşi başlığa eklemesi (server action
   soket eşini okuyamıyor, özel sunucu ister): ikisi de backlog'da.
 
-**Somut hop örnekleri.** Arayüz yoluna göre türetildi; hiçbiri henüz bu yolda
-ölçülmedi (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
+**Somut hop örnekleri.** Arayüz yoluna göre türetildi; bu yolda yalnız düz
+Route ölçüldü (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
 
 - Vekilsiz, arayüze `kubectl port-forward`: `1` (girdiyi Next.js yazar).
   Ölçülmedi.
 - Düz OpenShift Route (HAProxy router, varsayılan `forwardedHeaderPolicy:
-  Append`): `1`. Ölçülmedi.
+  Append`): `1`. Ölçüldü (sandbox, 2026-11-07). Router `IfNone` ya da `Never`
+  ise istemcinin yazdığı başlık olduğu gibi geçer; değer ancak Route'a kendi
+  politikası (`haproxy.router.openshift.io/set-forwarded-headers`) verilince
+  geçerlidir. Ölçülmedi.
 - Önünde başlığı yazan bir WAF ya da L7 yük dengeleyici olan Route: `2`.
   Ölçülmedi.
 - GKE `ingress-nginx`, L4 LoadBalancer Service, `externalTrafficPolicy: Local`,

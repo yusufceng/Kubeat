@@ -108,17 +108,23 @@ backend:
     # count is the X-Forwarded-For entries your proxies in front of the UI
     # write, or 1 with none. Left at 0 every browser looks like the UI pod and
     # the throttle falls back to one shared per-name lock. Values (README,
-    # "Hesaplar ve giriş"; derived, none measured yet): port-forward to the UI
-    # 1; plain OpenShift Route 1; Route behind a WAF/L7 LB that writes the
-    # header 2; GKE ingress-nginx (L4 LoadBalancer, externalTrafficPolicy:
-    # Local, default settings) 1; L7 GCLB + ingress-nginx with
-    # use-forwarded-headers and compute-full-forwarded-for 3; GKE's own GCE
-    # Ingress 2. The 1 with none holds for a port-forward only: Next.js keeps
-    # a header a client sent, so with frontend.service.type LoadBalancer or
-    # NodePort and no such proxy in front keep 0, a shared lock rather than a
-    # bypass. The backend reads the header only from the UI, which proves
-    # itself with the frontendToken Secret below: a pod that reaches the
-    # backend directly keys on its own address whatever it writes. One that
+    # "Hesaplar ve giriş"; derived, only the plain Route measured, in the
+    # sandbox on 2026-11-07): port-forward to the UI 1; plain OpenShift Route
+    # 1 (router forwardedHeaderPolicy Append, the default, or Replace; under
+    # IfNone or Never only with route.annotations
+    # haproxy.router.openshift.io/set-forwarded-headers: append); Route behind
+    # a WAF/L7 LB that writes the header 2; GKE ingress-nginx (L4
+    # LoadBalancer, externalTrafficPolicy: Local, default settings) 1; L7
+    # GCLB + ingress-nginx with use-forwarded-headers and
+    # compute-full-forwarded-for 3; GKE's own GCE Ingress 2; GKE Gateway
+    # (gke-l7-global-external-managed) 2. The install notes suggest the one
+    # for the Route or the Ingress class. The 1 with none holds for a
+    # port-forward only: Next.js keeps a header a client sent, so with
+    # frontend.service.type LoadBalancer or NodePort and no such proxy in
+    # front keep 0, a shared lock rather than a bypass. The backend reads
+    # the header only from the UI, which proves itself with the
+    # frontendToken Secret below: a pod that reaches the backend directly
+    # keys on its own address whatever it writes. One that
     # reaches the UI's Service directly is passed on as the UI's; above 0
     # turn frontend.networkPolicy on to close that. A misconfigured value is
     # warned (rate-limited): X-Forwarded-For seen while 0, a sign-in from a
@@ -237,23 +243,46 @@ frontend:
   # Before turning it on:
   # - With networkPolicy.enabled, push jobs in other namespaces send to the
   #   frontend: add their namespaces to from, or their push monitors go DOWN.
-  # - Anything else that calls the frontend's Service inside the cluster (a
-  #   monitor of Kubeat itself, a job sending to its push address) needs an
-  #   entry too.
+  # - It covers the status pages, badges and push addresses too, which the
+  #   frontend serves: visitors through the Route or Ingress are let in, but
+  #   anything else that calls the frontend's Service inside the cluster (a
+  #   wall display of a public status page, a monitor of Kubeat itself, a
+  #   job sending to its push address) needs an entry.
+  # After turning it on, check that it is enforced: a plugin that does not
+  # enforce NetworkPolicy ignores it without a word. A request from a pod in
+  # a namespace not in from to the frontend's Service on port 3000 must time
+  # out; on GKE, NetworkPolicy is enforced with Dataplane V2
+  # (networkConfig.datapathProvider ADVANCED_DATAPATH, always on Autopilot)
+  # or the network policy add-on (README, "Arayüzün ağ politikası", has the
+  # commands).
   networkPolicy:
     enabled: false
     # Who may connect: a list of NetworkPolicy "from" entries, at least one.
     # By default the OpenShift router, selected as OpenShift's own
     # allow-from-openshift-ingress policy does, by the label
-    # policy-group.network.openshift.io/ingress on its namespace. Elsewhere
-    # the ingress controller's namespace, e.g.
+    # policy-group.network.openshift.io/ingress on its namespace. That holds
+    # for a router on the pod network. A router on the host network (its
+    # IngressController's endpointPublishingStrategy HostNetwork, as on bare
+    # metal; README gives the oc command that shows it) connects from the
+    # node: add OpenShift's host-network group as a second entry, which lets
+    # in the nodes and host-network pods as well (an assumption, not
+    # measured; the default leaves it out):
+    #   - namespaceSelector:
+    #       matchLabels:
+    #         policy-group.network.openshift.io/ingress: ""
+    #   - namespaceSelector:
+    #       matchLabels:
+    #         policy-group.network.openshift.io/host-network: ""
+    # Elsewhere the ingress controller's namespace, e.g.
     #   - namespaceSelector:
     #       matchLabels:
     #         kubernetes.io/metadata.name: ingress-nginx
     # (a controller on the host network needs an ipBlock of the nodes); for
-    # GKE's own (GCE) Ingress with NEG the load balancer's ranges, ipBlock
-    # 35.191.0.0/16 and 130.211.0.0/22 (README, "Hesaplar ve giriş",
-    # "Arayüzün ağ politikası"). None measured yet.
+    # GKE's own (GCE) Ingress with NEG and for GKE Gateway the load
+    # balancer's ranges, ipBlock 35.191.0.0/16 and 130.211.0.0/22 (README,
+    # "Hesaplar ve giriş", "Arayüzün ağ politikası"). None measured yet. Left
+    # at this default where the render does not see OpenShift's API, the
+    # install notes warn: there it matches nothing.
     from:
       - namespaceSelector:
           matchLabels:
@@ -630,6 +659,10 @@ route:
   #   haproxy.router.openshift.io/hsts_header: max-age=31536000
   #     browsers then come back over HTTPS only (leave out preload on a
   #     shared apps domain)
+  #   haproxy.router.openshift.io/set-forwarded-headers: append
+  #     this Route's own X-Forwarded-For policy, for a router whose
+  #     forwardedHeaderPolicy is IfNone or Never, under which a client could
+  #     pick its sign-in source (README, "Vekil-hop rehberi")
   #   haproxy.router.openshift.io/rate-limit-connections: "true"
   #   haproxy.router.openshift.io/rate-limit-connections.rate-http: "500"
   #     at most 500 requests per client address in 10 seconds. Everything on

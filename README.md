@@ -33,11 +33,23 @@ helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.
   --set podSecurityContext.fsGroup=1001 \
   --set ingress.enabled=true --set ingress.className=<kümenin sınıfı> \
   --set ingress.host=kubeat.example.com \
-  --set 'ingress.annotations.cert-manager\.io/cluster-issuer=<issuer>'
+  --set 'ingress.annotations.cert-manager\.io/cluster-issuer=<issuer>' \
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 ```
 
 `<kümenin sınıfı>` `kubectl get ingressclass`'ın verdiği ad (GKE'nin kendi
 Ingress'i için bkz. "GKE"), `<issuer>` cert-manager'ın ClusterIssuer'ıdır.
+Son satır giriş throttle'ının tarayıcının adresini okumasını sağlar (bkz.
+"Hesaplar ve giriş", "Vekil-hop rehberi"); chart'ın varsayılanı `0`'da her
+tarayıcı tek bir kaynak sayılır:
+
+- `1`, `ingress-nginx` içindir ve controller'ın LoadBalancer Service'inin
+  `externalTrafficPolicy: Local` olmasını ister (`ingress-nginx` chart'ında
+  `--set controller.service.externalTrafficPolicy=Local`); varsayılan
+  `Cluster`'da controller istemciyi değil node'u görür.
+- GKE'nin kendi Ingress'inde (GCE) `2`; başka bir controller için değer
+  rehberdedir.
+
 Arayüz `https://kubeat.example.com`'da açılır; `admin`'in parolası:
 
 ```
@@ -139,9 +151,20 @@ pencereleri ve susturma"). GKE acil ve zorunlu yükseltmeleri pencere
 dışında da yapabilir, elle başlatılan yükseltme pencereye bakmaz; kalıcı
 önlem regional bir cluster'dır.
 
-GKE'de Ingress için iki yol vardır. **Önerilen yol ingress-nginx'tir:**
-yukarıdaki hızlı başlangıç komutu orada olduğu gibi çalışır
-(`--set ingress.className=nginx` ve cert-manager HTTP-01 ile sertifika).
+GKE'de arayüzü dışarı açmanın yolları:
+
+- **`ingress-nginx`, mevcut kurulumlar için.** Kubernetes projesi
+  `ingress-nginx`'i emekliye ayırdı (duyuru 2025-11; bakımı 2026-03'te
+  bitti): yeni bir kurulum için onu önermiyoruz. Controller'ı zaten çalışan
+  bir cluster'da yukarıdaki hızlı başlangıç komutu olduğu gibi çalışır
+  (`--set ingress.className=nginx` ve cert-manager HTTP-01 ile sertifika).
+- **GKE'nin kendi Ingress'i (GCE).** Aşağıda; gerçek bir GKE'de henüz
+  doğrulanmadı.
+- **GKE Gateway** (`gke-l7-global-external-managed`). Chart HTTPRoute
+  üretmez (backlog): HTTPRoute'u kendiniz yazıp `kubeat-frontend` Service'inin
+  `3000` portuna yönlendirirsiniz. Hop değeri ve arayüz politikasının
+  kaynakları "Vekil-hop rehberi"ndedir; bu yol da ölçülmedi.
+
 GKE'nin kendi (GCE) Ingress controller'ı iki noktada farklıdır:
 `ingressClassName`'e bakmaz, `kubernetes.io/ingress.class` annotation'ını
 okur; ve arkasındaki Service'in `NodePort` olmasını ya da container-native
@@ -157,8 +180,25 @@ ayrı bir annotation'ı (`networking.gke.io/managed-certificates`) ve cluster'da
 bir ManagedCertificate nesnesi gerekir. GCE Ingress sağlık kontrolünü kendi
 varsayılanıyla yapar; container-native modda pod'un hazırlık probe'unu
 (`/login`) kullanır. **GCE varyantı henüz gerçek bir GKE'de doğrulanmadı**
-(prova kullanıcıda, bkz. [yol haritası](docs/yol-haritasi.md#bilinen-sınırlar));
-doğrulanana kadar GKE'de ingress-nginx önerilir.
+(prova kullanıcıda, bkz. [yol haritası](docs/yol-haritasi.md#bilinen-sınırlar)).
+
+**GKE kontrol listesi: giriş throttle'ı.** Hangi yol seçilirse seçilsin
+(ayrıntılar "Hesaplar ve giriş"te; GKE satırlarının hiçbiri henüz ölçülmedi):
+
+1. Hop değeri. `ingress-nginx`'te
+   `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` ve controller'ın
+   Service'inde `externalTrafficPolicy: Local`; GCE Ingress'te ve GKE
+   Gateway'de `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2`.
+2. Arayüz politikası. `--set frontend.networkPolicy.enabled=true` ve
+   `frontend.networkPolicy.from`'da `ingress-nginx`'in namespace'i; GCE
+   Ingress'te (NEG) ve GKE Gateway'de yük dengeleyicinin aralıkları
+   (`35.191.0.0/16`, `130.211.0.0/22`). Politikayı cluster'ın gerçekten
+   uyguladığını "Arayüzün ağ politikası"ndaki denetim satırıyla görün
+   (Dataplane V2 ya da ağ politikası eklentisi).
+3. Doğrulama. Bir yanlış parolanın `sign-in refused` satırında `source`
+   sizin adresiniz, uydurma `X-Forwarded-For: 192.0.2.99`'lu isteğinkinde
+   yine sizin adresiniz olmalı ("Görülen kaynağı doğrulamak"); başka bir
+   namespace'ten arayüz Service'ine giden istek zaman aşımına düşmeli.
 
 **Yükseltme.** Sürümden sürüme yapılacaklar, davranış değişiklikleri, geri
 dönüş, alarm kurallarının değişip değişmediği, atlamalı yol ve yükseltmeden
@@ -207,6 +247,8 @@ bir `output` ile okunur). Notların uyarıları ve her birini kapatan değer:
 | Thanos 9091 | `prometheus.url` 9091'de ve keşif cluster çapında: pod'ların CPU ve belleği boş kalır | `prometheus.openshiftMonitoringView: true` |
 | Prometheus sertifikası denetlenmiyor | `prometheus.tokenFile` ile birlikte `prometheus.insecureSkipVerify: true`: token'ı o adreste yanıt veren alır | `prometheus.insecureSkipVerify: false` ve `prometheus.caFile` |
 | Ingress TLS | TLS Secret'ı yok (düz HTTP'de kimse giriş yapamaz) ya da Ingress TLS'siz (parolalar düz metin gider) | Secret'ı oluşturun ya da cert-manager'a oluşturtun (`ingress.annotations`); TLS Ingress'in önünde bitiyorsa `ingress.tls.enabled: false` ve `https://` ile `publicURL` |
+| Giriş throttle'ı (hop) | Route ya da Ingress açık ve `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS` yok ya da `0` (varsayılan): her tarayıcı arayüz pod'una sayılır, ad başına tek paylaşılan kilit kalır. Route'ta ayrıca: değer router'ın `forwardedHeaderPolicy`'si `Append` ya da `Replace` iken geçerlidir | `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS: "1"` (düz Route; `ingress-nginx`, controller Service'i `externalTrafficPolicy: Local`) ya da `"2"` (GCE Ingress, GKE Gateway, önünde başlığı yazan bir WAF olan Route); router `IfNone`/`Never` ise ya da politikayı okuyamıyorsanız `route.annotations` altında `haproxy.router.openshift.io/set-forwarded-headers: append` (bkz. "Vekil-hop rehberi") |
+| Arayüz politikası | Route ya da Ingress açık ve `frontend.networkPolicy.enabled` kapalı: cluster'daki bir pod arayüz Service'ine uydurma bir `X-Forwarded-For` ile gelip giriş kaynağını seçebilir. Açıkken: notlar politikanın uygulandığını doğrulamanızı ister; `from` varsayılanda (OpenShift router'ı) ve render OpenShift'in API'sini görmüyorsa WARNING (OpenShift dışında arayüze kimse ulaşamaz); `networkPolicy.enabled` da açıksa push gönderen namespace'leri hatırlatır | `frontend.networkPolicy.enabled: true`; OpenShift dışında `frontend.networkPolicy.from` controller'ın namespace'i ya da GCE Ingress ve GKE Gateway'de yük dengeleyicinin aralıkları; push gönderen namespace'ler de `from`'a (bkz. "Arayüzün ağ politikası") |
 
 Notlar ayrıca LDAP ya da OIDC için lisansı (`license.existingSecret`),
 SSO'nun dönüş adresini (`publicURL` ya da `oidc.redirectURL`) ve elle
@@ -269,8 +311,16 @@ helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.
   --set prometheus.url=https://thanos-querier.openshift-monitoring.svc:9091 \
   --set prometheus.tokenFile=/var/run/secrets/kubernetes.io/serviceaccount/token \
   --set prometheus.caFile=/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt \
-  --set prometheus.openshiftMonitoringView=true
+  --set prometheus.openshiftMonitoringView=true \
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 ```
+
+Son satır giriş throttle'ının tarayıcının adresini okumasını sağlar (bkz.
+"Hesaplar ve giriş", "Vekil-hop rehberi"). `1` düz bir Route içindir: router
+`X-Forwarded-For`'a ekler (varsayılan `forwardedHeaderPolicy: Append`; sandbox'ta
+ölçüldü) ya da onu değiştirir (`Replace`). Önünde başlığı yazan bir WAF ya da L7
+yük dengeleyici varsa `2`; router `IfNone` ya da `Never` ise değer ancak Route'a
+kendi politikası verilince geçerlidir (rehberde).
 
 İmajlar UBI tabanlıdır, kök olmayan ve rastgele bir UID ile, salt okunur
 kök dosya sistemiyle ve tüm capability'ler düşürülmüş olarak çalışır
@@ -1294,20 +1344,91 @@ chart'ın ayrı bir anahtarla açılan arayüz politikası kapatır:
               kubernetes.io/metadata.name: ingress-nginx
   ```
 
-- Host ağında çalışan bir controller'ın kaynağı node'dur: node'ların aralığını
-  `ipBlock` ile verin. GKE'nin kendi Ingress'i (GCE) container-native (NEG)
-  modda arayüze Google yük dengeleyicisinin aralıklarından gelir: `ipBlock`
-  `35.191.0.0/16` ve `130.211.0.0/22`; `NodePort` modunda kaynak node olabilir.
-  Bu değerlerin hiçbiri henüz gerçek bir cluster'da ölçülmedi.
+- OpenShift'te router pod ağında çalışıyorsa varsayılan `from` yeter. Router
+  host ağındaysa (`HostNetwork` yayımlama; çoğunlukla bare metal ve vSphere)
+  trafik node'dan gelir ve namespace seçicisi onu tutmaz: OpenShift'in host
+  ağı grubunu ikinci girdi olarak ekleyin. Bu girdi node'lardan ve host
+  ağındaki pod'lardan gelen her bağlantıyı da kabul eder; chart onu varsayılana
+  eklemez. Varsayım, ölçülmedi:
+
+  ```yaml
+  frontend:
+    networkPolicy:
+      enabled: true
+      from:
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/ingress: ""
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/host-network: ""
+  ```
+
+  Router'ın hangisi olduğu (`HostNetwork` dışındaki her değer pod ağıdır;
+  küme düzeyinde okuma yetkisi ister, Route başka bir IngressController'dan
+  çıkıyorsa `default` yerine onun adı):
+
+  ```
+  oc -n openshift-ingress-operator get ingresscontroller default -o jsonpath='{.status.endpointPublishingStrategy.type}{"\n"}'
+  ```
+
+- Host ağında çalışan başka bir controller'ın kaynağı da node'dur: node'ların
+  aralığını `ipBlock` ile verin. GKE'nin kendi Ingress'i (GCE) container-native
+  (NEG) modda ve GKE Gateway arayüze Google yük dengeleyicisinin
+  aralıklarından gelir: `ipBlock` `35.191.0.0/16` ve `130.211.0.0/22`;
+  `NodePort` modunda kaynak node olabilir. Bu değerlerin hiçbiri henüz gerçek
+  bir cluster'da ölçülmedi.
+- Politika durum sayfalarını, rozetleri ve push adreslerini de kapsar: onları
+  da arayüz sunar. Route ya da Ingress üzerinden gelen ziyaretçi etkilenmez;
+  cluster içinden arayüz Service'ine doğrudan giden her okuyucu (herkese açık
+  durum sayfasını gösteren bir ekran pod'u, rozeti çeken bir iç portal) bir
+  `from` girdisi ister ya da Route/Ingress adresini kullanır.
 - Anahtar `networkPolicy.enabled`'a bağlı değildir, onunla açılmaz: o politika
   açıkken başka namespace'lerdeki push işleri raporlarını arayüze gönderir
   (bkz. "Ağ erişimi") ve yalnız router'a izin veren bir politika onları keser,
   push monitor'leri yanlış DOWN düşer. İkisini birlikte açıyorsanız push
-  gönderen namespace'leri `frontend.networkPolicy.from`'a ekleyin. Cluster
+  gönderen namespace'leri `frontend.networkPolicy.from`'a ekleyin; kurulum
+  notu iki politika birlikte açıkken bunu hatırlatır. Cluster
   içinden arayüz Service'ine giden başka her şey (ör. Kubeat'in kendi
   arayüzünü izleyen bir monitor) de bir girdi ister.
 - `from` boş olamaz: NetworkPolicy'de boş `from` her kaynağa izin verir, chart
   böyle bir değeri reddeder.
+
+**Politikanın uygulandığını doğrulamak.** NetworkPolicy'yi uygulamayan bir ağ
+eklentisi politikayı sessizce yok sayar: kurulum başarılı görünür, arayüz
+Service'i yine herkese açıktır. Açtıktan sonra:
+
+- GKE'de cluster'ın politikayı uyguladığını görün (Autopilot hep Dataplane
+  V2'dir; ölçülmedi):
+
+  ```
+  gcloud container clusters describe <cluster> --location <konum> --format='value(networkConfig.datapathProvider,networkPolicy.enabled)'
+  ```
+
+  `ADVANCED_DATAPATH` (Dataplane V2) ya da ikinci sütunda `True` (ağ politikası
+  eklentisi) politikanın uygulandığını gösterir; ikisi de yoksa politika
+  etkisizdir.
+- Her platformda negatif adım: `from`'da olmayan geçici bir namespace'teki
+  pod'dan arayüz Service'ine giden istek zaman aşımına düşmelidir (curl
+  içeren herhangi bir imaj olur; OpenShift'te `oc`, namespace yerine
+  `from`'da olmayan bir proje):
+
+  ```
+  kubectl create namespace kubeat-np-check
+  kubectl -n kubeat-np-check run np-check --rm -i --restart=Never --image=curlimages/curl:8.10.1 -- \
+    curl -sS -m 5 -o /dev/null -w '%{http_code}\n' http://kubeat-frontend.kubeat.svc:3000/login
+  kubectl delete namespace kubeat-np-check
+  ```
+
+  Beklenen `curl: (28)` ile biten bir zaman aşımıdır. `200` dönüyorsa politika
+  uygulanmıyor ya da o namespace `from`'da. Sonra arayüzü Route ya da Ingress
+  adresinden açın: giriş sayfası gelmeli.
+
+Kurulum notu politika açıkken bu doğrulamayı ister. `from` varsayılandayken
+(OpenShift router'ı) ve render OpenShift'in API'sini (`security.openshift.io/v1`)
+görmüyorsa WARNING de yazar: OpenShift dışında bu `from` hiçbir kaynağı seçmez,
+arayüze Route ya da Ingress de ulaşamaz. `helm template` `--api-versions`
+olmadan OpenShift'te de API'yi görmediği için render durmaz, yalnız uyarır.
 
 Politika kapalıyken kalan sınır: değer `0`'dan büyükken cluster içindeki bir
 pod arayüz Service'ine (arayüz `NodePort` ise node portuna yük dengeleyiciyi
@@ -1330,14 +1451,41 @@ backend) ölçülüp ölçülmediğini yazar:
 | Kurulum | Değer | Başlıktaki girdiler, soldan (yazan) | Ölçüm |
 | --- | --- | --- | --- |
 | Vekilsiz: arayüze `kubectl port-forward` | `1` | `127.0.0.1` (Next.js) | ölçülmedi |
-| Düz OpenShift Route (HAProxy router, varsayılan `forwardedHeaderPolicy: Append`) | `1` | istemci (router) | ölçülmedi |
-| Önünde başlığı yazan bir WAF ya da L7 yük dengeleyici olan Route | `2` | istemci (WAF), WAF (router) | ölçülmedi |
+| Düz OpenShift Route (HAProxy router, varsayılan `forwardedHeaderPolicy: Append`) | `1` | istemci (router) | ölçüldü (sandbox, 2026-11-07) |
+| OpenShift Route, router `forwardedHeaderPolicy: Replace` | `1` | istemci (router; gelen başlığı siler) | ölçülmedi |
+| OpenShift Route, router `forwardedHeaderPolicy: IfNone` ya da `Never` | `0`; Route'a `haproxy.router.openshift.io/set-forwarded-headers: append` verilince `1` | istemcinin kendi yazdığı (router dokunmaz); başlık yoksa `IfNone`'da istemci (router), `Never`'da router'ın adresi (Next.js) | ölçülmedi |
+| Önünde başlığı yazan bir WAF ya da L7 yük dengeleyici olan Route (router `Append`) | `2` | istemci (WAF), WAF (router) | ölçülmedi |
 | GKE `ingress-nginx`: L4 LoadBalancer Service, `externalTrafficPolicy: Local`, varsayılan ayarlar | `1` | istemci (`ingress-nginx`; gelen başlığı kendi eşiyle değiştirir) | ölçülmedi |
 | Önde L7 Google Cloud yük dengeleyici (GCLB) + `ingress-nginx` (`use-forwarded-headers: "true"`, `compute-full-forwarded-for: "true"`) | `3` | istemci ve yük dengeleyicinin adresi (GCLB), GCLB vekili (`ingress-nginx`) | ölçülmedi |
 | GKE'nin kendi Ingress'i (GCE) | `2` | istemci ve yük dengeleyicinin adresi (GCLB) | ölçülmedi |
+| GKE Gateway (`gke-l7-global-external-managed`; HTTPRoute'u siz yazarsınız). Arayüz politikasının kaynakları: yük dengeleyicinin aralıkları, `ipBlock` `35.191.0.0/16` ve `130.211.0.0/22` | `2` | istemci ve yük dengeleyicinin adresi (GCLB) | ölçülmedi |
 
 Dikkat edilecekler:
 
+- **OpenShift router'ının `forwardedHeaderPolicy`'si.** Route satırları router
+  başlığa eklerken (`Append`, varsayılan) ya da onu kendi gördüğüyle
+  değiştirirken (`Replace`) geçerlidir. `IfNone` istemcinin gönderdiği başlığa
+  dokunmaz, `Never` hiç yazmaz: ikisinde de başlığı istemci yazar ve `0`'dan
+  büyük her değer kaynak-başına sınırı atlatır. Politikayı okumak küme
+  düzeyinde okuma yetkisi ister; boş çıktı `Append`'dir (Route başka bir
+  IngressController'dan, ör. bir shard'dan çıkıyorsa `default` yerine onun
+  adı):
+
+  ```
+  oc -n openshift-ingress-operator get ingresscontroller default -o jsonpath='{.spec.httpHeaders.forwardedHeaderPolicy}{"\n"}'
+  ```
+
+  Yetkiniz yoksa ya da politika `IfNone`/`Never` ise Kubeat'in Route'una kendi
+  politikasını verin; OpenShift'in belgesine göre router bu annotation'ı o
+  Route için IngressController'ın politikasının yerine uygular (ölçülmedi):
+
+  ```
+  --set-string 'route.annotations.haproxy\.router\.openshift\.io/set-forwarded-headers=append'
+  ```
+
+  `Replace`'te önünde bir WAF varken de değer `1`'dir: router WAF'ın yazdığını
+  siler, kaynak WAF'ın adresi olur ve istemciler ayrılmaz (paylaşılan kilit,
+  bypass değil). Ayırmak için Route'a `append` verip `2` kullanın.
 - `1` (vekilsiz) yalnız arayüze, başlığı yazan ya da değiştiren bir vekilden
   geçmeden hiçbir güvenilmeyen istemci ulaşamıyorsa geçerlidir (port-forward).
   Next.js istemcinin gönderdiği başlığa dokunmaz: arayüz Service'ini önünde
@@ -1381,21 +1529,40 @@ Dikkat edilecekler:
   `frontend.networkPolicy.enabled=true` kapatır (yukarıda "Arayüzün ağ
   politikası").
 
-Chart'ın varsayılanı `0`'dır. `route.enabled` ya da `ingress.enabled` açıkken
-kurulum notu (NOTES) değerin `0` kaldığını söyler ve yukarıdaki satırlardan o
-giriş türüne uyanları önerir: Route için `1` (önünde başlığı yazan bir WAF ya da
-L7 yük dengeleyiciyle `2`); Ingress için `ingress-nginx` varsayılanlarıyla `1`,
-GCE Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`. Emin değilseniz
-küçük değeri seçip `source` alanıyla doğrulamanızı söyler (fazla değer
-atlatılabilir, yukarıda). Değeri
-`--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` ile verin. Arayüzün
-ağ politikası kapalıysa not `frontend.networkPolicy.enabled=true`'yu da önerir:
-Route'ta varsayılan `from` OpenShift router'ıdır; Ingress'te
-`frontend.networkPolicy.from`'u controller'ın namespace'ine (GCE Ingress'te
-yük dengeleyicinin aralıklarına) ayarlamanızı söyler; `networkPolicy.enabled`
-açıksa push gönderen namespace'leri de `from`'a eklemenizi hatırlatır. 0.50'den
-beri bu amaçla `networkPolicy.enabled`'ı önermez: backend'e doğrudan gelen
-uydurma başlığı artık arayüzün sırrı kapatır.
+**Kurulum notunun önerisi.** Chart'ın varsayılanı `0`'dır; değeri siz
+verirsiniz. `route.enabled` ya da `ingress.enabled` açıkken kurulum notu
+(NOTES):
+
+- Değer `0` kaldıysa bunu söyler ve yukarıdaki satırlardan giriş türüne uyanı
+  önerir:
+  - Route: `1`, önünde başlığı yazan bir WAF ya da L7 yük dengeleyiciyle `2`.
+  - Ingress, `ingress.className` `nginx`: `1` ve controller'ın Service'inde
+    `externalTrafficPolicy: Local` şartı.
+  - Ingress, sınıf `gce` (`ingress.className` ya da GCE'nin okuduğu
+    `kubernetes.io/ingress.class` annotation'ı): `2` ve
+    `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2`.
+  - Başka ya da boş bir sınıf: `ingress-nginx` varsayılanlarıyla `1`, GCE
+    Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`.
+
+  Emin değilseniz küçük değeri seçip `source` alanıyla doğrulamanızı söyler
+  (fazla değer atlatılabilir, yukarıda); değeri
+  `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` gibi verirsiniz.
+- Route'ta, değer ne olursa olsun, `IfNone`/`Never` notunu, politikayı okuyan
+  `oc` komutunu ve yetkisi olmayana Route annotation'ını yazar (yukarıda
+  "Dikkat edilecekler"). `route.annotations`'da
+  `haproxy.router.openshift.io/set-forwarded-headers` `append` ya da `replace`
+  ise yazmaz.
+- Arayüzün ağ politikası kapalıysa `frontend.networkPolicy.enabled=true`'yu da
+  önerir: Route'ta varsayılan `from` OpenShift router'ıdır; Ingress'te
+  `frontend.networkPolicy.from`'u controller'ın namespace'ine (GCE Ingress'te
+  yük dengeleyicinin aralıklarına) ayarlamanızı söyler; `networkPolicy.enabled`
+  açıksa push gönderen namespace'leri de `from`'a eklemenizi hatırlatır. 0.50'den
+  beri bu amaçla `networkPolicy.enabled`'ı önermez: backend'e doğrudan gelen
+  uydurma başlığı artık arayüzün sırrı kapatır.
+- Politika açıkken (Route ya da Ingress olmasa da) politikanın uygulandığını
+  doğrulamanızı ister, `from` varsayılandayken OpenShift dışında WARNING yazar
+  (yukarıda "Politikanın uygulandığını doğrulamak") ve iki politika birlikte
+  açıksa push gönderen namespace'leri hatırlatır.
 
 **Görülen kaynağı doğrulamak.** Her başarısız giriş backend loguna bilgi
 satırı olarak yazılır; satırın `source` alanı throttle'ın anahtarladığı
@@ -1418,6 +1585,25 @@ kubectl -n kubeat logs deploy/kubeat-backend | grep 'sign-in refused'
   tanımıyordur (sır eksik ya da iki tarafta farklı; "Güvenilir eş");
   hepsinde aşağıdaki WARN'lardan biri de düşer.
 - Bir node'un adresiyse önde başlığı yazmayan bir L4 katmanı vardır (yukarıda).
+
+**Uydurma başlıkla negatif adım.** Doğru kaynak yetmez: istemci kendi
+başlığıyla kaynağını seçememeli. Aynı yanlış parolalı girişi uydurma bir
+başlıkla, yine tarayıcının yolundan (Route ya da Ingress) tekrarlayın:
+
+1. Tarayıcının geliştirici araçlarında (Network) yanlış parolalı giriş
+   isteğini "Copy as cURL" ile kopyalayın.
+2. Komuta `-H 'X-Forwarded-For: 192.0.2.99'` ekleyip aynı makineden çalıştırın.
+3. Yukarıdaki log satırına yeniden bakın.
+
+- `source` yine sizin adresinizse önünüzdeki vekil istemcinin başlığına
+  güvenmiyor ve değer fazla değil.
+- `source` `192.0.2.99` ise istemci kaynağını seçebiliyor: değer fazladır
+  (bir azaltın), router `IfNone`/`Never`'dır ya da `ingress-nginx`'te
+  `use-forwarded-headers` `compute-full-forwarded-for` olmadan açıktır
+  ("Dikkat edilecekler"). Düzeltip adımı yineleyin.
+
+`192.0.2.99` belgelere ayrılmış bir adrestir (TEST-NET-1), gerçek bir
+istemciye ait değildir.
 
 Satır yalnız operatör logudur: denetim kaydı ve istemci yanıtı adresi taşımaz,
 yanıt hep genel 401 ya da 429'dur (enum sızmaz). Dizinde parolası doğru olup
@@ -3629,15 +3815,18 @@ release'i kaldırıp yeniden kurmak bu yüzden monitor'ları, kanalları,
 olayları ve geçmişi götürmez: **aynı release adı ve namespace'le** (ve aynı
 values ile) yapılan yeniden kurulum, `helm install` ya da
 `helm upgrade --install`, kalan PVC'leri ve anahtarı olduğu gibi alır ve
-backend veritabanını kaldığı yerden açar. Chart'ın ürettiği üç Secret de aynı
+backend veritabanını kaldığı yerden açar. Chart'ın ürettiği dört Secret de aynı
 anahtara (`backend.persistence.keepOnUninstall`) bağlı `helm.sh/resource-policy:
 keep` taşır ve kaldırmada kalır: `<release>-admin` ile yönetici parolası,
-`<release>-api-token` ile API anahtarı ve `<release>-metrics-token` ile metrik
-anahtarı yeniden kurulumda sahiplenilir, eskisi gibi kalır. Böylece kurulum
-notları geçerli parolayı gösterir (yeniden üretilen, geçmeyen bir parola
-değil) ve eski anahtarı kullanan betikler ile elle yapılandırılmış bir
-Prometheus çalışmayı sürdürür. `keepOnUninstall=false` ile bu üç Secret de
-veri PVC'siyle birlikte gider ve yeniden kurulumda yeniden üretilir.
+`<release>-api-token` ile API anahtarı, `<release>-metrics-token` ile metrik
+anahtarı ve `<release>-frontend-token` ile arayüzün backend'e kendini tanıttığı
+sır (bkz. "Hesaplar ve giriş", "Güvenilir eş") yeniden kurulumda sahiplenilir,
+eskisi gibi kalır. Böylece kurulum notları geçerli parolayı gösterir (yeniden
+üretilen, geçmeyen bir parola değil) ve eski anahtarı kullanan betikler ile
+elle yapılandırılmış bir Prometheus çalışmayı sürdürür. Kendi Secret'ınızı
+verdiğiniz (`existingSecret`) bir değeri chart üretmez ve saymaz.
+`keepOnUninstall=false` ile bu dört Secret de veri PVC'siyle birlikte gider ve
+yeniden kurulumda yeniden üretilir.
 
 PVC'leri bilerek silmek için release'i kaldırdıktan sonra (kurulum notları
 komutu yalnızca kalacak PVC'lerle yazar):
@@ -3646,11 +3835,12 @@ komutu yalnızca kalacak PVC'lerle yazar):
 kubectl -n kubeat delete pvc kubeat-data kubeat-backup
 ```
 
-Aynı anahtarla korunan üç Secret de kalır; onları da silmek için (yeniden
-kurulum yenilerini üretir; kurulum notları bu komutu da yazar):
+Aynı anahtarla korunan dört Secret de kalır; onları da silmek için (yeniden
+kurulum yenilerini üretir; kurulum notları bu komutu da, yalnız chart'ın
+ürettikleriyle, yazar):
 
 ```sh
-kubectl -n kubeat delete secret kubeat-admin kubeat-api-token kubeat-metrics-token
+kubectl -n kubeat delete secret kubeat-admin kubeat-api-token kubeat-metrics-token kubeat-frontend-token
 ```
 
 Şifreleme anahtarı `<release>-secret-key` kendi politikasıyla her durumda

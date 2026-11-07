@@ -254,7 +254,11 @@ notes "TLS-off Ingress without SSO" omits "$NEEDS_HTTPS" --set ingress.enabled=t
 # neither. The backend's own policy is no longer what keeps a pod from
 # picking its source: the backend reads X-Forwarded-For only from the
 # frontend, which presents its token; a pod that reaches the frontend's
-# Service is what the frontend's policy keeps out.
+# Service is what the frontend's policy keeps out. Below: one value for the
+# Ingress class the notes know, the router's forwardedHeaderPolicy with a
+# Route, the frontend's policy once on, the README that gives what the
+# notes suggest, and the pilot's values.
+FRONTEND_POLICY=(--set frontend.networkPolicy.enabled=true)
 THROTTLE="Sign-in throttle:"
 HOPS_ZERO="UPTIME_TRUST_PROXY_HOPS is 0"
 SET_HOPS="--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1"
@@ -308,18 +312,148 @@ notes "Route, hops 1, backend policy on" says "$NEEDS_POLICY" "${ROUTE[@]}" \
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1 --set networkPolicy.enabled=true
 notes "Route, hops 1, backend policy on" says "$POLICY_PUSH" "${ROUTE[@]}" \
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1 --set networkPolicy.enabled=true
-notes "Route, hops 1, frontend policy on" omits "$THROTTLE" "${ROUTE[@]}" \
-  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1 --set frontend.networkPolicy.enabled=true
 notes "Route, hops unset, frontend policy on" says "$HOPS_ZERO" "${ROUTE[@]}" --set frontend.networkPolicy.enabled=true
 notes "Route, hops unset, frontend policy on" omits "$NEEDS_POLICY" "${ROUTE[@]}" --set frontend.networkPolicy.enabled=true
 notes "frontend token of one's own" says "with the Secret my-frontend-token" "${ROUTE[@]}" \
   --set frontendToken.existingSecret=my-frontend-token
-# The README section the notes point at gives the values they suggest.
+
+# One suggestion for the Ingress class the notes know: ingress-nginx's 1
+# holds only with externalTrafficPolicy: Local on its Service; GKE's own
+# Ingress, which reads its class from the kubernetes.io/ingress.class
+# annotation rather than ingressClassName, takes 2. Any other class, or
+# none, gets the three of before.
+NGINX_ONE="ingress-nginx: 1, provided its LoadBalancer Service has"
+NGINX_LOCAL="--set controller.service.externalTrafficPolicy=Local"
+GCE_TWO="GKE's own Ingress (GCE): 2"
+SET_HOPS_TWO="--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2"
+NGINX=(--set ingress.enabled=true --set ingress.className=nginx)
+GCE=(--set ingress.enabled=true --set 'ingress.annotations.kubernetes\.io/ingress\.class=gce')
+notes "Ingress nginx, hops unset" says "$NGINX_ONE" "${NGINX[@]}"
+notes "Ingress nginx, hops unset" says "$NGINX_LOCAL" "${NGINX[@]}"
+notes "Ingress nginx, hops unset" says "$SET_HOPS" "${NGINX[@]}"
+notes "Ingress nginx, hops unset" omits "$GCE_TWO" "${NGINX[@]}"
+notes "Ingress nginx, hops unset" omits "compute-full-forwarded-for: 3" "${NGINX[@]}"
+notes "Ingress nginx, hops unset" says "$HOPS_LOWER" "${NGINX[@]}"
+notes "Ingress gce annotation, hops unset" says "$GCE_TWO" "${GCE[@]}"
+notes "Ingress gce annotation, hops unset" says "$SET_HOPS_TWO" "${GCE[@]}"
+notes "Ingress gce annotation, hops unset" omits "$SET_HOPS" "${GCE[@]}"
+notes "Ingress gce annotation, hops unset" omits "ingress-nginx" "${GCE[@]}"
+notes "Ingress gce className, hops unset" says "$SET_HOPS_TWO" --set ingress.enabled=true --set ingress.className=gce
+notes "Ingress nginx, hops 1" omits "$NGINX_ONE" "${NGINX[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
+for class in traefik ""; do
+  notes "Ingress class \"$class\", hops unset" says "ingress-nginx with its default settings: 1; GKE's own Ingress (GCE): 2;" \
+    --set ingress.enabled=true --set-string ingress.className="$class"
+  notes "Ingress class \"$class\", hops unset" omits "$NGINX_LOCAL" --set ingress.enabled=true --set-string ingress.className="$class"
+done
+notes "Route with an Ingress class left in the values" says "a plain Route: 1" "${ROUTE[@]}" --set ingress.className=gce
+notes "Route with an Ingress class left in the values" says "$SET_HOPS" "${ROUTE[@]}" --set ingress.className=gce
+
+# A Route's value holds under the router's forwardedHeaderPolicy Append or
+# Replace; under IfNone or Never a client writes the header. With a Route
+# the notes say so whatever the value, give the oc line that reads the
+# policy (which needs cluster-wide read access) and, for whoever lacks it,
+# the Route's own policy; once the Route pins append or replace, not.
+ROUTER_POLICY_CMD="oc -n openshift-ingress-operator get ingresscontroller default -o jsonpath='{.spec.httpHeaders.forwardedHeaderPolicy}{\"\\n\"}'"
+ROUTER_ACCESS="it needs cluster-wide read access"
+# README's line that tells a router on the pod network from one on the host
+# network, for the frontend policy's "from".
+ROUTER_NETWORK_CMD="oc -n openshift-ingress-operator get ingresscontroller default -o jsonpath='{.status.endpointPublishingStrategy.type}{\"\\n\"}'"
+ROUTE_OWN_POLICY="--set-string 'route.annotations.haproxy\\.router\\.openshift\\.io/set-forwarded-headers=append'"
+ROUTE_PINNED=(--set-string 'route.annotations.haproxy\.router\.openshift\.io/set-forwarded-headers=append')
+HOPS_ONE=(--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1)
+notes "Route, hops unset" says "IfNone or Never it passes on a header the client wrote" "${ROUTE[@]}"
+notes "Route, hops unset" says "$ROUTER_POLICY_CMD" "${ROUTE[@]}"
+notes "Route, hops unset" says "$ROUTER_ACCESS" "${ROUTE[@]}"
+notes "Route, hops unset" says "$ROUTE_OWN_POLICY" "${ROUTE[@]}"
+notes "Route, hops 1, frontend policy on" says "$THROTTLE" "${ROUTE[@]}" "${HOPS_ONE[@]}" "${FRONTEND_POLICY[@]}"
+notes "Route, hops 1, frontend policy on" says "$ROUTER_POLICY_CMD" "${ROUTE[@]}" "${HOPS_ONE[@]}" "${FRONTEND_POLICY[@]}"
+notes "Route, hops 1, frontend policy on" omits "$HOPS_ZERO" "${ROUTE[@]}" "${HOPS_ONE[@]}" "${FRONTEND_POLICY[@]}"
+notes "Route, hops 1, frontend policy on" omits "$NEEDS_POLICY" "${ROUTE[@]}" "${HOPS_ONE[@]}" "${FRONTEND_POLICY[@]}"
+notes "Route pinning append, hops 1, frontend policy on" omits "$THROTTLE" "${ROUTE[@]}" "${ROUTE_PINNED[@]}" "${HOPS_ONE[@]}" "${FRONTEND_POLICY[@]}"
+notes "Route pinning replace" omits "$ROUTER_POLICY_CMD" "${ROUTE[@]}" \
+  --set-string 'route.annotations.haproxy\.router\.openshift\.io/set-forwarded-headers=Replace'
+notes "Route pinning if-none" says "$ROUTER_POLICY_CMD" "${ROUTE[@]}" \
+  --set-string 'route.annotations.haproxy\.router\.openshift\.io/set-forwarded-headers=if-none'
+notes "Ingress, hops unset" omits "$ROUTER_POLICY_CMD" "${INGRESS[@]}"
+notes "Ingress, hops 1, frontend policy on" omits "$THROTTLE" "${INGRESS[@]}" "${HOPS_ONE[@]}" "${FRONTEND_POLICY[@]}"
+# The annotation the notes give is the one the chart puts on the Route.
+helm template kubeat "$CHART" --show-only templates/expose.yaml "${ROUTE[@]}" "${ROUTE_PINNED[@]}" >"$WORK/route" 2>"$WORK/err" ||
+  failed "Route's own forwarded-headers policy: refused: $(cat "$WORK/err")"
+grep -qF "haproxy.router.openshift.io/set-forwarded-headers: append" "$WORK/route" ||
+  failed "Route's own forwarded-headers policy: the Route lacks the annotation the notes give"
+
+# The frontend's policy on: the notes ask for a check that it is enforced,
+# with a Route, an Ingress or neither; with the backend's policy on too, to
+# let the push jobs of other namespaces in. Its default "from" selects the
+# OpenShift router alone: where the render does not see OpenShift's API
+# (another cluster, or helm template without --api-versions, as GitOps tools
+# render), a warning, never a refused render.
+POLICY_CHECK="frontend.networkPolicy is on: check that the cluster enforces it"
+POLICY_CHECK_URL="http://kubeat-frontend.kubeat.svc:3000/login"
+POLICY_PUSH_BOTH="frontend.networkPolicy is on too: list those jobs' namespaces in"
+DEFAULT_FROM_WARN="WARNING: frontend.networkPolicy.from is left at its default"
+OPENSHIFT=(--api-versions security.openshift.io/v1)
+notes "frontend policy on, Route" says "$POLICY_CHECK" "${ROUTE[@]}" "${FRONTEND_POLICY[@]}" "${OPENSHIFT[@]}"
+notes "frontend policy on, Ingress" says "$POLICY_CHECK" "${INGRESS[@]}" "${FRONTEND_POLICY[@]}"
+notes "frontend policy on, neither Route nor Ingress" says "$POLICY_CHECK" "${FRONTEND_POLICY[@]}"
+notes "frontend policy on" says "$POLICY_CHECK_URL" --namespace kubeat "${FRONTEND_POLICY[@]}"
+notes "frontend policy off" omits "$POLICY_CHECK" "${ROUTE[@]}"
+notes "both policies" says "$POLICY_PUSH_BOTH" "${INGRESS[@]}" "${FRONTEND_POLICY[@]}" --set networkPolicy.enabled=true
+notes "both policies, hops 1" says "$POLICY_PUSH_BOTH" "${ROUTE[@]}" "${HOPS_ONE[@]}" "${FRONTEND_POLICY[@]}" --set networkPolicy.enabled=true
+notes "frontend policy alone" omits "$POLICY_PUSH_BOTH" "${INGRESS[@]}" "${FRONTEND_POLICY[@]}"
+notes "backend policy alone" omits "$POLICY_PUSH_BOTH" "${INGRESS[@]}" --set networkPolicy.enabled=true
+notes "default from, no OpenShift API" says "$DEFAULT_FROM_WARN" "${INGRESS[@]}" "${FRONTEND_POLICY[@]}"
+notes "default from, no OpenShift API, Route" says "$DEFAULT_FROM_WARN" "${ROUTE[@]}" "${FRONTEND_POLICY[@]}"
+notes "default from, OpenShift" omits "$DEFAULT_FROM_WARN" "${ROUTE[@]}" "${FRONTEND_POLICY[@]}" "${OPENSHIFT[@]}"
+notes "default from given by hand" says "$DEFAULT_FROM_WARN" "${INGRESS[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json 'frontend.networkPolicy.from=[{"namespaceSelector":{"matchLabels":{"policy-group.network.openshift.io/ingress":""}}}]'
+notes "from of one's own, no OpenShift API" omits "$DEFAULT_FROM_WARN" "${INGRESS[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json 'frontend.networkPolicy.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"ingress-nginx"}}}]'
+notes "OpenShift's two-entry from" omits "$DEFAULT_FROM_WARN" "${ROUTE[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json 'frontend.networkPolicy.from=[{"namespaceSelector":{"matchLabels":{"policy-group.network.openshift.io/ingress":""}}},{"namespaceSelector":{"matchLabels":{"policy-group.network.openshift.io/host-network":""}}}]'
+notes "frontend values missing" omits "$DEFAULT_FROM_WARN" "${INGRESS[@]}" --set frontend.networkPolicy=null
+notes "frontend policy off, no OpenShift API" omits "$DEFAULT_FROM_WARN" "${INGRESS[@]}"
+renders "default from, no OpenShift API" "${INGRESS[@]}" "${FRONTEND_POLICY[@]}"
+
+# The README section the notes point at gives the values they suggest
+# (docs/agents/sprint-takimi.md, step 2).
 README="$CHART/../../../README.md"
 for text in "frontend.networkPolicy.enabled=true" "frontend.networkPolicy.from" "**Arayüzün ağ politikası" \
-  "policy-group.network.openshift.io/ingress" "kubernetes.io/metadata.name: ingress-nginx" "35.191.0.0/16" "130.211.0.0/22"; do
+  "policy-group.network.openshift.io/ingress" "kubernetes.io/metadata.name: ingress-nginx" "35.191.0.0/16" "130.211.0.0/22" \
+  "$SET_HOPS" "$SET_HOPS_TWO" "$NGINX_LOCAL" "externalTrafficPolicy: Local" "**Vekil-hop rehberi" \
+  "$ROUTER_POLICY_CMD" "$ROUTE_OWN_POLICY" "haproxy.router.openshift.io/set-forwarded-headers: append" \
+  "policy-group.network.openshift.io/host-network: \"\"" "$ROUTER_NETWORK_CMD" \
+  "**Politikanın uygulandığını doğrulamak" "GKE Gateway (\`gke-l7-global-external-managed\`" \
+  "X-Forwarded-For: 192.0.2.99" "**Uydurma başlıkla negatif adım"; do
   grep -qF -- "$text" "$README" || failed "README lacks \"$text\", which the notes and values point at"
 done
+
+# The bank pilot's values (docs/pilot.md, "2. values-pilot.yaml") render,
+# install 0.50's sign-in fix on (hops 1, so the notes do not say it is 0)
+# and leave the proxied scope setting off, commented out.
+PILOT="$CHART/../../../docs/pilot.md"
+awk '/^### 2\. values-pilot\.yaml/ { section = 1; next }
+  section && /^```yaml$/ { inblock = 1; next }
+  inblock && /^```$/ { exit }
+  inblock { print }' "$PILOT" >"$WORK/values-pilot.yaml"
+if [ ! -s "$WORK/values-pilot.yaml" ]; then
+  failed "pilot: no values block under \"2. values-pilot.yaml\" in docs/pilot.md"
+else
+  PILOT_VALUES=(-f "$WORK/values-pilot.yaml" "${OPENSHIFT[@]}" --api-versions route.openshift.io/v1)
+  renders "pilot values" "${PILOT_VALUES[@]}"
+  notes "pilot values" omits "$HOPS_ZERO" "${PILOT_VALUES[@]}"
+  notes "pilot values" says "$THROTTLE" "${PILOT_VALUES[@]}"
+  notes "pilot values" says "$ROUTER_POLICY_CMD" "${PILOT_VALUES[@]}"
+  notes "pilot values" omits "$UNWRITABLE" "${PILOT_VALUES[@]}"
+  if helm template kubeat "$CHART" --show-only templates/backend.yaml "${PILOT_VALUES[@]}" >"$WORK/pilot-backend" 2>"$WORK/err"; then
+    grep -A1 -- "- name: UPTIME_TRUST_PROXY_HOPS\$" "$WORK/pilot-backend" | grep -qF 'value: "1"' ||
+      failed "pilot values: the backend's UPTIME_TRUST_PROXY_HOPS is not \"1\""
+    grep -qF "UPTIME_TARGET_SCOPE_TRUST_PROXY" "$WORK/pilot-backend" &&
+      failed "pilot values: UPTIME_TARGET_SCOPE_TRUST_PROXY is set, not left commented out"
+  else
+    failed "pilot values: refused: $(cat "$WORK/err")"
+  fi
+fi
 
 # The frontend's network policy: a switch of its own, off by default and
 # not turned on by networkPolicy.enabled, whose push jobs it would cut off.
@@ -358,7 +492,6 @@ policy() {
     [ "$want" = lacks ] || failed "$name: $policy lacks \"$text\""
   fi
 }
-FRONTEND_POLICY=(--set frontend.networkPolicy.enabled=true)
 policy "defaults" kubeat-frontend absent ""
 policy "backend policy on" kubeat-frontend absent "" --set networkPolicy.enabled=true
 policy "backend policy on" kubeat-backend has "app.kubernetes.io/component: backend" --set networkPolicy.enabled=true

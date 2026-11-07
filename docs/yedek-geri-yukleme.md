@@ -345,11 +345,11 @@ kopyası eski sürümde açılmaz. Anahtar yanlışsa backend başlamaz.
 
 Aynı release adıyla **yeniden kurulum** (ör. Terraform destroy/apply) geri
 yükleme gerektirmez: `helm uninstall` veri ve yedek PVC'lerini, şifreleme
-anahtarını ve chart'ın ürettiği `<release>-admin`, `<release>-api-token` ve
-`<release>-metrics-token` Secret'larını (`backend.persistence.keepOnUninstall`
-açıkken) bırakır, aynı adla yeniden kurulum hepsini sahiplenir; yönetici
-parolası ve token'lar eskisi gibi kalır (README "Yedekleme ve geri yükleme",
-"Kazayla kaldırmadan dönüş").
+anahtarını ve chart'ın ürettiği `<release>-admin`, `<release>-api-token`,
+`<release>-metrics-token` ve `<release>-frontend-token` Secret'larını
+(`backend.persistence.keepOnUninstall` açıkken) bırakır, aynı adla yeniden
+kurulum hepsini sahiplenir; yönetici parolası ve token'lar eskisi gibi kalır
+(README "Yedekleme ve geri yükleme", "Kazayla kaldırmadan dönüş").
 
 ## Node kaybından dönüş
 
