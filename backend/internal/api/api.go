@@ -183,13 +183,14 @@ type Options struct {
 	//
 	// Throttle is the primary sign-in throttle, keyed per source address and
 	// name (see authLogin, throttle.go), and the one the status-page unlock
-	// and the password change use under keys of their own. AccountThrottle,
-	// when set, is a second, much looser ceiling on a name's failures across
-	// all sources, so a distributed guess cannot run forever; nil turns it
-	// off. TrustProxyHops is how many X-Forwarded-For entries the proxies in
-	// front of the UI write, or 1 with none, so the source address can be
-	// read from the header the UI passes on; 0 trusts no such header and
-	// uses the peer that connected. FrontendToken is the secret the UI
+	// and the password change use per source address and page or account
+	// (beginGuess). AccountThrottle, when set, is a second, much looser
+	// ceiling on a name's, a page's or an account's password-change failures
+	// across all sources, so a distributed guess cannot run forever; nil
+	// turns it off. TrustProxyHops is how many X-Forwarded-For entries the
+	// proxies in front of the UI write, or 1 with none, so the source address
+	// can be read from the header the UI passes on; 0 trusts no such header
+	// and uses the peer that connected. FrontendToken is the secret the UI
 	// presents in X-Frontend-Token: the header is read only from a request
 	// that carries it, so that no other peer can pick its source; empty
 	// trusts it from no peer.
@@ -199,6 +200,10 @@ type Options struct {
 	TrustProxyHops    int
 	FrontendToken     string
 	PasswordMinLength int
+	// now, when set, is the clock the throttled password checks read (the
+	// sign-in, the password change and the status-page unlock), so that a
+	// test can run their lockout on a fake one; nil is the time.
+	now func() time.Time
 	// LoginConcurrency bounds the bcrypt comparisons that run at once; zero
 	// means half the CPUs, at least one, and two with LDAP (see
 	// passwordCheckSlots). Directory binds have slots of their own
@@ -340,6 +345,14 @@ type handler struct {
 	// proxyWarn warns, rate-limited, when X-Forwarded-For cannot be
 	// trusted for the sign-in throttle's source address (see clientIP).
 	proxyWarn *proxyWarn
+}
+
+// now is the time by the handler's clock (Options.now), in UTC.
+func (h *handler) now() time.Time {
+	if h.opts.now != nil {
+		return h.opts.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // NewHandler returns the root HTTP handler of the server.

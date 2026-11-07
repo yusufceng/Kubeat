@@ -468,7 +468,8 @@ func TestDirectorySignInTakesAComparison(t *testing.T) {
 }
 
 // The current password, asked for to change it, is throttled like a
-// sign-in, under a key of its own.
+// sign-in, per source under a key of its own: these all come from the
+// test's one address (other sources: TestGuessThrottledPerSource).
 func TestPasswordChangeIsThrottled(t *testing.T) {
 	srv, _ := newTestAPI(t) // three failures lock
 	base := srv.URL

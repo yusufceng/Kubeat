@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
+	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
 // fromUI is a request as the UI sends it: from peer, with the UI's token
@@ -52,7 +54,7 @@ func TestClientIP(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &handler{opts: Options{TrustProxyHops: tc.hops, FrontendToken: testFrontendToken}}
-			if got := h.clientIP(fromUI(tc.peer, tc.xff...), time.Now()); got != tc.want {
+			if got := h.clientIP(fromUI(tc.peer, tc.xff...), signInSurface, time.Now()); got != tc.want {
 				t.Errorf("clientIP(hops=%d, peer=%q, xff=%v) = %q, want %q", tc.hops, tc.peer, tc.xff, got, tc.want)
 			}
 		})
@@ -117,7 +119,7 @@ func TestClientIPUntrustedPeerKeysOnThePeer(t *testing.T) {
 					for _, v := range form.lines {
 						r.Header.Add("X-Forwarded-For", v)
 					}
-					if got := h.clientIP(r, time.Now()); got != "10.128.5.9" {
+					if got := h.clientIP(r, signInSurface, time.Now()); got != "10.128.5.9" {
 						t.Errorf("source = %q, want the peer 10.128.5.9", got)
 					}
 				})
@@ -127,7 +129,7 @@ func TestClientIPUntrustedPeerKeysOnThePeer(t *testing.T) {
 	// The same from an IPv6 peer: the port goes, the address stays.
 	h := &handler{opts: Options{TrustProxyHops: 1, FrontendToken: testFrontendToken}}
 	r := &http.Request{RemoteAddr: "[fd00::9]:39000", Header: http.Header{"X-Forwarded-For": {"203.0.113.7"}}}
-	if got := h.clientIP(r, time.Now()); got != "fd00::9" {
+	if got := h.clientIP(r, signInSurface, time.Now()); got != "fd00::9" {
 		t.Errorf("an IPv6 peer: source = %q, want fd00::9", got)
 	}
 }
@@ -160,7 +162,7 @@ func TestClientIPWarns(t *testing.T) {
 
 	t.Run("hops=0 and a header warns and keeps the peer", func(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 0})
-		if got := h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), t0); got != "198.51.100.9" {
+		if got := h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), signInSurface, t0); got != "198.51.100.9" {
 			t.Errorf("source = %q, want the peer 198.51.100.9", got)
 		}
 		if !strings.Contains(logs.String(), "UPTIME_TRUST_PROXY_HOPS=0") || !strings.Contains(logs.String(), "level=WARN") {
@@ -170,7 +172,7 @@ func TestClientIPWarns(t *testing.T) {
 
 	t.Run("hops=0 without a header stays quiet", func(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 0})
-		h.clientIP(req("198.51.100.9:4321"), t0)
+		h.clientIP(req("198.51.100.9:4321"), signInSurface, t0)
 		if logs.Len() != 0 {
 			t.Errorf("warned with no X-Forwarded-For: %q", logs.String())
 		}
@@ -180,7 +182,7 @@ func TestClientIPWarns(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 1, FrontendToken: testFrontendToken})
 		r := req(attackerPod, "203.0.113.7")
 		r.Header.Set(frontendTokenHeader, "a-guess-at-the-token")
-		if got := h.clientIP(r, t0); got != "10.128.5.9" {
+		if got := h.clientIP(r, signInSurface, t0); got != "10.128.5.9" {
 			t.Errorf("source = %q, want the peer 10.128.5.9", got)
 		}
 		got := logs.String()
@@ -198,7 +200,7 @@ func TestClientIPWarns(t *testing.T) {
 
 	t.Run("a sign-in sent to the backend directly warns that it came without a header", func(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 1, FrontendToken: testFrontendToken})
-		if got := h.clientIP(req("10.128.7.3:51000"), t0); got != "10.128.7.3" {
+		if got := h.clientIP(req("10.128.7.3:51000"), signInSurface, t0); got != "10.128.7.3" {
 			t.Errorf("source = %q, want the peer 10.128.7.3", got)
 		}
 		if got := logs.String(); !strings.Contains(got, "did not present the UI's X-Frontend-Token") ||
@@ -215,7 +217,7 @@ func TestClientIPWarns(t *testing.T) {
 			if presented != "" {
 				r.Header.Set(frontendTokenHeader, presented)
 			}
-			if got := h.clientIP(r, t0); got != "10.128.2.15" {
+			if got := h.clientIP(r, signInSurface, t0); got != "10.128.2.15" {
 				t.Errorf("presenting %q: source = %q, want the peer 10.128.2.15", presented, got)
 			}
 		}
@@ -234,7 +236,7 @@ func TestClientIPWarns(t *testing.T) {
 
 	t.Run("the UI without X-Forwarded-For keys on the peer and warns", func(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 1, FrontendToken: testFrontendToken})
-		if got := h.clientIP(fromUI(frontendPod), t0); got != "10.128.2.15" {
+		if got := h.clientIP(fromUI(frontendPod), signInSurface, t0); got != "10.128.2.15" {
 			t.Errorf("source = %q, want the peer 10.128.2.15", got)
 		}
 		if got := logs.String(); !strings.Contains(got, "fewer entries than UPTIME_TRUST_PROXY_HOPS=1") {
@@ -247,7 +249,7 @@ func TestClientIPWarns(t *testing.T) {
 		// Only one forwarded entry, which a client could have set, so the
 		// source must not be read from it: a forged X-Forwarded-For must
 		// neither slip the throttle nor lock a victim out.
-		if got := h.clientIP(fromUI("10.0.0.1:5000", "1.2.3.4"), t0); got != "10.0.0.1" {
+		if got := h.clientIP(fromUI("10.0.0.1:5000", "1.2.3.4"), signInSurface, t0); got != "10.0.0.1" {
 			t.Errorf("source = %q, want the peer 10.0.0.1, not the client-set entry", got)
 		}
 		if !strings.Contains(logs.String(), "UPTIME_TRUST_PROXY_HOPS=2") || !strings.Contains(logs.String(), "level=WARN") {
@@ -265,7 +267,7 @@ func TestClientIPWarns(t *testing.T) {
 
 	t.Run("a full-length chain from the UI reads the client and stays quiet", func(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 2, FrontendToken: testFrontendToken})
-		if got := h.clientIP(fromUI("10.0.0.1:5000", "203.0.113.7, 10.0.0.2"), t0); got != "203.0.113.7" {
+		if got := h.clientIP(fromUI("10.0.0.1:5000", "203.0.113.7, 10.0.0.2"), signInSurface, t0); got != "203.0.113.7" {
 			t.Errorf("source = %q, want the client 203.0.113.7", got)
 		}
 		if logs.Len() != 0 {
@@ -275,13 +277,13 @@ func TestClientIPWarns(t *testing.T) {
 
 	t.Run("the warning is rate-limited to once a minute per key", func(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 0})
-		h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), t0)
-		h.clientIP(req("198.51.100.9:4321", "203.0.113.2"), t0.Add(30*time.Second))
+		h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), signInSurface, t0)
+		h.clientIP(req("198.51.100.9:4321", "203.0.113.2"), signInSurface, t0.Add(30*time.Second))
 		if n := strings.Count(logs.String(), "level=WARN"); n != 1 {
 			t.Errorf("warned %d times within a minute, want 1", n)
 		}
 		// A new minute warns again.
-		h.clientIP(req("198.51.100.9:4321", "203.0.113.3"), t0.Add(61*time.Second))
+		h.clientIP(req("198.51.100.9:4321", "203.0.113.3"), signInSurface, t0.Add(61*time.Second))
 		if n := strings.Count(logs.String(), "level=WARN"); n != 2 {
 			t.Errorf("warned %d times across the minute boundary, want 2", n)
 		}
@@ -290,7 +292,7 @@ func TestClientIPWarns(t *testing.T) {
 	t.Run("a flood from a peer that is not the UI warns once a minute", func(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 1, FrontendToken: testFrontendToken})
 		for i := range 100 {
-			h.clientIP(req(attackerPod, fmt.Sprintf("198.51.100.%d", i)), t0.Add(time.Duration(i)*100*time.Millisecond))
+			h.clientIP(req(attackerPod, fmt.Sprintf("198.51.100.%d", i)), signInSurface, t0.Add(time.Duration(i)*100*time.Millisecond))
 		}
 		if n := strings.Count(logs.String(), "level=WARN"); n != 1 {
 			t.Errorf("warned %d times within a minute, want 1", n)
@@ -299,12 +301,12 @@ func TestClientIPWarns(t *testing.T) {
 
 	t.Run("the warnings keep separate keys", func(t *testing.T) {
 		h, logs := logged(Options{TrustProxyHops: 0, FrontendToken: testFrontendToken})
-		h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), t0) // hops=0 branch
+		h.clientIP(req("198.51.100.9:4321", "203.0.113.1"), signInSurface, t0) // hops=0 branch
 		h.opts.TrustProxyHops = 2
-		h.clientIP(fromUI("10.0.0.1:5000", "1.2.3.4"), t0) // short-chain branch
-		h.clientIP(req(attackerPod, "203.0.113.7"), t0)    // untrusted-peer branch
+		h.clientIP(fromUI("10.0.0.1:5000", "1.2.3.4"), signInSurface, t0) // short-chain branch
+		h.clientIP(req(attackerPod, "203.0.113.7"), signInSurface, t0)    // untrusted-peer branch
 		h.opts.FrontendToken = ""
-		h.clientIP(req(frontendPod, "203.0.113.7"), t0) // no-token branch
+		h.clientIP(req(frontendPod, "203.0.113.7"), signInSurface, t0) // no-token branch
 		if n := strings.Count(logs.String(), "level=WARN"); n != 4 {
 			t.Errorf("distinct misconfigurations warned %d times, want 4", n)
 		}
@@ -587,5 +589,338 @@ func TestSignInUntrustedPeerCannotFillTheAccountCeiling(t *testing.T) {
 				t.Errorf("the log names a token: %q", text)
 			}
 		})
+	}
+}
+
+// fakeClock is the handler's clock in a test (Options.now), moved by hand,
+// so that a lockout runs out without the test waiting for it.
+type fakeClock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(d)
+}
+
+// guessLockout is the lockout period of the throttled-guess tests, the
+// backend's default.
+const guessLockout = 15 * time.Minute
+
+// throttledAPI serves the API on a fake clock starting at a fixed time, with
+// three failures locking a source for guessLockout, ceiling failures of a
+// page or an account from all sources locking it for everyone (zero: no
+// ceiling), one X-Forwarded-For entry trusted from the UI, and the options
+// then changed by customize unless it is nil. It returns the server, the
+// store, the clock and the backend's log.
+func throttledAPI(t *testing.T, ceiling int, customize func(*Options)) (*httptest.Server, *store.SQLite, *fakeClock, *syncBuffer) {
+	t.Helper()
+	clock := &fakeClock{at: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}
+	logs := &syncBuffer{}
+	srv, db := newTestAPIWith(t, func(o *Options) {
+		o.now = clock.now
+		o.TrustProxyHops = 1
+		o.Throttle = &auth.Throttle{MaxFailures: 3, Lockout: guessLockout}
+		if ceiling > 0 {
+			o.AccountThrottle = &auth.Throttle{MaxFailures: ceiling, Lockout: guessLockout}
+		}
+		o.Logger = slog.New(slog.NewTextHandler(logs, nil))
+		if customize != nil {
+			customize(o)
+		}
+	})
+	return srv, db, clock, logs
+}
+
+// fromBrowserAt sends a request to the API as the UI sends it on behalf of a
+// browser at source: from the UI pod, with the UI's token and with source as
+// the X-Forwarded-For the proxy in front of the UI wrote, and with bearer as
+// the session unless it is empty.
+func fromBrowserAt(srv *httptest.Server, source, bearer, method, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.RemoteAddr = frontendPod
+	req.Header.Set(frontendTokenHeader, testFrontendToken)
+	req.Header.Set("X-Forwarded-For", source)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	rec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, req)
+	return rec
+}
+
+// A guarded is a password other than a sign-in's that the throttle guards
+// per source, as a browser tries it: try sends password from source. A
+// wrong one is answered with wrong, the right one, password, with right;
+// refused is the log line a wrong one leaves.
+type guarded struct {
+	try                  func(source, password string) *httptest.ResponseRecorder
+	password             string
+	wrong, right         int
+	refused, surfaceName string
+}
+
+// The two guarded passwords, each made on a fresh server by its make.
+var guardedPasswords = []struct {
+	name string
+	make func(t *testing.T, srv *httptest.Server, db *store.SQLite) guarded
+}{
+	{"status-page unlock", statusPagePassword},
+	{"password change", currentPassword},
+}
+
+// statusPagePassword publishes the page "gizli" with a password and returns
+// its unlock.
+func statusPagePassword(t *testing.T, srv *httptest.Server, db *store.SQLite) guarded {
+	t.Helper()
+	web := mkMonitor(t, db, "web", "", "", true)
+	if code := do(t, "POST", srv.URL+"/api/v1/status-pages", `{"slug":"gizli","title":"Gizli sayfa","monitors":[{"monitor_id":`+
+		itoa(web.ID)+`}],"password":"gizli-parola-1"}`, nil); code != http.StatusCreated {
+		t.Fatalf("create the page: status = %d, want 201", code)
+	}
+	return guarded{
+		try: func(source, password string) *httptest.ResponseRecorder {
+			return fromBrowserAt(srv, source, "", "POST", "/api/v1/status-pages/by-slug/gizli/unlock", `{"password":"`+password+`"}`)
+		},
+		password: "gizli-parola-1", wrong: http.StatusUnauthorized, right: http.StatusOK,
+		refused: "status page unlock refused", surfaceName: statusPageSurface.name,
+	}
+}
+
+// currentPassword makes the administrator "admin" and returns the change of
+// admin's password, asked for the current one, with admin's session: the
+// same session from every source, as one who stole it holds it. The right
+// password is changed to itself, so that it stays right.
+func currentPassword(t *testing.T, srv *httptest.Server, _ *store.SQLite) guarded {
+	t.Helper()
+	rec := fromBrowserAt(srv, "203.0.113.200", "", "POST", "/api/v1/auth/setup", `{"username":"admin","password":"parola-123"}`)
+	var sess sessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &sess); rec.Code != http.StatusOK || err != nil || sess.Token == "" {
+		t.Fatalf("setup: status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	return guarded{
+		try: func(source, password string) *httptest.ResponseRecorder {
+			return fromBrowserAt(srv, source, sess.Token, "POST", "/api/v1/auth/password",
+				`{"current_password":"`+password+`","new_password":"parola-123"}`)
+		},
+		password: "parola-123", wrong: http.StatusBadRequest, right: http.StatusNoContent,
+		refused: "password change refused", surfaceName: passwordSurface.name,
+	}
+}
+
+// wantThrottled fails unless rec is the throttle's answer for a lock that
+// lasts left: 429, Retry-After in whole seconds and the very body any lock
+// of that length gets, whichever key it is (enum-safe, #78).
+func wantThrottled(t *testing.T, what string, rec *httptest.ResponseRecorder, left time.Duration) {
+	t.Helper()
+	want := httptest.NewRecorder()
+	tooManyAttempts(want, left)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != want.Header().Get("Retry-After") ||
+		rec.Body.String() != want.Body.String() {
+		t.Errorf("%s: %d, Retry-After %q, body %q; want 429, Retry-After %q, body %q", what, rec.Code,
+			rec.Header().Get("Retry-After"), rec.Body.String(), want.Header().Get("Retry-After"), want.Body.String())
+	}
+}
+
+// One source's wrong guesses at a status page's password, or at the
+// current password asked for to change an account's, lock that source
+// only: a visitor from another source opens the page, the owner from
+// another source changes the password, while the guesser is refused with
+// 429 and Retry-After until the lockout runs out (CWE-307, ADR-0004). Before
+// 0.51 the lock was the page's and the account's, for everyone.
+func TestGuessThrottledPerSource(t *testing.T) {
+	const attacker, owner = "203.0.113.1", "203.0.113.2"
+	for _, tc := range guardedPasswords {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, db, clock, logs := throttledAPI(t, 0, nil)
+			g := tc.make(t, srv, db)
+			for i := range 3 {
+				if rec := g.try(attacker, "yanlis-parola"); rec.Code != g.wrong {
+					t.Fatalf("attacker guess %d: status = %d, want %d", i+1, rec.Code, g.wrong)
+				}
+			}
+			wantThrottled(t, "the attacker's fourth guess", g.try(attacker, "yanlis-parola"), guessLockout)
+			wantThrottled(t, "the attacker with the right password", g.try(attacker, g.password), guessLockout)
+			if rec := g.try(owner, g.password); rec.Code != g.right {
+				t.Errorf("the right password from another source: status = %d, want %d (one source locks itself only)", rec.Code, g.right)
+			}
+			// Another source's success does not lift the guesser's lock.
+			clock.advance(5 * time.Minute)
+			wantThrottled(t, "the attacker five minutes on", g.try(attacker, g.password), guessLockout-5*time.Minute)
+			clock.advance(guessLockout - 5*time.Minute)
+			if rec := g.try(attacker, g.password); rec.Code != g.right {
+				t.Errorf("the attacker's source once the lockout ran out: status = %d, want %d", rec.Code, g.right)
+			}
+			got := logs.String()
+			if n := strings.Count(got, `msg="`+g.refused+`"`); n != 3 {
+				t.Errorf("%d %q lines, want 3: %q", n, g.refused, got)
+			}
+			if n := strings.Count(got, "source="+attacker); n != 3 {
+				t.Errorf("%d refusals name the keyed source %s, want 3: %q", n, attacker, got)
+			}
+			if strings.Contains(got, "source=10.128.2.15") || strings.Contains(got, "level=WARN") {
+				t.Errorf("keyed on the UI pod, or warned, with the hops right: %q", got)
+			}
+		})
+	}
+}
+
+// The loose ceiling of the sign-in (UPTIME_LOGIN_ACCOUNT_MAX_FAILURES)
+// holds a page's and an account's failures from all sources, so a guess
+// spread over many sources cannot run forever: past it the page or the
+// account is locked for everyone, the right password from a fresh source
+// included, with the same 429 as a source's lock, until the lockout runs
+// out (the cost ADR-0004 accepts).
+func TestGuessCeilingAcrossSources(t *testing.T) {
+	const ceiling = 5
+	for _, tc := range guardedPasswords {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, db, clock, _ := throttledAPI(t, ceiling, nil)
+			g := tc.make(t, srv, db)
+			for i := range ceiling {
+				if rec := g.try(fmt.Sprintf("198.51.100.%d", i+1), "yanlis-parola"); rec.Code != g.wrong {
+					t.Fatalf("guess %d from a source of its own: status = %d, want %d", i+1, rec.Code, g.wrong)
+				}
+			}
+			wantThrottled(t, "a guess from a fresh source past the ceiling", g.try("198.51.100.99", "yanlis-parola"), guessLockout)
+			wantThrottled(t, "the right password from a fresh source past the ceiling", g.try("203.0.113.2", g.password), guessLockout)
+			clock.advance(guessLockout)
+			if rec := g.try("203.0.113.2", g.password); rec.Code != g.right {
+				t.Errorf("the right password once the lockout ran out: status = %d, want %d", rec.Code, g.right)
+			}
+		})
+	}
+	// Without the ceiling (0) the same spread guess is held per source only.
+	for _, tc := range guardedPasswords {
+		t.Run(tc.name+" without a ceiling", func(t *testing.T) {
+			srv, db, _, _ := throttledAPI(t, 0, nil)
+			g := tc.make(t, srv, db)
+			for i := range 2 * ceiling {
+				if rec := g.try(fmt.Sprintf("198.51.100.%d", i+1), "yanlis-parola"); rec.Code != g.wrong {
+					t.Fatalf("guess %d from a source of its own: status = %d, want %d", i+1, rec.Code, g.wrong)
+				}
+			}
+			if rec := g.try("203.0.113.2", g.password); rec.Code != g.right {
+				t.Errorf("the right password: status = %d, want %d", rec.Code, g.right)
+			}
+		})
+	}
+}
+
+// A right password forgets the failures before it under the ceiling as a
+// sign-in's does: the visitors of a page share its password, and their typos
+// while many open it at once, in an incident, must not add up to the
+// ceiling and lock the page for all of them.
+func TestGuessRightPasswordClearsTheCeiling(t *testing.T) {
+	const ceiling = 5
+	for _, tc := range guardedPasswords {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, db, _, _ := throttledAPI(t, ceiling, nil)
+			g := tc.make(t, srv, db)
+			visitor := 0
+			for round := range 4 {
+				for range ceiling - 1 {
+					visitor++
+					if rec := g.try(fmt.Sprintf("198.51.100.%d", visitor), "yanlis-parola"); rec.Code != g.wrong {
+						t.Fatalf("round %d, typo of visitor %d: status = %d, want %d", round+1, visitor, rec.Code, g.wrong)
+					}
+				}
+				visitor++
+				if rec := g.try(fmt.Sprintf("198.51.100.%d", visitor), g.password); rec.Code != g.right {
+					t.Fatalf("round %d, the right password: status = %d, want %d", round+1, rec.Code, g.right)
+				}
+			}
+		})
+	}
+}
+
+// A request for a page that is not there, or not published, is no guess:
+// it is taken back from its source and from the ceiling, so it neither
+// locks anyone nor counts toward the page's ceiling.
+func TestStatusPageUnknownIsNoGuess(t *testing.T) {
+	srv, db, _, _ := throttledAPI(t, 5, nil)
+	g := statusPagePassword(t, srv, db)
+	for i := range 10 {
+		if rec := fromBrowserAt(srv, "203.0.113.1", "", "POST", "/api/v1/status-pages/by-slug/nope/unlock",
+			`{"password":"x"}`); rec.Code != http.StatusNotFound {
+			t.Fatalf("unknown page, request %d: status = %d, want 404", i+1, rec.Code)
+		}
+	}
+	if rec := g.try("203.0.113.1", g.password); rec.Code != g.right {
+		t.Errorf("a real page from the same source: status = %d, want %d", rec.Code, g.right)
+	}
+}
+
+// With the hops wrong the throttle cannot tell sources apart, and both
+// surfaces fall back to one shared lock, as the sign-in does: every browser
+// keys on the UI pod and one source's guesses lock the page, or the
+// account's password change, for everyone. The backend warns, naming the
+// surface and the lock it fell back to.
+func TestGuessSharedLockWhenHopsWrong(t *testing.T) {
+	const attacker, owner = "203.0.113.1", "203.0.113.2"
+	for _, wrong := range []struct {
+		name      string
+		customize func(*Options)
+		warn      string
+	}{
+		{"hops=0 behind a proxy", func(o *Options) { o.TrustProxyHops = 0 }, "but UPTIME_TRUST_PROXY_HOPS=0"},
+		{"hops above the chain", func(o *Options) { o.TrustProxyHops = 2 }, "fewer entries than UPTIME_TRUST_PROXY_HOPS=2"},
+		{"no frontend token", func(o *Options) { o.FrontendToken = "" }, "UPTIME_FRONTEND_TOKEN is not set"},
+	} {
+		for _, tc := range guardedPasswords {
+			t.Run(wrong.name+", "+tc.name, func(t *testing.T) {
+				srv, db, _, logs := throttledAPI(t, 0, wrong.customize)
+				g := tc.make(t, srv, db)
+				for i := range 3 {
+					if rec := g.try(attacker, "yanlis-parola"); rec.Code != g.wrong {
+						t.Fatalf("attacker guess %d: status = %d, want %d", i+1, rec.Code, g.wrong)
+					}
+				}
+				wantThrottled(t, "the right password from another source", g.try(owner, g.password), guessLockout)
+				got := logs.String()
+				if !strings.Contains(got, "level=WARN") || !strings.Contains(got, wrong.warn) ||
+					!strings.Contains(got, "the "+g.surfaceName+" throttle") || !strings.Contains(got, `\"10.128.2.15\"`) {
+					t.Errorf("want a WARN naming %q, the %s throttle and the UI pod, got %q", wrong.warn, g.surfaceName, got)
+				}
+				if strings.Contains(got, "sign-in") {
+					t.Errorf("the WARN names the sign-in for a %s: %q", g.surfaceName, got)
+				}
+				if n := strings.Count(got, "source=10.128.2.15"); n != 3 {
+					t.Errorf("%d refusals name the UI pod they keyed on, want 3: %q", n, got)
+				}
+			})
+		}
+	}
+}
+
+// The three surfaces share the warnings' once-a-minute limit: the visitors of
+// a status page add no lines to those the sign-ins leave. Each line names
+// the surface of the request that met the misconfiguration.
+func TestGuessWarningsShareTheMinute(t *testing.T) {
+	srv, db, clock, logs := throttledAPI(t, 0, func(o *Options) { o.TrustProxyHops = 0 })
+	page := statusPagePassword(t, srv, db)
+	change := currentPassword(t, srv, db)
+	page.try("203.0.113.1", "yanlis-parola")
+	fromBrowserAt(srv, "203.0.113.1", "", "POST", "/api/v1/auth/login", `{"username":"admin","password":"yanlis-parola"}`)
+	change.try("203.0.113.1", "yanlis-parola")
+	got := logs.String()
+	if n := strings.Count(got, "level=WARN"); n != 1 || !strings.Contains(got, "seen on a status-page unlock") ||
+		!strings.Contains(got, "one shared per-page lock") {
+		t.Errorf("want one WARN within the minute, naming the status-page unlock, got %d: %q", n, got)
+	}
+	clock.advance(61 * time.Second)
+	change.try("203.0.113.1", "yanlis-parola")
+	got = logs.String()
+	if n := strings.Count(got, "level=WARN"); n != 2 || !strings.Contains(got, "seen on a password change") ||
+		!strings.Contains(got, "one shared per-account lock") {
+		t.Errorf("want a second WARN a minute on, naming the password change, got %d: %q", n, got)
 	}
 }
