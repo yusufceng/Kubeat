@@ -354,6 +354,17 @@ olmadan çalıştığı için imaja `tar` ekleme gerekçesi zayıfladı; `tar` k
 backlog'da kalır. Tetikleyici: parçalı bloğun bir platformda (ör. GKE)
 yetersiz kalması.
 
+Güncelleme (2026-11-07, sprint 8 kapanışı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+parçalı blok 0.50'de müşteri runbook'unda (S84, [#120](https://github.com/yusufceng/Kubeat/issues/120)) ve sandbox'ta `oc` ile
+ilk kez gerçek bir platformda koştu (5,7 MB, 52 sn, "yedek doğrulandı"); `tar`
+gerekmedi. Müşteri A (sprint 8 yeni bulgusu 2, önemli) bu maddenin OADP/Velero
+kısmını yeniden istiyor: veri PVC'si yalnız CSI snapshot ile (A'ya göre canlı
+SQLite + WAL dosya sistemi yedeğiyle tutarlı alınmaz), yedek PVC'si fs-backup ile,
+anahtar Vault'ta ayrı tutulur ve `secretKey.existingSecret` ile verilir, Restore
+sırası Secret → PVC → Deployment, OpenShift'te bir prova kaydı. README'deki
+"gerekmez" cümlesi CSI snapshot koşuluna daraltılmalı. Sprint 9 belge turu adayı,
+S41 provasıyla birlikte.
+
 ## Yedek kopyalarını S3 uyumlu depoya yüklemek
 
 2026-10-27'de ertelendi (S8). `UPTIME_BACKUP_S3_*` ile her başarılı kopyanın
@@ -1676,6 +1687,12 @@ yüzeyinde iki L var (S78, S79); ikisi merge edildikten sonra sprint 9'da. Açı
 soru varsayılanı değişti: girişteki gibi gevşek bir slug/hesap tavanı olur
 (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` yeniden kullanılır, yeni ayar yok).
 
+Güncelleme (2026-11-07, sprint 8 kapanışı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+0.50'de arayüz başlığı parola değiştirme ve durum sayfası kilidinde de taşıyor
+(S78, [#118](https://github.com/yusufceng/Kubeat/issues/118)), backend `pw:`/`sp:` sayaçlarında onu henüz kullanmıyor. Sprint 8
+provası durum sayfası kilidinin gerçek yolda sayfaya göre kaldığını gösterdi:
+öteki kaynaktan girilen doğru parola da kilitli kaldı. Sprint 9 kuyruğunda.
+
 ## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
 
 2026-11-04'te ertelendi (sprint 5 planı; [sprints/2026-11-04-sprint-05.md](sprints/2026-11-04-sprint-05.md)).
@@ -1952,6 +1969,15 @@ README'deki değeri önerir. Tetikleyici: frontend NetworkPolicy'sinin (S79,
 [#119](https://github.com/yusufceng/Kubeat/issues/119)) sahada kullanılması ya da
 yanlış hop ayarının tekrarlanan raporu.
 
+Güncelleme (2026-11-07, S78 ve S79 teslimatı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+varsayılan 0.50'de de `0` kaldı. Developer notu: 0.50'de fazla değer artık güvenli
+tarafa düşmüyor (başlığa ekleyen bir vekilin arkasında istemci kaynağını seçebilir;
+sprint 8 provasında hops=2 ile gerçek yolda görüldü). Bu yüzden `1` varsayılanı,
+önünde başlığı yazmayan bir katman olan kurulumda yalnız eksik (güvenli) tarafta
+kalır; bu bilgi kararı kolaylaştırır. Sınır: router istemcinin başlığına dokunmuyorsa
+(`forwardedHeaderPolicy` IfNone ya da Never; sprint 8 Müşteri A bulgusu 1) `1` de
+fazladır. Tetikleyici değişmedi.
+
 ## Arayüzün kendi gördüğü eşi `X-Forwarded-For`'a eklemesi
 
 2026-11-06'da ertelendi (sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
@@ -1964,6 +1990,15 @@ tek yolu bu, ama özel bir sunucu gerektiriyor. Bugünkü önlem S79'un
 NetworkPolicy'si; kapalıyken sınır README "Hesaplar ve giriş" ve ADR-0004'te
 yazılı. Tetikleyici: opt-in frontend NetworkPolicy'sinin bir platformda
 uygulanamaması.
+
+Güncelleme (2026-11-07, S78 ve S79 teslimatı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)):
+developer notuna göre bu ek iki şeyi daha çözer. Arayüz Service'i doğrudan dışarı
+açıkken (bugün doğru değer `0`, tek paylaşılan kilit) kaynak-başına throttle
+çalışır. Fazla hop değerinin atlatılabilir olması da kökten kapanır: son girdiyi
+arayüz yazacağı için değer topolojiden bağımsız sabitlenebilir. Tetikleyiciye ek:
+opt-in politikanın GKE'de varsayılan `from` ile uygulanamadığının (sprint 8
+Müşteri B bulgusu 5) ya da router politikası IfNone/Never olan bir kurulumun
+(Müşteri A bulgusu 1) sahada görülmesi.
 
 ## XFF güveni için cluster dışındaki güvenilir vekillerin CIDR listesi (S79'un isteğe bağlı parçası)
 
@@ -2006,3 +2041,74 @@ satırdır ve log tabanlı uyarıda gürültü yapar. Öneri: değişken açık�
 ölçütü, sessizce etkisiz kalan güvenlik ayarı olmasın diye). Ertelendi, çünkü
 kabul ölçütü bugünkü davranışı istiyor ve gürültü bildiren bir kurulum yok.
 Tetikleyici: log tabanlı uyarıda bu satırdan şikâyet eden bir kurulum.
+
+## İlk kurulum (setup) çağrısında `X-Forwarded-For`'u taşımak
+
+2026-11-07'de ertelendi (S78 [#118](https://github.com/yusufceng/Kubeat/issues/118), PO kararı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
+0.50'de arayüz başlığı giriş, parola değiştirme ve durum sayfası kilidinde taşır;
+ilk kurulum çağrısı taşımaz. Çağrı tek seferlik ve throttle'sız olduğu için kaynak
+adres bugün hiçbir karara girmiyor. Tetikleyici: setup yoluna throttle ya da kaynak
+adresli bir denetim satırı eklenmesi.
+
+## Vekil-hop rehberinin satırlarını arayüz yolunda ölçmek
+
+2026-11-07'de ertelendi (S78 [#118](https://github.com/yusufceng/Kubeat/issues/118); [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
+README "Vekil-hop rehberi" tablosunun altı satırı da 0.50'de "ölçülmedi" yazıyor.
+Sprint 8 provası (sandbox, tarayıcı → Route → arayüz → backend) yalnız "Düz
+OpenShift Route: 1" satırını ölçtü. Port-forward (`1`), WAF'lı Route (`2`) ve GKE
+satırları (`ingress-nginx` `1`, L7 GCLB + `ingress-nginx` `3`, GCE Ingress `2`)
+ölçülmedi. Bir satır ölçülünce README, ADR-0004, `values.yaml` ve
+`docs/yukseltme.md`'de aynı anda "ölçüldü" yazılmalı; düz Route için bu yazım da
+henüz yapılmadı. `ingress-nginx` satırı minikube'un ingress addon'uyla ajan-içi
+ölçülebilir (sprint 8 Müşteri B bulgusu 6). Tetikleyici: sprint 9'un minikube
+`ingress-nginx` provası ya da kullanıcının GKE ya da kurumsal provası.
+
+## Arayüz sırrı değişince pod'ları kendiliğinden yeniden başlatmak (checksum annotation)
+
+2026-11-07'de ertelendi (S79 [#119](https://github.com/yusufceng/Kubeat/issues/119); [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
+`<release>-frontend-token` Secret'ı değişince backend ve arayüz pod'ları
+kendiliğinden yeniden başlamaz. Pod'lardan biri eski sırla kalırsa tarayıcı
+girişleri arayüz pod'una anahtarlanır (tek paylaşılan kilit ve "güvenilmeyen eş"
+WARN'ı). Elle yeniden başlatma README'de belgeli; öteki Secret'larda da checksum
+annotation'ı yok. Yapılırsa bütün Secret'lar için aynı desende yapılır. Tetikleyici:
+sır döndürme isteyen bir kurulum ya da bu pencerenin GitOps'ta gözlenmesi.
+
+## Doğrulamalı yedek bloklarının kalanları (S84 takibi)
+
+2026-11-07'de ertelendi (S84+S74 [#120](https://github.com/yusufceng/Kubeat/issues/120); [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
+0.50'de `docs/yedek-geri-yukleme.md`'deki dışarı alma ve geri yükleme blokları
+parçalı, sha256 ve `SQLite format 3` doğrulamalı; sprint 8'de minikube'da
+(`kubectl`) ve sandbox'ta (`oc`) geçti. Kalanlar:
+
+- **Blokları CI'da sınamak.** Belgedeki blokları olduğu gibi çıkarıp sahte bir
+  `kubectl` ile koşan test. Developer'ın lokal düzeneği (52 senaryo) depoya
+  alınmadı, çünkü PO kararı ayrı betik istemedi. Düzenek #123'ün kuralına uymalı
+  (`KUBECONFIG` tuzağı, `command -v`) ve `KUBECTL`'i sahte betiğin mutlak yoluna
+  ayarlamalı.
+- **Yükleme yönünü parçalı yapmak.** Geri yükleme kopyayı tek akışla yükler; pod
+  tarafındaki sha256 ve başlık denetimi kesik bir yüklemeyi `mv` etmeden reddeder.
+  Tetikleyici: yükleme yönünde kesilmenin gözlenmesi.
+- **Anahtar Secret'ının adını Deployment'tan okumak.** Bugün `SECRET=<ad>`
+  parametresiyle ve belgedeki bir jsonpath komutuyla veriliyor. Blok kendisi okusaydı
+  ek bir `get deploy` çağrısı ve RBAC varsayımı gerekirdi.
+- **İnceleme düşük bulguları (BA).** `SECRET` verilmemiş bir `existingSecret`
+  kurulumunda blok bütün parçaları indirdikten sonra Secret'ı okuyamayıp kopyayı
+  siliyor; güvenli ama büyük veritabanında zaman kaybı, Secret önce denetlenebilir.
+  `kubeat-restore` pod'u yoksa, hazır değilse ya da namespace yanlışsa yalnız
+  `kubectl`'in hatası kalıyor ve belgede söz verilen `GERİ YÜKLENMEDİ` satırı
+  çıkmıyor; `mv` yapılmadığı için güvenli.
+
+Tetikleyici: bloklara dokunan bir sonraki madde. İmaja `tar` (S7) ayrı maddede
+("Yedekleri cluster dışına taşıma belgesi ve backend imajına `tar`").
+
+## ntfy kanal adresindeki host'u yönetici için de ASCII'ye zorlamak
+
+2026-11-07'de ertelendi (S81 [#121](https://github.com/yusufceng/Kubeat/issues/121): incelemenin düşük bulgusu ve developer'ın
+isteğe bağlı önerisi; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)). README "Hedeflerdeki ve kanal adreslerindeki host
+adları ASCII ile yazılır" diyor, ama ntfy kanal ayarları ASCII denetiminden
+geçmiyor: yönetici ya da `*` kapsamlı kullanıcı ASCII olmayan bir host'la 201
+alıyor (2026-10-20'den beri). Güvenlik etkisi yok; kapsamı sınırlı kullanıcı
+0.50'de kapsam denetimiyle reddediliyor. Yöneticiye 400 vermek tek kiracılı
+kurulumda da davranışı değiştirir, bu yüzden kabul ölçütünün dışında kaldı.
+Tetikleyici: kanal ayarlarına dokunan bir madde ya da ASCII olmayan bir ntfy
+host'unun teslimatta sorun çıkardığı bir rapor.
