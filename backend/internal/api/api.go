@@ -187,7 +187,10 @@ type Options struct {
 	// (beginGuess). AccountThrottle, when set, is a second, much looser
 	// ceiling on a name's, a page's or an account's password-change failures
 	// across all sources, so a distributed guess cannot run forever; nil
-	// turns it off. TrustProxyHops is how many X-Forwarded-For entries the
+	// turns it off. SourceThrottle, when set, is a ceiling on one source's
+	// failed sign-ins across all names, keyed on the source alone, so a
+	// single source cannot spray a password over many names; nil (the
+	// default) turns it off. TrustProxyHops is how many X-Forwarded-For entries the
 	// proxies in front of the UI write, or 1 with none, so the source address
 	// can be read from the header the UI passes on; 0 trusts no such header
 	// and uses the peer that connected. FrontendToken is the secret the UI
@@ -197,6 +200,7 @@ type Options struct {
 	SessionTTL        time.Duration
 	Throttle          *auth.Throttle
 	AccountThrottle   *auth.Throttle
+	SourceThrottle    *auth.Throttle
 	TrustProxyHops    int
 	FrontendToken     string
 	PasswordMinLength int

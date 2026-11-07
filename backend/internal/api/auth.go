@@ -487,6 +487,21 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		tooManyAttempts(w, locked)
 		return
 	}
+	// A ceiling on the source's failures at all names, so that one source
+	// cannot try a password at many names (a password spray), each of them,
+	// with LDAP, a bind that counts toward the directory's own lockout. It
+	// comes before the name's ceiling across sources: a source refused here
+	// does not touch the names it sprays, not even for the moment until its
+	// attempt is taken back. It is off (nil) unless the ceiling is set: the
+	// users behind one NAT or forward proxy share a source.
+	if h.opts.SourceThrottle != nil {
+		if _, srcLocked, srcOK := h.opts.SourceThrottle.Begin(source, now); !srcOK {
+			h.opts.Throttle.Undo(key, now)
+			h.opts.SignIns.SignInThrottled(metrics.ThrottleSourceTotal)
+			tooManyAttempts(w, srcLocked)
+			return
+		}
+	}
 	// A loose, very high ceiling on a name's failures across all sources,
 	// so a large distributed guess cannot run forever. A single source is
 	// held well below it by the per-source throttle above, so the owner's
@@ -494,6 +509,9 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	if h.opts.AccountThrottle != nil {
 		if _, acctLocked, acctOK := h.opts.AccountThrottle.Begin(acctKey, now); !acctOK {
 			h.opts.Throttle.Undo(key, now)
+			if h.opts.SourceThrottle != nil {
+				h.opts.SourceThrottle.Undo(source, now)
+			}
 			h.opts.SignIns.SignInThrottled(metrics.ThrottleAccount)
 			tooManyAttempts(w, acctLocked)
 			return
@@ -501,6 +519,9 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	undo := func() {
 		h.opts.Throttle.Undo(key, now)
+		if h.opts.SourceThrottle != nil {
+			h.opts.SourceThrottle.Undo(source, now)
+		}
 		if h.opts.AccountThrottle != nil {
 			h.opts.AccountThrottle.Undo(acctKey, now)
 		}
@@ -598,6 +619,13 @@ func (h *handler) authLogin(w http.ResponseWriter, r *http.Request) {
 	h.opts.Throttle.Reset(key)
 	if h.opts.AccountThrottle != nil {
 		h.opts.AccountThrottle.Reset(acctKey)
+	}
+	// The source's failures at other names stay: one right password in a
+	// spray must not wipe out the misses before it. Only this attempt, which
+	// was no failure, is taken back, so that the right passwords of the many
+	// users behind one NAT do not add up to the ceiling.
+	if h.opts.SourceThrottle != nil {
+		h.opts.SourceThrottle.Undo(source, now)
 	}
 	h.signIn(w, r, user, "login")
 }

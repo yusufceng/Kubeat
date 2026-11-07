@@ -378,6 +378,21 @@ func main() {
 			sweepThrottle(ctx, accountThrottle)
 		}()
 	}
+	// The per-source ceiling: one source's failures across all names, so
+	// that a single source cannot spray a password over many names. Off
+	// unless set; the start says so with LDAP on (reportSourceCeiling). Its
+	// refusal lines carry throttle=source_total, their name the source.
+	var sourceThrottle *auth.Throttle
+	if cfg.LoginSourceMaxFailures > 0 {
+		sourceThrottle = &auth.Throttle{MaxFailures: cfg.LoginSourceMaxFailures, Lockout: cfg.LoginLockout, MaxKeys: cfg.LoginThrottleMaxKeys,
+			Logger: logger.With("throttle", metrics.ThrottleSourceTotal)}
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			sweepThrottle(ctx, sourceThrottle)
+		}()
+	}
+	reportSourceCeiling(cfg, logger)
 
 	if cfg.PrometheusURL != "" {
 		client, err := prom.New(prom.Options{
@@ -431,6 +446,7 @@ func main() {
 			SessionTTL:               cfg.SessionTTL,
 			Throttle:                 throttle,
 			AccountThrottle:          accountThrottle,
+			SourceThrottle:           sourceThrottle,
 			TrustProxyHops:           cfg.TrustProxyHops,
 			FrontendToken:            cfg.FrontendToken,
 			PasswordMinLength:        cfg.PasswordMinLength,
@@ -930,6 +946,45 @@ func statusPageTokenKey(secretKey string, logger *slog.Logger) []byte {
 	}
 	logger.Info("UPTIME_SECRET_KEY is not set: the tokens of password-protected status pages are signed with a key of this run, and a restart asks their visitors for the password again")
 	return key
+}
+
+// reportSourceCeiling says at start what bounds one source's failed
+// sign-ins across names while LDAP is on, where each wrong password at a
+// name in the directory is a bind that counts toward the directory's own
+// lockout. Left unset, the ceiling is off and nothing stops one source from
+// trying a password at many names (a password spray): a published guard
+// must not go silently unused, so that is a WARN. Set to 0, it was turned
+// off on purpose, as behind a shared NAT or PAC proxy, and an INFO says it
+// was heard. A ceiling set says nothing, unless the sources cannot be told
+// apart (no trusted hops, or no UI token to trust them from): every browser
+// then keys on the UI pod, and the ceiling is one lock for all sign-ins,
+// which a few failures from anyone close for everyone; that is a WARN, with
+// LDAP or without. No LDAP and no ceiling says nothing.
+func reportSourceCeiling(cfg config.Config, logger *slog.Logger) {
+	if cfg.LoginSourceMaxFailures > 0 {
+		if cfg.TrustProxyHops <= 0 || cfg.FrontendToken == "" {
+			logger.Warn(fmt.Sprintf("UPTIME_LOGIN_SOURCE_MAX_FAILURES is %d but the sign-in throttle cannot tell sources "+
+				"apart (UPTIME_TRUST_PROXY_HOPS is 0, or UPTIME_FRONTEND_TOKEN is not set): every browser's sign-in keys "+
+				"on the UI pod, so the ceiling is one lock for all sign-ins, and %d failed sign-ins from anyone lock "+
+				"everyone out for UPTIME_LOGIN_LOCKOUT; set the hops and the token, or leave the ceiling at 0 "+
+				`(README, "Hesaplar ve giriş", "Vekil-hop rehberi")`, cfg.LoginSourceMaxFailures, cfg.LoginSourceMaxFailures))
+		}
+		return
+	}
+	if cfg.LDAPURL == "" {
+		return
+	}
+	if !cfg.LoginSourceMaxFailuresSet {
+		logger.Warn("LDAP is on and UPTIME_LOGIN_SOURCE_MAX_FAILURES is not set: nothing bounds one source's failed " +
+			"sign-ins across names, so a single source can try a password at many directory names (a password spray), " +
+			"each a bind that counts toward the directory's own lockout; set it, 20 for an install reachable from the " +
+			"internet, or set it to 0 to keep it off on purpose, as behind a shared NAT or PAC proxy " +
+			`(README, "LDAP", "Dizin hesap kilidi")`)
+		return
+	}
+	logger.Info("UPTIME_LOGIN_SOURCE_MAX_FAILURES is 0: the ceiling on one source's failed sign-ins across names is off, " +
+		"so a single source may try a password at many directory names, a bind each " +
+		`(README, "LDAP", "Dizin hesap kilidi")`)
 }
 
 // sweepThrottle forgets, every lockout period, the sign-in names whose

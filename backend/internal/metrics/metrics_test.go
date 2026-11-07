@@ -198,6 +198,7 @@ func TestSignInMetrics(t *testing.T) {
 		"kubeat_signin_failures_total{reason=directory_unreachable}",
 		"kubeat_signin_throttled_total{kind=source}",
 		"kubeat_signin_throttled_total{kind=account}",
+		"kubeat_signin_throttled_total{kind=source_total}",
 	} {
 		if value, ok := got[key]; !ok || value != 0 {
 			t.Errorf("%s = %v (present: %v), want 0 at the start", key, value, ok)
@@ -212,6 +213,8 @@ func TestSignInMetrics(t *testing.T) {
 	m.SignInThrottled(ThrottleSource)
 	m.SignInThrottled(ThrottleSource)
 	m.SignInThrottled(ThrottleAccount)
+	m.SignInThrottled(ThrottleSourceTotal)
+	m.SignInThrottled(ThrottleSourceTotal)
 
 	got, err = m.Gather()
 	if err != nil {
@@ -223,6 +226,7 @@ func TestSignInMetrics(t *testing.T) {
 		"kubeat_signin_failures_total{reason=directory_unreachable}": 1,
 		"kubeat_signin_throttled_total{kind=source}":                 3,
 		"kubeat_signin_throttled_total{kind=account}":                1,
+		"kubeat_signin_throttled_total{kind=source_total}":           2,
 	}
 	for key, value := range want {
 		if got[key] != value {

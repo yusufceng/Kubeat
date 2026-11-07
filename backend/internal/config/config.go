@@ -73,6 +73,17 @@ type Config struct {
 	// it, so a legitimate owner's own mistakes never reach it. Zero turns
 	// the ceiling off, leaving only the per-source throttle.
 	LoginAccountMaxFailures int // UPTIME_LOGIN_ACCOUNT_MAX_FAILURES
+	// LoginSourceMaxFailures is a ceiling on one source's failed sign-ins
+	// across all names within the lockout period, so that a single source
+	// cannot try a password at many names (a password spray), each of them,
+	// with LDAP, a bind that counts toward the directory's own lockout. Zero
+	// (the default) turns it off: the users behind one NAT or forward proxy
+	// share a source, and a ceiling would lock all of them out at once.
+	// LoginSourceMaxFailuresSet says whether it was given at all, so that
+	// the start can warn of it left unset with LDAP on and only note a 0
+	// given on purpose.
+	LoginSourceMaxFailures    int  // UPTIME_LOGIN_SOURCE_MAX_FAILURES
+	LoginSourceMaxFailuresSet bool // UPTIME_LOGIN_SOURCE_MAX_FAILURES not empty
 	// TrustProxyHops is how many X-Forwarded-For entries the proxies in
 	// front of the UI write, or 1 with none (Next.js writes its own peer
 	// then); the UI passes the header on with the browser's sign-in. The
@@ -680,6 +691,12 @@ func Load() (Config, error) {
 	if cfg.LoginAccountMaxFailures, err = envIntOrZero("UPTIME_LOGIN_ACCOUNT_MAX_FAILURES", 50); err != nil {
 		return Config{}, err
 	}
+	// Off by default, and off at zero; whether it was given decides what
+	// the start says of it with LDAP on (a WARN unset, an INFO at 0).
+	if cfg.LoginSourceMaxFailures, err = envIntOrZero("UPTIME_LOGIN_SOURCE_MAX_FAILURES", 0); err != nil {
+		return Config{}, err
+	}
+	cfg.LoginSourceMaxFailuresSet = os.Getenv("UPTIME_LOGIN_SOURCE_MAX_FAILURES") != ""
 	if cfg.TrustProxyHops, err = envIntOrZero("UPTIME_TRUST_PROXY_HOPS", 0); err != nil {
 		return Config{}, err
 	}

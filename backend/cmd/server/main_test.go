@@ -429,6 +429,57 @@ func TestQueueWarning(t *testing.T) {
 	}
 }
 
+// With LDAP on, the start says what bounds one source's failed sign-ins
+// across names: a WARN while UPTIME_LOGIN_SOURCE_MAX_FAILURES is left unset
+// (a published guard must not go silently unused), an INFO when it is 0 on
+// purpose, and nothing once it is set or without LDAP (S88). A ceiling set
+// while the throttle cannot tell sources apart is one lock for every
+// browser, and is a WARN too, LDAP or not.
+func TestReportSourceCeiling(t *testing.T) {
+	const ldapURL = "ldaps://ldap.example:636"
+	apart := config.Config{LoginSourceMaxFailures: 20, LoginSourceMaxFailuresSet: true, TrustProxyHops: 1, FrontendToken: "ui-token"}
+	withLDAP := apart
+	withLDAP.LDAPURL = ldapURL
+	noHops := withLDAP
+	noHops.TrustProxyHops = 0
+	noToken := apart
+	noToken.FrontendToken = ""
+	for _, tt := range []struct {
+		name  string
+		cfg   config.Config
+		level string // of the one line; empty for none
+		names string // what the line must name besides the setting
+	}{
+		{"no LDAP, unset", config.Config{}, "", ""},
+		{"no LDAP, 0", config.Config{LoginSourceMaxFailuresSet: true}, "", ""},
+		{"LDAP, unset", config.Config{LDAPURL: ldapURL}, "level=WARN", "Dizin hesap kilidi"},
+		{"LDAP, 0", config.Config{LDAPURL: ldapURL, LoginSourceMaxFailuresSet: true}, "level=INFO", "Dizin hesap kilidi"},
+		{"no LDAP, a ceiling", apart, "", ""},
+		{"LDAP, a ceiling", withLDAP, "", ""},
+		{"a ceiling, hops 0", noHops, "level=WARN", "one lock for all sign-ins"},
+		{"a ceiling, no UI token", noToken, "level=WARN", "one lock for all sign-ins"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			reportSourceCeiling(tt.cfg, slog.New(slog.NewTextHandler(&logs, nil)))
+			lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+			if tt.level == "" {
+				if lines[0] != "" {
+					t.Errorf("logged %q, want nothing", lines)
+				}
+				return
+			}
+			if len(lines) != 1 || !strings.Contains(lines[0], tt.level) || !strings.Contains(lines[0], "UPTIME_LOGIN_SOURCE_MAX_FAILURES") ||
+				!strings.Contains(lines[0], tt.names) {
+				t.Errorf("logged %q, want one %s line naming the setting and %q", lines, tt.level, tt.names)
+			}
+			if strings.Contains(lines[0], "ui-token") {
+				t.Errorf("the line names the UI token: %q", lines[0])
+			}
+		})
+	}
+}
+
 // selfHealthFailing is how the log starts the line saying Kubeat stopped
 // doing its job, up to the reason.
 const selfHealthFailing = `level=ERROR msg="self-health failing: checks are not running, or their results are not stored" reason="`
