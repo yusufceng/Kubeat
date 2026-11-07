@@ -108,8 +108,9 @@ backend:
     # count is the X-Forwarded-For entries your proxies in front of the UI
     # write, or 1 with none. Left at 0 every browser looks like the UI pod and
     # the throttle falls back to one shared per-name lock. Values (README,
-    # "Hesaplar ve giriş"; derived, only the plain Route measured, in the
-    # sandbox on 2026-11-07): port-forward to the UI 1; plain OpenShift Route
+    # "Hesaplar ve giriş"; derived, measured only for the plain Route in the
+    # sandbox and for ingress-nginx reached from inside a minikube cluster,
+    # both on 2026-11-07): port-forward to the UI 1; plain OpenShift Route
     # 1 (router forwardedHeaderPolicy Append, the default, or Replace; under
     # IfNone or Never only with route.annotations
     # haproxy.router.openshift.io/set-forwarded-headers: append); Route behind
@@ -281,7 +282,8 @@ frontend:
     # (a controller on the host network needs an ipBlock of the nodes); for
     # GKE's own (GCE) Ingress with NEG and for GKE Gateway the load
     # balancer's ranges, ipBlock 35.191.0.0/16 and 130.211.0.0/22 (README,
-    # "Hesaplar ve giriş", "Arayüzün ağ politikası"). None measured yet. Left
+    # "Hesaplar ve giriş", "Arayüzün ağ politikası"). Only the ingress-nginx
+    # namespace was measured (minikube with Calico, 2026-11-07). Left
     # at this default where the render does not see OpenShift's API, the
     # install notes warn: there it matches nothing.
     from:

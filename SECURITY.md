@@ -15,14 +15,18 @@ Bildirimde şunlar işe yarar:
 - Açığı yeniden üretme adımları.
 - Etkisi: ne okunabiliyor, ne değiştirilebiliyor, kimin yetkisiyle.
 
-Düzeltme yayımlanınca açık, depoda bir GitHub güvenlik duyurusuyla
-(Security Advisory) duyurulur.
+Düzeltme yayımlanınca bildirilen açık, depoda bir GitHub güvenlik
+duyurusuyla (Security Advisory) duyurulur. Kararlı sürüme (1.0) kadar kendi
+incelememizde ya da taramamızda bulduğumuz bir açığın düzeltmesi duyuru
+açılmadan çıkabilir: o zaman [docs/yukseltme.md](docs/yukseltme.md)'deki
+yükseltme notu sürümü "güvenlik sürümü" diye adlandırır ve hangi kurulumların
+yükseltmesi gerektiğini yazar, açığın ayrıntısını yazmaz.
 
 ## Desteklenen sürümler
 
-Güvenlik düzeltmesini yalnızca son minor sürüm alır: en son yayımlanan
-`0.Y` hattının son yaması. Düzeltme o hatta yeni bir yama sürümü olarak
-çıkar ve eski minor'lara geri taşınmaz. Daha eski bir minor'daysanız
+Güvenlik düzeltmesini yalnızca son minor sürüm alır. Düzeltme en son
+yayımlanan `0.Y` hattında bir yama sürümüyle ya da bir sonraki minor sürümle
+çıkar; eski minor'lara geri taşınmaz. Daha eski bir minor'daysanız
 düzeltmeyi almak için son minor'a yükseltin
 ([docs/yukseltme.md](docs/yukseltme.md)'deki yükseltme notları).
 

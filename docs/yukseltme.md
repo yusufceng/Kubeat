@@ -48,14 +48,14 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.50'ye
+### 0.42'den 0.51'e
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
    başarısız kanalları düzeltin ya da kapatın; aynı PagerDuty servisine
    bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
    0.46'dan beri uyarıya döner: 1 dakikadan ya da bir denemenin
-   süresinden kısa bir değer 0.46–0.50'de backend'i durdurmaz, alt
+   süresinden kısa bir değer 0.46–0.51'de backend'i durdurmaz, alt
    sınıra yükseltilir ve her açılışta `WARN` yazılır; değeri yine de
    düzeltin: 0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu
    ayarı tanımaz).
@@ -98,32 +98,38 @@ geri dönüş başladığınız sürüme olur.
    `frontendToken.existingSecret` ile verin; isteğe bağlı
    `frontend.networkPolicy.enabled`'ı ve vekilli kurulumda, vekil cluster
    dışındaysa, isteğe bağlı `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi değerlendirin.
-10. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46–0.50'de değişmedi:
+10. 0.51'in adımları ("0.51'e yükseltme", Yapılacak): kapsamı sınırlı
+    kullanıcınız ya da annotation monitor'leriniz varsa "Her bağlantıda kapsam"
+    ön kontrolünü koşun; kurum ağındaki hedefler için
+    `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'i, vekilli kurulumda
+    `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi değerlendirin; kapsamı sınırlı kullanıcının kurduğu eski monitor'ü yönetici
+    olarak kaydetmeyin.
+11. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46–0.51'de değişmedi:
     yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi Alertmanager
-    yönlendirmesine ekleyin; kuralları kopyalıyorsanız 0.50'ninkileri
+    yönlendirmesine ekleyin; kuralları kopyalıyorsanız 0.51'inkileri
     kopyalayın (0.45'inkilerle aynı).
-11. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
+12. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
     yerine `--reset-then-reuse-values`, Helm 3.14+):
 
     ```sh
-    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 -f values.yaml
+    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 -f values.yaml
     ```
 
-12. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
-    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.50'nin yeniden denemesi,
+13. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
+    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.51'in yeniden denemesi,
     kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
     PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.50'ye
+### 0.41'den 0.51'e
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.50'ye"deki adımlar.
+2. Sonra "0.42'den 0.51'e"deki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
-0.43–0.49'dan gelirken başladığınız sürümden sonraki bölümleri
+0.43–0.50'den gelirken başladığınız sürümden sonraki bölümleri
 eskiden yeniye okuyun. 0.40 ya da öncesinden gelirken de öyle; şemayı
 yükselten 0.38, 0.39 ve 0.40'tan dönüş yalnızca yedekle olur.
 
@@ -186,6 +192,77 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   api status-pages | jq length
   ```
 
+- **Her bağlantıda kapsam** (0.51). Önce kapsamı sınırlı bir editör olup
+  olmadığını bulun: yerel hesaplar, dizin grupları ve LDAP/OIDC varsayılan
+  rolü. İlk iki sayıdan biri sıfırdan büyükse ya da üçüncü komut
+  `..._DEFAULT_ROLE=editor` gösteriyor ve aynı önekin `_DEFAULT_NAMESPACES`
+  satırı yoksa ya da `*` içermiyorsa `LIMITED=true`:
+
+  ```sh
+  api users | jq '[.[] | select(.role == "editor" and ((.namespaces // []) | index("*") | not))] | length'
+  api ldap/groups | jq '[.[] | select(.role == "editor" and ((.namespaces // []) | index("*") | not))] | length'
+  kubectl -n "$NS" get deploy "$REL-backend" -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' \
+    | grep -E '^UPTIME_(LDAP|OIDC)_DEFAULT_(ROLE|NAMESPACES)='
+  LIMITED=false   # ya da true
+  ```
+
+  Sonra süzgeci bir dosyaya yazıp koşun:
+
+  ```sh
+  cat > kapsam-on-kontrol.jq <<'JQ'
+  # Monitors a 0.51 upgrade would hold to their namespace and refuse.
+  # Use: api monitors | jq -r --argjson limited <true|false> -f kapsam-on-kontrol.jq
+  # limited: whether some user may edit monitors in only some namespaces
+  # (step 1). Without one only annotation monitors are held (every install).
+  # Output: verdict, endpoint (hedef|seçenek), id, namespace, name, target.
+  def bare: ascii_downcase | sub("\\.+$"; "") | ltrimstr("[") | rtrimstr("]");
+  def host:
+    if .type == "http" or .type == "websocket" then .target | capture("^[a-zA-Z]+://(?<h>\\[[^]]*\\]|[^/:?#]*)").h
+    elif .type == "dns" or .type == "ping" then .target
+    else .target | sub(":[0-9]+$"; "") end
+    | bare;
+  def resolverhost:
+    if test("^\\[") then capture("^\\[(?<h>[^]]*)\\]").h
+    elif (split(":") | length) == 2 then sub(":[0-9]+$"; "")
+    else . end
+    | bare;
+  def ns: split(".") as $l | [range(1; $l | length) | select($l[.] == "svc" or $l[.] == "pod") | $l[. - 1]] | last;
+  def private: test("^(10|127)\\.|^172\\.(1[6-9]|2[0-9]|3[01])\\.|^192\\.168\\.|^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.|^169\\.254\\.|^(f[cd]|fe80:)|^::1$");
+  # A host's verdict for monitor $m: refused by its spelling (kesin), judged
+  # where it resolves (çözüme bağlı; not a host taken from a cluster object),
+  # or nothing.
+  def verdict($m; $resolves):
+    if test("^[0-9.]+$|:") then (if private then "kesin" else empty end)
+    elif (contains(".") | not) then "kesin"
+    elif test("\\.(svc|cluster\\.local)$") then (if ns == $m.namespace then empty else "kesin" end)
+    elif $resolves then "çözüme bağlı"
+    else empty end;
+  .[] | select(.namespace != "" and .type != "push" and .type != "workload" and ($limited or .managed)) | . as $m
+  | ((host | verdict($m; $m.source == "") | "\(.)\thedef"),
+     (if .type == "dns" and ((.dns.resolver // "") != "") then .dns.resolver | resolverhost | verdict($m; true) | "\(.)\tseçenek" else empty end))
+  | "\(.)\t\($m.id)\t\($m.namespace)\t\($m.name)\t\($m.target)"
+  JQ
+  api monitors | jq -r --argjson limited "$LIMITED" -f kapsam-on-kontrol.jq
+  ```
+
+  Satır: karar, uç nokta (`hedef` ya da host adı taşıyan bir `seçenek`), id,
+  namespace, ad, hedef. `kesin` adından reddedilendir (başka namespace'in
+  Service adı, kısa ad, çıplak özel adres). `çözüme bağlı` dış görünen bir
+  addır: yükseltmeden sonra backend'in çözücüsünde cluster içine ya da
+  `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` dışındaki özel bir adrese çözülürse
+  reddedilir; vekile giden istekte backend'de çözülemezse de reddedilir
+  (NXDOMAIN'i yalnız `UPTIME_TARGET_SCOPE_TRUST_PROXY` vekile bırakır). Süzgeç
+  bunu bilemez ve elle kurulan monitor'lerin her dış adını listeler. Kurum
+  aralığındaki bir adres `kesin` görünür, `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'teyse
+  reddedilmez. `LIMITED=false` iken yalnız annotation monitor'lerine bakar.
+  Süzgeç yalnız hedefe ve host adı taşıyan seçeneğe bakar; kontrolün çalışırken
+  ulaştığı öteki yerler önceden görülemez. Yükseltmeden sonra kesin liste:
+
+  ```sh
+  api monitors | jq -r '.[] | select(.last_result.diagnostics.explanation.code == "blocked_by_scope")
+    | "\(.id)\t\(.namespace)\t\(.name)\t\(.target)"'
+  ```
+
 - **Kapsam dışı iç hedefler** (0.47, 0.48'de genişledi). Kapsamı sınırlı
   kullanıcılar ve cluster içi görünen hedefli monitor'ler; 0.47'de bu
   kullanıcılar kapsamları dışındaki iç hedefleri artık yeniden oluşturamaz
@@ -230,6 +307,169 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 0.51'e yükseltme
+
+0.51 bir güvenlik sürümüdür: namespace'le sınırlı kullanıcısı olan kurulumlar
+yükseltmeli. Kapsamı sınırlı bir kullanıcının kurduğu monitor'ün kontrolü
+artık açtığı her bağlantıda o kullanıcının hedef kapsamına tabidir; 0.50'ye
+kadar kapsam yalnız hedef belirlenirken denetleniyordu (README "Hedef
+politikası" → "Her bağlantıda"). Annotation'la kurulan monitor'ler her
+kurulumda nesnelerinin namespace'ine bağlanır. Ayrıca kapsam denetimine kurum
+ağı aralıkları için opt-in bir ayar, durum sayfası kilidi ile parola
+değiştirmeye kaynak adrese göre sınır ve platforma göre hop değerleri gelir.
+Şema değişmez (26), migration yok; chart kurulumunda yeni zorunlu ayar yok.
+Kontrol anındaki kapsam, kapsam kaydı ve kurum aralıkları minikube'da iki
+namespace ve kapsamı sınırlı bir editörle, monitor'ler arayüz formundan
+kurularak sınandı (2026-11-07); kaydı olmayan monitor'lerin yükseltme yolu
+`go test` ile sınandı. `ingress-nginx`'in hop değeri `1` ve arayüzün
+ağ politikası Calico'lu minikube'da ölçüldü; GKE satırları ölçülmedi. Durum
+sayfası kilidinin iki kaynaklı provası sürümden sonra Route'tadır.
+
+### Yapılacak
+
+- **Yükseltmeden önce ön kontrolü koşun** (kapsamı sınırlı kullanıcınız ya da
+  annotation monitor'leriniz varsa; aşağıda "Ön kontrolleri betiklemek" → "Her
+  bağlantıda kapsam"). Süzgeç
+  yükseltmeden sonra kapsamın reddedeceği monitor'leri listeler; kapsamı
+  sınırlı kullanıcı yoksa yalnız annotation monitor'lerine bakar. Kesin liste
+  yükseltmeden sonra `blocked_by_scope` süzgecindedir.
+- **Kurum ağındaki hedefler için `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`.**
+  Kurum ağındaki özel bir adrese bağlanan kontroller 0.51'de `blocked_by_scope`
+  ile DOWN olur: kapsamı sınırlı kullanıcıların monitor'lerinde, kapsamı sınırlı
+  kullanıcısı olan kurulumda 0.51'den önce kurulmuş her monitor'de (yöneticinin
+  kurduğu dahil, yönetici kaydedene kadar; aşağıda "Kaydı olmayan monitor'ler")
+  ve her kurulumda annotation monitor'lerinin kendi host'u dışındaki
+  bağlantılarında. Kurumun cluster dışındaki aralıklarını virgülle verin (ör.
+  `10.50.0.0/16`): bu aralıklara çözülen ad ya da çıplak adres kapsamı sınırlı
+  kullanıcı için cluster dışı sayılır. Pod, Service ve node (makine) ağı ile
+  API VIP'i listeye girmez; router VIP'i yalnız bilerek girer (node ağındaysa
+  `/32` ile) ve o VIP'teki her Route'u, başka ekiplerinkiler de, açar.
+  Geçersiz bir aralık (IPv6 biçiminde yazılmış IPv4 aralığı dahil) ya da API
+  sunucusunun veya backend pod'unun adresini içeren bir aralık backend'i
+  başlatmaz; log nedenini yazar (README "Hedef politikası" → "Kurum ağı").
+  İlk açılışın geçmesi güvence değildir: pod ağının bir parçasını içeren bir
+  aralık, pod başka bir node'a taşınınca backend'i başlatmaz. Varsayılan boştur ve 0.50'nin oluşturma anındaki davranışı değişmez.
+- **Vekilli kurulum.** Backend'in çözücüsü genel adları çözemiyorsa (hava
+  boşluklu, vekilli kurulum), vekile giden ve backend'in çözemediği bir dış
+  host'a ulaşan kontrol DOWN olur. Bu, annotation monitor'lerinde kendi host'u
+  dışındaki host'ta (ör. bir kimlik sağlayıcının giriş sayfası), kapsamı
+  sınırlı kullanıcısı olan kurulumda da 0.51'den önce kurulmuş monitor'lerin
+  (yöneticininki dahil) hedefinde olur. Vekil cluster dışındaysa çare
+  `UPTIME_TARGET_SCOPE_TRUST_PROXY=true`'dur (yalnız NXDOMAIN'i vekile bırakır;
+  SERVFAIL ve zaman aşımı yine red sayılır). Yöneticinin kurduğu monitor'ü bir
+  kez kaydetmek de onu düzeltir (aşağıda). Öteki durumda monitor'ü yönetici
+  olarak yeniden kurun.
+- **Kaydı olmayan monitor'ler.** Monitor'ler kapsam kaydını 0.51'de alır.
+  Açılışta kapsamı sınırlı editör yoksa annotation monitor'leri dışında 0.51'den
+  önceki her monitor her namespace'in kaydını alır (log: `monitors set up
+  before the target scope was recorded keep reaching every namespace`) ve
+  değişen bir şey olmaz. Varsa her biri kendi namespace'inin kapsamına bağlanır
+  ve sayıları her açılışta bir `WARN` satırına yazılır (`monitors set up before
+  the target scope was recorded are held to their own namespace until an
+  administrator saves them`): bir yöneticinin bir namespace'e koyup başka bir
+  namespace'e, çıplak bir adrese, kurum ağına (aralık tanımlı değilse) ya da
+  vekilli kurulumda yalnız vekilin çözdüğü bir dış ada bağlanan monitor'ü de
+  DOWN olur. Yönetici onu bir kez
+  kaydedince (formu değiştirmeden kaydetmek ya da hedefi aynı değerle `PATCH`
+  etmek) kaydı yazılır ve düzelir:
+  `api "monitors/$ID" -X PATCH -H 'Content-Type: application/json' -d "$(api "monitors/$ID" | jq -c '{target}')"`.
+  **Kapsamı sınırlı bir kullanıcının kurduğu eski monitor'ü yönetici olarak
+  kaydetmeyin:** kayıt yokken yazanın kim olduğu bilinmez ve yöneticinin
+  kaydı, formdan da, ona her namespace'in kaydını yazar; kayıtsız kaldıkça
+  namespace'ine bağlıdır.
+- **Yedeği doğrulamalı blokla alın** (yukarıda "Yükseltmeden önce yedek").
+  "yedek doğrulandı" demiyorsa yükseltmeyin.
+
+### Davranış değişikliği
+
+- **Her bağlantıda kapsam
+  ([#131](https://github.com/yusufceng/Kubeat/issues/131)).** Kapsamı sınırlı
+  bir kullanıcının kurduğu monitor'ün kontrolü yaptığı her bağlantıda o
+  kullanıcının kapsamına tabidir; kural oluşturmadakiyle aynıdır (kurum
+  aralıkları ve vekilli kurulum ayarı dahil). Reddedilen bağlantı monitor'ü
+  DOWN yapar: açıklama `blocked_by_scope`, hata ve bildirim iki dilde tek
+  genel bir metindir ve adres yazmaz; ters monitor'de beklenen başarısızlık
+  sayılmaz. Her red `kubeat_target_scope_denied_total{reason="connection"}`'da
+  sayılır (seri 0'dan başlar); `checker` kullanıcılı denetim satırı monitor
+  başına bir kez yazılır (duraklatıp açınca, ayarlar değişince ya da backend
+  yeniden başlayınca bir satır daha). Yöneticinin, API token'ının ve kapsamı
+  `*` olan kullanıcının monitor'leri etkilenmez; istisna, kapsamı sınırlı
+  kullanıcısı olan kurulumda 0.51'den önce kurulmuş ve yöneticinin henüz
+  kaydetmediği monitor'lerdir (yukarıda "Kaydı olmayan monitor'ler").
+  Kontrolün bağlandığı uç noktalar oluşturma ve değiştirmede de denetlenir:
+  kapsamı sınırlı kullanıcı, hedefi kapsamının dışındaki bir monitor'ün
+  seçeneklerini değiştiremez (403); onu duraklatabilir. CoreDNS kesintisinde bu kontrollerin bir kısmı
+  DOWN olur ve bildirim bunu kapsam reddi diye söyler (S82).
+- **Kapsam kaydı.** Monitor'ün ayarlarında kontrolün bağlandığı yeri en son
+  adlandıran kullanıcının namespace'leri tutulur. Kayıt daha geniş bir
+  kapsama yalnız hedef ya da host adı taşıyan bir seçenek değişince geçer:
+  yöneticinin bir monitor'ü ad, etiket, aralık ya da kontrolün başka bir
+  seçeneğiyle kaydetmesi, formdan da, kaydı genişletmez; istisna yukarıdaki
+  kaydı olmayan monitor'dür. Kaydın namespace'lerinin hepsini tutmayan biri
+  kontrolün herhangi bir seçeneğini değiştirirse kayıt ortak namespace'lere
+  daralır; formun saklanandan farklı yazdığı bir seçenek de (ör. API'yle
+  kurulmuş bir monitor'de) buna girer. Daralmış bir monitor'ü sahibi de
+  yönetici de hedefi ya da host adı taşıyan bir seçeneği farklı bir değere
+  çevirerek ya da kopyalayarak geri alır.
+- **Annotation monitor'leri her kurulumda.** Kapsamı sınırlı kullanıcısı
+  olmayan kurulumda da annotation'la kurulan monitor nesnesinin namespace'ine
+  bağlanır: hedefini nesneyi düzenleyen belirler ve Kubeat onun kim olduğunu
+  bilmez. Kendi host'unda kalan annotation monitor'ü değişmez. Kontrolü
+  kendi host'undan başka bir namespace'e ya da cluster içine, kurum aralığı
+  tanımlı değilse özel adresli bir kurum host'una, vekilli kurulumda da
+  backend'in çözemediği başka bir dış host'a ulaşan annotation monitor'ü
+  `blocked_by_scope` ile DOWN olur (çareler yukarıda). Açılışta log: 
+  `annotation monitors set up before the target scope was recorded are held
+  to their object's namespace`.
+- **Durum sayfası kilidi ve parola değiştirme kaynak adrese göre
+  ([#134](https://github.com/yusufceng/Kubeat/issues/134)).** Bir kaynağın
+  `UPTIME_LOGIN_MAX_FAILURES` yanlış denemesi yalnız o kaynağı kilitler; sayfa
+  ve hesap başına gevşek tavan `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`'tır ve doğru
+  parola onu sıfırlar. Hop değeri `0` ya da gerekenden küçükse (ör. WAF'lı
+  Route'ta `1`) veya `UPTIME_FRONTEND_TOKEN` yoksa bu iki yüzey de giriş gibi tek paylaşılan kilide geriler; girişin hop
+  `WARN`'ları bu yüzeylerde de düşer ve yüzeyi adlandırır (eksik değer `WARN`
+  vermez; fazla değerde başlığını uzatan istemci kaynağını seçebilir). Kilit
+  yanıtı aynıdır (429 + `Retry-After`). Ret satırları (`status page unlock
+  refused`, `password change refused`) `source` alanını taşır; 429'lar yalnız
+  throttle'ın dakikalık `sign-in attempts refused` `WARN`'ında görünür. Yeni
+  ayar yok.
+
+Ayrıca (davranış değiştirmez ya da opt-in):
+
+- **Kurum ağı aralıkları ([#132](https://github.com/yusufceng/Kubeat/issues/132)).**
+  Yeni opt-in `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` (yukarıda "Yapılacak").
+  Hedef politikası ve yük korumaları bu ayarı okumaz.
+- **Hop değeri komutlarda ve kurulum notunda
+  ([#133](https://github.com/yusufceng/Kubeat/issues/133)).** Hızlı başlangıç,
+  GKE ve OpenShift komutları ile banka pilot reçetesi hop değerini taşır (düz
+  Route ve `ingress-nginx` `1`; GCE Ingress ve GKE Gateway `2`); pilot vekilli
+  kapsam ayarını kapalı verir. Kurulum notu Ingress'te sınıfı
+  (`ingress.className` ya da `kubernetes.io/ingress.class`) biliniyorsa tek
+  değer önerir; Route'ta, router politikası Route annotation'ıyla
+  sabitlenmedikçe, `IfNone`/`Never` notunu hep yazar; arayüz politikası
+  açıkken doğrulama satırı, iki politika açıkken push hatırlatması, varsayılan
+  `from` OpenShift dışında kalırsa render'ı durdurmayan bir `WARNING` verir.
+  Chart'ın hop varsayılanı `0` kaldı.
+
+### Geri dönüş
+
+Şema aynı (26), `helm rollback` ile 0.50.0'a. 0.50 kapsam kaydını tanımaz ve
+0.50'de kaydedilen (duraklatılan dahil) bir monitor'ün kaydını düşürür; 0.51'e yeniden geçişte o
+monitor kaydı olmayan monitor gibi değerlendirilir (yukarıda). Dönüşte her
+bağlantıdaki kapsam, annotation monitor'lerinin namespace'e bağlanması,
+durum sayfası kilidi ile parola değiştirmenin kaynak sınırı kalkar;
+`UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` 0.50'de tanınmaz ve yok sayılır (kurum
+hedeflerinin oluşturması yine reddedilir, var olanlar çalışır). Kurum
+aralığını ayarlayıp backend'i başlatamazsanız ayarı boşaltmak da geri
+dönüştür.
+
+### Alarm kuralları: değişmedi
+
+Chart'ın PrometheusRule'u 0.50'ye göre değişmedi; kuralları kopyaladıysanız
+yeniden kopyalamanız gerekmez. `blocked_by_scope` ile DOWN olan monitor
+kendi kuralınızla (ör. `kubeat_target_scope_denied_total{reason="connection"}`
+artışı) izlenebilir; chart buna hazır kural getirmez.
 
 ## 0.50'ye yükseltme
 
