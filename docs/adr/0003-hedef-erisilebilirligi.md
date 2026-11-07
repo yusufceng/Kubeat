@@ -38,7 +38,8 @@ sınırlayacağımızdır.
 **(a) ve (b) önce (0.46 turu, #80/#81); (c) ve (d) sprint 5'te (#84/#85);
 (c)'nin kalan boşluğu çözüm anında denetimle sprint 6'da (0.48, #95); çözüm
 hatasında güvenli taraf sprint 7'de (0.49, #107), vekilli topolojideki
-daraltması sprint 8'de (0.50, #121).**
+daraltması sprint 8'de (0.50, #121); kurum aralıkları ve kontrolün her
+bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
 
 - **(a)** `UPTIME_TARGET_DENY_CIDRS`'in rolü belgelendi: bir monitor ya da
   kanal webhook'u politikanın izin verdiği her adrese ulaşır; hassas ya da
@@ -56,10 +57,11 @@ daraltması sprint 8'de (0.50, #121).**
   namespace'indeki kısa ad gibi namespace'i adından okunamayan cluster içi bir
   adres, sınırlı bir kullanıcı için reddedilir; cluster dışı hedefler eskisi
   gibi yalnızca hedef politikasına tabidir. Meşru cross-namespace izleme
-  (kapsamı o namespace'i içeren kullanıcı için) bozulmaz; kısıt hedef oluşturma
-  ve değiştirmede uygulanır, var olan monitor'ler yeniden denetlenmez. Monitor
-  API'si ile kanal webhook'u yolunu kapsar (`backend/internal/api`,
-  `backend/internal/netguard`).
+  (kapsamı o namespace'i içeren kullanıcı için) bozulmaz. Kısıt hedef
+  oluşturma ve değiştirmede uygulanır; monitor'de 0.51'den beri kontrolün
+  yaptığı her bağlantıda da (aşağıda "Her bağlantıda kapsam"), kanalda yalnız
+  oluşturma ve değiştirmede. Monitor API'si ile kanal webhook'u yolunu kapsar
+  (`backend/internal/api`, `backend/internal/netguard`).
 
   **Çözüm anında (dial-time) denetim (0.48, #95).** (c) hedefi 0.47'de yalnız
   adından (`netguard.InCluster`) sınıflıyordu; bir cluster son ekiyle bitmeyen
@@ -213,6 +215,106 @@ daraltması sprint 8'de (0.50, #121).**
   Listedeki her adrese kapsamı sınırlı kullanıcı bir namespace'e bağlanmadan,
   Kubeat'in pod'undan ulaşır; ayarın sınırı operatörün listesidir.
 
+  **Her bağlantıda kapsam (0.51, #131).** 0.50'ye kadar kapsam yalnız hedef
+  belirlenirken denetleniyordu: monitor kaydı onu kuranın kapsamını taşımıyor,
+  checker da kapsama bakmıyordu. Kontrol hedefin kendisinden başka
+  bağlantılar da açabildiği için, kayıt anında kapsamda görünen bir monitor
+  kontrol sırasında kapsamın dışına ulaşabiliyordu (yolların ayrıntısı
+  güvenlik gereği burada yazılmaz). PO kararıyla:
+
+  - **Kural.** Kapsamı sınırlı bir kullanıcının kurduğu monitor'ün kontrolü,
+    yaptığı her bağlantıda o kullanıcının kapsamına tabidir. Her bağlantı
+    oluşturmadaki kuralla okunur; kural tek yerdedir (`netguard.ScopeRules`)
+    ve API de onu sorar: adından cluster içi olan host yalnız kapsamdaki
+    namespace'te, çıplak cluster adresi ve kısa ad hiç, adı dış görünen host
+    yalnız cluster dışına düşüyorsa kabul edilir; kurum aralıkları (S80) ve
+    vekil kararı (S81) aynen geçerlidir. Doğrudan bağlantıda karar bağlanılan
+    adrese verilir (`netguard.Dialer.In`), yanıtı kayıttan sonra değişen bir ad
+    da (DNS rebinding) böylece yakalanır. Vekile verilen istekte backend
+    bağlanmadığı için vekilin istendiği her host, verilmeden önce oluşturmadaki
+    gibi çözülüp denetlenir (`netguard.Scope.Proxy`). Kontrolün bağlandığı uç
+    noktalar oluşturma ve değiştirmede de denetlenir.
+  - **Red.** Kapsamın reddettiği bağlantı kontrolü DOWN yapar. Sonucun hatası
+    tek genel bir metindir, adresi ve nedeni söylemez ((d) maskesi; ayrıntı
+    yalnız backend log'unda); açıklaması `blocked_by_scope`, arayüzde ve
+    bildirimde iki dilde. Ters monitor bunu, hedef politikasının reddi
+    (`ErrBlocked`) gibi, beklediği başarısızlık saymaz. Her ret
+    `kubeat_target_scope_denied_total{reason="connection"}`'ı artırır; denetim
+    kaydına (`deny`/`target-scope`, kullanıcı `checker`) monitor başına bir kez
+    yazılır, monitor'ün bağlandığı yeri belirleyen ayarları değişince ya da
+    backend yeniden başlayınca bir kez daha. Satır sayısı böylece monitor'lerin
+    ve ayar değişikliklerinin sayısıyla sınırlıdır; dakika sınırı S82'de
+    `auditCap`'le birleşir.
+  - **Kaydın yeri.** Karşılaştırılan seçenekler:
+    1. Var olan `settings` JSON sütunu: göç yok, şema 26 kalır, 0.50'ye
+       `helm rollback` mümkün. 0.50 alanı okur ama monitor'ü kaydederken
+       düşürür (testle sınandı); o monitor kaydı olmayan kuralına düşer.
+    2. Yeni sütun: sorgulanabilir ve açık, ama şema göçü; `docs/backlog.md`
+       S6 kuralı gereği önce açılışta otomatik yedek gelir ve 0.50'ye rollback
+       biter.
+    3. Monitor'ün namespace alanından türetmek: göçsüz ve kayıtsız, ama
+       yöneticinin bir namespace'e koyduğu monitor'ü kapsamı sınırlı
+       kullanıcınınkinden ayıramaz; yönetici monitor'leri de namespace'e
+       bağlanırdı.
+
+    (1) seçildi (PO şartı: göç yok). Kayıt
+    `"scope": {"namespaces": [...], "discovered": true}` biçimindedir;
+    `["*"]` her namespace'tir. Kaydı, kontrolün nereye bağlandığını (hedefi ya
+    da türün seçeneklerini) en son belirleyen yazar: oluşturan, klonlayan, içe
+    aktaran ya da değiştiren. Duraklatmak, ad ve etiket değiştirmek kaydı
+    değiştirmez; seçenek değişikliği hedefi değiştirenin kapsamıyla yeniden
+    denetlenir, böylece kapsamı sınırlı kullanıcı hedefi kapsamının dışındaki
+    bir monitor'ün kontrolünü üstlenemez. `discovered`, hedefin keşiften
+    (içe aktarma ya da annotation) geldiğini söyler: monitor'ün kendi host'u
+    içe aktarmadaki gibi namespace'iyle kapsamdadır (router VIP'ine çözülen
+    on-prem Route adı reddedilmez), kontrolün başka her bağlantısı kayıttaki
+    namespace'lere tabidir.
+  - **Anlık görüntü mü, canlı okuma mı (S73).** Kayıt, yazanın o anki
+    kapsamının anlık görüntüsüdür. Canlı okuma (kaydın kullanıcıyı
+    göstermesi, kontrolün kullanıcının bugünkü kapsamını okuması) kapsam
+    daralınca etkisini hemen gösterir ve S73'ün işinin çoğunu yapardı; ama
+    silinen ya da devre dışı bırakılan kullanıcının, servis token'ının, rolü
+    düşürülen yöneticinin monitor'leri birden DOWN olur, dizin grubundan gelen
+    kapsam yalnız girişte yenilenir ve kontrolün sıcak yolunda kullanıcı
+    okunurdu. Anlık görüntü seçildi: kapsam daralınca var olan monitor'ler
+    eski görüntüyle çalışmaya devam eder; S73 bu görüntüleri kullanıcıların
+    bugünkü kapsamıyla karşılaştırıp işaretler. Görüntü yazanı tutmaz; S73 onu
+    kayda göçsüz ekleyebilir (JSON alanı).
+  - **Kaydı olmayan monitor.** 0.51'den önce kurulan ya da 0.50'de yeniden
+    kaydedilen monitor'ün kaydı yoktur. Seçenekler: (a) değişiklik kaydından
+    oluşturanı bulmak: denetim kaydı 90 gün saklanır, `update` satırı hedefin
+    değişip değişmediğini söylemez ve rol bugünkü roldür, eski monitor'lerin
+    çoğu için cevap çıkmaz; (b) namespace'ten türetmek: monitor'ü her zaman
+    namespace'ini düzenleyebilen biri yazdı (`CanEdit`), namespace'siz
+    monitor'ü yalnız her namespace'i gören yazabilir; (c) sınırsız saymak:
+    yükseltmeden önce kurulmuş kapsam dışı monitor'ler açık kalır. (b) seçildi
+    (PO): namespace'siz monitor hiçbir şeye tabi değildir, ötekiler kendi
+    namespace'lerine, keşiften gelenler kendi host'larıyla namespace'lerine
+    bağlanır (`store.Monitor.TargetScope`). Bir yöneticinin bir namespace'e
+    koyup başka yere bağlanan monitor'ü de bu kurala düşer. Sessizce DOWN
+    olmasın diye:
+    - açılışta kapsamı sınırlı bir editör yoksa (yerel hesap, dizin grup
+      eşlemesi, LDAP ya da OIDC varsayılan rolü) kimse bir monitor'ü
+      namespace'inin dışına yöneltemezdi: kaydı olmayan monitor'lere her
+      namespace'in kaydı yazılır ve tek kiracılı kurulumda hiçbir şey
+      değişmez;
+    - varsa sayıları açılışta bir `WARN` satırında yazılır, yükseltmeden
+      önceki ön kontrol onları listeler (`docs/yukseltme.md`) ve bir
+      yöneticinin monitor'ü kaydetmesi kaydını yazar;
+    - sınır: yalnız bugünkü editörlere bakılır; kapsamı sınırlı editörü
+      silinmiş ya da genişletilmiş bir kurulumda onun kurduğu kaydı olmayan
+      monitor'ler de her namespace'in kaydını alır.
+  - **Yönetici ve `*`.** Kaydı her namespace olan monitor (yönetici, servis
+    token'ı, kapsamı `*` olan editör, namespace'siz monitor) hiçbir şeye tabi
+    değildir; kontrolü 0.50'deki gibi çalışır.
+  - **Kalan sınırlar.** Kanallar (webhook türü) yalnız oluşturma ve
+    değiştirmede denetlenir (backlog). Vekile verilen istekte karar backend'in
+    çözümüne dayanır, vekil adı yeniden çözer; vekile giden kontrolde çözüm
+    hatası (SERVFAIL, zaman aşımı) oluşturmadaki gibi güvenli tarafta red
+    sayılır. CoreDNS kesintisinde kapsamı sınırlı monitor'lerin vekilli
+    kontrolleri bu yüzden DOWN olur ve bu red sayaçta gerçek bir reddinden
+    ayrılmaz (S82). Kapsam daralması var olan kayıtları değiştirmez (S73).
+
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir
   monitor'ü okuyabilen herkese döner ve aksi hâlde bir iç cluster adresini
@@ -255,7 +357,9 @@ daraltması sprint 8'de (0.50, #121).**
   testlerle tek tek kapsanır (`backend/internal/netguard`,
   `backend/internal/api`). Kalan artık yalnızca DNS rebinding penceresidir
   (adın çözümle dial arasında değişmesi); bunun için deny-CIDR ve çok kiracılı
-  prova derinlemesine savunmadır.
+  prova derinlemesine savunmadır. 0.51'den beri kapsamı sınırlı monitor'lerin
+  doğrudan bağlantılarında bu pencere de kapandı: kontrol bağlandığı adresi
+  denetler (yukarıda (c), "Her bağlantıda kapsam").
 - **Çözüm hatasında kapalı (0.49).** 0.48'in çözüm-anı denetimi çözüm hata ya da
   zaman aşımı verince hedefi sessizce kabul ediyordu (fail-open); 0.49'da kapsam
   denetimi çözüm hatasında da kapalı kalır: kapsamı sınırlı bir kullanıcı CoreDNS
@@ -269,3 +373,9 @@ daraltması sprint 8'de (0.50, #121).**
   HTTP isteğinde yerel NXDOMAIN, opt-in `UPTIME_TARGET_SCOPE_TRUST_PROXY` ile
   kapsam reddi sayılmaz; cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine
   reddedilir (yukarıda (c), "Vekilli topolojide NXDOMAIN").
+- **Her bağlantıda kapsam (0.51).** Kapsamı sınırlı kullanıcının monitor'leri
+  kontrolün her bağlantısında onun kapsamına tabidir; kayıt `settings`
+  JSON'unda, şema 26, 0.50'ye rollback mümkün. Yönetici ve `*` etkilenmez;
+  kaydı olmayan monitor namespace'ine bağlanır, kapsamı sınırlı editör yoksa
+  her namespace'in kaydını alır. Kanallar ve kapsam daralması sonraki işlerdir
+  (yukarıda (c), "Her bağlantıda kapsam").

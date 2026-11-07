@@ -273,6 +273,7 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   reddeder; iki etiketli kısa ad (`kubernetes.default`, `api.payments`) ve iç
   adrese çözülen genel ad (`172-30-0-1.sslip.io`) de kapanır. Kalan: adı çözümle
   bağlantı arasında değişen hedef (DNS rebinding, TOCTOU) bu kapının dışındadır
+  (0.51'de kapsamı sınırlı monitor'lerin doğrudan bağlantılarında kapandı, (d))
   ve çok kiracılı prova kullanıcıdadır — deny-CIDR ve prova derinlemesine
   savunmadır. Vekil (`HTTP_PROXY`) üzerinden giden istekte hedef backend'de
   çözülüp denetlenir, ama vekil adı yeniden çözer; vekilin nereye ulaştığı onun
@@ -307,9 +308,16 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   minikube provası release manager'da, gerçek hava boşluklu
   cluster provası kullanıcıda; (c) denetim ve sayaç çözüm hatasını gerçek cross-tenant reddinden
   ayırmıyor ve denetim satırlarının sınırı yok (S82, sprint 10 kuyruğu); (d)
-  kapsam daralınca var olan monitor'ler yeniden denetlenmiyor (S73, backlog;
-  kapsam kaydının tasarımı sprint 9 ADR'sinde, uygulama S82'den sonra, sprint 11
-  adayı).
+  0.51'de kapsam yalnız hedef belirlenirken değil, monitor'ün her bağlantısında
+  uygulanıyor (S86, sprint 9, [#131](https://github.com/yusufceng/Kubeat/issues/131);
+  ADR-0003 c "Her bağlantıda kapsam"): kayıt monitor'ün ayarlarında (şema 26),
+  yönetici ve `*` etkilenmiyor, kaydı olmayan eski monitor namespace'ine
+  bağlanıyor (kapsamı sınırlı editör yoksa her namespace'in kaydını alıyor),
+  reddedilen kontrol DOWN ve `reason=connection` ile sayılıyor. Kalan: kayıt
+  yazıldığı anın görüntüsü, kapsam daralınca var olan monitor'ler eski kapsamla
+  çalışıyor (S73, backlog, sprint 11 adayı); kanallar yalnız oluşturma ve
+  değiştirmede denetleniyor (backlog); vekile giden kontrolde çözüm hatası
+  gerçek bir reddinden ayrılmıyor (S82); minikube provası release manager'da.
 - Keşif sayfasından içe aktarma tek seferliktir; sürekli izleme için nesneye
   `kubeat.io/monitor` annotation'ı eklenir.
 - Annotation eşitlemesi her turda Service, Pod, EndpointSlice, Ingress,

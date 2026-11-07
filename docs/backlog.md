@@ -1972,6 +1972,17 @@ kalır. Tetikleyici (S80, S81 ve S82'nin merge'ü) sprint 10 sonunda dolar;
 uygulama sprint 11 adayı (L). ADR kapsamı canlı okuyan bir kayıt seçerse S73'ün
 kapsamı yeniden değerlendirilir.
 
+Güncelleme (2026-11-07, S86 [#131](https://github.com/yusufceng/Kubeat/issues/131)): ADR-0003 (c) "Her bağlantıda kapsam" bir
+**anlık görüntü** seçti: monitor'ün `settings` JSON'unda, kontrolün nereye
+bağlandığını en son belirleyen kullanıcının o anki namespace'leri (`scope`),
+yazanın kimliği olmadan. Monitor'ler artık her bağlantıda bu kayda göre
+denetleniyor; S73'ün işi kapsam daralınca (rol, grup ya da namespace
+değişikliği) kayıtları kullanıcıların bugünkü kapsamıyla karşılaştırıp işaretlemek
+ve raporlamak olarak kalır. Bunun için kayda yazanın kimliği göçsüz eklenir
+(JSON alanı); kaydı olmayan ya da yazanı bilinmeyen monitor'ler için kural S73'ün
+ADR'sinde. Kanallar ayrı maddede ("Kanal hedeflerinde hedef kapsamını teslimat
+anında uygulamak").
+
 ## Yeni giriş/dizin/throttle metrikleri için chart PrometheusRule ve throttle sessiz-etkisizlik metriği (S63/S72 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2048,6 +2059,13 @@ S82 sprint 10 kuyruğunda 1. sırada. `targetscope.go` zinciri S80 ([#132](https
 S86 ([#131](https://github.com/yusufceng/Kubeat/issues/131)) → S82; S86'nın kontrol anı reddi aynı etiket kümesini ve satır
 sınırını kullanacak. Müşteri A'nın sprint 8 bulgusu 3'ü (ayarı açmadan bir dış
 adın yerel çözüm sonucunu gösteren komut, pilot ön şart sınaması) S82'ye katıldı.
+
+Güncelleme (2026-11-07, S86): kontrol anı reddi `reason="connection"` ile her
+kontrolde sayılıyor; denetim satırı (`deny`/`target-scope`, kullanıcı `checker`)
+monitor başına, bağlandığı yeri belirleyen ayarları değişene ya da backend yeniden
+başlayana kadar bir kez yazılıyor. S82 bu yola da `resolve_error` ayrımını (vekile
+giden kontrolde SERVFAIL ve zaman aşımı bugün `connection` sayılıyor) ve
+`auditCap`'in dakika sınırını getirir.
 
 ## Kapsam çözüm-hatası reddini gerçek cross-tenant reddinden ayırmak (reason/WARN, S77 takibi)
 
