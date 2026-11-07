@@ -12,8 +12,8 @@ const (
 	// (403), as it does in a namespace whose Role was taken away or which
 	// was deleted together with its RoleBinding.
 	DiscoveryForbidden = "forbidden"
-	// DiscoveryNotFound: the cluster API does not have what was asked for
-	// (404).
+	// DiscoveryNotFound: the cluster API does not serve the kind of object
+	// asked for (404); a namespace that does not exist lists as empty.
 	DiscoveryNotFound = "not_found"
 	// DiscoveryTimeout: no answer within UPTIME_KUBE_TIMEOUT, or the API
 	// server's own timeout.
@@ -37,7 +37,7 @@ func newDiscoveryMetrics(registry *prometheus.Registry) discoveryMetrics {
 	d := discoveryMetrics{
 		syncErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kubeat_discovery_sync_errors_total",
-			Help: "Reads of the cluster the annotation sync could not do, by reason: \"forbidden\" (403: a namespace's Role taken away, or the namespace deleted with its RoleBinding), \"not_found\" (404), \"timeout\" (no answer within UPTIME_KUBE_TIMEOUT) or \"other\" (the API server unreachable, credentials refused, a failure on its side). With discovery limited to namespaces (UPTIME_DISCOVERY_NAMESPACES), one per namespace skipped in a run; otherwise, and for a run that got no answer at all, one per run, which changed nothing. The namespaces are named in the discovery status (GET /api/v1/discovery) and the backend's log, not here.",
+			Help: "Reads of the cluster the annotation sync could not do, by reason: \"forbidden\" (403: a namespace's Role taken away, or the namespace deleted with its RoleBinding), \"not_found\" (404: a kind of object the cluster does not serve), \"timeout\" (no answer within UPTIME_KUBE_TIMEOUT) or \"other\" (the API server unreachable, credentials refused, a failure on its side). With discovery limited to namespaces (UPTIME_DISCOVERY_NAMESPACES), one per namespace skipped in a run; otherwise, and for a run that got no answer at all, one per run, which changed nothing. The namespaces are named in the discovery status (GET /api/v1/discovery) and the backend's log, not here.",
 		}, []string{"reason"}),
 		namespacesSkipped: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "kubeat_discovery_namespaces_skipped",

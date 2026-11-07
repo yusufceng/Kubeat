@@ -3945,7 +3945,7 @@ yayınlar. Başlıcaları:
 | `kubeat_backup_last_failure_timestamp_seconds` | Son başarısız yedek denemesinin zamanı, süreç açıldığından beri; yoksa 0. Son başarılı kopyadan yeniyse yedekleme başarısızdır (`KubeatBackupFailing`) |
 | `kubeat_license_expiry_timestamp_seconds` | Kubeat Enterprise lisansının bitiş zamanı; lisans yoksa 0 |
 | `kubeat_discovery_namespaces_skipped` | Annotation eşitlemesinin son turda okuyamayıp atladığı namespace sayısı (namespace sınırlı keşifte); hepsi okunduysa ve cluster geneli keşifte 0. Hiç yanıt alamayan tur değeri değiştirmez. Namespace adları etiket değildir, keşif durumunda ve log'dadır (bkz. "Keşif" → "Okunamayan namespace") |
-| `kubeat_discovery_sync_errors_total{reason}` | Annotation eşitlemesinin yapamadığı cluster okumaları, nedenine göre: `forbidden` (`403`: Role kaldırıldı ya da namespace RoleBinding'iyle silindi), `not_found` (`404`), `timeout` (`UPTIME_KUBE_TIMEOUT` içinde yanıt yok), `other` (ulaşılamayan API sunucusu, reddedilen kimlik bilgisi, sunucu tarafı hata). Namespace sınırlı keşifte atlanan her namespace için turda bir, hiç yanıt alamayan ya da cluster geneli keşifte okunamayan tur için bir artar; dört seri de açılışta 0'dan başlar |
+| `kubeat_discovery_sync_errors_total{reason}` | Annotation eşitlemesinin yapamadığı cluster okumaları, nedenine göre: `forbidden` (`403`: Role kaldırıldı ya da namespace RoleBinding'iyle silindi), `not_found` (`404`: istenen kaynak türü sunulmuyor), `timeout` (`UPTIME_KUBE_TIMEOUT` içinde yanıt yok), `other` (ulaşılamayan API sunucusu, reddedilen kimlik bilgisi, sunucu tarafı hata). Namespace sınırlı keşifte atlanan her namespace için turda bir, hiç yanıt alamayan ya da cluster geneli keşifte okunamayan tur için bir artar; dört seri de açılışta 0'dan başlar |
 
 Chart'ta `metrics.serviceMonitor.enabled=true` bir ServiceMonitor oluşturur;
 böylece monitor durumları cluster'ın kendi Prometheus'unda sorgulanabilir
@@ -4664,8 +4664,9 @@ Keşif `discovery.namespaces` (`UPTIME_DISCOVERY_NAMESPACES`) ile
 sınırlıyken eşitleme namespace'leri tek tek okur. Biri okunamazsa:
 
 - **Atlanır, tur sürer.** Namespace'in Role'ü kaldırılmışsa ya da namespace
-  RoleBinding'iyle birlikte silinmişse API sunucusu `403` (ya da `404`)
-  döner. Eşitleme o namespace'i atlar, öteki namespace'leri her zamanki
+  RoleBinding'iyle birlikte silinmişse API sunucusu `403` döner (var olmayan
+  bir namespace'teki liste `404` değil, boş bir listedir; RoleBinding'i
+  gidince istek `403` alır). Eşitleme o namespace'i atlar, öteki namespace'leri her zamanki
   gibi eşitler.
 - **Atlanan namespace'in monitor'leri değişmez.** Silinmez, güncellenmez;
   oradaki "Kubeat'te silindi" kayıtları da korunur. Bu sürede o
@@ -4673,9 +4674,12 @@ sınırlıyken eşitleme namespace'leri tek tek okur. Biri okunamazsa:
   yerinde kalır.
 - **Düzelince uygulanır.** Namespace yeniden okunabilince sonraki tur
   (`UPTIME_DISCOVERY_SYNC_INTERVAL`) bekleyen değişiklikleri uygular.
-- **Silinen namespace.** Monitor'leri namespace `discovery.namespaces`
+- **Silinen namespace.** Monitor'leri genelde namespace `discovery.namespaces`
   listesinden çıkarılana kadar kalır; çıkarıldıktan sonraki ilk tur onları
-  geçmişleriyle birlikte kaldırır.
+  geçmişleriyle birlikte kaldırır. Kesin değildir: Kubernetes bir namespace'in
+  nesnelerini sabit olmayan bir sırayla siler. RoleBinding nesnelerden sonra
+  silinirse o birkaç saniyeye denk gelen bir tur boş liste okur ve
+  monitor'leri geçmişleriyle daha erken kaldırır.
 - **Hiçbiri okunamazsa** tur hiçbir şeyi değiştirmez, keşif durumu "Cluster
   okunamadı" der ve atlanan namespace'lerin hepsini listeler.
 - **Namespace'in değil cluster'ın hatası.** Yanıt alınamayan bir istek
