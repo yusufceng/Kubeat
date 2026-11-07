@@ -2245,8 +2245,8 @@ sprint 10'da S82'nin ilk PR'ıyla karşılanıyor
 API'de ve kontrolün açtığı her bağlantıda; iptal ve süre dolması red sayılmaz; kapalı
 kümeli `source` etiketi (`user`, `annotation`, `unrecorded`).
 `UPTIME_TARGET_RESOLVE_TIMEOUT` yalnız API yolunu sınırlar ve varsayılanı 5 sn'den 2
-sn'ye iner; kontrol anındaki çözüm monitor'ün kendi zaman aşımına bağlanır (0.51'den
-beri kontrol de API'nin süresini kullanıyor). Madde S82'nin iki PR'ı
+sn'ye iner; kontrol anındaki çözüm monitor'ün kendi zaman aşımına bağlanır (0.51'de
+vekile giden kontrol de API'nin süresini kullanıyordu). Madde S82'nin iki PR'ı
 ([#142](https://github.com/yusufceng/Kubeat/issues/142),
 [#143](https://github.com/yusufceng/Kubeat/issues/143)) merge edilince kapanır;
 kapanış notu "denetlenmeyen red yolları" listesinin README'deki yerini yazar.

@@ -772,8 +772,8 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       sn sürebilir, arayüz isteği bırakır ve kullanıcı formda 403 yerine zaman
       aşımı görür. Ret yine yapılır ve `resolve_error` ile sayılır.
     - **Kontrol anında.** Kontrolün açtığı her bağlantıdaki çözüm bu ayara bağlı
-      değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de API'nin
-      süresini kullanıyordu). Yavaş yanıt veren bir çözücü kontrolü monitor'ün
+      değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de vekile
+      giden kontrol API'nin süresini kullanıyordu). Yavaş yanıt veren bir çözücü kontrolü monitor'ün
       zaman aşımı dolmadan DOWN yapmaz. Ayrı bir ayar yoktur.
     - **İptal ve süre dolması red değildir.** Kontrolün zaman aşımı ya da
       backend'in kapanışı çözümü yarıda keserse kontrol bu hatayla biter
@@ -946,10 +946,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       kesintisinde de `target` ya da `connection` sayılır; vekile giden düz
       `http://` istekte `Host` başlığındaki ad da, URL'nin adı çözülemese bile
       (vekile sorulan adların hepsi çözümden önce yazılışlarıyla sınanır).
-      Bilinen sınır: API bir isteği ilk reddiyle sayar. Çözücüsü verilmiş bir
-      DNS monitor'ünde önce hedef ad sınanır; o çözülemezse çözücünün host'u
-      (adından reddedilen başka ekibin DNS Service'i olsa da) sınanmadan ret
-      `resolve_error` sayılır. İstek yine reddedilir.
+      Bilinen sınır: API bir isteği ilk reddiyle sayar. Bir istek birden çok
+      ad sınıyorsa ve ilk ad çözülemiyorsa ret, ötekiler sınanmadan
+      `resolve_error` sayılır. İstek yine reddedilir. Kontrol anında bütün
+      adlar sınanır, cluster'a götüren ad varsa ret `connection` sayılır.
   - **`source`: kimin kapsamı (0.52, kapalı küme).**
     - `user`: API isteği (API'nin bütün redleri) ya da kapsam kaydı bir
       kullanıcının olan monitor'ün kontrolü.
@@ -5619,7 +5619,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_CHECK_SHOW_VALUE` | `true` | JSON kontrolü bulduğu değeri sonuç ve hatada tekrarlar; hedefin yanıtı monitor'ü görenlerin görmemesi gereken veri taşıyabiliyorsa `false` yapın |
 | `UPTIME_TARGET_DENY_CIDRS` | – | Kontrollerin ve bildirimlerin bağlanmayacağı, yerleşik listeye (loopback, link-local, metadata, multicast) eklenen aralıklar; virgülle ayrılmış CIDR. Bkz. "Hedef politikası" |
 | `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
-| `UPTIME_TARGET_RESOLVE_TIMEOUT` | `2s` | Yalnız API'de: kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir ve `reason="resolve_error"` ile sayılır, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun. 0.52'den beri kontrol anındaki çözüm bu ayara bağlı değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de varsayılan 5 sn, kontrol de bunu kullanıyordu). Bkz. "Hedef politikası" → "Zaman aşımı". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
+| `UPTIME_TARGET_RESOLVE_TIMEOUT` | `2s` | Yalnız API'de: kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir ve `reason="resolve_error"` ile sayılır, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun. 0.52'den beri kontrol anındaki çözüm bu ayara bağlı değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de varsayılan 5 sn; vekile giden kontrol de bunu kullanıyordu). Bkz. "Hedef politikası" → "Zaman aşımı". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
 | `UPTIME_TARGET_SCOPE_TRUST_PROXY` | `false` | `true` iken kapsamı sınırlı kullanıcının hedefi backend'in çözücüsünde yalnız NXDOMAIN alıyor ve istek vekile gidiyorsa (`HTTP_PROXY`/`HTTPS_PROXY`, `NO_PROXY` dışında; HTTP, anahtar kelime, JSON, WebSocket monitor'leri ve webhook türü kanallar) reddedilmez. Yalnız vekil cluster dışındaysa açın. Cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine reddedilir. Vekil verilmiş ve ayar kapalıysa açılışta bir `WARN` gelir. Bkz. "Hedef politikası" → "Vekilli kurulum" |
 | `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` | – | Kapsam denetiminin özel olsa da cluster dışı saydığı kurum aralıkları; virgülle ayrılmış CIDR. Bu aralıktaki bir adres (çıplak yazılmış ya da bir addan çözülmüş) kapsamı sınırlı kullanıcı için genel bir adres gibi kabul edilir. Hedef politikası ve yük korumaları bu ayarı okumaz. Cluster'ın pod, Service ve node ağları ile API VIP'i listeye girmez; router VIP'i yalnız on-prem Route'lar için bilerek (node ağındaysa `/32` ile) girer ve o VIP'teki her Route kapsamı sınırlı kullanıcıya açılır. API sunucusunun adresini ya da backend'in kendi adresini içeren aralık ve IPv6 biçiminde yazılmış IPv4 aralığı backend'i başlatmaz. Bkz. "Hedef politikası" → "Kurum ağı" |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |

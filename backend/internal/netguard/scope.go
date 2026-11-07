@@ -372,28 +372,38 @@ func (s *Scope) Proxy(next func(*http.Request) (*url.URL, error)) func(*http.Req
 		if err != nil || proxy == nil {
 			return proxy, err
 		}
-		// Every host refused by its spelling is refused before any is
-		// resolved: a resolver that fails for the URL's host must not pass
-		// a Host header naming another team's Service off as its fault.
+		// A host refused by where it is, by its spelling or by where it
+		// resolves, is the refusal reported: a lookup that fails for one
+		// host does not stand for the refusal of another. Every host is
+		// judged by its spelling before any is resolved, and every one is
+		// resolved before a failed lookup is reported.
 		hosts := proxiedHosts(req)
 		for _, host := range hosts {
 			if _, class := s.class(host); class == hostRefused {
 				return nil, s.refuse(host, RefusedOutside)
 			}
 		}
+		unresolved := ""
 		for _, host := range hosts {
 			name, class := s.class(host)
 			if class != hostExternal {
 				continue
 			}
-			switch why := s.rules.resolution(req.Context(), name, req.URL); {
-			case why == NotRefused:
-				continue
-			case why == RefusedUnresolved && req.Context().Err() != nil:
-				return nil, req.Context().Err() // cut short, not refused
+			switch why := s.rules.resolution(req.Context(), name, req.URL); why {
+			case NotRefused:
+			case RefusedUnresolved:
+				if unresolved == "" {
+					unresolved = host
+				}
 			default:
 				return nil, s.refuse(host, why)
 			}
+		}
+		if unresolved != "" {
+			if err := req.Context().Err(); err != nil {
+				return nil, err // cut short, not refused
+			}
+			return nil, s.refuse(unresolved, RefusedUnresolved)
 		}
 		return proxy, nil
 	}
