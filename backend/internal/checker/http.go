@@ -86,13 +86,18 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 	if o.SkipTLSVerify {
 		transport = c.insecure
 	}
-	if addr != "" {
+	scope := scopeOf(ctx)
+	switch {
+	case addr != "":
 		// A transport of its own, so that the connection pool does not hand
 		// this pod's connection to a check of another.
 		t := transport.Clone()
-		t.DialContext = c.dialTo(addr)
+		t.DialContext = c.dialTo(ctx, m, addr)
+		t.Proxy = scope.Proxy(t.Proxy)
 		defer t.CloseIdleConnections()
 		transport = t
+	case scope != nil:
+		transport = c.heldTransport(m, transport, o.SkipTLSVerify)
 	}
 	// The monitor's headers, credentials and body are for the server it
 	// checks: the one its URL names, or that one on TLS (store.SameServer),

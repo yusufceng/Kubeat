@@ -20,7 +20,7 @@ import (
 // protocol Kubernetes gRPC probes use) whether it is serving. The outcome
 // reports the connections made, at the address each reached.
 func (c *Checker) checkGRPC(ctx context.Context, m store.Monitor) outcome {
-	d := c.dials(m)
+	d := c.dials(ctx, m)
 	return d.made(c.grpcHealth(ctx, m, d))
 }
 

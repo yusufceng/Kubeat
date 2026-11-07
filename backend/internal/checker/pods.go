@@ -130,9 +130,11 @@ func listPods(names []string) string {
 
 // dialTo returns a dialer that connects to addr whatever address it is
 // asked for, so that a request keeps its URL (Host header, TLS server name)
-// while reaching one pod.
-func (c *Checker) dialTo(addr string) func(ctx context.Context, network, _ string) (net.Conn, error) {
+// while reaching one pod. A scope of the check under way in ctx reads the
+// pod as one behind the monitor's Service.
+func (c *Checker) dialTo(ctx context.Context, m store.Monitor, addr string) func(ctx context.Context, network, _ string) (net.Conn, error) {
+	dialer := c.dialer.In(scopeOf(ctx), eachPodHost(m))
 	return func(ctx context.Context, network, _ string) (net.Conn, error) {
-		return c.dialer.DialContext(ctx, network, addr)
+		return dialer.DialContext(ctx, network, addr)
 	}
 }

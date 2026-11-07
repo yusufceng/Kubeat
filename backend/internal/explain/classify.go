@@ -123,6 +123,7 @@ type failure struct {
 // out is the DNS server's, and what a proxy reports in a gRPC status
 // mentions the connection errors it had.
 var failures = []failure{
+	{BlockedByScope, is(netguard.ErrScope), anyOf(netguard.ErrScope.Error())},
 	{BlockedByPolicy, blocked, anyOf(netguard.ErrBlocked.Error())},
 	{ProxyNoHealthyUpstream, nil, with(envoy, anyOf("no healthy upstream"))},
 	{ProxyUpstreamTLS, nil, with(envoy, allOf("upstream connect error or disconnect/reset before headers", "TLS error"))},

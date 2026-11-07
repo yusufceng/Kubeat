@@ -289,12 +289,17 @@ func (p *Policy) Control(_ context.Context, _, address string, _ syscall.RawConn
 	return p.Check(addrPort.Addr())
 }
 
-// Dialer connects as a net.Dialer does, held to a policy.
+// Dialer connects as a net.Dialer does, held to a policy, and to a target
+// scope when it has one (In).
 type Dialer struct {
 	policy *Policy
 	// checked has the policy's Control; plain connects to the addresses
 	// the policy trusts.
 	checked, plain net.Dialer
+	// scope, when set, holds the connections to a user's namespaces too;
+	// as is the host they are for, where the address does not say (In).
+	scope *Scope
+	as    string
 }
 
 // Dialer returns a dialer that connects as base does, with each connection
@@ -317,6 +322,9 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 	if d.policy.trusts(address) {
 		return d.plain.DialContext(ctx, network, address)
 	}
+	if d.scope != nil {
+		return d.dialScoped(ctx, network, address)
+	}
 	return d.checked.DialContext(ctx, network, address)
 }
 
@@ -326,7 +334,7 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 // does not resolve here is left to the proxy, which may know names this
 // network does not. That is the target policy; the per-user scope check
 // refuses such a name for a user limited to some namespaces unless
-// UPTIME_TARGET_SCOPE_TRUST_PROXY is on (api.targetInScope).
+// UPTIME_TARGET_SCOPE_TRUST_PROXY is on (ScopeRules.Refuses).
 //
 // A host made of numbers is not a name, though: a proxy that reads it as
 // inet_aton does takes 2852039166, 0xa9.0xfe.0xa9.0xfe and 169.254.43518
@@ -381,7 +389,7 @@ func (p *Policy) CheckHost(ctx context.Context, host string) error {
 // drop first, as a proxy does. A proxy and glibc read such a host as an
 // address, the pure-Go resolver refuses it as a name, and readers disagree on
 // some forms (inet_aton reads 010 as 8). The per-user scope check
-// (api.targetInScope) refuses one that is not an address as written, since
+// (ScopeRules) refuses one that is not an address as written, since
 // it cannot tell which address the request reaches.
 func Numeric(host string) bool { return numeric(host) }
 
@@ -457,23 +465,12 @@ func (p *Policy) Proxy(next func(*http.Request) (*url.URL, error)) func(*http.Re
 		if err != nil || proxy == nil || p.trusts(hostPort(req.URL)) {
 			return proxy, err
 		}
-		if err := p.CheckHost(req.Context(), req.URL.Hostname()); err != nil {
-			return nil, err
-		}
 		// A plain http:// request goes to the proxy in absolute form, and
-		// net/http writes the Host header there, not the URL's host: that
-		// is the address the proxy fetches. Over https the proxy is asked
-		// to CONNECT to the URL's host, and the header stays in the tunnel.
-		if req.URL.Scheme == "http" && req.Host != "" {
-			host := req.Host
-			if h, _, err := net.SplitHostPort(host); err == nil {
-				host = h
-			}
-			host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
-			if !strings.EqualFold(host, req.URL.Hostname()) {
-				if err := p.CheckHost(req.Context(), host); err != nil {
-					return nil, err
-				}
+		// the proxy fetches the Host header net/http writes there, not the
+		// URL's host (proxiedHosts).
+		for _, host := range proxiedHosts(req) {
+			if err := p.CheckHost(req.Context(), host); err != nil {
+				return nil, err
 			}
 		}
 		return proxy, nil

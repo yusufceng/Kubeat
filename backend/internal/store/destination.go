@@ -147,6 +147,18 @@ func (m *Monitor) DropSecrets() []string {
 	return names
 }
 
+// ResolverHost is the host of the server the options ask, without port or
+// brackets; "" when they ask the resolver of the machine the checks run on.
+func (o DNSOptions) ResolverHost() string {
+	if o.Resolver == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(o.Resolver); err == nil {
+		return host
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(o.Resolver, "["), "]")
+}
+
 // Outbound reports whether the monitor's checks make a request to its
 // target over the network. Push monitors wait for their source to report
 // and workload monitors ask the cluster API; neither puts load on a target,

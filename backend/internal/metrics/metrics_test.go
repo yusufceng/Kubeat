@@ -232,15 +232,15 @@ func TestSignInMetrics(t *testing.T) {
 }
 
 // kubeat_target_scope_denied_total has a series per reason from the start, at
-// 0, and both reasons count on their own. The label set is fixed, so no other
-// series can appear.
+// 0, and each reason counts on its own: the API's two and the checks' one.
+// The label set is fixed, so no other series can appear.
 func TestTargetScopeDeniedCounter(t *testing.T) {
 	m := New("test")
 	got, err := m.Gather()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace} {
+	for _, reason := range []string{ScopeDeniedTarget, ScopeDeniedNamespace, ScopeDeniedConnection} {
 		key := "kubeat_target_scope_denied_total{reason=" + reason + "}"
 		if value, ok := got[key]; !ok || value != 0 {
 			t.Errorf("%s = %v (present: %v), want 0 at the start", key, value, ok)
@@ -250,6 +250,9 @@ func TestTargetScopeDeniedCounter(t *testing.T) {
 	m.TargetScopeDenied(ScopeDeniedTarget)
 	m.TargetScopeDenied(ScopeDeniedTarget)
 	m.TargetScopeDenied(ScopeDeniedNamespace)
+	for range 3 {
+		m.TargetScopeDenied(ScopeDeniedConnection)
+	}
 
 	got, err = m.Gather()
 	if err != nil {
@@ -261,10 +264,14 @@ func TestTargetScopeDeniedCounter(t *testing.T) {
 	if got["kubeat_target_scope_denied_total{reason=namespace}"] != 1 {
 		t.Errorf("namespace = %v, want 1", got["kubeat_target_scope_denied_total{reason=namespace}"])
 	}
+	if got["kubeat_target_scope_denied_total{reason=connection}"] != 3 {
+		t.Errorf("connection = %v, want 3", got["kubeat_target_scope_denied_total{reason=connection}"])
+	}
 	for key := range got {
 		if strings.HasPrefix(key, "kubeat_target_scope_denied_total") &&
 			key != "kubeat_target_scope_denied_total{reason=target}" &&
-			key != "kubeat_target_scope_denied_total{reason=namespace}" {
+			key != "kubeat_target_scope_denied_total{reason=namespace}" &&
+			key != "kubeat_target_scope_denied_total{reason=connection}" {
 			t.Errorf("unexpected scope-denial series %s", key)
 		}
 	}

@@ -36,7 +36,7 @@ func (c *Checker) databaseTLS(m store.Monitor, host string) *tls.Config {
 // query. The outcome reports the connections made, at the address each
 // reached, as do the other database checks.
 func (c *Checker) checkPostgres(ctx context.Context, m store.Monitor) outcome {
-	d := c.dials(m)
+	d := c.dials(ctx, m)
 	return d.made(c.postgresQuery(ctx, m, d))
 }
 
@@ -63,6 +63,7 @@ func (c *Checker) postgresQuery(ctx context.Context, m store.Monitor, d *dials) 
 	cfg.Fallbacks = nil
 	cfg.RuntimeParams = map[string]string{"application_name": "kubeat"}
 	cfg.DialFunc = d.dial(c)
+	cfg.LookupFunc = c.resolver().LookupHost
 	// The simple protocol runs the query as it is written, without preparing it.
 	cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
@@ -100,7 +101,7 @@ func postgresError(err error) error {
 
 // checkMySQL logs in to a MySQL or MariaDB server and runs the monitor's query.
 func (c *Checker) checkMySQL(ctx context.Context, m store.Monitor) outcome {
-	d := c.dials(m)
+	d := c.dials(ctx, m)
 	return d.made(c.mysqlQuery(ctx, m, d))
 }
 
@@ -151,7 +152,7 @@ func (discardLogger) Print(...any) {}
 // password, and expects PONG for a PING. The protocol is simple enough to
 // speak directly: a command is a line, and so is the answer to these.
 func (c *Checker) checkRedis(ctx context.Context, m store.Monitor) outcome {
-	d := c.dials(m)
+	d := c.dials(ctx, m)
 	return d.made(c.redisPing(ctx, m, d))
 }
 

@@ -149,6 +149,7 @@ export type ExplanationCode =
   | "http_504"
   // Failures to get an answer at all.
   | "blocked_by_policy"
+  | "blocked_by_scope"
   | "dns_service_not_found"
   | "dns_not_found"
   | "dns_failed"

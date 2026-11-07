@@ -393,6 +393,9 @@ func differs(current, want store.Monitor) bool {
 // create makes the monitor and reports it, and whether it was made: a
 // name already taken by a monitor made by hand is left be.
 func (s *Syncer) create(ctx context.Context, want store.Monitor) (store.Monitor, bool, error) {
+	// Whoever may annotate the object owns its namespace: the checks are
+	// held to it, the object's own host as discovery found it (ADR-0003 c).
+	want.Scope = &store.TargetScope{Namespaces: []string{want.Namespace}, Discovered: true}
 	m, err := s.opts.Store.CreateMonitor(ctx, want)
 	if errors.Is(err, store.ErrConflict) {
 		s.opts.Logger.Warn("discovery sync: name taken", "name", want.Name)

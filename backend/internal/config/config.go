@@ -187,7 +187,8 @@ type Config struct {
 
 	// TargetResolveTimeout bounds the name lookup the per-user scope check
 	// makes when a scoped user aims a monitor or a channel webhook at an
-	// external-looking name (api.targetInScope, ADR-0003 c). It keeps a slow
+	// external-looking name (netguard.ScopeRules, ADR-0003 c), and for a
+	// check of their monitor through a proxy. It keeps a slow
 	// or stuck resolver from holding a create or an edit open to
 	// HTTPWriteTimeout; a lookup that does not finish in time is treated as
 	// unresolved, and the scoped user's target is refused on the safe side.

@@ -746,6 +746,13 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if host, err := h.endpointsInScope(r.Context(), principal(r), m); err != nil {
+		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, host)
+		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
+		return
+	}
+	// The checks are held to the creator's scope, every connection of them.
+	m.Scope = targetScopeRecord(principal(r))
 	if err := validateEachPod(m); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -812,6 +819,14 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
+	if host, err := h.endpointsInScope(r.Context(), principal(r), m); err != nil {
+		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, host)
+		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
+		return
+	}
+	// The copy's checks are held to the scope of whoever made it, not to
+	// the original's.
+	m.Scope = targetScopeRecord(principal(r))
 	h.storeMonitor(w, r, m)
 }
 
@@ -993,6 +1008,14 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
+	}
+	// A change of where the checks connect — the target, or the options of
+	// the type, which say what else a check reaches — makes p's scope the
+	// one the checks are held to (below), so the target is held to it here
+	// as a new monitor's is. Pausing, renaming or tagging keeps the scope
+	// the monitor has.
+	connects := req.Target != nil || req.checkOptions.given()
+	if connects {
 		retargeted := merged.monitor(current)
 		if err := h.targetInScope(r.Context(), p, retargeted.Host(), monitorRequestURL(retargeted)); err != nil {
 			h.auditScopeDenied(r, metrics.ScopeDeniedTarget, retargeted.Host())
@@ -1010,6 +1033,19 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	if err := req.checkOptions.apply(&change); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if connects {
+		if host, err := h.endpointsInScope(r.Context(), p, change); err != nil {
+			h.auditScopeDenied(r, metrics.ScopeDeniedTarget, host)
+			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
+			return
+		}
+		// A target taken from a cluster object stays one while it is left
+		// as it is; a monitor without a record counts a discovered one as
+		// such, as the checker does.
+		discovered := current.Source != "" && change.Target == current.Target && (current.Scope == nil || current.Scope.Discovered)
+		change.Scope = targetScopeRecord(p)
+		change.Scope.Discovered = discovered
 	}
 	// Stored secrets go only to the server they were entered for: the
 	// target's, or that one on TLS, and the site its Host header names.

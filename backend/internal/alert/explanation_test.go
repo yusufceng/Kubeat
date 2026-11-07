@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/yusufceng/Kubeat/backend/internal/explain"
@@ -75,5 +76,20 @@ func TestDownNotificationIsExplained(t *testing.T) {
 	}
 	if got := lastFact(down); got.Value != "connection refused — "+explain.Text(store.Explanation{Code: explain.ConnectionRefused}, explain.Turkish) {
 		t.Errorf("cause = %+v", got)
+	}
+}
+
+// An outage the target scope caused says so in the notification, in either
+// language, after the check's own generic error.
+func TestCauseOfAScopeRefusal(t *testing.T) {
+	n := sampleDown()
+	n.Incident.Cause = "refused by the target scope: a connection of this check leads outside the namespaces of whoever set up the monitor"
+	n.Explanation = &store.Explanation{Code: explain.BlockedByScope}
+	for language, words := range map[string]string{LanguageTurkish: "hedef kapsamı", LanguageEnglish: "target scope refused"} {
+		n.Language = language
+		got := lastFact(n).Value
+		if !strings.HasPrefix(got, n.Incident.Cause+" — ") || !strings.Contains(got, words) {
+			t.Errorf("%s: cause = %q", language, got)
+		}
 	}
 }

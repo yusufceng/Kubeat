@@ -36,7 +36,7 @@ const pingPayload = 56
 // allowed by the kernel (net.ipv4.ping_group_range on Linux); container
 // runtimes allow it by default.
 func (c *Checker) checkPing(ctx context.Context, m store.Monitor) outcome {
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, m.Target)
+	addrs, err := c.resolver().LookupIPAddr(ctx, m.Target)
 	if err != nil {
 		return failed(err)
 	}
@@ -51,6 +51,9 @@ func (c *Checker) checkPing(ctx context.Context, m store.Monitor) outcome {
 	// about the address they would go to.
 	addr, _ := netip.AddrFromSlice(ip)
 	if err := c.opts.Guard.Check(addr); err != nil {
+		return failed(err)
+	}
+	if err := scopeOf(ctx).Addr(m.Host(), addr); err != nil {
 		return failed(err)
 	}
 	out := c.echo(ctx, ip)

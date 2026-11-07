@@ -61,9 +61,14 @@ func (c *Checker) checkWebSocket(ctx context.Context, m store.Monitor) outcome {
 
 	// The handshake is HTTP/1.1; a connection of its own, since after the
 	// upgrade it is no longer an HTTP connection that could be reused.
+	proxy := c.opts.Proxy
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
+	scope := scopeOf(ctx)
 	transport := &http.Transport{
-		Proxy:             c.opts.Guard.Proxy(http.ProxyFromEnvironment),
-		DialContext:       c.dialer.DialContext,
+		Proxy:             scope.Proxy(c.opts.Guard.Proxy(proxy)),
+		DialContext:       c.dialer.In(scope, "").DialContext,
 		TLSClientConfig:   c.tlsConfig("", m.WebSocket.SkipTLSVerify),
 		TLSNextProto:      map[string]func(string, *tls.Conn) http.RoundTripper{}, // no HTTP/2
 		DisableKeepAlives: true,

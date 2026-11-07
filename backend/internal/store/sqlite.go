@@ -492,7 +492,10 @@ func (s *SQLite) scanMonitor(row rowScanner) (Monitor, error) {
 }
 
 // settings is the stored form of a monitor's check options: only the part
-// that belongs to its type is present.
+// that belongs to its type is present. The record of the target scope rides
+// along (Monitor.Scope), absent where there is none: a version that does
+// not know it reads the rest as before and, saving the monitor, leaves it
+// out, so the monitor falls back to the rule for monitors without one.
 type settings struct {
 	HTTP      *HTTPOptions      `json:"http,omitempty"`
 	TCP       *TCPOptions       `json:"tcp,omitempty"`
@@ -501,6 +504,7 @@ type settings struct {
 	WebSocket *WebSocketOptions `json:"websocket,omitempty"`
 	Database  *DatabaseOptions  `json:"database,omitempty"`
 	Workload  *WorkloadOptions  `json:"workload,omitempty"`
+	Scope     *TargetScope      `json:"scope,omitempty"`
 }
 
 // normalize fills in the defaults of the monitor's check options and clears
@@ -548,7 +552,7 @@ func normalize(m *Monitor) {
 
 // encodeSettings returns the stored form of a normalized monitor's options.
 func encodeSettings(m Monitor) (string, error) {
-	var st settings
+	st := settings{Scope: m.Scope}
 	switch m.Type {
 	case MonitorHTTP:
 		st.HTTP = &m.HTTP
@@ -612,6 +616,7 @@ func decodeSettings(text string, m *Monitor) error {
 	if err := json.Unmarshal([]byte(text), &st); err != nil {
 		return fmt.Errorf("decode settings: %w", err)
 	}
+	m.Scope = st.Scope
 	normalize(m)
 	return nil
 }

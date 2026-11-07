@@ -100,8 +100,8 @@ type Resolver interface {
 // private address is inside the cluster, as before.
 //
 // This is the one place the rule is kept, for every scope check to ask, at
-// create and edit (api.targetInScope) or wherever else a connection is held
-// to the scope, so that two checks never classify one address apart: an
+// create and edit (ScopeRules.Refuses) and for every connection of a check
+// held to the scope (Scope), so that two checks never classify one address apart: an
 // address is inside the cluster for the scope when InClusterAddr says so and
 // none of the ranges holds it (ExternalRanges.InClusterAddr). Only addresses
 // are read this way — a host written as an address, and the addresses a name
@@ -277,7 +277,7 @@ func ResolvesInCluster(ctx context.Context, r Resolver, host string) (bool, erro
 // tells where a name lands only for a connection the backend makes itself:
 // a request handed to a proxy outside the cluster is resolved there, so the
 // scope check may let it through behind UPTIME_TARGET_SCOPE_TRUST_PROXY
-// (api.targetInScope, ADR-0003 c). Every other failure stays unsafe.
+// (ScopeRules, ADR-0003 c). Every other failure stays unsafe.
 func NotFound(err error) bool {
 	var dnsErr *net.DNSError
 	return errors.As(err, &dnsErr) && dnsErr.IsNotFound && !dnsErr.IsTimeout
