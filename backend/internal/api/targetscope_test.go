@@ -391,17 +391,27 @@ func TestScopeDenialAuditedAndCounted(t *testing.T) {
 		t.Errorf("deny summaries missing a reason: target=%v namespace=%v (%v)", sawTargetSummary, sawNamespaceSummary, denials)
 	}
 
-	// The counter rose once per reason: two targets, one namespace.
+	// The counter rose once per reason, each a user's: two targets, one
+	// namespace.
 	got, err := meter.Gather()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["kubeat_target_scope_denied_total{reason=target}"] != 2 {
-		t.Errorf("reason=target = %v, want 2", got["kubeat_target_scope_denied_total{reason=target}"])
+	if n := got[scopeDeniedKey(metrics.ScopeDeniedTarget)]; n != 2 {
+		t.Errorf("reason=target = %v, want 2", n)
 	}
-	if got["kubeat_target_scope_denied_total{reason=namespace}"] != 1 {
-		t.Errorf("reason=namespace = %v, want 1", got["kubeat_target_scope_denied_total{reason=namespace}"])
+	if n := got[scopeDeniedKey(metrics.ScopeDeniedNamespace)]; n != 1 {
+		t.Errorf("reason=namespace = %v, want 1", n)
 	}
+	if n := got[scopeDeniedKey(metrics.ScopeDeniedResolveError)]; n != 0 {
+		t.Errorf("reason=resolve_error = %v, want 0", n)
+	}
+}
+
+// scopeDeniedKey is the Gather key of kubeat_target_scope_denied_total's
+// series of reason: the API's refusals are all a user's.
+func scopeDeniedKey(reason string) string {
+	return "kubeat_target_scope_denied_total{reason=" + reason + "}{source=" + metrics.ScopeSourceUser + "}"
 }
 
 // An administrator and a single-tenant install never raise a scope denial:
@@ -423,12 +433,10 @@ func TestScopeDenialNotRaisedForAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["kubeat_target_scope_denied_total{reason=target}"] != 0 || got["kubeat_target_scope_denied_total{reason=namespace}"] != 0 {
-		t.Errorf("administrator raised the scope-denial counter: %v",
-			map[string]float64{
-				"target":    got["kubeat_target_scope_denied_total{reason=target}"],
-				"namespace": got["kubeat_target_scope_denied_total{reason=namespace}"],
-			})
+	for key, n := range got {
+		if strings.HasPrefix(key, "kubeat_target_scope_denied_total") && n != 0 {
+			t.Errorf("administrator raised the scope-denial counter: %s = %v", key, n)
+		}
 	}
 }
 
@@ -584,8 +592,10 @@ func TestScopeTrustProxyAcceptsProxiedNXDOMAIN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := got["kubeat_target_scope_denied_total{reason=target}"]; n != 0 {
-		t.Errorf("reason=target = %v, want 0", n)
+	for _, reason := range []string{metrics.ScopeDeniedTarget, metrics.ScopeDeniedResolveError} {
+		if n := got[scopeDeniedKey(reason)]; n != 0 {
+			t.Errorf("reason=%s = %v, want 0", reason, n)
+		}
 	}
 }
 
@@ -1067,12 +1077,17 @@ func TestScopeExternalCIDRs(t *testing.T) {
 			if rows := auditDenials(t, db); len(rows) != denials {
 				t.Errorf("deny rows = %d, want %d", len(rows), denials)
 			}
+			// The name that does not resolve is a fault of the resolver for
+			// the operator; every other refusal an attempt.
 			got, err := meter.Gather()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if n := got["kubeat_target_scope_denied_total{reason=target}"]; n != float64(denials) {
-				t.Errorf("reason=target = %v, want %d", n, denials)
+			if n := got[scopeDeniedKey(metrics.ScopeDeniedTarget)]; n != float64(denials-1) {
+				t.Errorf("reason=target = %v, want %d", n, denials-1)
+			}
+			if n := got[scopeDeniedKey(metrics.ScopeDeniedResolveError)]; n != 1 {
+				t.Errorf("reason=resolve_error = %v, want 1", n)
 			}
 			// An administrator reaches every one of them, as before.
 			if code := do(t, "POST", base+"/api/v1/monitors", monitorJSON("admin", "http", "https://api.payments/", `"namespace":"shop"`), nil); code != http.StatusCreated {

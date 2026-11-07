@@ -172,8 +172,13 @@ func TestScopeRecordEndpointsAreHeldWhenSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := got["kubeat_target_scope_denied_total{reason=target}"]; n != float64(len(refused)) {
-		t.Errorf("reason=target = %v, want %d", n, len(refused))
+	// gone.example.com does not resolve: a fault of the resolver, not an
+	// attempt, for the operator.
+	if n := got["kubeat_target_scope_denied_total{reason=target}{source=user}"]; n != float64(len(refused)-1) {
+		t.Errorf("reason=target = %v, want %d", n, len(refused)-1)
+	}
+	if n := got["kubeat_target_scope_denied_total{reason=resolve_error}{source=user}"]; n != 1 {
+		t.Errorf("reason=resolve_error = %v, want 1", n)
 	}
 
 	// In scope: one's own namespace's Service, a public resolver.

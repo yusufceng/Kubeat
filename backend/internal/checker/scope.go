@@ -26,17 +26,22 @@ import (
 
 // ScopeOptions configures how the checks are held to their monitors' scopes.
 type ScopeOptions struct {
-	// Rules are the operator's parts of the rule: the company ranges, the
-	// resolver's bound and the proxy exception, as the API has them.
+	// Rules are the operator's parts of the rule: the company ranges and the
+	// proxy exception, as the API has them. The resolver's bound is left
+	// zero: a lookup of a check is bounded by the check's context, the
+	// monitor's own timeout, not by the API's.
 	Rules netguard.ScopeRules
 	// Refused, if set, is told of every check the scope refused a
-	// connection of, with the first host it refused. first is set for the
-	// first refusal of the monitor's present settings since the checker
-	// started, which is the one to write down: a monitor refused check
-	// after check is one finding, and its row is written once, not every
-	// check; a change of where it connects, a pause or a restart makes the
-	// next refusal a first one again.
-	Refused func(m store.Monitor, host string, first bool)
+	// connection of, with the first host it refused and why: a host that
+	// leads outside the scope (netguard.RefusedOutside), or a name the
+	// resolver could not answer for (netguard.RefusedUnresolved). first is
+	// set for the first refusal for that reason under the monitor's present
+	// settings since the checker started, which is the one to write down: a
+	// monitor refused check after check is one finding, and its row is
+	// written once, not every check; a change of where it connects, a pause
+	// or a restart makes the next refusal a first one again. A check whose
+	// context ended, by its timeout or a shutdown, is not told of.
+	Refused func(m store.Monitor, host string, why netguard.Refusal, first bool)
 }
 
 // ScopeActor is who the audit entries of the checks' refusals name: the
@@ -58,11 +63,18 @@ func (scopeRefusal) Error() string { return scopeRefusalText }
 func (scopeRefusal) Unwrap() error { return netguard.ErrScope }
 
 // ScopeAuditSummary is the audit entry of a check the scope refused, in the
-// language of the audit log's fixed texts ("tr" or English): the monitor and
-// the host refused.
-func ScopeAuditSummary(language, monitor, host string) string {
-	if language == "tr" {
+// language of the audit log's fixed texts ("tr" or English): the monitor,
+// the host refused and why, a host outside the namespaces or a name that did
+// not resolve.
+func ScopeAuditSummary(language, monitor, host string, why netguard.Refusal) string {
+	unresolved := why == netguard.RefusedUnresolved
+	switch {
+	case language == "tr" && unresolved:
+		return fmt.Sprintf("%s monitor'ü: kontrolünün %s bağlantısı reddedildi, ad çözülemediği için monitor'ü kuranın namespace'lerinde kaldığı gösterilemedi", monitor, host)
+	case language == "tr":
 		return fmt.Sprintf("%s monitor'ü: kontrolünün %s bağlantısı reddedildi, monitor'ü kuranın namespace'lerinin dışında", monitor, host)
+	case unresolved:
+		return fmt.Sprintf("monitor %s: its check was refused a connection to %s, a name that did not resolve, so it could not be shown to stay within the namespaces of whoever set it up", monitor, host)
 	}
 	return fmt.Sprintf("monitor %s: its check was refused a connection to %s, outside the namespaces of whoever set it up", monitor, host)
 }
@@ -150,17 +162,23 @@ func spelledOut(s *netguard.Scope, m store.Monitor) bool {
 }
 
 // refusedByScope is the outcome of a check of m the scope refused a
-// connection of, host the first one: its error says only that, and its
-// diagnostics only what it means, without the address or the phases of the
-// connection refused. The connections the check made before stay its hops.
-func (c *Checker) refusedByScope(m store.Monitor, out outcome, host string) outcome {
+// connection of, host the first one and why the reason: its error says only
+// that, and its diagnostics only what it means, without the address, the
+// reason or the phases of the connection refused. The connections the check
+// made before stay its hops.
+func (c *Checker) refusedByScope(m store.Monitor, out outcome, host string, why netguard.Refusal) outcome {
 	key := scopeSettings(m)
 	c.mu.Lock()
-	first := c.reported[m.ID] != key
-	c.reported[m.ID] = key
+	reported := c.reported[m.ID]
+	if reported == nil {
+		reported = make(map[netguard.Refusal]string)
+		c.reported[m.ID] = reported
+	}
+	first := reported[why] != key
+	reported[why] = key
 	c.mu.Unlock()
 	if c.opts.Scope.Refused != nil {
-		c.opts.Scope.Refused(m, host, first)
+		c.opts.Scope.Refused(m, host, why, first)
 	}
 	return outcome{
 		err:  errScopeRefusal,

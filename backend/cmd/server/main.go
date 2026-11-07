@@ -241,10 +241,13 @@ func main() {
 		RolloutGrace:       cfg.WorkloadRolloutGrace,
 		Guard:              guard,
 		// The same rules the API holds a scoped user's targets to, for
-		// every connection of their monitors' checks.
+		// every connection of their monitors' checks; a lookup of theirs is
+		// bounded by the monitor's own timeout, not by the API's
+		// UPTIME_TARGET_RESOLVE_TIMEOUT, so that a slow resolver does not
+		// fail a check before its timeout does.
 		Scope: checker.ScopeOptions{
 			Rules: netguard.ScopeRules{
-				External: scopeExternal, ResolveTimeout: cfg.TargetResolveTimeout, TrustProxy: cfg.TargetScopeTrustProxy,
+				External: scopeExternal, TrustProxy: cfg.TargetScopeTrustProxy,
 			},
 			Refused: scopeRefused(db, meter, cfg.Language, logger),
 		},
@@ -792,22 +795,29 @@ func recordTargetScopes(ctx context.Context, db *store.SQLite, cfg config.Config
 }
 
 // scopeRefused records the checks a monitor's target scope refused a
-// connection of: every one in kubeat_target_scope_denied_total
-// {reason="connection"}, and the first under each of a monitor's settings in
-// the log and the audit log, beside the writes the API refused, so that a
-// monitor which starts to reach outside its namespaces leaves one row, not
-// one a check.
-func scopeRefused(db *store.SQLite, meter *metrics.Metrics, language string, logger *slog.Logger) func(store.Monitor, string, bool) {
-	return func(m store.Monitor, host string, first bool) {
-		meter.TargetScopeDenied(metrics.ScopeDeniedConnection)
+// connection of: every one in kubeat_target_scope_denied_total, by reason —
+// "connection" for a host outside the scope, "resolve_error" for a name the
+// resolver could not answer for — and by whose record holds the monitor
+// (metrics.ScopeSource); and the first for each reason under a monitor's
+// settings in the log and the audit log, beside the writes the API refused,
+// so that a monitor which starts to reach outside its namespaces leaves one
+// row, not one a check, and a fault of the cluster's DNS reads as one.
+func scopeRefused(db *store.SQLite, meter *metrics.Metrics, language string, logger *slog.Logger) func(store.Monitor, string, netguard.Refusal, bool) {
+	return func(m store.Monitor, host string, why netguard.Refusal, first bool) {
+		reason := metrics.ScopeDeniedConnection
+		message := "a check was refused a connection outside its monitor's target scope; the monitor is down while it is"
+		if why == netguard.RefusedUnresolved {
+			reason = metrics.ScopeDeniedResolveError
+			message = "a check was refused a connection to a name that did not resolve, as the target scope refuses a name it cannot place; the monitor is down while it is, more often for a fault of the cluster's DNS than for an attempt"
+		}
+		meter.TargetScopeDenied(reason, metrics.ScopeSource(m))
 		if !first {
 			return
 		}
-		logger.Warn("a check was refused a connection outside its monitor's target scope; the monitor is down while it is",
-			"monitor_id", m.ID, "monitor", m.Name, "host", host)
+		logger.Warn(message, "monitor_id", m.ID, "monitor", m.Name, "host", host, "reason", reason)
 		err := db.AppendAudit(context.Background(), store.AuditEntry{
 			At: time.Now().UTC(), Username: checker.ScopeActor, Action: "deny", ObjectType: "target-scope", ObjectID: m.ID,
-			Summary: checker.ScopeAuditSummary(language, m.Name, host),
+			Summary: checker.ScopeAuditSummary(language, m.Name, host, why),
 		})
 		if err != nil {
 			logger.Error("audit entry lost", "action", "deny", "object", "target-scope", "error", err)

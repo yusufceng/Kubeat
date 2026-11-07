@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -25,8 +26,12 @@ const codeTargetScope = "target_scope"
 
 // scopeRefusal is why a target is outside the caller's scope. It carries no
 // code of its own: every scope refusal uses codeTargetScope, written by the
-// handler beside the body's message.
-type scopeRefusal struct{ msg string }
+// handler beside the body's message. unresolved is for the operator's
+// counter and audit entry alone (targetDenial): the body is the same.
+type scopeRefusal struct {
+	msg        string
+	unresolved bool
+}
 
 func (e *scopeRefusal) Error() string { return e.msg }
 
@@ -67,15 +72,34 @@ const scopeRefused = "the target is outside your namespaces: a monitor's check o
 // external-looking name is resolved, so single-tenant installs and
 // administrators never pay a lookup. A refusal carries the single generic
 // scopeRefused message, so the body does not become an internal-address
-// oracle.
+// oracle; whether the resolver could not answer for the name is kept for the
+// counter and the audit entry (targetDenial).
 func (h *handler) targetInScope(ctx context.Context, p auth.Principal, host string, request *url.URL) error {
 	if p.SeesAll() || host == "" {
 		return nil
 	}
-	if h.scopeRules().Refuses(ctx, p.CanRead, host, request) {
-		return &scopeRefusal{scopeRefused}
+	switch h.scopeRules().Judge(ctx, p.CanRead, host, request) {
+	case netguard.RefusedOutside:
+		return &scopeRefusal{msg: scopeRefused}
+	case netguard.RefusedUnresolved:
+		return &scopeRefusal{msg: scopeRefused, unresolved: true}
 	}
 	return nil
+}
+
+// targetDenial is the reason a refusal of targetInScope is counted and
+// written down under: metrics.ScopeDeniedResolveError for a name the
+// resolver could not answer for (a SERVFAIL, an NXDOMAIN outside the proxy
+// exception, a timeout, a request its client gave up on), so that a fault of
+// the cluster's DNS is told from an attempt at another team;
+// metrics.ScopeDeniedTarget for a host that leads outside the caller's
+// namespaces by its name or where it resolves.
+func targetDenial(err error) string {
+	var refusal *scopeRefusal
+	if errors.As(err, &refusal) && refusal.unresolved {
+		return metrics.ScopeDeniedResolveError
+	}
+	return metrics.ScopeDeniedTarget
 }
 
 // scopeRules are the operator's parts of the scope check, from the options.
@@ -180,29 +204,43 @@ func channelTargetHost(typ store.ChannelType, target string) string {
 // the caller aimed at, outside their scope; the action and object
 // ("deny"/"target-scope") carry the rest.
 const (
-	scopeDeniedTargetText    = "target %s is outside your namespaces"
-	scopeDeniedNamespaceText = "namespace %s is outside the namespaces you may edit"
+	scopeDeniedTargetText     = "target %s is outside your namespaces"
+	scopeDeniedNamespaceText  = "namespace %s is outside the namespaces you may edit"
+	scopeDeniedUnresolvedText = "target %s did not resolve, so it could not be shown to be outside the cluster"
 )
 
 // auditScopeDenied records a cross-tenant write a scoped caller was refused —
 // a monitor or a channel aimed at a target host outside their namespaces
-// (metrics.ScopeDeniedTarget), or created or edited in a namespace they may
-// not change (metrics.ScopeDeniedNamespace). It writes an audit entry, beside
+// (metrics.ScopeDeniedTarget) or at a name the resolver could not answer for
+// (metrics.ScopeDeniedResolveError; targetDenial tells the two apart), or
+// created or edited in a namespace they may not change
+// (metrics.ScopeDeniedNamespace). It writes an audit entry, beside
 // login_failed, so a SOC sees the attempt over the 90-day window — before, a
 // refusal left only a 403 and no trace — and counts it in
-// kubeat_target_scope_denied_total for alerting. detail names the target or
-// the namespace for the log; a target is written as the scope check read it
-// (scopeHost), without its trailing dots, so one host is one spelling in the
-// log however it was written. The client still gets the very same 403 with the
-// same generic body: the response is written by the caller and left untouched,
-// so neither the log nor the metric tells a client anything new.
+// kubeat_target_scope_denied_total for alerting, as a user's
+// (metrics.ScopeSourceUser). detail names the target or the namespace for
+// the log; a target is written as the scope check read it (scopeHost),
+// without its trailing dots, so one host is one spelling in the log however
+// it was written. A lookup the client gave up on (a closed page, the
+// frontend's own timeout) is counted and not written down: it ended with the
+// request, not because of where the name leads. The client still gets the
+// very same 403 with the same generic body: the response is written by the
+// caller and left untouched, so neither the log nor the metric tells a
+// client anything new.
 func (h *handler) auditScopeDenied(r *http.Request, reason, detail string) {
+	h.opts.Meter.TargetScopeDenied(reason, metrics.ScopeSourceUser)
 	phrase := scopeDeniedTargetText
-	if reason == metrics.ScopeDeniedNamespace {
-		phrase = scopeDeniedNamespaceText
-	} else if host := scopeHost(detail); host != "" {
+	switch {
+	case reason == metrics.ScopeDeniedNamespace:
+		h.audit(r, "deny", "target-scope", 0, fmt.Sprintf(h.auditText(scopeDeniedNamespaceText), detail))
+		return
+	case reason == metrics.ScopeDeniedResolveError && r.Context().Err() != nil:
+		return
+	case reason == metrics.ScopeDeniedResolveError:
+		phrase = scopeDeniedUnresolvedText
+	}
+	if host := scopeHost(detail); host != "" {
 		detail = host
 	}
 	h.audit(r, "deny", "target-scope", 0, fmt.Sprintf(h.auditText(phrase), detail))
-	h.opts.Meter.TargetScopeDenied(reason)
 }

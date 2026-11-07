@@ -32,17 +32,20 @@ var ErrScope = errors.New("outside the target scope")
 
 // ScopeRules are the operator's parts of the scope check: the company ranges
 // that count as outside the cluster (UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS),
-// the resolver and its bound (UPTIME_TARGET_RESOLVE_TIMEOUT), and the proxy
-// exception (UPTIME_TARGET_SCOPE_TRUST_PROXY). The zero value holds no
-// company range, resolves with net.DefaultResolver without a bound of its
-// own and makes no exception.
+// the resolver and its bound, and the proxy exception
+// (UPTIME_TARGET_SCOPE_TRUST_PROXY). The zero value holds no company range,
+// resolves with net.DefaultResolver without a bound of its own and makes no
+// exception.
 type ScopeRules struct {
 	External ExternalRanges
 	// Resolver looks external-looking names up; nil is net.DefaultResolver,
 	// the pod's own resolver with its search domains (ndots), which is what
 	// a check would dial through.
 	Resolver Resolver
-	// ResolveTimeout bounds that lookup; zero leaves it to the context.
+	// ResolveTimeout bounds that lookup; zero leaves it to the context. The
+	// API's check of a target sets it (UPTIME_TARGET_RESOLVE_TIMEOUT); the
+	// checks leave it zero, so that a lookup of theirs is bounded by the
+	// monitor's own timeout alone (0.52).
 	ResolveTimeout time.Duration
 	// TrustProxy lets an external-looking name that does not exist here
 	// (NXDOMAIN) through when the request is handed to the proxy, which
@@ -151,18 +154,50 @@ func (r ScopeRules) classify(host string, canRead func(string) bool) (string, ho
 //     HTTPS_PROXY, NO_PROXY), and the host must be written without trailing
 //     dots, since NO_PROXY reads a host as written.
 func (r ScopeRules) Refuses(ctx context.Context, canRead func(string) bool, host string, request *url.URL) bool {
+	return r.Judge(ctx, canRead, host, request) != NotRefused
+}
+
+// A Refusal is what the scope makes of a host: NotRefused, or why it is
+// refused. The reason is the operator's alone, for the counter, the log and
+// the audit entry, so that a fault of the resolver is told from an attempt
+// to reach another team; whoever set the target gets one answer for both
+// (ErrScope, the API's single message), or the answer would tell them where
+// a name leads.
+type Refusal int
+
+const (
+	// NotRefused: the host is in scope.
+	NotRefused Refusal = iota
+	// RefusedOutside: the host leads outside the scope, by its spelling
+	// (another namespace's Service, the API server, a bare cluster address,
+	// a short name, a host no resolver and proxy read alike) or by where it
+	// resolves (a two-label name the search domains turn into a Service, a
+	// public name pointing into the cluster).
+	RefusedOutside
+	// RefusedUnresolved: a host external by its spelling the resolver could
+	// not answer for — a SERVFAIL, an NXDOMAIN outside the proxy exception,
+	// a timeout, a lookup cut short — so it cannot be shown to land outside
+	// the cluster.
+	RefusedUnresolved
+)
+
+// Judge is Refuses with the reason: NotRefused for a host in scope,
+// otherwise why it is refused. A lookup the context ended counts as one the
+// resolver could not answer (RefusedUnresolved); whether that is a refusal
+// worth writing down is for the caller to tell from its context.
+func (r ScopeRules) Judge(ctx context.Context, canRead func(string) bool, host string, request *url.URL) Refusal {
 	name, class := r.classify(host, canRead)
 	switch class {
 	case hostRefused:
-		return true
+		return RefusedOutside
 	case hostInScope:
-		return false
+		return NotRefused
 	}
-	return r.resolvesRefused(ctx, name, request)
+	return r.resolution(ctx, name, request)
 }
 
-// resolvesRefused is Refuses for a name that is external by its spelling.
-func (r ScopeRules) resolvesRefused(ctx context.Context, name string, request *url.URL) bool {
+// resolution is Judge for a name that is external by its spelling.
+func (r ScopeRules) resolution(ctx context.Context, name string, request *url.URL) Refusal {
 	// Bound the resolution so a slow or stuck resolver cannot hold the
 	// caller open.
 	if r.ResolveTimeout > 0 {
@@ -173,13 +208,13 @@ func (r ScopeRules) resolvesRefused(ctx context.Context, name string, request *u
 	inCluster, err := r.External.ResolvesInCluster(ctx, r.Resolver, name)
 	switch {
 	case inCluster:
-		return true
+		return RefusedOutside
 	case err == nil:
-		return false
+		return NotRefused
 	case r.TrustProxy && NotFound(err) && Proxied(r.Proxy, request) && !strings.HasSuffix(request.Hostname(), "."):
-		return false
+		return NotRefused
 	}
-	return true
+	return RefusedUnresolved
 }
 
 // Scope is the target scope one check of a monitor is held to, for every
@@ -204,7 +239,10 @@ func (r ScopeRules) resolvesRefused(ctx context.Context, name string, request *u
 // but those the monitor's settings name, which were judged when they were
 // set — is refused too, as the API refuses such a target: whether it would
 // land in the cluster cannot be told, and a failure of its own would tell a
-// name that does not exist from one that lands there.
+// name that does not exist from one that lands there. That refusal is
+// RefusedUnresolved, every other one RefusedOutside. A lookup the context
+// ended, the check's timeout or a shutdown, is no refusal: the connection
+// fails with the context's error.
 type Scope struct {
 	rules   ScopeRules
 	canRead func(string) bool
@@ -218,9 +256,9 @@ type Scope struct {
 	// would without a scope.
 	named []string
 
-	mu      sync.Mutex
-	refused bool
-	host    string // the first host refused
+	mu   sync.Mutex
+	why  Refusal // why the first host refused was, NotRefused for none
+	host string  // the first host refused
 }
 
 // Connections returns the scope of one check, holding the namespaces canRead
@@ -264,26 +302,27 @@ func (s *Scope) class(host string) (string, hostClass) {
 	return s.rules.classify(host, s.canRead)
 }
 
-// refuse notes that a connection to host was refused and returns the error.
-func (s *Scope) refuse(host string) error {
+// refuse notes that a connection to host was refused, and why, and returns
+// the error.
+func (s *Scope) refuse(host string, why Refusal) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.refused {
-		s.refused, s.host = true, ScopeHost(host)
+	if s.why == NotRefused {
+		s.why, s.host = why, ScopeHost(host)
 	}
 	return ErrScope
 }
 
-// Refused reports whether the scope refused any connection, and the first
-// host it refused, for the operator's log and the audit entry: a nil Scope
-// refused nothing.
-func (s *Scope) Refused() (string, bool) {
+// Refused reports the first host the scope refused a connection to, and
+// why, for the operator's counter, log and audit entry; NotRefused while it
+// refused none. A nil Scope refused nothing.
+func (s *Scope) Refused() (string, Refusal) {
 	if s == nil {
-		return "", false
+		return "", NotRefused
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.host, s.refused
+	return s.host, s.why
 }
 
 // Host reports whether a check may name host at all, as ErrScope or nil: it
@@ -295,7 +334,7 @@ func (s *Scope) Host(host string) error {
 		return nil
 	}
 	if _, class := s.class(host); class == hostRefused {
-		return s.refuse(host)
+		return s.refuse(host, RefusedOutside)
 	}
 	return nil
 }
@@ -311,9 +350,9 @@ func (s *Scope) Addr(host string, addr netip.Addr) error {
 	_, class := s.class(host)
 	switch {
 	case class == hostRefused:
-		return s.refuse(host)
+		return s.refuse(host, RefusedOutside)
 	case class == hostExternal && s.rules.External.InClusterAddr(addr):
-		return s.refuse(host)
+		return s.refuse(host, RefusedOutside)
 	}
 	return nil
 }
@@ -334,10 +373,20 @@ func (s *Scope) Proxy(next func(*http.Request) (*url.URL, error)) func(*http.Req
 			return proxy, err
 		}
 		for _, host := range proxiedHosts(req) {
-			name, class := s.class(host)
-			if class == hostRefused || class == hostExternal && s.rules.resolvesRefused(req.Context(), name, req.URL) {
-				return nil, s.refuse(host)
+			why := RefusedOutside
+			switch name, class := s.class(host); class {
+			case hostInScope:
+				continue
+			case hostExternal:
+				why = s.rules.resolution(req.Context(), name, req.URL)
 			}
+			switch {
+			case why == NotRefused:
+				continue
+			case why == RefusedUnresolved && req.Context().Err() != nil:
+				return nil, req.Context().Err() // cut short, not refused
+			}
+			return nil, s.refuse(host, why)
 		}
 		return proxy, nil
 	}
@@ -391,7 +440,7 @@ func (d *Dialer) dialScoped(ctx context.Context, network, address string) (net.C
 	}
 	switch _, class := d.scope.class(host); class {
 	case hostRefused:
-		return nil, d.scope.refuse(host)
+		return nil, d.scope.refuse(host, RefusedOutside)
 	case hostInScope:
 		return d.checked.DialContext(ctx, network, address)
 	}
@@ -413,16 +462,20 @@ func (d *Dialer) dialScoped(ctx context.Context, network, address string) (net.C
 		}
 		addrPort, err := netip.ParseAddrPort(address)
 		if err != nil {
-			return d.scope.refuse(host)
+			return d.scope.refuse(host, RefusedOutside)
 		}
 		return d.scope.Addr(host, addrPort.Addr())
 	}
 	conn, err := external.DialContext(ctx, network, address)
 	// A name the check was led to that does not resolve is refused, the
-	// monitor's own names left to fail as they would (Scope).
+	// monitor's own names left to fail as they would (Scope); one whose
+	// lookup the context ended is not.
 	var notResolved *net.DNSError
 	if err != nil && errors.As(err, &notResolved) && !d.scope.names(host) {
-		return nil, d.scope.refuse(host)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, d.scope.refuse(host, RefusedUnresolved)
 	}
 	return conn, err
 }

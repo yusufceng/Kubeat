@@ -739,7 +739,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
 	m.Enabled = true
 	if err := h.targetInScope(r.Context(), principal(r), m.Host(), monitorRequestURL(m)); err != nil {
-		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, m.Host())
+		h.auditScopeDenied(r, targetDenial(err), m.Host())
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -748,7 +748,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if host, err := h.endpointsInScope(r.Context(), principal(r), m); err != nil {
-		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, host)
+		h.auditScopeDenied(r, targetDenial(err), host)
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -816,12 +816,12 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.targetInScope(r.Context(), principal(r), m.Host(), monitorRequestURL(m)); err != nil {
-		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, m.Host())
+		h.auditScopeDenied(r, targetDenial(err), m.Host())
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
 	if host, err := h.endpointsInScope(r.Context(), principal(r), m); err != nil {
-		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, host)
+		h.auditScopeDenied(r, targetDenial(err), host)
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -1018,7 +1018,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	if connects {
 		retargeted := merged.monitor(current)
 		if err := h.targetInScope(r.Context(), p, retargeted.Host(), monitorRequestURL(retargeted)); err != nil {
-			h.auditScopeDenied(r, metrics.ScopeDeniedTarget, retargeted.Host())
+			h.auditScopeDenied(r, targetDenial(err), retargeted.Host())
 			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 			return
 		}
@@ -1036,7 +1036,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if connects {
 		if host, err := h.endpointsInScope(r.Context(), p, change); err != nil {
-			h.auditScopeDenied(r, metrics.ScopeDeniedTarget, host)
+			h.auditScopeDenied(r, targetDenial(err), host)
 			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 			return
 		}

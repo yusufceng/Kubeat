@@ -323,10 +323,14 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   işaret eden genel ad backend'de NXDOMAIN alıp vekile gidiyor), bu yüzden node
   IP'lerini, VIP'leri ve kurum aralıklarını vekilin ACL'i kapatmalı;
   minikube provası geçti (sprint 8), gerçek hava boşluklu
-  cluster provası kullanıcıda; (c) denetim ve sayaç çözüm hatasını gerçek cross-tenant reddinden
-  ayırmıyor ve denetim satırlarının sınırı yok (S82, sprint 10,
-  [#142](https://github.com/yusufceng/Kubeat/issues/142),
-  [#143](https://github.com/yusufceng/Kubeat/issues/143)); (d)
+  cluster provası kullanıcıda; (c) 0.52'de sayaç, log ve denetim satırı çözüm hatasını
+  (`reason="resolve_error"`) gerçek cross-tenant reddinden ve kaynağı (`source`: `user`,
+  `annotation`, `unrecorded`) birbirinden ayırıyor, kontrolün iptali ve süre dolması red
+  sayılmıyor, `UPTIME_TARGET_RESOLVE_TIMEOUT` (2 sn) yalnız API'yi sınırlıyor (S82,
+  sprint 10, [#142](https://github.com/yusufceng/Kubeat/issues/142)); denetim
+  satırlarının sınırı yok (S82, sprint 10,
+  [#143](https://github.com/yusufceng/Kubeat/issues/143)); CoreDNS kesintisi
+  provası kullanıcıda (minikube), GKE ve kurumsal DNS ölçülmedi; (d)
   0.51'de kapsam yalnız hedef belirlenirken değil, monitor'ün her bağlantısında
   uygulanıyor (S86, sprint 9, [#131](https://github.com/yusufceng/Kubeat/issues/131);
   ADR-0003 c "Her bağlantıda kapsam"): kayıt monitor'ün ayarlarında (şema 26),
@@ -339,8 +343,7 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   DOWN ve `reason=connection` ile sayılıyor. Kalan: kayıt
   yazıldığı anın görüntüsü, kapsam daralınca var olan monitor'ler eski kapsamla
   çalışıyor (S73, backlog, sprint 11 adayı); kanallar yalnız oluşturma ve
-  değiştirmede denetleniyor (backlog); vekile giden kontrolde çözüm hatası
-  gerçek bir reddinden ayrılmıyor (S82, sprint 10); kaydı olmayan monitor'ün
+  değiştirmede denetleniyor (backlog); kaydı olmayan monitor'ün
   açılış kararı her açılışta yeniden veriliyor, bu yüzden kapsamı daraltan bir
   rol ya da grup değişikliğinden sonraki bir açılışta kayıt genişleyebilir
   (S91, sprint 11 adayı, S73 ile); minikube provası geçti (sprint 9), vekilli

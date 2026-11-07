@@ -197,12 +197,15 @@ type Config struct {
 	TargetAllowCIDRs string // UPTIME_TARGET_ALLOW_CIDRS
 
 	// TargetResolveTimeout bounds the name lookup the per-user scope check
-	// makes when a scoped user aims a monitor or a channel webhook at an
-	// external-looking name (netguard.ScopeRules, ADR-0003 c), and for a
-	// check of their monitor through a proxy. It keeps a slow
-	// or stuck resolver from holding a create or an edit open to
-	// HTTPWriteTimeout; a lookup that does not finish in time is treated as
-	// unresolved, and the scoped user's target is refused on the safe side.
+	// makes in the API, when a scoped user aims a monitor or a channel
+	// webhook at an external-looking name (netguard.ScopeRules, ADR-0003 c).
+	// It keeps a slow or stuck resolver from holding a create or an edit
+	// open to HTTPWriteTimeout; a lookup that does not finish in time is
+	// treated as unresolved, the scoped user's target is refused on the safe
+	// side and counted as resolve_error. The default, 2s, is below the
+	// frontend's BACKEND_TIMEOUT_MS (3s), so the refusal reaches the form
+	// before the frontend gives up. Only the API's: since 0.52 a check's
+	// connections resolve within the monitor's own timeout.
 	TargetResolveTimeout time.Duration // UPTIME_TARGET_RESOLVE_TIMEOUT
 	// TargetScopeTrustProxy lets that scope check accept an external-looking
 	// name the backend's resolver does not know (NXDOMAIN) when the check or
@@ -470,7 +473,7 @@ func Load() (Config, error) {
 		{&cfg.HTTPReadTimeout, "UPTIME_HTTP_READ_TIMEOUT", 30 * time.Second},
 		{&cfg.HTTPWriteTimeout, "UPTIME_HTTP_WRITE_TIMEOUT", 2 * time.Minute},
 		{&cfg.HTTPIdleTimeout, "UPTIME_HTTP_IDLE_TIMEOUT", 2 * time.Minute},
-		{&cfg.TargetResolveTimeout, "UPTIME_TARGET_RESOLVE_TIMEOUT", 5 * time.Second},
+		{&cfg.TargetResolveTimeout, "UPTIME_TARGET_RESOLVE_TIMEOUT", 2 * time.Second},
 		{&cfg.SchedulerTick, "UPTIME_SCHEDULER_TICK", time.Second},
 		{&cfg.MaxJitter, "UPTIME_MAX_JITTER", 5 * time.Second},
 		{&cfg.ResultFlushInterval, "UPTIME_RESULT_FLUSH_INTERVAL", time.Second},

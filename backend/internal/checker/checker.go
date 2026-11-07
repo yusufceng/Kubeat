@@ -94,11 +94,11 @@ type Checker struct {
 
 	// rollouts is when each workload target was first seen rolling out;
 	// reported, the settings (scopeSettings) under which each monitor's
-	// check was last refused by its scope; held, the transport of each
-	// monitor held to a scope (heldTransport).
+	// check was last refused by its scope, for each reason; held, the
+	// transport of each monitor held to a scope (heldTransport).
 	mu       sync.Mutex
 	rollouts map[string]time.Time
-	reported map[int64]string
+	reported map[int64]map[netguard.Refusal]string
 	held     map[int64]heldTransport
 	now      func() time.Time
 }
@@ -130,7 +130,7 @@ func New(opts Options) *Checker {
 		dialer:    dialer,
 		opts:      opts,
 		rollouts:  make(map[string]time.Time),
-		reported:  make(map[int64]string),
+		reported:  make(map[int64]map[netguard.Refusal]string),
 		held:      make(map[int64]heldTransport),
 		now:       time.Now,
 	}
@@ -216,8 +216,15 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	default:
 		out = failedf("unsupported monitor type %q", m.Type)
 	}
-	if host, refused := scope.Refused(); refused {
-		out = c.refusedByScope(m, out, host)
+	if host, why := scope.Refused(); why != netguard.NotRefused {
+		if err := ctx.Err(); err != nil {
+			// Ended by its timeout or a shutdown: no refusal to count or
+			// write down, whatever the scope made of a connection it could
+			// not finish judging. The check failed as one cut short does.
+			out = outcome{err: err, hops: out.hops}
+		} else {
+			out = c.refusedByScope(m, out, host, why)
+		}
 	}
 
 	result.Latency = time.Since(start)
