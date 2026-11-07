@@ -82,6 +82,15 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 		req.Host = site
 	}
 
+	// Every check opens connections of its own, as a new visitor would, and
+	// closes them when it ends, held to a scope or not: its response time
+	// takes in the name lookup, the connection and the TLS handshake, and
+	// the certificate it reports is the one the server presents now, not
+	// that of a connection an earlier check left open. Within the check, a
+	// redirect to a server it already reached goes on the same connection.
+	// What stays open is thus bounded by the checks under way, not by the
+	// monitors there are. c.verifying and c.insecure are the configuration
+	// each check's transport starts from; neither sends a request itself.
 	transport := c.verifying
 	if o.SkipTLSVerify {
 		transport = c.insecure
@@ -89,16 +98,19 @@ func (c *Checker) checkHTTPAt(ctx context.Context, m store.Monitor, addr string)
 	scope := scopeOf(ctx)
 	switch {
 	case addr != "":
-		// A transport of its own, so that the connection pool does not hand
-		// this pod's connection to a check of another.
+		// This pod's address, whatever address the URL leads to.
 		t := transport.Clone()
 		t.DialContext = c.dialTo(ctx, m, addr)
 		t.Proxy = scope.Proxy(t.Proxy)
-		defer t.CloseIdleConnections()
 		transport = t
 	case scope != nil:
 		transport = c.heldTransport(m, transport, o.SkipTLSVerify)
+	default:
+		transport = transport.Clone()
 	}
+	// Deferred before the response body is closed, so that it runs after:
+	// the connection the body leaves idle is closed too.
+	defer transport.CloseIdleConnections()
 	// The monitor's headers, credentials and body are for the server it
 	// checks: the one its URL names, or that one on TLS (store.SameServer),
 	// and the site its Host header names there. A redirect that stays on it

@@ -184,11 +184,12 @@ type heldTransport struct {
 
 // heldTransport returns the transport the HTTP checks of m, held to a scope,
 // send their requests with: m's own, made from base and kept between its
-// checks under the same settings, so that a check reuses the connection the
-// one before it made, as the shared transports let a monitor do, and never a
-// connection made for another monitor, which may be held to another scope or
-// to none. A connection it makes, and every request it hands to a proxy, is
-// held to the scope of the check under way (scopeOf).
+// checks under the same settings, so that a check never gets a connection
+// made for another monitor, which may be held to another scope or to none.
+// It keeps no connection between the checks either: each closes the ones it
+// opened when it ends (checkHTTPAt), so that a check of m opens its own as
+// every check does. A connection it makes, and every request it hands to a
+// proxy, is held to the scope of the check under way (scopeOf).
 func (c *Checker) heldTransport(m store.Monitor, base *http.Transport, skipVerify bool) *http.Transport {
 	key := fmt.Sprintf("%t\x00%s", skipVerify, scopeSettings(m))
 	c.mu.Lock()
