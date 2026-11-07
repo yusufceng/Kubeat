@@ -79,13 +79,22 @@ func (s *slots) acquire(ctx context.Context) (release func(), ok bool) {
 	return nil, false
 }
 
-// auditCap caps the failed sign-ins written to the audit log at perMinute
-// a minute. Each made-up name fails for the first time, so without a cap
-// a flood of them would write a row each: enough to fill the volume, and
-// to push every other entry out of the log's view. What the cap leaves out
-// is counted, and the count logged as a warning once the minute is over.
-type auditCap struct {
+// failedSignInsDropped is the warning that a minute left failed sign-ins
+// out of the audit log (AuditCap).
+const failedSignInsDropped = "failed sign-ins left out of the audit log: more than UPTIME_LOGIN_AUDIT_PER_MINUTE in a minute"
+
+// AuditCap caps the rows of one kind written to the audit log at perMinute
+// a minute: the failed sign-ins of names without an account here, the
+// target-scope refusals of requests, and those of checks, each kind under
+// a cap of its own, so that a flood of one does not crowd out another.
+// Each made-up name fails for the first time, and a script can be refused
+// as often as it asks, so without a cap a flood would write a row each:
+// enough to fill the volume, and to push every other entry out of the log's
+// view. What the cap leaves out is counted, and the count logged as a
+// warning (report) once the minute is over.
+type AuditCap struct {
 	perMinute int
+	report    string
 	logger    *slog.Logger
 	// later runs f after d: time.AfterFunc, but replaceable in tests.
 	later func(d time.Duration, f func())
@@ -96,15 +105,15 @@ type auditCap struct {
 	dropped int
 }
 
-// newAuditCap returns a cap of perMinute rows a minute; zero or less means
-// no cap.
-func newAuditCap(perMinute int, logger *slog.Logger) *auditCap {
-	return &auditCap{perMinute: perMinute, logger: logger, later: func(d time.Duration, f func()) { time.AfterFunc(d, f) }}
+// NewAuditCap returns a cap of perMinute rows a minute; zero or less means
+// no cap. report is the warning that says a minute left rows out; it is
+// logged with how many, the minute and the limit.
+func NewAuditCap(perMinute int, report string, logger *slog.Logger) *AuditCap {
+	return &AuditCap{perMinute: perMinute, report: report, logger: logger, later: func(d time.Duration, f func()) { time.AfterFunc(d, f) }}
 }
 
-// allow reports whether a failed sign-in at now may be written to the
-// audit log.
-func (c *auditCap) allow(now time.Time) bool {
+// Allow reports whether a row at now may be written to the audit log.
+func (c *AuditCap) Allow(now time.Time) bool {
 	if c.perMinute <= 0 {
 		return true
 	}
@@ -112,7 +121,7 @@ func (c *auditCap) allow(now time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !minute.Equal(c.minute) {
-		c.report()
+		c.reportDropped()
 		c.minute, c.written = minute, 0
 	}
 	if c.written < c.perMinute {
@@ -125,7 +134,7 @@ func (c *auditCap) allow(now time.Time) bool {
 			c.mu.Lock()
 			defer c.mu.Unlock()
 			if c.minute.Equal(minute) {
-				c.report()
+				c.reportDropped()
 			}
 		})
 	}
@@ -133,13 +142,12 @@ func (c *auditCap) allow(now time.Time) bool {
 	return false
 }
 
-// report logs how many failed sign-ins the current minute left out of the
+// reportDropped logs how many rows the current minute left out of the
 // audit log, if any; call with mu held.
-func (c *auditCap) report() {
+func (c *AuditCap) reportDropped() {
 	if c.dropped == 0 {
 		return
 	}
-	c.logger.Warn("failed sign-ins left out of the audit log: more than UPTIME_LOGIN_AUDIT_PER_MINUTE in a minute",
-		"dropped", c.dropped, "minute", c.minute, "limit", c.perMinute)
+	c.logger.Warn(c.report, "dropped", c.dropped, "minute", c.minute, "limit", c.perMinute)
 	c.dropped = 0
 }

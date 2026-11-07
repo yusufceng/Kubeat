@@ -345,9 +345,19 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   (`reason="resolve_error"`) gerçek cross-tenant reddinden ve kaynağı (`source`: `user`,
   `annotation`, `unrecorded`) birbirinden ayırıyor, kontrolün iptali ya da süre dolmasıyla
   yarıda kalan çözüm red sayılmıyor (kapsamın reddettiği cluster bağlantısı sayılıyor),
-  `UPTIME_TARGET_RESOLVE_TIMEOUT` (2 sn) yalnız API'yi sınırlıyor (S82,
+  `UPTIME_TARGET_RESOLVE_TIMEOUT` (2 sn) yalnız API'yi sınırlıyor; API birden çok ad
+  sınayan bir isteği ilk reddiyle sayıyor, ilk ad çözülemiyorsa ötekiler sınanmadan
+  `resolve_error` (istek yine reddediliyor; README "Kapsam ihlali denetimi") (S82,
   sprint 10, [#142](https://github.com/yusufceng/Kubeat/issues/142)); denetim
-  satırlarının sınırı yok (S82, sprint 10,
+  satırları ve `WARN`'ları dakika başına `UPTIME_LOGIN_AUDIT_PER_MINUTE` ile
+  sınırlı (API'nin ve kontrollerin redleri ayrı bütçe, sayaç her reddi sayıyor),
+  API reddi de kullanıcı, namespace, neden ve hedefle bir `WARN` yazıyor,
+  keşiften içe aktarma ve geri yükleme, bakım penceresi ve workload hedefi
+  redleri de satır yazıyor; push token, silme, test bildirimi ve olay notu
+  redleri yetki reddi olarak denetlenmiyor (README "Kapsam ihlali denetimi",
+  "Denetlenmeyen red yolları"); kayıtlar SIEM'e kendiliğinden akmıyor (S83'ün
+  kalanı backlog'da); vekilli kurulumun NXDOMAIN ön şartı ayarı açmadan
+  `server resolve` ile sınanıyor (S82, sprint 10,
   [#143](https://github.com/yusufceng/Kubeat/issues/143)); CoreDNS kesintisi
   provası kullanıcıda (minikube), GKE ve kurumsal DNS ölçülmedi; (d)
   0.51'de kapsam yalnız hedef belirlenirken değil, monitor'ün her bağlantısında

@@ -232,14 +232,34 @@ politikası", "Vekilli kurulum") örnekte yorum satırıdır ve kapalı kalır.
 Açıkken namespace'le sınırlı bir editör, yalnız vekilin çözdüğü bir dış ada
 (Slack, Teams ya da bir SaaS'ın durum adresi) HTTP monitor'ü ve kanal
 kurabilir; ama vekilin ulaştığı her adrese de (node IP'leri/NodePort, router,
-API ve LoadBalancer VIP'leri, kurumun özel aralıkları) bir adla ulaşır. Satırı yalnız şu ikisini ağ ekibinden yazılı
-aldıktan sonra açın ve onayı kurulum kaydına yazın:
+API ve LoadBalancer VIP'leri, kurumun özel aralıkları) bir adla ulaşır. Satırı yalnız şu üçü
+tamamken açın ve onayı kurulum kaydına yazın; ilk ikisini ağ ekibinden yazılı
+alın, üçüncüsünü kurulumdan sonra, ayar kapalıyken siz sınayın:
 
 - [ ] Vekil cluster dışında çalışıyor: cluster'ın adlarını çözemez,
   ClusterIP'lere ve pod adreslerine bağlanamaz. Cluster içindeki bir vekille
   ayar kapalı kalır.
 - [ ] Vekilin ACL'i node IP'lerini ve NodePort'ları, router, API ve
   LoadBalancer VIP'lerini ve kurumun özel aralıklarını kapatıyor.
+- [ ] Backend'in çözücüsü editörlerin kuracağı dış adlara NXDOMAIN veriyor
+  (0.52; README "Vekilli kurulum", "Ön sınama"). Kurulumdan sonra her ad için
+  (Slack, Teams ve SaaS durum adresleri; buradaki adlar örnektir):
+
+  ```sh
+  oc -n kubeat exec deploy/kubeat-backend -- server resolve status.saglayici.example hooks.saglayici.example
+  ```
+
+  Komut backend'in kendi binary'siyle, kapsam denetiminin çözdüğü gibi çözer;
+  sunucu başlatmaz, bir şey değiştirmez. Beklenen satır
+  `NXDOMAIN, no such name for this pod's resolver`'dır: ayar bu adları vekile
+  giden HTTP(S) istekte kabul eder. `did not resolve (… server misbehaving)`
+  ya da `no answer within 2s` görürseniz cluster DNS'i dış adlara SERVFAIL ya
+  da zaman aşımı veriyordur: ayar yardım etmez, ad `resolve_error` ile
+  reddedilmeye devam eder. Satırı açmayın; önce cluster DNS'inin bu adlara
+  yanıt vermesini (`dns.operator/default`, `servers`) ya da NXDOMAIN
+  döndürmesini ağ ekibiyle ayarlayın, o zamana kadar bu hedefleri yönetici
+  kurar. `resolves to …, outside the cluster` görülen bir ad için ayar
+  gerekmez.
 
 Ayar kapalıyken ve vekil verilmişken backend açılışta bir `WARN` yazar
 (`HTTP_PROXY/HTTPS_PROXY is set and UPTIME_TARGET_SCOPE_TRUST_PROXY is off`);

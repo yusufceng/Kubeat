@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
@@ -200,8 +201,8 @@ func channelTargetHost(typ store.ChannelType, target string) string {
 }
 
 // Audit summaries for a refused cross-tenant write (S68), localised like the
-// other fixed audit phrases (auditTR). %s is the target host or the namespace
-// the caller aimed at, outside their scope; the action and object
+// other fixed audit phrases (auditTR). %s is the target or the namespace the
+// caller aimed at, outside their scope; the action and object
 // ("deny"/"target-scope") carry the rest.
 const (
 	scopeDeniedTargetText     = "target %s is outside your namespaces"
@@ -209,38 +210,73 @@ const (
 	scopeDeniedUnresolvedText = "target %s did not resolve, so it could not be shown to be outside the cluster"
 )
 
+// scopeDeniedWarnings are the log lines of a refused request, by reason,
+// written beside its deny row: the operator's own, in English like the rest
+// of the log.
+var scopeDeniedWarnings = map[string]string{
+	metrics.ScopeDeniedTarget:       "a request was refused by the target scope: its target leads outside the caller's namespaces",
+	metrics.ScopeDeniedNamespace:    "a request was refused by the target scope: the caller may not edit in that namespace",
+	metrics.ScopeDeniedResolveError: "a request was refused by the target scope: its target did not resolve, more often for a fault of the cluster's DNS than for an attempt",
+}
+
+// ScopeDenialsDropped is the warning that a minute left target-scope
+// refusals of requests out of the audit log and the log (AuditCap).
+const ScopeDenialsDropped = "target-scope refusals of requests left out of the audit log and the log: more than UPTIME_LOGIN_AUDIT_PER_MINUTE in a minute; kubeat_target_scope_denied_total counts every one"
+
 // auditScopeDenied records a cross-tenant write a scoped caller was refused —
-// a monitor or a channel aimed at a target host outside their namespaces
+// a monitor or a channel aimed at a target outside their namespaces
 // (metrics.ScopeDeniedTarget) or at a name the resolver could not answer for
 // (metrics.ScopeDeniedResolveError; targetDenial tells the two apart), or
-// created or edited in a namespace they may not change
-// (metrics.ScopeDeniedNamespace). It writes an audit entry, beside
+// created, edited, imported, restored or held still by a maintenance window
+// in a namespace they may not change (metrics.ScopeDeniedNamespace). It
+// counts it in kubeat_target_scope_denied_total for alerting, as a user's
+// (metrics.ScopeSourceUser), every one; and writes an audit entry, beside
 // login_failed, so a SOC sees the attempt over the 90-day window — before, a
-// refusal left only a 403 and no trace — and counts it in
-// kubeat_target_scope_denied_total for alerting, as a user's
-// (metrics.ScopeSourceUser). detail names the target or the namespace for
-// the log; a target is written as the scope check read it (scopeHost),
-// without its trailing dots, so one host is one spelling in the log however
-// it was written. A lookup the client gave up on (a closed page, the
-// frontend's own timeout) is counted and not written down: it ended with the
-// request, not because of where the name leads. The client still gets the
-// very same 403 with the same generic body: the response is written by the
-// caller and left untouched, so neither the log nor the metric tells a
+// refusal left only a 403 and no trace — and after it a WARN line naming
+// the user, the namespace, the reason and the target, for a central log.
+//
+// namespace is the one the caller aimed at for a namespace refusal, else
+// the one the monitor or the channel is in; host is the target refused, ""
+// for a namespace refusal. A target is written as the scope check read it
+// (scopeHost), without its trailing dots, so one host is one spelling in the
+// log however it was written. A lookup the client gave up on (a closed page,
+// the frontend's own timeout) is counted and not written down: it ended
+// with the request, not because of where the name leads. No more than
+// LoginAuditPerMinute rows and lines a minute are written (scopeDenials);
+// the minute's warning says how many were left out. The client still gets
+// the very same 403 with the same generic body: the response is written by
+// the caller and left untouched, so neither the log nor the metric tells a
 // client anything new.
-func (h *handler) auditScopeDenied(r *http.Request, reason, detail string) {
+func (h *handler) auditScopeDenied(r *http.Request, reason, namespace, host string) {
 	h.opts.Meter.TargetScopeDenied(reason, metrics.ScopeSourceUser)
-	phrase := scopeDeniedTargetText
-	switch {
-	case reason == metrics.ScopeDeniedNamespace:
-		h.audit(r, "deny", "target-scope", 0, fmt.Sprintf(h.auditText(scopeDeniedNamespaceText), detail))
+	if reason == metrics.ScopeDeniedResolveError && r.Context().Err() != nil {
 		return
-	case reason == metrics.ScopeDeniedResolveError && r.Context().Err() != nil:
+	}
+	if read := scopeHost(host); read != "" {
+		host = read
+	}
+	var summary string
+	switch reason {
+	case metrics.ScopeDeniedNamespace:
+		summary = fmt.Sprintf(h.auditText(scopeDeniedNamespaceText), namespace)
+	case metrics.ScopeDeniedResolveError:
+		summary = fmt.Sprintf(h.auditText(scopeDeniedUnresolvedText), host)
+	default:
+		summary = fmt.Sprintf(h.auditText(scopeDeniedTargetText), host)
+	}
+	if !h.scopeDenials.Allow(h.now()) {
 		return
-	case reason == metrics.ScopeDeniedResolveError:
-		phrase = scopeDeniedUnresolvedText
 	}
-	if host := scopeHost(detail); host != "" {
-		detail = host
+	h.audit(r, "deny", "target-scope", 0, summary)
+	h.opts.Logger.Warn(scopeDeniedWarnings[reason], "user", principal(r).Username, "namespace", namespace, "reason", reason, "host", host)
+}
+
+// namespacesOf is the namespaces of a channel or a maintenance window as an
+// audit entry and its log line name them: comma-separated, and
+// store.AllNamespaces for one that covers every namespace.
+func namespacesOf(namespaces ...string) string {
+	if len(namespaces) == 0 {
+		return store.AllNamespaces
 	}
-	h.audit(r, "deny", "target-scope", 0, fmt.Sprintf(h.auditText(phrase), detail))
+	return strings.Join(namespaces, ", ")
 }

@@ -62,7 +62,9 @@ type Config struct {
 	// LoginAuditPerMinute caps the failed sign-ins written to the audit
 	// log in a minute, but for the wrong passwords of names with an
 	// account here (local, or a directory or SSO user who signed in
-	// before); what is left out is counted in a warning.
+	// before); what is left out is counted in a warning. Since 0.52 it caps
+	// the target-scope refusals' deny rows and their WARN lines as well,
+	// those of requests and those of checks each under a cap of its own.
 	LoginAuditPerMinute int // UPTIME_LOGIN_AUDIT_PER_MINUTE
 	// LoginAccountMaxFailures is a loose, very high ceiling on a name's
 	// failed sign-ins across all sources within the lockout period, kept so

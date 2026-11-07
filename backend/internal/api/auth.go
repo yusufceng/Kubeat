@@ -778,7 +778,7 @@ func (h *handler) auditRefusal(ctx context.Context, key, username string, e stor
 	if !first && !locks {
 		return
 	}
-	if capped && !h.failedLogins.allow(time.Now()) {
+	if capped && !h.failedLogins.Allow(time.Now()) {
 		return
 	}
 	if locks {

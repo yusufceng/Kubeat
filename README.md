@@ -772,8 +772,8 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       sn sürebilir, arayüz isteği bırakır ve kullanıcı formda 403 yerine zaman
       aşımı görür. Ret yine yapılır ve `resolve_error` ile sayılır.
     - **Kontrol anında.** Kontrolün açtığı her bağlantıdaki çözüm bu ayara bağlı
-      değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de API'nin
-      süresini kullanıyordu). Yavaş yanıt veren bir çözücü kontrolü monitor'ün
+      değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de vekile
+      giden kontrol API'nin süresini kullanıyordu). Yavaş yanıt veren bir çözücü kontrolü monitor'ün
       zaman aşımı dolmadan DOWN yapmaz. Ayrı bir ayar yoktur.
     - **İptal ve süre dolması red değildir.** Kontrolün zaman aşımı ya da
       backend'in kapanışı çözümü yarıda keserse kontrol bu hatayla biter
@@ -867,6 +867,35 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       Vekil cluster içindeyse ayar kapalı kalır ve bu satır bilgi içindir. Ayar
       açık ama vekil verilmemişse de bir `WARN` gelir: ayar hiçbir şeyi
       değiştirmez.
+    - **Ön sınama: backend dış adı nasıl çözüyor (0.52).** Ayar yalnız
+      backend'in çözücüsü dış adlara NXDOMAIN veriyorsa işe yarar. Bunu ayarı
+      açmadan, editörlerin kuracağı adlarla backend pod'undan sınayın:
+
+      ```sh
+      kubectl -n kubeat exec deploy/kubeat-backend -- server resolve status.saglayici.example
+      ```
+
+      OpenShift'te `oc -n kubeat exec ...` aynıdır. Komut backend'in kendi
+      binary'sidir: adı kapsam denetiminin çözdüğü gibi çözer (pod'un çözücüsü
+      ve arama alanları, `UPTIME_TARGET_RESOLVE_TIMEOUT`,
+      `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`), `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi
+      okumaz. Sunucu başlatmaz, hiçbir şeyi değiştirmez. İmajda `dig` ya da
+      `nslookup` yoktur; `getent` ve `curl` NXDOMAIN'i SERVFAIL'den ayırmaz.
+      Her ad için bir satır yazar:
+      - `NXDOMAIN, no such name for this pod's resolver`: ayar bu adı vekile
+        giden HTTP(S) istekte kabul eder; bugün `resolve_error` ile reddedilir.
+      - `did not resolve (… server misbehaving)` ya da `no answer within 2s`:
+        cluster DNS'i dış adlara SERVFAIL ya da zaman aşımıyla yanıt veriyor.
+        Ayar yardım etmez; ad `resolve_error` ile reddedilmeye devam eder.
+        Önce kapsamı açmayan çare: cluster DNS'inin bu bölgeyi yanıtlaması
+        (kurumsal DNS'e iletmesi ya da NXDOMAIN vermesi). O zamana kadar hedefi
+        yönetici kurar.
+      - `resolves to …, outside the cluster`: ad zaten kabul edilir, ayar
+        gerekmez.
+      - `resolves to …, inside the cluster`: ad cluster içine çözülüyor; ayar
+        açılsa da `target` ile reddedilir.
+      - `refused by its spelling` ya da `an address outside the cluster`: ad
+        hiç çözülmez, karar yazılışından verilir (yukarıda "Host'un yazılışı").
     - **Sınırlar.** Ayar yalnız NXDOMAIN'de işe yarar. Cluster DNS'i dış adlara
       SERVFAIL, REFUSED ya da zaman aşımıyla yanıt veriyorsa ad yine reddedilir;
       bu ret 0.52'den beri sayaçta (`reason="resolve_error"`) ve denetim satırında
@@ -887,18 +916,25 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   bağlantıda"); kanal hedefinde adı bu çözümle teslimat arasında değişen bir
   hedef bu kapının dışındadır (DNS rebinding), bunun için deny-CIDR ve çok
   kiracılı kurulumda düzenli bir prova derinlemesine savunma olarak kalır.
-- **Kapsam ihlali denetimi (0.49; kontrol anı 0.51; çözüm hatası ve kaynak
-  0.52).** Kapsamı sınırlı bir kullanıcının kapsam dışı bir hedefe ya da
-  düzenleyemediği bir namespace'e monitor veya kanal kurma/değiştirme girişimi
-  yalnızca reddedilmekle kalmaz, bir denetim kaydı bırakır: `login_failed` gibi,
-  `deny`/`target-scope` eylemiyle ve 90 gün saklanan denetim kaydında görünür
-  (yöneticiye açık; "Hesaplar ve giriş" denetim kaydı). Ayrıca
-  `kubeat_target_scope_denied_total{reason,source}` sayacı artar.
+- **Kapsam ihlali denetimi (0.49; kontrol anı 0.51; çözüm hatası, kaynak,
+  satır sınırı ve log satırı 0.52).** Kapsamı sınırlı bir kullanıcının kapsam
+  dışı bir hedefe ya da düzenleyemediği bir namespace'e monitor veya kanal
+  kurma/değiştirme, keşiften içe aktarma ya da geri yükleme, bakım penceresi
+  kurma ya da silme girişimi yalnızca reddedilmekle kalmaz, bir denetim kaydı
+  bırakır: `login_failed` gibi, `deny`/`target-scope` eylemiyle ve 90 gün
+  saklanan denetim kaydında görünür (yöneticiye açık; "Hesaplar ve giriş"
+  denetim kaydı). Ayrıca `kubeat_target_scope_denied_total{reason,source}`
+  sayacı artar ve backend log'u bir `WARN` yazar.
   - **`reason`: neden.**
     - `target`: hedef kapsam dışı; adından (başka namespace'in Service'i, API
       sunucusu, çıplak cluster adresi, kısa ad) ya da çözüldüğü yerden (iki
-      etiketli `api.odeme`, iç adrese çözülen genel ad).
-    - `namespace`: kullanıcı o namespace'i düzenleyemiyor.
+      etiketli `api.odeme`, iç adrese çözülen genel ad). 0.52'den beri
+      workload monitor'ünün okunamayan bir namespace'teki iş yükü de
+      (`odeme/deployment/api`).
+    - `namespace`: kullanıcı o namespace'i düzenleyemiyor: monitor ya da kanal,
+      0.52'den beri keşiften içe aktarma ve geri yükleme, bakım penceresinin
+      kurulması ve silinmesi. Her namespace'i kapsayan bir kanal ya da pencere
+      satırda `*` diye yazılır.
     - `connection` (0.51): bir monitor'ün kontrolü kapsamın dışına bağlanmak
       istedi ve reddedildi (aşağıda "Her bağlantıda").
     - `resolve_error` (0.52): dış görünen bir ad çözülemediği için reddedildi
@@ -910,10 +946,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       kesintisinde de `target` ya da `connection` sayılır; vekile giden düz
       `http://` istekte `Host` başlığındaki ad da, URL'nin adı çözülemese bile
       (vekile sorulan adların hepsi çözümden önce yazılışlarıyla sınanır).
-      Bilinen sınır: API bir isteği ilk reddiyle sayar. Çözücüsü verilmiş bir
-      DNS monitor'ünde önce hedef ad sınanır; o çözülemezse çözücünün host'u
-      (adından reddedilen başka ekibin DNS Service'i olsa da) sınanmadan ret
-      `resolve_error` sayılır. İstek yine reddedilir.
+      Bilinen sınır: API bir isteği ilk reddiyle sayar. Bir istek birden çok
+      ad sınıyorsa ve ilk ad çözülemiyorsa ret, ötekiler sınanmadan
+      `resolve_error` sayılır. İstek yine reddedilir. Kontrol anında bütün
+      adlar sınanır, cluster'a götüren ad varsa ret `connection` sayılır.
   - **`source`: kimin kapsamı (0.52, kapalı küme).**
     - `user`: API isteği (API'nin bütün redleri) ya da kapsam kaydı bir
       kullanıcının olan monitor'ün kontrolü.
@@ -929,22 +965,63 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     aşımına uğrasa da `connection` sayılır. API'de istemci isteği çözüm
     sürerken bıraktıysa ret yalnız `resolve_error` ile sayılır, denetim satırı
     yazılmaz.
-  - **Denetim satırı ve log.** Satır nedeni de söyler: "… hedefi
-    namespace'lerinizin dışında" ya da "… hedefi çözülemedi". Kontrol anında her
-    reddedilen kontrol sayılır; denetim kaydına ise monitor ve neden başına bir
-    satır yazılır (kullanıcı `checker`, nesne monitor'ün kimliği), monitor'ün
+  - **Denetim satırı.** Satır nedeni de söyler: "… hedefi
+    namespace'lerinizin dışında" ya da "… hedefi çözülemedi". API'de her ret bir
+    satırdır (kullanıcı reddedilen kişidir). Kontrol anında her reddedilen
+    kontrol sayılır; denetim kaydına ise monitor ve neden başına bir satır
+    yazılır (kullanıcı `checker`, nesne monitor'ün kimliği), monitor'ün
     bağlandığı yeri belirleyen ayarları değişince, monitor duraklatılıp yeniden
-    açılınca ya da backend yeniden başlayınca bir satır daha. Satır sayısı
-    böylece monitor'lerin ve ayar değişikliklerinin sayısıyla sınırlıdır.
-    Backend log'u aynı anda bir `WARN` yazar; `reason` alanı `connection` ya da
-    `resolve_error`'dur.
+    açılınca ya da backend yeniden başlayınca bir satır daha.
+  - **Log satırı (0.52).** Her denetim satırından sonra backend log'u bir
+    `WARN` yazar; merkezi logda insanın denemesi annotation ve yükseltme
+    gürültüsünden ayrılır:
+    - API reddi (0.52'de yeni): `user` (reddedilen kullanıcı), `namespace`
+      (namespace reddinde hedeflenen, hedef reddinde monitor'ün ya da kanalın
+      namespace'i), `reason` ve `host` (hedef, kapsamın okuduğu yazılışla;
+      namespace reddinde boş). Örnek:
+      `{"level":"WARN","msg":"a request was refused by the target scope: its target leads outside the caller's namespaces","user":"dev","namespace":"magaza","reason":"target","host":"api.odeme.svc"}`.
+    - Kontrol anı reddi: `monitor_id`, `monitor`, `namespace` (0.52),
+      `source` (0.52), `host` ve `reason` (`connection` ya da
+      `resolve_error`).
+    - Adın çözüldüğü adres ne istemciye ne kontrol sonucuna ne de bu satırlara
+      yazılır; satır host'u yazar.
+  - **Satır sınırı (0.52).** `deny`/`target-scope` satırları ve onların `WARN`
+    satırları dakikada en fazla `UPTIME_LOGIN_AUDIT_PER_MINUTE` (60) yazılır;
+    yeni ayar yoktur. Değer en az 1'dir; `0` ya da negatif değer backend'i
+    `invalid configuration` ile başlatmaz. Bütçeler ayrıdır: API'nin redleri,
+    kontrollerin redleri ve başarısız girişler (`login_failed`) her biri kendi
+    60'ını kullanır. Böylece bir DNS kesintisinde annotation monitor'lerinin
+    ilk redleri insanın API'deki denemesini, bir giriş seli de kapsam redlerini
+    kayıttan itmez.
+    - Sayaç her reddi saymaya devam eder; sınır yalnız satırları ve log
+      satırlarını keser.
+    - Sınır aşılınca dakikanın sonunda bir `WARN` yazılmayan satır sayısını
+      söyler: `target-scope refusals of requests left out of the audit log and the log: …`
+      ya da `target-scope refusals of checks left out …`; alanları `dropped`,
+      `minute` ve `limit`.
+    - Kontrol anında sınıra takılan ilk ret sonradan yazılmaz: o monitor'ün bir
+      sonraki satırı yine ayar değişikliği, duraklatma ya da yeniden başlatmayla
+      gelir. Sayaç (`source`'la) ve dakikanın uyarısı redleri gösterir.
+  - **Denetlenmeyen red yolları (0.52).** Şu 403'ler hedef seçimi değil yetki
+    reddidir: istek monitor'ün okunabilen namespace'indedir (okunamayan
+    namespace'teki monitor ya da olay 404 alır), ret yalnız kullanıcının
+    rolünden gelir (izleyici) ve hiçbiri bir kontrolün ya da teslimatın nereye
+    bağlanacağını belirlemez. Bunlar sayaca, denetim kaydına ve log'a
+    yazılmaz; istemci aynı 403'ü alır:
+    - push token yenileme (`POST /api/v1/monitors/{id}/push-token`);
+    - monitor silme (`DELETE /api/v1/monitors/{id}`);
+    - test bildirimi (`POST /api/v1/monitors/{id}/test-notification`): var olan
+      kanallara gider, hedef seçmez;
+    - olay notu yazma, değiştirme ve silme (`/api/v1/incidents/{id}/notes`).
 
   Anlamlı her seri (API'nin üç nedeni `source="user"` ile, kontrolün iki nedeni
   üç kaynakla) açılışta 0'dan başlar. İstemci yine yalnızca aynı genel 403'ü ya
   da sonuçta aynı genel hatayı görür; denetim kaydı ve metrik `/metrics`
   token'ıyla korunan yüzeyde kalır ve bir enum sızdırmaz. Böylece cross-tenant
   bir erişim girişimi (başka ekibin Service'ine ya da API sunucusuna
-  monitor/kanal) iz bırakır ve SOC'a bağlanabilir. Yönetici ve kapsamı `*` olan
+  monitor/kanal) iz bırakır. Kayıtlar API ve arayüzden, log satırı merkezi
+  logdan okunur; SIEM'e kendiliğinden akmaz (denetim kaydının tamamını
+  stdout'a yazmak backlog'da). Yönetici ve kapsamı `*` olan
   kullanıcı kendi isteğiyle sayaca ya da denetim kaydına düşmez (onlar için red
   oluşmaz); istisnalar annotation'la kurulan monitor'ler (her kurulumda,
   `source="annotation"`) ve kaydı olmayan, kendi namespace'ine bağlanan bir
@@ -2201,6 +2278,8 @@ bırakır. Kubeat'te hesabı olmayan adların (uydurma adlar ve hiç girmemiş
 dizin kullanıcıları) başarısız girişleri ve rolü olmayan dizin
 kullanıcılarının reddi dakikada en fazla `UPTIME_LOGIN_AUDIT_PER_MINUTE`
 (60) girdi yazar; fazlası dakikanın sonunda sayısıyla uyarı olarak loglanır.
+Aynı sınır, kendi bütçesiyle, kapsam reddinin `deny`/`target-scope`
+satırlarına da uygulanır ("Hedef politikası" → "Kapsam ihlali denetimi").
 Hesabı olan bir adın (yerel hesap ya da daha önce girmiş bir dizin veya SSO
 kullanıcısı) yanlış parolası bu sınıra takılmaz: böyle adların sayısı
 bellidir ve her biri bir kilit süresinde en fazla
@@ -5487,7 +5566,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu, kilitli olmayan en fazla kullanıcı adı; doluyken yeni bir ad, en az denenmiş adlardan en uzun süredir denenmeyenin yerini alır, kilitli adlar unutulmaz. Aynı zamanda sürmekte olan (sağlayıcıya gidip henüz dönmemiş) SSO girişlerinin en fazla sayısı; aşılınca en eskileri unutulur |
 | `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan bcrypt karşılaştırması sayısı; `0` CPU sayısının yarısı, en az 1, LDAP açıkken en az 2 (her dizin girişi de bir karşılaştırma harcar). Dizine bağlanmaların ayrı sırası vardır (aynı anda 16) |
 | `UPTIME_LOGIN_QUEUE_WAIT` | `3s` | Bir girişin sırasını (bcrypt ya da dizin) en fazla bekleme süresi; sonra 503 |
-| `UPTIME_LOGIN_AUDIT_PER_MINUTE` | `60` | Kayda bir dakikada yazılan en fazla başarısız giriş (hesabı olan adların, yani yerel hesapların ve daha önce girmiş dizin ya da SSO kullanıcılarının yanlış parolası hariç); fazlası yalnızca uyarı olarak sayılır |
+| `UPTIME_LOGIN_AUDIT_PER_MINUTE` | `60` | Kayda bir dakikada yazılan en fazla başarısız giriş (hesabı olan adların, yani yerel hesapların ve daha önce girmiş dizin ya da SSO kullanıcılarının yanlış parolası hariç); fazlası yalnızca uyarı olarak sayılır. 0.52'den beri aynı sınır, kendi bütçeleriyle, kapsam reddinin `deny`/`target-scope` satırlarına ve onların `WARN` satırlarına da uygulanır: bir bütçe API'nin redleri, bir bütçe kontrollerin redleri; `kubeat_target_scope_denied_total` her reddi sayar (bkz. "Hedef politikası" → "Kapsam ihlali denetimi"). Değer en az 1'dir; `0` ya da negatif değer backend'i `invalid configuration` ile başlatmaz |
 | `UPTIME_PASSWORD_MIN_LENGTH` | `8` | En kısa parola (karakter); en uzunu 72 bayttır |
 | `UPTIME_AUDIT_RETENTION` | `2160h` | Kayıt girdilerinin saklanma süresi (90 gün) |
 | `UPTIME_LDAP_URL` | – | Dizin adresi (`ldap://` ya da `ldaps://`); boşsa LDAP kapalı |
@@ -5540,7 +5619,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_CHECK_SHOW_VALUE` | `true` | JSON kontrolü bulduğu değeri sonuç ve hatada tekrarlar; hedefin yanıtı monitor'ü görenlerin görmemesi gereken veri taşıyabiliyorsa `false` yapın |
 | `UPTIME_TARGET_DENY_CIDRS` | – | Kontrollerin ve bildirimlerin bağlanmayacağı, yerleşik listeye (loopback, link-local, metadata, multicast) eklenen aralıklar; virgülle ayrılmış CIDR. Bkz. "Hedef politikası" |
 | `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
-| `UPTIME_TARGET_RESOLVE_TIMEOUT` | `2s` | Yalnız API'de: kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir ve `reason="resolve_error"` ile sayılır, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun. 0.52'den beri kontrol anındaki çözüm bu ayara bağlı değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de varsayılan 5 sn, kontrol de bunu kullanıyordu). Bkz. "Hedef politikası" → "Zaman aşımı". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
+| `UPTIME_TARGET_RESOLVE_TIMEOUT` | `2s` | Yalnız API'de: kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir ve `reason="resolve_error"` ile sayılır, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun. 0.52'den beri kontrol anındaki çözüm bu ayara bağlı değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de varsayılan 5 sn; vekile giden kontrol de bunu kullanıyordu). Bkz. "Hedef politikası" → "Zaman aşımı". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
 | `UPTIME_TARGET_SCOPE_TRUST_PROXY` | `false` | `true` iken kapsamı sınırlı kullanıcının hedefi backend'in çözücüsünde yalnız NXDOMAIN alıyor ve istek vekile gidiyorsa (`HTTP_PROXY`/`HTTPS_PROXY`, `NO_PROXY` dışında; HTTP, anahtar kelime, JSON, WebSocket monitor'leri ve webhook türü kanallar) reddedilmez. Yalnız vekil cluster dışındaysa açın. Cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine reddedilir. Vekil verilmiş ve ayar kapalıysa açılışta bir `WARN` gelir. Bkz. "Hedef politikası" → "Vekilli kurulum" |
 | `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` | – | Kapsam denetiminin özel olsa da cluster dışı saydığı kurum aralıkları; virgülle ayrılmış CIDR. Bu aralıktaki bir adres (çıplak yazılmış ya da bir addan çözülmüş) kapsamı sınırlı kullanıcı için genel bir adres gibi kabul edilir. Hedef politikası ve yük korumaları bu ayarı okumaz. Cluster'ın pod, Service ve node ağları ile API VIP'i listeye girmez; router VIP'i yalnız on-prem Route'lar için bilerek (node ağındaysa `/32` ile) girer ve o VIP'teki her Route kapsamı sınırlı kullanıcıya açılır. API sunucusunun adresini ya da backend'in kendi adresini içeren aralık ve IPv6 biçiminde yazılmış IPv4 aralığı backend'i başlatmaz. Bkz. "Hedef politikası" → "Kurum ağı" |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |

@@ -293,6 +293,11 @@ README "Kapsam ihlali denetimi"ndeki "SOC'a bağlanabilir" cümlesi de S82'de da
 Kalan kısmın (denetim kaydının tamamını stdout'a yazmak, süzgeçler, CSV, kaynak
 adresi) tetikleyicisi değişmedi: gerçek bir SIEM isteği.
 
+Güncelleme (2026-11-07, S82 [#143](https://github.com/yusufceng/Kubeat/issues/143), 0.52):
+`deny`/`target-scope` dilimi teslim edildi; ADR-0002'ye not yazıldı ("Not: denetim
+satırının log satırı"). README "Kapsam ihlali denetimi" artık "kayıtlar API ve
+arayüzden, log satırı merkezi logdan okunur; SIEM'e kendiliğinden akmaz" diyor.
+
 ## Oturuma boşta kalma süresi `UPTIME_SESSION_IDLE`
 
 2026-10-27'de ertelendi (S5). Kurumsal güvenlik kontrol listesi maddesi
@@ -2190,6 +2195,15 @@ test bildirimi ve olay notu hedef seçimi değil yetki reddi; "denetlenmeyen red
 yolları" listesinde gerekçesiyle yer alır. Madde #143 merge edilince kapanır; kapanış
 notu listenin README'deki yerini (bölüm adı) yazar.
 
+Kapandı (2026-11-07, S82 [#143](https://github.com/yusufceng/Kubeat/issues/143), 0.52):
+`deny`/`target-scope` satırları ve `WARN`'ları dakika başına
+`UPTIME_LOGIN_AUDIT_PER_MINUTE` ile sınırlı (API'nin ve kontrollerin redleri ayrı
+bütçe, sayaç her reddi sayar). Keşiften içe aktarma ve geri yükleme, bakım
+penceresinin kurulması ve silinmesi `namespace`, workload hedefi (oluşturma ve hedef
+değişikliği) `target` ile satır yazar. Denetlenmeyen yolların listesi README "Hedef
+politikası" → "Kapsam ihlali denetimi" → "Denetlenmeyen red yolları"nda: push token
+yenileme, monitor silme, test bildirimi, olay notu.
+
 ## Kapsam çözüm-hatası reddini gerçek cross-tenant reddinden ayırmak (reason/WARN, S77 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2231,11 +2245,48 @@ sprint 10'da S82'nin ilk PR'ıyla karşılanıyor
 API'de ve kontrolün açtığı her bağlantıda; iptal ve süre dolması red sayılmaz; kapalı
 kümeli `source` etiketi (`user`, `annotation`, `unrecorded`).
 `UPTIME_TARGET_RESOLVE_TIMEOUT` yalnız API yolunu sınırlar ve varsayılanı 5 sn'den 2
-sn'ye iner; kontrol anındaki çözüm monitor'ün kendi zaman aşımına bağlanır (0.51'den
-beri kontrol de API'nin süresini kullanıyor). Madde S82'nin iki PR'ı
+sn'ye iner; kontrol anındaki çözüm monitor'ün kendi zaman aşımına bağlanır (0.51'de
+vekile giden kontrol de API'nin süresini kullanıyordu). Madde S82'nin iki PR'ı
 ([#142](https://github.com/yusufceng/Kubeat/issues/142),
 [#143](https://github.com/yusufceng/Kubeat/issues/143)) merge edilince kapanır;
 kapanış notu "denetlenmeyen red yolları" listesinin README'deki yerini yazar.
+
+Kapandı (2026-11-07, S82 [#142](https://github.com/yusufceng/Kubeat/issues/142) ve
+[#143](https://github.com/yusufceng/Kubeat/issues/143), 0.52): çözüm hatası sayaçta,
+logda ve denetim satırında `resolve_error`; API reddi de bir `WARN` yazar, kontrol anı
+`WARN`'ı namespace'i ve `source`'u taşır; vekilli kurulumun NXDOMAIN ön şartı ayarı
+açmadan `server resolve` ile sınanır (README "Vekilli kurulum" → "Ön sınama",
+`docs/pilot.md` "Vekilli kapsam"). Denetlenmeyen red yolları README "Hedef politikası"
+→ "Kapsam ihlali denetimi" → "Denetlenmeyen red yolları"nda.
+
+## Kapsam reddi satır sınırında insanın reddini kayıtta tutmak (S82 takibi)
+
+2026-11-07'de ertelendi (S82 [#143](https://github.com/yusufceng/Kubeat/issues/143)
+incelemesi; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52'de
+kontrollerin `deny`/`target-scope` satırları ve `WARN`'ları dakikada
+`UPTIME_LOGIN_AUDIT_PER_MINUTE` ile sınırlı. Bir CoreDNS kesintisinde 60'tan fazla
+annotation monitor'ü aynı dakikada ilk `resolve_error` reddini verirse, o dakika kaydı
+bir kullanıcıya ait monitor'ün gerçek `connection` reddinin ilk satırı ve `WARN`'ı düşer
+ve sonradan yazılmaz (README "Hedef politikası" → "Kapsam ihlali denetimi" → "Satır
+sınırı"). Dakikanın uyarısı yalnız `dropped`, `minute` ve `limit` yazar, düşenlerin
+`source` ve `reason` dağılımını vermez. Sayaç `source="user",reason="connection"`
+sinyalini korur, bu yüzden 0.52'yi bekletmedi; merkezi loga bakan SOC ise o dakikadaki
+insan kaynaklı reddi logdan göremez. Seçenekler: dakikanın uyarısına `source` ve
+`reason` sayımı eklemek ya da `connection` redlerine `resolve_error`'dan önce bütçe
+vermek. Tetikleyici: bir pilotta ya da provada kesinti dakikasında kaybolan bir
+`source=user` satırı.
+
+## `server resolve`'un vekil istisnasını da değerlendirmesi (S82 takibi)
+
+2026-11-07'de ertelendi (S82 [#143](https://github.com/yusufceng/Kubeat/issues/143);
+[sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52'nin
+`server resolve NAME...` komutu yalnız ad alır ve pod'un çözücüsünün kararını yazar;
+`UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi, `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`'yi okumaz.
+Çıktı ve README "Vekilli kurulum" → "Ön sınama" NXDOMAIN satırını "vekile giden
+HTTP(S) istekte" diye niteler; `NO_PROXY`'ye düşen bir ad için bu karar geçmez.
+Seçenek: komutun URL de alıp isteğin vekile gidip gitmediğini ve ayar açıkken
+kapsamın kararını yazması. Tetikleyici: vekilli bir kurulumda `NO_PROXY` listesinde
+olan dış bir adın ön sınamada yanlış okunması.
 
 ## Chart'ta Route/Ingress açıkken `UPTIME_TRUST_PROXY_HOPS` varsayılanını 1 yapmak
 

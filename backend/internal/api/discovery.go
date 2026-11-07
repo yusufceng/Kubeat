@@ -8,6 +8,7 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/discovery"
 	"github.com/yusufceng/Kubeat/backend/internal/k8s"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -199,6 +200,7 @@ func (h *handler) discoveryImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p := principal(r); !p.CanEdit(req.Namespace) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, req.Namespace, "")
 		scopeError(w, p)
 		return
 	}
@@ -318,6 +320,7 @@ func (h *handler) discoveryRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p := principal(r); !p.CanEdit(req.Namespace) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, req.Namespace, "")
 		scopeError(w, p)
 		return
 	}

@@ -728,18 +728,19 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p := principal(r); !p.CanEdit(req.Namespace) {
-		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, req.Namespace)
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, req.Namespace, "")
 		scopeError(w, p)
 		return
 	}
 	if err := workloadInScope(r, req); err != nil {
+		h.auditScopeDenied(r, metrics.ScopeDeniedTarget, req.Namespace, req.Target)
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 	m := req.monitor(defaultOptions(store.MonitorType(req.Type)))
 	m.Enabled = true
 	if err := h.targetInScope(r.Context(), principal(r), m.Host(), monitorRequestURL(m)); err != nil {
-		h.auditScopeDenied(r, targetDenial(err), m.Host())
+		h.auditScopeDenied(r, targetDenial(err), m.Namespace, m.Host())
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -748,7 +749,7 @@ func (h *handler) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if host, err := h.endpointsInScope(r.Context(), principal(r), m); err != nil {
-		h.auditScopeDenied(r, targetDenial(err), host)
+		h.auditScopeDenied(r, targetDenial(err), m.Namespace, host)
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -800,7 +801,7 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	} else if !p.CanEdit(m.Namespace) {
-		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, m.Namespace)
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, m.Namespace, "")
 		scopeError(w, p)
 		return
 	}
@@ -816,12 +817,12 @@ func (h *handler) cloneMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.targetInScope(r.Context(), principal(r), m.Host(), monitorRequestURL(m)); err != nil {
-		h.auditScopeDenied(r, targetDenial(err), m.Host())
+		h.auditScopeDenied(r, targetDenial(err), m.Namespace, m.Host())
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
 	if host, err := h.endpointsInScope(r.Context(), principal(r), m); err != nil {
-		h.auditScopeDenied(r, targetDenial(err), host)
+		h.auditScopeDenied(r, targetDenial(err), m.Namespace, host)
 		writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 		return
 	}
@@ -927,7 +928,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !p.CanEdit(current.Namespace) {
-		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, current.Namespace)
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, current.Namespace, "")
 		scopeError(w, p)
 		return
 	}
@@ -1006,6 +1007,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Target != nil {
 		if err := workloadInScope(r, merged); err != nil {
+			h.auditScopeDenied(r, metrics.ScopeDeniedTarget, merged.Namespace, merged.Target)
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
@@ -1018,13 +1020,13 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	if connects {
 		retargeted := merged.monitor(current)
 		if err := h.targetInScope(r.Context(), p, retargeted.Host(), monitorRequestURL(retargeted)); err != nil {
-			h.auditScopeDenied(r, targetDenial(err), retargeted.Host())
+			h.auditScopeDenied(r, targetDenial(err), merged.Namespace, retargeted.Host())
 			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 			return
 		}
 	}
 	if merged.Namespace != current.Namespace && !p.CanEdit(merged.Namespace) {
-		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, merged.Namespace)
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, merged.Namespace, "")
 		scopeError(w, p)
 		return
 	}
@@ -1036,7 +1038,7 @@ func (h *handler) updateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if connects {
 		if host, err := h.endpointsInScope(r.Context(), p, change); err != nil {
-			h.auditScopeDenied(r, targetDenial(err), host)
+			h.auditScopeDenied(r, targetDenial(err), change.Namespace, host)
 			writeErrorCode(w, http.StatusForbidden, err.Error(), codeTargetScope)
 			return
 		}

@@ -53,6 +53,19 @@ func canEditMaintenance(p auth.Principal, m store.Maintenance) bool {
 	}
 }
 
+// maintenanceNamespace is the namespace a window covers, as the audit entry
+// of a refused change names it: its monitor's, its own, or every namespace
+// (namespacesOf) for one without either.
+func maintenanceNamespace(m store.Maintenance) string {
+	switch {
+	case m.MonitorID != 0:
+		return m.MonitorNamespace
+	case m.Namespace != "":
+		return m.Namespace
+	}
+	return namespacesOf()
+}
+
 // monitorNamespaces maps every monitor to its namespace or group.
 func (h *handler) monitorNamespaces(ctx context.Context) (map[int64]string, error) {
 	monitors, err := h.opts.Store.ListMonitors(ctx)

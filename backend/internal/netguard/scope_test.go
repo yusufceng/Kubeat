@@ -501,6 +501,26 @@ func TestScopedProxy(t *testing.T) {
 			t.Errorf("Host at another team's Service, %s: err = %v, refused %q, %v; want RefusedOutside of api.payments.svc", name, err, host, why)
 		}
 	}
+
+	// A host that resolves into the cluster is the refusal reported, before
+	// or after a host that does not resolve.
+	for _, c := range []struct{ target, host string }{
+		{"http://gone.example.com/", "api.payments"},
+		{"http://api.payments/", "gone.example.com"},
+		{"http://gone.example.com/", "172-30-0-1.sslip.io"},
+	} {
+		s := rules.Connections(shop, "")
+		req := httptest.NewRequest(http.MethodGet, c.target, nil)
+		req.Host = c.host
+		_, err := s.Proxy(toProxy)(req)
+		want := c.host
+		if c.host == "gone.example.com" {
+			want = "api.payments"
+		}
+		if host, why := s.Refused(); why != RefusedOutside || host != want || !errors.Is(err, ErrScope) {
+			t.Errorf("%s with Host %q: err = %v, refused %q, %v; want RefusedOutside of %s", c.target, c.host, err, host, why, want)
+		}
+	}
 }
 
 // A target taken from a cluster object of the monitor's namespace is in

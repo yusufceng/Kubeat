@@ -77,13 +77,15 @@ const OtherHost = "other"
 // it carries nothing a client could not already tell from its own 403 or the
 // monitor's result.
 const (
-	// ScopeDeniedTarget: the monitor's target host or the channel's delivery
-	// host is outside the caller's namespaces (a cross-tenant attempt at
-	// another team's Service or the API server, by its name or by where it
-	// resolves; see api.targetInScope).
+	// ScopeDeniedTarget: the monitor's target host, a workload monitor's
+	// workload or the channel's delivery host is outside the caller's
+	// namespaces (a cross-tenant attempt at another team's Service or the
+	// API server, by its name or by where it resolves; see
+	// api.targetInScope).
 	ScopeDeniedTarget = "target"
 	// ScopeDeniedNamespace: the caller may not edit in the namespace they
-	// aimed the monitor or channel at.
+	// aimed the monitor, the channel, an import from discovery or a
+	// maintenance window at.
 	ScopeDeniedNamespace = "namespace"
 	// ScopeDeniedConnection: a check of a monitor held to a scope was
 	// refused a connection outside it, after the monitor was set up (see
@@ -211,7 +213,7 @@ func New(version string) *Metrics {
 	}, []string{"kind"})
 	m.targetScopeDenied = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "kubeat_target_scope_denied_total",
-		Help: "Refusals of the per-user target scope: monitor or channel writes a scoped caller was refused, and checks refused a connection outside the scope their monitor is held to, by reason and source. reason: \"target\" (the target host or a channel's delivery host leads outside the caller's namespaces, by its name or where it resolves: another team's Service, the API server), \"namespace\" (the caller may not edit in the namespace they aimed at), \"connection\" (a check was refused a connection outside its monitor's scope; the monitor is down, every refused check counts) or \"resolve_error\" (an external-looking name the resolver could not answer for, a SERVFAIL, an NXDOMAIN outside the proxy exception or a timeout, was refused at the API or at a check, more often a fault of the cluster's DNS than an attempt). source: \"user\" (an API request, every one of the API's refusals, or a check of a monitor whose scope record is a user's), \"annotation\" (a check of a monitor the annotation sync manages, held to its object's namespace in every install: single-tenant installs raise \"connection\" and \"resolve_error\" with it too) or \"unrecorded\" (a check of a monitor set up before the scope was recorded, held to its namespace). A name a check left unresolved when its timeout or a shutdown cut it short is not counted, while a connection a check was refused as leading outside its scope counts as \"connection\" however the check ended; an API request its client gave up on during the lookup counts as \"resolve_error\". The requests of whoever sees every namespace, and the checks of a monitor whose record holds every namespace, raise nothing. The refused request still gets the same 403, and the refused check the same generic error, so this leaks nothing a client could not already tell.",
+		Help: "Refusals of the per-user target scope: monitor or channel writes a scoped caller was refused, and checks refused a connection outside the scope their monitor is held to, by reason and source. reason: \"target\" (the target host, a workload monitor's workload or a channel's delivery host leads outside the caller's namespaces, by its name or where it resolves: another team's Service, the API server), \"namespace\" (the caller may not edit in the namespace they aimed a monitor, a channel, an import from discovery or a maintenance window at), \"connection\" (a check was refused a connection outside its monitor's scope; the monitor is down, every refused check counts) or \"resolve_error\" (an external-looking name the resolver could not answer for, a SERVFAIL, an NXDOMAIN outside the proxy exception or a timeout, was refused at the API or at a check, more often a fault of the cluster's DNS than an attempt). source: \"user\" (an API request, every one of the API's refusals, or a check of a monitor whose scope record is a user's), \"annotation\" (a check of a monitor the annotation sync manages, held to its object's namespace in every install: single-tenant installs raise \"connection\" and \"resolve_error\" with it too) or \"unrecorded\" (a check of a monitor set up before the scope was recorded, held to its namespace). A name a check left unresolved when its timeout or a shutdown cut it short is not counted, while a connection a check was refused as leading outside its scope counts as \"connection\" however the check ended; an API request its client gave up on during the lookup counts as \"resolve_error\". The requests of whoever sees every namespace, and the checks of a monitor whose record holds every namespace, raise nothing. Every refusal counts, also one the audit log and the log leave out past UPTIME_LOGIN_AUDIT_PER_MINUTE a minute. The refused request still gets the same 403, and the refused check the same generic error, so this leaks nothing a client could not already tell.",
 	}, []string{"reason", "source"})
 	// The series the audit and any alerting watch are there from the start,
 	// at 0, so a first denial reads as an increase, not a series appearing.
