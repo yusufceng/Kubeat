@@ -1818,6 +1818,11 @@ sonra kilitlendi, B doğru parolayla sayfayı açtı ve parolayı değiştirdi; 
 A'nın adresini yazdı. Kalanlar değişmedi: 429'ların sayacı S85'te, kaynak başına
 adlardan bağımsız tavan S88'de (ikisi sprint 10 önerisinde).
 
+Güncelleme (2026-11-07, S88 [#145](https://github.com/yusufceng/Kubeat/issues/145), 0.52.0): kaynak başına, adlardan
+bağımsız giriş tavanı geldi (`UPTIME_LOGIN_SOURCE_MAX_FAILURES`, varsayılan `0`
+kapalı, `kind="source_total"`; ADR-0004 "Not: adlardan bağımsız kaynak tavanı").
+Yalnız girişi kapsar; bu maddenin iki yüzeyi kaynak + kapsam sınırıyla kalır.
+
 ## Throttle'da IPv6 kaynaklarını /64'e toplamak
 
 2026-11-07'de ertelendi (S76 incelemesi, [#134](https://github.com/yusufceng/Kubeat/issues/134)).
@@ -1827,6 +1832,11 @@ onu yalnız gevşek tavan sınırlar (ADR-0004 "Maliyetler ve riskler"). Seçene
 IPv6 kaynağını `/64`'e toplamak (aynı `/64`'ü paylaşan kullanıcıları birleştirir)
 ya da kaynak ve `/64` için iki katlı anahtar. Tetikleyici: IPv6'lı ilk Route ya da
 Ingress.
+
+Güncelleme (2026-11-07, S88 [#145](https://github.com/yusufceng/Kubeat/issues/145), 0.52.0): 0.52'nin kaynak tavanı
+(`UPTIME_LOGIN_SOURCE_MAX_FAILURES`) da tam adrese anahtarlanır; tek bir `/64`'ten
+yapılan sprey her adreste ayrı tavan alır. Toplama yapılırsa bu tavana da uygulanmalı.
+Tetikleyici değişmedi.
 
 ## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
 

@@ -251,6 +251,43 @@ Route'unda, gerçek tarayıcı yolunda görüldü). 0.51'de:
   (`status page unlock refused`, `password change refused`) logda `source`
   alanını taşır.
 
+**Not: adlardan bağımsız kaynak tavanı (0.52).** Birincil anahtar kaynak + ad
+olarak kalır; girişe yeni bir boyut eklenir
+([#145](https://github.com/yusufceng/Kubeat/issues/145), S88): bir kaynağın
+bütün adlardaki hatalı girişlerine tavan (`UPTIME_LOGIN_SOURCE_MAX_FAILURES`,
+anahtar yalnız kaynak adres, süre `UPTIME_LOGIN_LOCKOUT`). Gerekçe: kaynak + ad
+sınırı tek bir kaynağın bir parolayı çok sayıda ada denemesini (parola spreyi)
+durdurmaz; dizinli kurulumda her deneme dizine bir bind'dir ve dizinin kendi
+kilidine sayılır.
+
+- **Varsayılan `0`, kapalı (PO kararı).** NAT ya da kurumsal vekil (PAC)
+  arkasındaki bir ofis tek kaynaktır; yanlış bir tavan o ofisi toptan dışarıda
+  bırakır, ki bu dizine bind'den daha kötü bir hatadır. Opt-in bir güvenlik
+  ayarı sessizce kullanılmadan kalmasın diye LDAP tanımlıyken ayar hiç
+  verilmemişse açılışta `WARN`, açıkça `0` verilmişse `INFO` yazılır. Önerilen
+  değer (dizinli ve internete açık kurulum) README "LDAP" → "Dizin hesap
+  kilidi"ndedir. Hop değeri `0` ya da arayüz sırrı eksikken her tarayıcı aynı
+  kaynaktır ve tavan bütün girişler için tek kilide döner; değer verilmişse
+  backend bunu açılışta `WARN` ile söyler.
+- **Sıra.** Kaynak + ad sınırı, kaynak tavanı, adın tüm kaynaklardaki tavanı.
+  Bir sınıra takılan deneme öncekilerden geri alınır. Kaynak tavanı ad
+  tavanından önce gelir: tavanı dolan kaynak denediği adların sayacına bir an
+  bile yazılmaz.
+- **Doğru giriş tavanı sıfırlamaz.** Spreydeki tek bir isabet öncesindeki
+  hataları silmemeli. İsabetin kendisi de sayılmaz (geri alınır), ki NAT
+  arkasındaki kullanıcıların doğru girişleri tavanda birikmesin. Kaynak + ad
+  ve ad tavanı sayaçları önceki gibi sıfırlanır. Dizine ulaşılamaması, meşgul
+  yanıtı ve devre dışı hesabın doğru parolası sayılmaz.
+- **Yanıt değişmez:** 429 + `Retry-After`, öteki kilitlerle aynı gövde.
+  `kubeat_signin_throttled_total{kind="source_total"}` reddi sayar; seri
+  açılışta 0'dan başlar.
+- **Kapsam.** Yalnız giriş. Durum sayfası kilidi ve parola değiştirme tek bir
+  sayfaya ya da hesaba bağlıdır, kaynak + kapsam sınırıyla kalır. Kaynak
+  adresine dayanmayan NAT ayrımı backlog'da ("Giriş throttle için
+  güvenilir-vekil IP allowlist"); IPv6 kaynakları `/64`'e toplanmaz (aşağıda).
+- **Geri alma.** Ayarı kaldırmak ya da `0` vermek eski davranışa döner; şema
+  değişmez (26).
+
 **Maliyetler ve riskler.**
 
 - **Dağıtık tahmine karşı daha zayıf.** Kaynak-başına throttle, çok sayıda
@@ -313,9 +350,10 @@ Route'unda, gerçek tarayıcı yolunda görüldü). 0.51'de:
   biçimde tutmak. Kalanlar: çok kaynaktan bir ada gelen denemelerin toplamı
   (hesap tavanı yerel hesapları da kapsadığından dizin eşiğinin altına
   çekilmesi önerilmez; `admin`'i birkaç kaynaktan kilitlenebilir yapar) ve bir
-  kaynağın bütün adlardaki denemeleri (parola spreyi). Kaynak başına, adlardan
-  bağımsız tavan ayrı bir karar olarak bu ADR'ye eklenecek (S88, sprint 10
-  kuyruğu).
+  kaynağın bütün adlardaki denemeleri (parola spreyi). 0.52'de ikincisi için
+  opt-in kaynak tavanı geldi (yukarıda "Not: adlardan bağımsız kaynak
+  tavanı"); varsayılan kapalıyken sprey sürer, LDAP tanımlıysa açılış `WARN`'ı
+  bunu söyler. Çok kaynağa yayılmış sprey kaynak tavanını da aşmadan sürebilir.
 - **Tek replica.** Sayaç bellektedir; backend yeniden başlayınca ya da başka
   replicada sıfırlanır. Çok replicalı dağıtık throttle yol haritasında bilinen
   sınırdır.

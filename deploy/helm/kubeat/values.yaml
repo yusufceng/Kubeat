@@ -138,6 +138,7 @@ backend:
     # UPTIME_TRUST_PROXY_HOPS: "1"              # X-Forwarded-For entries your proxies in front of the UI write (1 with none); source read from the rightmost this many (0: trust none, use the peer)
     # UPTIME_LOGIN_MAX_FAILURES: "10"           # per-source failures that lock a source's attempts at a name
     # UPTIME_LOGIN_ACCOUNT_MAX_FAILURES: "50"   # loose, very high ceiling on a name's failures across all sources; 0 turns it off
+    # UPTIME_LOGIN_SOURCE_MAX_FAILURES: "20"    # ceiling on one source's sign-in failures across all names (a password spray); default 0 (off): users behind one NAT or PAC proxy share a source; with LDAP and unset the backend warns at start (README "LDAP")
     # UPTIME_RECOVERY_THRESHOLD: "1"
     # UPTIME_DEFAULT_FAILURE_THRESHOLD: "3"
     # UPTIME_CERT_WARNING: 336h
