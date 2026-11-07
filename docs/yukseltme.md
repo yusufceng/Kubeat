@@ -107,7 +107,13 @@ geri dönüş başladığınız sürüme olur.
 11. 0.52'nin adımları ("0.52'ye yükseltme", Yapılacak): HTTP monitor'lerinin
     `slow_above_ms` eşiklerine ve uzak HTTPS hedefi çoksa worker doluluğuna
     bakın; kapsam reddi alarmlarınızı `reason` ve `source`'a göre gözden
-    geçirin; LDAP'lı kurulumda kaynak tavanına karar verin.
+    geçirin; `UPTIME_TARGET_RESOLVE_TIMEOUT`'un 2 sn'ye indiğini hesaba katın;
+    LDAP'lı kurulumda kaynak tavanına karar verin;
+    `KubeatSignInSourceDegraded` doğru hop değerinde yanıyorsa (`hops_zero`,
+    `hops_too_low`) değeri artırmayın, susturun;
+    `metrics.prometheusRule.clusterLabel` `reason` ya da `surface` ise
+    değiştirin; namespace sınırlı keşifte yükseltmeden önce keşif durumuna
+    bakın.
 12. Alarm kuralları 0.43, 0.44, 0.45 ve 0.52'de değişti, 0.46–0.51'de
     değişmedi: yeni `kubeat.self` alarmlarını, `KubeatUnhealthy`'yi,
     `KubeatSignInSourceDegraded`'i ve `KubeatDiscoveryNamespaceSkipped`'i
@@ -341,19 +347,24 @@ bağlantıları"). GKE'nin kube-dns/Cloud DNS'i ve kurumsal DNS ölçülmedi.
 - **Uzak HTTPS hedefi çoksa worker doluluğunu izleyin.** Kontrol süresi
   uzadığından aynı `UPTIME_WORKERS` daha az kontrol taşır. Yükseltmeden sonra
   `kubeat_scheduler_dispatch_skipped_total` ve `KubeatWorkersSaturated`'a
-  bakın, gerekirse `UPTIME_WORKERS`'ı artırın.
+  bakın, gerekirse `UPTIME_WORKERS`'ı artırın. Özel bir GKE cluster'da Cloud
+  NAT'tan aynı adrese giden çok monitor varsa NAT port sınırına da bakın
+  (`nat/dropped_sent_packets_count`); ölçülmedi.
 - **Kapsam reddi alarmlarınızı gözden geçirin.** DNS arızasıyla gelen ret
   0.51'de API'de `target`, kontrolde `connection` sayılıyordu; 0.52'de
   `resolve_error`'dır. `reason="target"` ya da `"connection"`'a bakan bir
   alarm DNS kesintisinde artık yanmaz; bu bilerek yapıldı. Gerçek bir
   cross-tenant girişimi için alarmı `source="user"` ve `reason="target"`'a
   bağlayın, DNS'i `reason="resolve_error"` ile ayrıca izleyin (README "Kapsam
-  ihlali denetimi").
+  ihlali denetimi"). Yanıt vermeyen bir çözücü kontrolde sayılmaz, monitor
+  zaman aşımıyla DOWN olur; DNS kesintisini monitor DOWN alarmları ya da
+  cluster DNS'inin kendi metrikleriyle de izleyin.
 - **`UPTIME_TARGET_RESOLVE_TIMEOUT`.** Varsayılan 5 sn'den 2 sn'ye iner ve
   yalnız API'deki oluşturma ve değiştirmeyi sınırlar. 2–5 sn'de yanıt veren
   bir çözücüde kapsamı sınırlı kullanıcının oluşturması artık reddedilir.
-  Değeri arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun; eski süre için
-  `UPTIME_TARGET_RESOLVE_TIMEOUT=5s` verin.
+  Değeri arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun; çözücünüz 2
+  sn'den yavaşsa değeri 3 sn'nin altında büyütün (ör. `2500ms`). `5s` 0.51'in
+  süresini geri getirir, ama 3 sn'yi aşan çözümde arayüz isteği bırakır.
 - **LDAP'lı kurulumda kaynak tavanına karar verin.** LDAP tanımlıyken
   `UPTIME_LOGIN_SOURCE_MAX_FAILURES` verilmemişse açılışta bir `WARN` yazılır.
   Önerilen değer `20`'dir. Aynı NAT ya da kurumsal vekil (PAC) arkasındaki
@@ -376,8 +387,12 @@ bağlantıları"). GKE'nin kube-dns/Cloud DNS'i ve kurumsal DNS ölçülmedi.
   okunamayan tek bir namespace bütün eşitlemeyi durduruyordu. Böyle bir
   namespace varsa 0.52'nin ilk turu öteki namespace'lerde birikmiş değişiklikleri
   bir seferde uygular; buna annotation'ı kaldırılmış monitor'lerin
-  geçmişleriyle silinmesi de girer. Yükseltmeden önce keşif durumuna
-  (`GET /api/v1/discovery`) bakın.
+  geçmişleriyle silinmesi de girer. 0.51'in keşif durumunda
+  (`GET /api/v1/discovery`) `sync.error` boş değilse eşitleme durmuştur:
+  geçmişini korumak istediğiniz monitor'lerin nesnelerinde annotation'ın
+  yerinde olduğunu doğrulayın ve yedeğin doğrulandığından emin olun.
+- **`metrics.prometheusRule.clusterLabel`** `reason` ya da `surface` ise
+  `helm upgrade` render'da durur; yükseltmeden önce başka bir ad verin.
 - **Kuralları kopyalıyorsanız yeniden kopyalayın** (aşağıda "Alarm kuralları:
   değişti").
 - **Yedeği doğrulamalı blokla alın** (yukarıda "Yükseltmeden önce yedek").
@@ -394,7 +409,8 @@ bağlantıları"). GKE'nin kube-dns/Cloud DNS'i ve kurumsal DNS ölçülmedi.
     zaman aşımı. Kontrolde vekile giden ya da ayarlarda yazılı olmayan bir ada
     yönelen bağlantının çözüm hatası.
   - Ne sayılmaz: doğrudan bağlanan kontrolde monitor'ün yazılı hedefinin
-    çözüm hatası sıradan bir DNS hatasıdır. Kontrolün zaman aşımı ya da
+    çözüm hatası sıradan bir DNS hatasıdır. Annotation'dan gelen monitor'ün
+    kendi host'u nesnenin namespace'iyle kapsamdadır ve hiç çözülmez. Kontrolün zaman aşımı ya da
     kapanış çözümü yarıda keserse red sayılmaz, kontrol bağlamın hatasıyla
     biter.
   - Ne değişmez: istemcinin gördüğü 403 + `target_scope` ve kontrol sonucu
@@ -438,8 +454,9 @@ bağlantıları"). GKE'nin kube-dns/Cloud DNS'i ve kurumsal DNS ölçülmedi.
     (`sync.skipped_namespaces`), namespace başına bir `WARN` satırında ve
     Keşif sayfasında.
   - Yeni seriler: `kubeat_discovery_namespaces_skipped` ve
-    `kubeat_discovery_sync_errors_total{reason}`. İkisi de namespace etiketi
-    taşımaz.
+    `kubeat_discovery_sync_errors_total{reason}`. İkisi de atlanan
+    namespace'in adını etiket olarak taşımaz (`namespace` etiketi Kubeat'in
+    kendi namespace'idir).
 - **Kaynak ayrımı sayacı
   ([#146](https://github.com/yusufceng/Kubeat/issues/146)).**
   - `kubeat_signin_source_degraded_total{reason,surface}` throttle'ın
@@ -473,14 +490,15 @@ yazılıdır.
 
 | Kurulum | Yönetici ya da `*` | Kapsamı sınırlı | Annotation | Kaydı olmayan |
 | --- | --- | --- | --- | --- |
-| Tek kiracılı | Değişmez | (yok) | Sonuç aynı. Vekile giden ya da yazılı olmayan bir ada yönelen bağlantının DNS arızası `resolve_error`, gerçek ret `connection` sayılır, ikisi de `source="annotation"`; satırlar dakikada sınırlı. Çare: cluster DNS'i ve egress | Değişmez (açılışta her namespace'in kaydı) |
-| Çok kiracılı | Değişmez | Aynı 403. DNS arızası `resolve_error{source="user"}` sayılır ve bir `WARN` yazar; çözüm başına 2 sn. Çare: DNS ve egress, gerekirse süreyi 3 sn'nin altında büyütmek | Tek kiracılıdaki gibi | Namespace'ine bağlı, `source="unrecorded"`. Çare: hedefi `servis.namespace.svc` ile yazmak; yöneticinin kaydetmesi son çare (kapsamı açar) |
-| Vekilli | Değişmez | Backend'de çözülemeyen vekilli ad yine reddedilir, artık `resolve_error` sayılır. Çare: vekil cluster dışındaysa ve `server resolve` NXDOMAIN diyorsa `UPTIME_TARGET_SCOPE_TRUST_PROXY=true`; SERVFAIL ve zaman aşımında ayar yardım etmez | Aynı, `source="annotation"` | Aynı, `source="unrecorded"` |
+| Tek kiracılı | Değişmez | (yok) | Sonuç aynı. Kendi host'u nesnenin namespace'iyle kapsamdadır ve çözülmez; onun DNS arızası sıradan DNS hatasıdır. Kontrolün başka bir ada (vekile giden ya da ayarlarda yazılı olmayan) yönelen bağlantısında DNS arızası `resolve_error`, gerçek ret `connection` sayılır, ikisi de `source="annotation"`; satırlar dakikada sınırlı. Çare: cluster DNS'i ve egress | Değişmez (açılışta her namespace'in kaydı) |
+| Çok kiracılı | Değişmez | Aynı 403. API'de DNS arızası `resolve_error{source="user"}` sayılır ve bir `WARN` yazar; çözüm başına 2 sn. Kontrolde vekile giden ya da yazılı olmayan bir adın DNS arızası da `resolve_error{source="user"}`; doğrudan bağlanan kontrolde yazılı hedefin DNS hatası sayılmaz. Çare: DNS ve egress, gerekirse süreyi 3 sn'nin altında büyütmek | Tek kiracılıdaki gibi | Namespace'ine bağlı (değişmez); vekile giden ya da yazılı olmayan bir adın DNS arızası `resolve_error{source="unrecorded"}`. Çare: DNS ve egress; hedefi `servis.namespace.svc` ile yazmak; yöneticinin kaydetmesi son çare (kapsamı açar) |
+| Vekilli | Değişmez | Backend'de çözülemeyen vekilli ad yine reddedilir, artık `resolve_error` sayılır. Çare: vekil cluster dışındaysa ve `server resolve` NXDOMAIN diyorsa `UPTIME_TARGET_SCOPE_TRUST_PROXY=true`; SERVFAIL ve zaman aşımında ayar yardım etmez | Kendi host'u değişmez (çözülmez). Vekile giden başka bir adın backend'de çözülemeyişi reddedilir, artık `resolve_error{source="annotation"}`. Çare: Kapsamı sınırlı sütunundaki gibi | Aynı, `source="unrecorded"` |
 
 Kaynak kullanımı: vekile giden kontrolde yanıt vermeyen bir çözücü kontrolü
-5 sn'de değil monitor'ün zaman aşımında bitirir, worker'lar dolabilir (2
-worker'lı minikube provasında `kubeat_checks_in_flight` 2'de kaldı,
-`kubeat_scheduler_dispatch_skipped_total` arttı). Çare `UPTIME_WORKERS` ya da
+5 sn'de değil monitor'ün zaman aşımında bitirir, worker'lar dolabilir
+(minikube'da 3 sn gecikmeli çözücü, 2 worker ve 18 monitor'le
+`kubeat_checks_in_flight` 2'de kaldı, `kubeat_scheduler_dispatch_skipped_total`
+arttı; yanıt vermeyen çözücüyle ölçülmedi). Çare `UPTIME_WORKERS` ya da
 daha kısa bir monitor zaman aşımıdır.
 
 ### Geri dönüş
@@ -512,9 +530,9 @@ daha kısa bir monitor zaman aşımıdır.
     Doğru değerde yandığı iki kurulum yukarıda "Yapılacak"tadır.
 - Yeni grup `kubeat.discovery` (sonda): `KubeatDiscoveryNamespaceSkipped`.
   Eşitleme 10 dakikadır en az bir namespace'i atlıyorsa yanar; ciddiyeti
-  `warning`'dir, etiketlerinde namespace adı yoktur.
+  `warning`'dir; atlanan namespace'in adı etiketlerinde yoktur.
 - `metrics.prometheusRule.clusterLabel` artık `reason` ya da `surface`
-  olamaz.
+  olamaz; böyle bir değerle `helm upgrade` render'da durur.
 
 Kuralları başka bir depoya kopyalıyorsanız 0.52'ninkileri kopyalayın ve iki
 alarmı Alertmanager yönlendirmesine ekleyin.

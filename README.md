@@ -767,10 +767,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       `reason="resolve_error"` ile sayılır (aşağıda "Kapsam ihlali denetimi").
       Sınır her çözüm içindir ve varsayılanı arayüzün backend zaman aşımından
       (`BACKEND_TIMEOUT_MS`, 3 sn) küçüktür: tek bir çözümün reddi, arayüz isteği
-      bırakmadan forma ulaşır. Çözücüsü adla verilmiş bir DNS monitor'ü ise iki
-      çözüm yapar (hedef ad ve çözücünün host'u); ikisi de takılırsa istek ~4
-      sn sürebilir, arayüz isteği bırakır ve kullanıcı formda 403 yerine zaman
-      aşımı görür. Ret yine yapılır ve `resolve_error` ile sayılır.
+      bırakmadan forma ulaşır. Birden çok ad sınayan bir istekte her ad ayrı
+      süre kullanır; ikisi de takılırsa istek ~4 sn sürebilir, arayüz isteği
+      bırakır ve kullanıcı formda 403 yerine zaman aşımı görür. Ret yine yapılır
+      ve `resolve_error` ile sayılır.
     - **Kontrol anında.** Kontrolün açtığı her bağlantıdaki çözüm bu ayara bağlı
       değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de vekile
       giden kontrol API'nin süresini kullanıyordu). Yavaş yanıt veren bir çözücü kontrolü monitor'ün
@@ -799,11 +799,13 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     (`kube-dns`/`openshift-dns`) izin vermelidir, aksi hâlde kapsamı sınırlı bir
     kullanıcının meşru dış hedef oluşturması güvenli tarafta reddedilir ve kapsama
     bağlı monitor'lerin kontrolü (annotation monitor'leri her kurulumda) DOWN
-    olabilir. API'deki ret ve vekile giden kontroldeki ret sayaçta
-    `reason="resolve_error"` ile, gerçek bir cross-tenant reddinden ayrı görünür
-    (aşağıda "Kapsam ihlali denetimi"). Doğrudan bağlanan kontrolde monitor'ün
-    yazılı hedefinin çözüm hatası kapsam reddi değildir: kontrol sıradan DNS
-    hatasıyla biter ve sayılmaz (minikube'da ölçüldü, 2026-11-08). Çözüm
+    olabilir. API'deki ret ve kontrolde vekile giden ya da ayarlarda yazılı
+    olmayan bir ada yönelen bağlantının reddi sayaçta `reason="resolve_error"`
+    ile, gerçek bir cross-tenant reddinden ayrı görünür (aşağıda "Kapsam ihlali
+    denetimi"). Doğrudan bağlanan kontrolde monitor'ün yazılı hedefinin çözüm
+    hatası kapsam reddi değildir: kontrol sıradan DNS hatasıyla biter ve
+    sayılmaz (minikube'da ölçüldü, 2026-11-08). Annotation'dan gelen monitor'ün
+    kendi host'u nesnenin namespace'iyle kapsamdadır ve hiç çözülmez. Çözüm
     pod'un kendi çözücüsünü ve arama alanlarını (`ndots`) kullanır — checker'ın
     hedefi bağlarken kullanacağı çözümün aynısı — ve hedef politikasına tabi
     değildir. `HTTP_PROXY`/`HTTPS_PROXY` verilse de kapsam çözümü yine backend'de
@@ -948,9 +950,8 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       cluster DNS'inin ya da egress'in arızasıdır (yukarıda "Egress ve DNS").
       Ret değişmez: istemci aynı 403'ü, kontrol aynı `blocked_by_scope`
       sonucunu alır. Adından reddedilen biçimler hiç çözülmediği için bir DNS
-      kesintisinde de `target` ya da `connection` sayılır; vekile giden düz
-      `http://` istekte `Host` başlığındaki ad da, URL'nin adı çözülemese bile
-      (vekile sorulan adların hepsi çözümden önce yazılışlarıyla sınanır).
+      kesintisinde de `target` ya da `connection` sayılır; vekile giden istekte
+      de (vekile sorulan adların hepsi çözümden önce yazılışlarıyla sınanır).
       Bilinen sınır: API bir isteği ilk reddiyle sayar. Bir istek birden çok
       ad sınıyorsa ve ilk ad çözülemiyorsa ret, ötekiler sınanmadan
       `resolve_error` sayılır. İstek yine reddedilir. Kontrol anında bütün
