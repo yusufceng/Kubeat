@@ -293,6 +293,11 @@ README "Kapsam ihlali denetimi"ndeki "SOC'a bağlanabilir" cümlesi de S82'de da
 Kalan kısmın (denetim kaydının tamamını stdout'a yazmak, süzgeçler, CSV, kaynak
 adresi) tetikleyicisi değişmedi: gerçek bir SIEM isteği.
 
+Güncelleme (2026-11-07, S82 [#143](https://github.com/yusufceng/Kubeat/issues/143), 0.52):
+`deny`/`target-scope` dilimi teslim edildi; ADR-0002'ye not yazıldı ("Not: denetim
+satırının log satırı"). README "Kapsam ihlali denetimi" artık "kayıtlar API ve
+arayüzden, log satırı merkezi logdan okunur; SIEM'e kendiliğinden akmaz" diyor.
+
 ## Oturuma boşta kalma süresi `UPTIME_SESSION_IDLE`
 
 2026-10-27'de ertelendi (S5). Kurumsal güvenlik kontrol listesi maddesi
@@ -2190,6 +2195,15 @@ test bildirimi ve olay notu hedef seçimi değil yetki reddi; "denetlenmeyen red
 yolları" listesinde gerekçesiyle yer alır. Madde #143 merge edilince kapanır; kapanış
 notu listenin README'deki yerini (bölüm adı) yazar.
 
+Kapandı (2026-11-07, S82 [#143](https://github.com/yusufceng/Kubeat/issues/143), 0.52):
+`deny`/`target-scope` satırları ve `WARN`'ları dakika başına
+`UPTIME_LOGIN_AUDIT_PER_MINUTE` ile sınırlı (API'nin ve kontrollerin redleri ayrı
+bütçe, sayaç her reddi sayar). Keşiften içe aktarma ve geri yükleme, bakım
+penceresinin kurulması ve silinmesi `namespace`, workload hedefi (oluşturma ve hedef
+değişikliği) `target` ile satır yazar. Denetlenmeyen yolların listesi README "Hedef
+politikası" → "Kapsam ihlali denetimi" → "Denetlenmeyen red yolları"nda: push token
+yenileme, monitor silme, test bildirimi, olay notu.
+
 ## Kapsam çözüm-hatası reddini gerçek cross-tenant reddinden ayırmak (reason/WARN, S77 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2236,6 +2250,14 @@ beri kontrol de API'nin süresini kullanıyor). Madde S82'nin iki PR'ı
 ([#142](https://github.com/yusufceng/Kubeat/issues/142),
 [#143](https://github.com/yusufceng/Kubeat/issues/143)) merge edilince kapanır;
 kapanış notu "denetlenmeyen red yolları" listesinin README'deki yerini yazar.
+
+Kapandı (2026-11-07, S82 [#142](https://github.com/yusufceng/Kubeat/issues/142) ve
+[#143](https://github.com/yusufceng/Kubeat/issues/143), 0.52): çözüm hatası sayaçta,
+logda ve denetim satırında `resolve_error`; API reddi de bir `WARN` yazar, kontrol anı
+`WARN`'ı namespace'i ve `source`'u taşır; vekilli kurulumun NXDOMAIN ön şartı ayarı
+açmadan `server resolve` ile sınanır (README "Vekilli kurulum" → "Ön sınama",
+`docs/pilot.md` "Vekilli kapsam"). Denetlenmeyen red yolları README "Hedef politikası"
+→ "Kapsam ihlali denetimi" → "Denetlenmeyen red yolları"nda.
 
 ## Chart'ta Route/Ingress açıkken `UPTIME_TRUST_PROXY_HOPS` varsayılanını 1 yapmak
 

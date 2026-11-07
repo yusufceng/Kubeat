@@ -172,8 +172,11 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
   kapsamın sınırı vekilin ulaşabildiği yerdir. Vekil verilmiş ve ayar
   kapalıyken backend açılışta bir kez `WARN` yazar. Kalan sınırlar: cluster DNS'i
   dış adlara NXDOMAIN değil SERVFAIL ya da zaman aşımıyla yanıt veriyorsa ayar
-  yardım etmez ve bu red denetimde gerçek bir cross-tenant reddinden ayrılmaz
-  (S82); gerçek hava boşluklu cluster provası kullanıcıdadır.
+  yardım etmez; 0.52'den beri bu red sayaçta, logda ve denetim satırında
+  `resolve_error` ile gerçek bir cross-tenant reddinden ayrılır ve operatör
+  backend'in yanıtını ayarı açmadan backend pod'undan sınar (`server resolve`,
+  README "Vekilli kurulum", "Ön sınama"; S82, #142, #143); gerçek hava boşluklu
+  cluster provası kullanıcıdadır.
 
   **Kurum ağı aralıkları (0.51, #132).** (c)'nin "cluster dışı hedefler yalnızca
   hedef politikasına tabidir" kuralında "cluster dışı" adresle okunur:
@@ -408,13 +411,27 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     çözülemeyen bir ad (vekilli istekte SERVFAIL ve zaman aşımı; doğrudan
     bağlantıda ayarlarda yazılı olmayan her ad) oluşturmadaki gibi güvenli
     tarafta red sayılır. CoreDNS kesintisinde kapsamı sınırlı ve annotation'la
-    kurulan monitor'lerin bu kontrolleri bu yüzden DOWN olur, bildirim DNS
-    kesintisini kapsam reddi diye söyler ve bu red sayaçta gerçek bir
-    reddinden ayrılmaz (S82). Kapsam daralması var olan kayıtları değiştirmez
-    (S73). Yönetici, kaydı başka birinin olan bir monitor'ü kendine ancak
-    hedefi ya da host adı taşıyan bir seçeneği değiştirerek ya da monitor'ü
-    kopyalayarak alır; formun farklı yazdığı bir seçenekle daralmış bir
-    monitor de böyle geri alınır.
+    kurulan monitor'lerin bu kontrolleri bu yüzden DOWN olur ve bildirim DNS
+    kesintisini kapsam reddi diye söyler; 0.52'den beri bu red sayaçta, logda
+    ve denetim satırında `resolve_error` ile gerçek bir reddinden ayrılır,
+    kontrolün zaman aşımının ya da kapanışın yarıda kestiği çözüm red sayılmaz
+    (S82, #142). Denetim (0.52, S82, #143):
+    - `deny`/`target-scope` satırları ve log satırları dakika başına
+      `UPTIME_LOGIN_AUDIT_PER_MINUTE` ile sınırlıdır; API'nin ve kontrollerin
+      redleri ayrı bütçe kullanır, sayaç her reddi sayar. Sınıra takılan bir
+      kontrolün ilk reddi sonradan yazılmaz; dakikanın uyarısı sayısını
+      söyler.
+    - Push token yenileme, monitor silme, test bildirimi ve olay notu redleri
+      hedef seçimi değil yetki reddidir ve denetlenmez (README "Kapsam ihlali
+      denetimi", "Denetlenmeyen red yolları").
+    - Kayıtlar API ve arayüzden, log satırı merkezi logdan okunur; SIEM'e
+      kendiliğinden akmaz (denetim kaydının tamamını stdout'a yazmak backlog'da).
+
+    Kapsam daralması var olan kayıtları değiştirmez (S73). Yönetici, kaydı
+    başka birinin olan bir monitor'ü kendine ancak hedefi ya da host adı
+    taşıyan bir seçeneği değiştirerek ya da monitor'ü kopyalayarak alır;
+    formun farklı yazdığı bir seçenekle daralmış bir monitor de böyle geri
+    alınır.
 
 - **(d)** Monitor kontrol sonucunun hatasındaki (`result.Error`) çözülen
   IPv4/IPv6 adresleri de maskelenir (`[address hidden]`), çünkü bu hata bir

@@ -53,3 +53,18 @@ Dosya Secret olarak verilir ve değiştiğinde yeniden okunur.
   (docs/backlog.md, "Kurumsal kodun lisansı").
 - İmzalama anahtarı kaybolursa yeni lisans verilemez. Çevrimdışı bir yedeği
   olmalıdır.
+
+## Not: denetim satırının log satırı (2026-11-07, 0.52)
+
+`audit` özelliğinin kapısı denetim kaydını **görmektir**: arayüz, API ve CSV.
+Kayıt lisanstan bağımsız yazılır (README "Kubeat Enterprise lisansı": "Kayıt
+yine yazılır"). Başarılı bir denetim yazımından sonra stdout'a yazılan log
+satırı bu kapının dışındadır; lisanssız kurulumda da yazılır, çünkü operatörün
+kendi logudur, görme yüzeyi değildir (`docs/backlog.md` "Denetim kaydı: stdout
+log satırı ..." kararı). 0.52'de bu, kapsam reddinin `deny`/`target-scope`
+satırlarının `WARN`'ına uygulandı (S82, [#143](https://github.com/yusufceng/Kubeat/issues/143)):
+API reddi kullanıcıyı, namespace'i, nedeni ve hedefi; kontrol anı reddi
+monitor'ü, namespace'i ve kaynağı yazar (yazım başarısız olsa da yazılır,
+yanında `audit entry lost` hatası durur). Satırlar ve log satırları dakika
+başına `UPTIME_LOGIN_AUDIT_PER_MINUTE` ile sınırlıdır. Denetim kaydının tamamını
+stdout'a yazmak, süzgeçler ve CSV backlog'da kalır; karar değişmez.
