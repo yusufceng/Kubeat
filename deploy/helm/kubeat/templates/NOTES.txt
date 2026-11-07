@@ -63,14 +63,20 @@ reach it with a port-forward and the API token (README, "API"):
   curl -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors
 {{- /*
 The sign-in throttle's source address behind the Route or Ingress: the
-values README "Hesaplar ve giriş" gives, and the frontend's network policy
-that keeps pods from choosing their own source once the header is trusted.
-The backend trusts it from the frontend alone (the frontend token), so the
-backend's policy is not needed for that.
+values README "Hesaplar ve giriş" gives, one for the Ingress class when the
+notes know it (GKE's own Ingress reads its class from the annotation, not
+from ingressClassName); the router's forwardedHeaderPolicy, under which a
+Route's value holds, unless the Route pins its own; and the frontend's
+network policy that keeps pods from choosing their own source once the
+header is trusted. The backend trusts it from the frontend alone (the
+frontend token), so the backend's policy is not needed for that.
 */}}
 {{- $hops := dig "extraEnv" "UPTIME_TRUST_PROXY_HOPS" "" .Values.backend | default "0" | toString }}
 {{- $frontendPolicy := dig "networkPolicy" "enabled" false .Values.frontend }}
-{{- if and (or .Values.route.enabled .Values.ingress.enabled) (or (eq $hops "0") (not $frontendPolicy)) }}
+{{- $ingressClass := .Values.ingress.className | default (index (.Values.ingress.annotations | default dict) "kubernetes.io/ingress.class") | default "" | toString | lower }}
+{{- $routeHeaders := index (.Values.route.annotations | default dict) "haproxy.router.openshift.io/set-forwarded-headers" | default "" | toString | lower }}
+{{- $routeNote := and .Values.route.enabled (not (has $routeHeaders (list "append" "replace"))) }}
+{{- if and (or .Values.route.enabled .Values.ingress.enabled) (or (eq $hops "0") (not $frontendPolicy) $routeNote) }}
 
 Sign-in throttle: failed sign-ins are counted per client address, which
 the backend reads from the X-Forwarded-For the UI passes on.
@@ -82,6 +88,13 @@ to the X-Forwarded-For entries your proxies in front of the UI write
 {{- if .Values.route.enabled }}
   a plain Route: 1; a Route behind a WAF or L7 load balancer that writes
   X-Forwarded-For: 2
+{{- else if eq $ingressClass "nginx" }}
+  ingress-nginx: 1, provided its LoadBalancer Service has
+  externalTrafficPolicy: Local (in the ingress-nginx chart
+  --set controller.service.externalTrafficPolicy=Local); with Cluster, the
+  default, it sees a node instead of the client
+{{- else if eq $ingressClass "gce" }}
+  GKE's own Ingress (GCE): 2
 {{- else }}
   ingress-nginx with its default settings: 1; GKE's own Ingress (GCE): 2;
   an L7 Google Cloud load balancer in front of ingress-nginx with
@@ -90,7 +103,17 @@ to the X-Forwarded-For entries your proxies in front of the UI write
 If unsure, take the lower value and check the source it keys on: one too
 high lets a client lengthen the header and pick its own source, unwarned.
 Upgrade with it, e.g.
-  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS={{ if and (not .Values.route.enabled) (eq $ingressClass "gce") }}2{{ else }}1{{ end }}
+{{- end }}
+{{- if $routeNote }}
+A Route's value holds while the router appends to X-Forwarded-For or
+replaces it: forwardedHeaderPolicy Append, the default, or Replace. Under
+IfNone or Never it passes on a header the client wrote, and any value above
+0 lets a client pick its own source. To read the policy (empty is Append;
+it needs cluster-wide read access):
+  oc -n openshift-ingress-operator get ingresscontroller default -o jsonpath='{.spec.httpHeaders.forwardedHeaderPolicy}{"\n"}'
+Without that access, or under IfNone or Never, give this Route its own:
+  --set-string 'route.annotations.haproxy\.router\.openshift\.io/set-forwarded-headers=append'
 {{- end }}
 {{- if not $frontendPolicy }}
 The backend reads the header only from the frontend, which proves itself
@@ -111,6 +134,36 @@ giriş", "Arayüzün ağ politikası").
 With networkPolicy.enabled push jobs in other namespaces send to the
 frontend: list their namespaces in frontend.networkPolicy.from too.
 {{- end }}
+{{- end }}
+{{- end }}
+{{- /*
+The frontend's own policy, once it is on: a network plugin that does not
+enforce NetworkPolicy ignores it without a word, so the notes ask for a
+check. Its default "from" selects the OpenShift router alone and matches
+nothing elsewhere; whether this is OpenShift is read from the APIs this
+render sees, which a GitOps render (helm template without --api-versions)
+does not, so it is a warning and never a failed render.
+*/}}
+{{- if $frontendPolicy }}
+
+frontend.networkPolicy is on: check that the cluster enforces it, since a
+network plugin that does not enforce NetworkPolicy ignores it without a
+word. From a pod in a namespace not in frontend.networkPolicy.from, a
+request to
+  http://{{ .Release.Name }}-frontend.{{ .Release.Namespace }}.svc:3000/login
+must time out (README, "Hesaplar ve giriş", "Arayüzün ağ politikası").
+{{- $router := list (dict "namespaceSelector" (dict "matchLabels" (dict "policy-group.network.openshift.io/ingress" ""))) }}
+{{- $from := dig "networkPolicy" "from" $router .Values.frontend }}
+{{- if and (eq (toJson $from) (toJson $router)) (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) }}
+
+WARNING: frontend.networkPolicy.from is left at its default, which lets in
+only the OpenShift router, and this cluster does not look like OpenShift
+(or this render did not see its API: helm template without
+--api-versions). Anywhere else that default matches nothing, so neither
+the Route nor the Ingress reaches the UI. Set frontend.networkPolicy.from
+to your ingress controller's namespace, or for GKE's own Ingress to its
+load balancer's ranges (README, "Hesaplar ve giriş", "Arayüzün ağ
+politikası").
 {{- end }}
 {{- end }}
 {{- if and (or .Values.oidc.issuer .Values.ldap.url) (not .Values.license.existingSecret) }}
@@ -158,6 +211,10 @@ The NetworkPolicy lets only these connect to the backend:
   - the sources in networkPolicy.backendIngressFrom
 Jobs in other namespaces send push reports through the frontend:
   http://{{ .Release.Name }}-frontend.{{ .Release.Namespace }}.svc:3000/api/push/<token>
+{{- if $frontendPolicy }}
+frontend.networkPolicy is on too: list those jobs' namespaces in
+frontend.networkPolicy.from, or their push monitors go DOWN.
+{{- end }}
 {{- end }}
 {{- $kept := list }}
 {{- if include "kubeat.keepData" . }}{{ $kept = append $kept (printf "%s-data" .Release.Name) }}{{ end }}
