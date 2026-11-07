@@ -15,8 +15,12 @@ Bildirimde şunlar işe yarar:
 - Açığı yeniden üretme adımları.
 - Etkisi: ne okunabiliyor, ne değiştirilebiliyor, kimin yetkisiyle.
 
-Düzeltme yayımlanınca açık, depoda bir GitHub güvenlik duyurusuyla
-(Security Advisory) duyurulur.
+Düzeltme yayımlanınca bildirilen açık, depoda bir GitHub güvenlik
+duyurusuyla (Security Advisory) duyurulur. Kararlı sürüme (1.0) kadar kendi
+incelememizde ya da taramamızda bulduğumuz bir açığın düzeltmesi duyuru
+açılmadan çıkabilir: o zaman [docs/yukseltme.md](docs/yukseltme.md)'deki
+yükseltme notu sürümü "güvenlik sürümü" diye adlandırır ve hangi kurulumların
+yükseltmesi gerektiğini yazar, açığın ayrıntısını yazmaz.
 
 ## Desteklenen sürümler
 

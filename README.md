@@ -28,7 +28,7 @@ tamamlayıcıdır. Ingress controller'ı ve cert-manager'ı olan bir cluster'a
 kurulum (OpenShift'te "OpenShift" bölümündeki komut):
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 \
   -n kubeat --create-namespace \
   --set podSecurityContext.fsGroup=1001 \
   --set ingress.enabled=true --set ingress.className=<kümenin sınıfı> \
@@ -68,7 +68,7 @@ Kubeat'in kendisi düşerse cluster dışındaki bir heartbeat alıcısı haber 
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum".
@@ -85,7 +85,7 @@ beri imajlar ve chart imzalıdır; sürümün GitHub Release'i digest'leri ve
 SBOM'ları taşır (bkz. "Tedarik zinciri"). 0.44.0 ve öncesi imzasızdır. Herhangi bir cluster'a kurulum:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 \
   --set podSecurityContext.fsGroup=1001 \
   -n kubeat --create-namespace
 ```
@@ -304,7 +304,7 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
@@ -1578,6 +1578,13 @@ chart'ın ayrı bir anahtarla açılan arayüz politikası kapatır:
               kubernetes.io/metadata.name: ingress-nginx
   ```
 
+  Bu seçici ölçüldü (minikube, Calico, ingress eklentisi, controller v1.10.1,
+  2026-11-07): Ingress yolu açık kaldı, probe'lar geçti, `from`'da olmayan bir
+  namespace'ten arayüz Service'ine doğrudan istek zaman aşımına düştü; iki
+  politika birlikte açıkken `from`'da olmayan bir namespace'in push'u monitor'ü
+  DOWN yaptı, namespace eklenince UP oldu. GKE'nin kendi controller'ı ve
+  yük dengeleyici aralıkları ölçülmedi.
+
 - OpenShift'te router pod ağında çalışıyorsa varsayılan `from` yeter. Router
   host ağındaysa (`HostNetwork` yayımlama; çoğunlukla bare metal ve vSphere)
   trafik node'dan gelir ve namespace seçicisi onu tutmaz: OpenShift'in host
@@ -1690,6 +1697,7 @@ backend) ölçülüp ölçülmediğini yazar:
 | OpenShift Route, router `forwardedHeaderPolicy: IfNone` ya da `Never` | `0`; Route'a `haproxy.router.openshift.io/set-forwarded-headers: append` verilince `1` | istemcinin kendi yazdığı (router dokunmaz); başlık yoksa `IfNone`'da istemci (router), `Never`'da router'ın adresi (Next.js) | ölçülmedi |
 | Önünde başlığı yazan bir WAF ya da L7 yük dengeleyici olan Route (router `Append`) | `2` | istemci (WAF), WAF (router) | ölçülmedi |
 | GKE `ingress-nginx`: L4 LoadBalancer Service, `externalTrafficPolicy: Local`, varsayılan ayarlar | `1` | istemci (`ingress-nginx`; gelen başlığı kendi eşiyle değiştirir) | ölçülmedi |
+| `ingress-nginx` varsayılan ayarlarla, istemci controller'ın Service'ine cluster içinden bağlanırken | `1` | istemci (`ingress-nginx`; uydurma girdiyi siler) | ölçüldü (minikube ingress eklentisi, controller v1.10.1, Calico, 2026-11-07; LoadBalancer ve `externalTrafficPolicy` yolu ölçülmedi) |
 | Önde L7 Google Cloud yük dengeleyici (GCLB) + `ingress-nginx` (`use-forwarded-headers: "true"`, `compute-full-forwarded-for: "true"`) | `3` | istemci ve yük dengeleyicinin adresi (GCLB), GCLB vekili (`ingress-nginx`) | ölçülmedi |
 | GKE'nin kendi Ingress'i (GCE) | `2` | istemci ve yük dengeleyicinin adresi (GCLB) | ölçülmedi |
 | GKE Gateway (`gke-l7-global-external-managed`; HTTPRoute'u siz yazarsınız). Arayüz politikasının kaynakları: yük dengeleyicinin aralıkları, `ipBlock` `35.191.0.0/16` ve `130.211.0.0/22` | `2` | istemci ve yük dengeleyicinin adresi (GCLB) | ölçülmedi |
@@ -3895,7 +3903,7 @@ satır:
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.51.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 ### Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`

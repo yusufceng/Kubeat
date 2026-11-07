@@ -152,8 +152,10 @@ herkese kilitleyebiliyordu.
   küçük kalsın) ve arayüzün kendi gördüğü eşi başlığa eklemesi (server action
   soket eşini okuyamıyor, özel sunucu ister): ikisi de backlog'da.
 
-**Somut hop örnekleri.** Arayüz yoluna göre türetildi; bu yolda yalnız düz
-Route ölçüldü (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
+**Somut hop örnekleri.** Arayüz yoluna göre türetildi; bu yolda düz Route
+(sandbox) ve cluster içinden bağlanılan `ingress-nginx` (minikube ingress
+eklentisi, controller v1.10.1) ölçüldü (README "Hesaplar ve giriş",
+"Vekil-hop rehberi"):
 
 - Vekilsiz, arayüze `kubectl port-forward`: `1` (girdiyi Next.js yazar).
   Ölçülmedi.
@@ -166,7 +168,10 @@ Route ölçüldü (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
   Ölçülmedi.
 - GKE `ingress-nginx`, L4 LoadBalancer Service, `externalTrafficPolicy: Local`,
   varsayılan ayarlar: `1` (controller gelen başlığı kendi eşiyle değiştirir).
-  Ölçülmedi.
+  GKE'de ölçülmedi; aynı controller'ın varsayılan ayarlarla uydurma girdiyi
+  silip `1`'i verdiği, istemci controller'ın Service'ine cluster içinden
+  bağlanırken ölçüldü (minikube ingress eklentisi, controller v1.10.1,
+  2026-11-07).
 - Önde L7 Google Cloud yük dengeleyici (GCLB) + `ingress-nginx`
   (`use-forwarded-headers` ve `compute-full-forwarded-for` açık): `3` (GCLB
   istemciyi ve yük dengeleyicinin adresini, `ingress-nginx` GCLB vekilini
