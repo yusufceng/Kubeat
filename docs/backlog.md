@@ -436,6 +436,18 @@ sınırlı; doğru yol 0.46'dan beri README "API" ve NOTES'ta yazılı. Tetikley
 `frontend/proxy.ts`'e dokunan ilk madde (S34 ona katılır) ya da gerçek bir
 kullanıcı raporu.
 
+Güncelleme (2026-11-07, sprint 9 kapanışı; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)):
+`kubeat.io/path`'in Route ve Ingress'te tanınması için yeni kanıt (Müşteri A, sprint 9
+bulgusu 1, önemli). 0.51'de annotation monitor'leri her kurulumda nesnelerinin
+namespace'ine bağlı. SSO arkasındaki bir uygulamanın annotation monitor'ü kendi host'u
+dışındaki kimlik sağlayıcı sayfasına ulaşınca `blocked_by_scope` ile DOWN oluyor.
+Kapsamı açmayan çare kontrolü uygulamanın kendi host'unda, kimlik doğrulaması istemeyen
+bir sağlık yolunda tutmak. Annotation'la çalışan ekip bunu manifestten ancak
+`kubeat.io/path` Route ve Ingress'te de geçerse verebilir (bugün yalnız Service;
+`backend/internal/discovery/sync.go`). Bu parça (küçük) sprint 10'da S43 ile aynı keşif
+paketinde slot almadan, ya da sprint 11 belge turunda SSO çaresiyle birlikte adaydır;
+karar PO'da. Ada göre arama, `upsert` ve OpenAPI'nin tetikleyicisi değişmedi.
+
 ## Ücretsiz katmanda tek OIDC sağlayıcısıyla giriş; alternatifi TOTP 2FA
 
 2026-10-27'de ertelendi (S16). Küçük ekibin "Google Workspace ile giriş,
@@ -856,6 +868,16 @@ Gerekçe kullanıcı kararı (2026-11-07): hiçbir sürüm satılmadı; eski min
 geri taşıma (0.46.1 dahil) yapılmaz, destek penceresi kararlı sürüm çıkarken
 düşünülür. Müşteri A'nın 3 yıllık destek sorusu o kararda cevaplanır. 1.0'a
 kadar SECURITY.md'nin advisory cümlesi düzeltilir (S69, sprint 9 sürüm PR'ı).
+
+Güncelleme (2026-11-07, sprint 9 kapanışı; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)):
+Müşteri A (sprint 9 bulgusu 3; önemli, 1.0'da satın alma için engelleyici) kullanıcı
+kararını (1.0'a kadar advisory yok) gerekçesiyle kabul ediyor ve 1.0 kararı için üç şart
+öneriyor: kendi bulunanlar dahil her güvenlik düzeltmesine etkilenen ve düzelen sürüm
+aralığıyla bir GHSA ve CVE kimliği; o zamana kadar `docs/yukseltme.md`'deki "güvenlik
+sürümü" adlandırmalarının etkilenen sürüm aralığını makine okunur bir tabloda vermesi;
+1.0 ile en az bir önceki minor'a yama veren bir destek penceresi. Gerekçe: SBOM ve
+GHSA/CVE okuyan tarayıcı advisory'siz bir düzeltmeden önceki sürümü açıklı göstermez.
+Tetikleyici değişmedi (1.0 kararı, sprint 11 sonu); bu üçü kararın girdisi.
 
 ## containers/image'ın okuduğu biçimde ikinci imza
 
@@ -1768,6 +1790,12 @@ S85 kapsamında, sprint 10 adayı, sıra S76 → S88 → S85), gerçek tarayıc�
 iki kaynaklı prova sürümden sonra (sandbox Route). IPv6 kaynakları ayrı maddede
 ("Throttle'da IPv6 kaynaklarını /64'e toplamak").
 
+Güncelleme (2026-11-07, sprint 9 kapanışı; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)):
+iki kaynaklı prova sandbox Route'unda (0.51.0, hops=1) geçti: A kaynağı 10 yanlıştan
+sonra kilitlendi, B doğru parolayla sayfayı açtı ve parolayı değiştirdi; ret satırları
+A'nın adresini yazdı. Kalanlar değişmedi: 429'ların sayacı S85'te, kaynak başına
+adlardan bağımsız tavan S88'de (ikisi sprint 10 önerisinde).
+
 ## Throttle'da IPv6 kaynaklarını /64'e toplamak
 
 2026-11-07'de ertelendi (S76 incelemesi, [#134](https://github.com/yusufceng/Kubeat/issues/134)).
@@ -2246,6 +2274,14 @@ oldu. Tabloya üç satır "ölçülmedi" ile eklendi: router `Replace`, router
 (a)'da ve kullanıcının GKE provasında ölçülür; ölçülmeyen satır "ölçülmedi"
 kalır.
 
+Güncelleme (2026-11-07, sprint 9 kapanışı; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)):
+**kapandı.** Prova (a) Calico'lu ve ingress eklentili minikube'da (controller v1.10.1)
+`ingress-nginx` `1` satırını ölçtü; README, ADR-0004 ve `docs/yukseltme.md`'de
+ortamıyla "ölçüldü" yazıldı. Kullanıcıda kalanlar (sprint dosyası "Sprint 10'a
+devredenler"): GCE Ingress ve GKE Gateway `2`, `ingress-nginx`'in LoadBalancer +
+`externalTrafficPolicy: Local` yolu, WAF ya da F5 önlü Route `2`, router `Replace`,
+`IfNone`/`Never` ve port-forward satırları.
+
 ## Arayüz sırrı değişince pod'ları kendiliğinden yeniden başlatmak (checksum annotation)
 
 2026-11-07'de ertelendi (S79 [#119](https://github.com/yusufceng/Kubeat/issues/119); [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
@@ -2320,6 +2356,10 @@ sertleştirmenin dışında kaldı; kanalların kapsamı bugünkü gibi oluştur
 değiştirmede denetlenir. Kanıt gelirse ayrı madde olur. Tetikleyici: S86'nın SRE
 incelemesindeki değerlendirme.
 
+Güncelleme (2026-11-07, S86 teslimatı; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)):
+SRE incelemesinden sonra madde backlog'da kaldı. Yeni tetikleyici: kanal hedefleriyle
+ilgili bir bulgu ya da S73'ün kanal kısmı.
+
 ## Kurum aralığı açılış korumasını node ağına ve cluster ağlarının tamamına genişletmek
 
 2026-11-07'de ertelendi (S80 [#132](https://github.com/yusufceng/Kubeat/issues/132); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
@@ -2339,3 +2379,79 @@ cluster ağlarını ayrı bir ayarla beyan etmesi ya da OpenShift'te
 VIP'ini kendiliğinden bulmak S80'in kapsam dışıydı. Tetikleyici: pilotta ya da
 provada aralığın node ağı veya API VIP'iyle çakıştığının görülmesi, ya da bunu
 isteyen bir kurulum.
+
+Güncelleme (2026-11-07, sprint 9 kapanışı; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)):
+**tetikleyici doldu** ("bunu isteyen bir kurulum"; Müşteri A, sprint 9 bulgusu 2,
+önemli). Müşteri ayarı 30 cluster'da GitOps'la cluster başına veriyor. OpenShift'te her
+node pod ağından kendi alt ağını alıyor ve her cluster yükseltmesi node'ları sırayla
+drain ediyor: pod ağının bir parçasını içeren aralık ilk açılışta geçip tam yükseltme
+sırasında backend'i durdurur. Liste dışlama kabul etmediği için kurum ağı tek büyük bir
+özel aralıksa cluster başına onlarca CIDR elle yazılıyor. Koruma gerçek bir pod'da
+denenmedi (sprint 10'a devreden prova). Müşterinin isteği:
+
+- Operatör cluster ağlarını chart'ta beyan eder; çakışma `helm template` ya da ArgoCD
+  sync anında render hatası verir, CrashLoop değil.
+- Çalışma anında yakalanan çakışmada backend durmaz: ayar yok sayılır (boş liste daha
+  sıkı taraf), `ERROR` satırı ve chart alarmı verilir, izleme sürer.
+
+Çalışma anı kısmı S80'in PO kararına ("çakışan aralık backend'i başlatmaz") aykırı;
+gerekçe "İzleme asla durmaz" ilkesi ve boş listenin daha sıkı taraf olması, karar
+PO'da. PMO önerisi: 1.0'dan önce, aynı kapsam yüzeyindeki S73 ile sıralı olarak sprint
+11 adayı.
+
+## Kurulum notunda `frontend.networkPolicy.from` önerisini Ingress sınıfına göre vermek
+
+2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
+0.51'de kurulum notu hop değerini Ingress sınıfına göre öneriyor (`nginx` `1`, `gce`
+`2`), ama arayüz politikası kapalıyken `frontend.networkPolicy.from` için eski genel
+cümleyi veriyor; `gce` için yük dengeleyici aralıklarını söylemiyor. `gce-internal`
+gibi öteki sınıflar için ayrı öneri yok, bugünkü üç seçenek sıralanıyor. Kabul ölçütü
+yalnız hop önerisini istiyordu. İlgili müşteri bulguları (sprint 9, Müşteri B, önemli):
+GCE'de verilen değer sınıfla çelişince kurulum notu bunu söylemiyor (bulgu 4) ve GKE
+için kopyalanabilir bir `values-gke.yaml` yok (bulgu 5). Tetikleyici: o iki bulguyu
+taşıyan madde (sprint 10 ya da sprint 11 belge turu adayı) ya da `gce-internal` ile
+kurulan bir kurulum.
+
+## `test-chart.sh`'in README denetimini kurulum notunun gösterdiği bölüme daraltmak
+
+2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133) BA incelemesinin düşük bulgusu; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
+`sprint-takimi.md` adım 2, kurulum notunun önerdiği değerin notun gösterdiği README
+bölümünde geçmesini kabul ölçütü sayıyor. `deploy/helm/test-chart.sh` metinleri bütün
+README'de arıyor; bölüm başka yerde aynı metni taşıyınca denetim yanlışlıkla geçer.
+İş: denetimi bölüm başlıkları arasında (`awk` ile, pilot örneğindeki gibi) yapmak.
+Tetikleyici: kurulum notuna dokunan bir sonraki madde.
+
+## Keşiften içe aktarmayı monitor'ün kapsam kuralıyla hizalamak
+
+2026-11-07'de ertelendi (S80 [#132](https://github.com/yusufceng/Kubeat/issues/132) ve S86 [#131](https://github.com/yusufceng/Kubeat/issues/131); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
+İçe aktarma hedefi çözmez, yalnız kullanıcının düzenleyebildiği namespace'e bakar
+(README "Hedef politikası" → "Sınır: keşiften içe aktarma"). Ayar boşken ya da router
+VIP'i listede değilken kapsamı sınırlı kullanıcı bir Route'u içe aktarabiliyor; aynı
+monitor'ün klonu ve aynı host'a hedef değişikliği ise reddediliyor. 0.51'de kontrol her
+bağlantıda kapsama tabi olduğundan bu monitor kontrolde `blocked_by_scope` ile DOWN
+olur. İçe aktarma aynı kararı içe aktarma anında verirse kullanıcı erken ve açık bir
+403 alır. Aynı `discovery.go` yolu S82'nin red yolları listesinde. Tetikleyici: S82
+(sprint 10) ya da S73.
+
+## Kapsam denetiminin porta bakması (node üstündeki router VIP'i)
+
+2026-11-07'de ertelendi (S80 [#132](https://github.com/yusufceng/Kubeat/issues/132); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
+Router VIP'i bir node'un üstündeyse (bare metal'de keepalived) ve `/32` ile
+`UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'e girdiyse, aynı adres o node'un host ağında
+dinleyen portlarına da (ör. kubelet) çıkar; kapsam portlara bakmaz. 0.51'de yalnız
+belgelendi (README "Hedef politikası" → "Kurum ağı" → "Şart"): bunu istemeyen VIP'i
+listeye almaz, on-prem Route'ları yönetici kurar. Çözüm, aralıkla birlikte izinli
+portları da okumak olabilir. Tetikleyici: VIP'i node üstünde olan
+ve on-prem Route'ları kapsamı sınırlı editörlere açmak isteyen bir kurulum.
+
+## Annotation monitor'leri için kurulum düzeyinde kapsam istisnası
+
+2026-11-07'de ertelendi (S86 [#131](https://github.com/yusufceng/Kubeat/issues/131); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
+0.51'de annotation'la kurulan monitor her kurulumda nesnesinin namespace'ine bağlıdır,
+çünkü hedefini nesneyi düzenleyen belirler ve Kubeat onun kim olduğunu bilmez. Kapsamı
+sınırlı kullanıcısı olmayan tek kiracılı bir kurulum için bu kural gereğinden sıkı
+olabilir. Kurulum düzeyinde bir istisna ayarı bilerek eklenmedi: kanıt yok ve güvenli
+varsayılanı geri açar. Sprint 9'da Müşteri A (bulgu 1, SSO) istisna değil belge çaresi
+ve `kubeat.io/path` istedi; Müşteri B (bulgu 6) tek kiracılı kurulum için yükseltme
+notunda kısa yol istedi. Tetikleyici: belge çaresi ve `kubeat.io/path` yetmeyen bir
+kurulum.

@@ -324,7 +324,8 @@ namespace ve kapsamı sınırlı bir editörle, monitor'ler arayüz formundan
 kurularak sınandı (2026-11-07); kaydı olmayan monitor'lerin yükseltme yolu
 `go test` ile sınandı. `ingress-nginx`'in hop değeri `1` ve arayüzün
 ağ politikası Calico'lu minikube'da ölçüldü; GKE satırları ölçülmedi. Durum
-sayfası kilidinin iki kaynaklı provası sürümden sonra Route'tadır.
+sayfası kilidi ve parola değiştirmenin iki kaynaklı provası ve uydurma
+`X-Forwarded-For` adımı sürümden sonra sandbox Route'unda geçti (2026-11-07).
 
 ### Yapılacak
 
