@@ -866,6 +866,10 @@ func TestTargetScopeExternalCIDRs(t *testing.T) {
 		"10.50.0.0/16,corp": `"corp" is not a CIDR`,
 		"10.50.0.0/33":      `"10.50.0.0/33" is not a CIDR`,
 		"10.50.0.1":         "write it as 10.50.0.1/32",
+		// An IPv4 range written as IPv6 would hold no address for the scope
+		// check, nor for this guard, which reads the ranges as it does.
+		"::ffff:10.50.0.0/112": "write it as 10.50.0.0/16",
+		"::ffff:0.0.0.0/96":    "write it as 0.0.0.0/0",
 	} {
 		t.Setenv(key, value)
 		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), key+": ") || !strings.Contains(err.Error(), want) {

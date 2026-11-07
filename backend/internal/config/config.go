@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 )
 
 // Config holds every tunable of the server. Each field maps to one
@@ -887,34 +889,34 @@ var ownAddrs = func() ([]netip.Addr, error) {
 // the pods in it by address, with no namespace to answer for, so the backend
 // does not start until the range is narrowed or the setting emptied. It
 // catches the plain mistake (10.0.0.0/8 over a cluster's networks), not every
-// overlap: the rest of the pod and Service networks, the node network and
-// the cluster's VIPs are the operator's to keep out (README, "Hedef
-// politikası"). An empty setting reads nothing.
+// overlap: it compares the addresses of this start only, so a range over
+// another part of the pod network passes today and stops the backend once
+// the pod is scheduled there; the rest of the pod and Service networks, the
+// node network and the API VIP are the operator's to keep out (README, "Hedef
+// politikası"). The ranges are read by netguard.ParseExternalRanges and
+// compared by ExternalRanges.Holding, as the scope check reads and compares
+// them, so the guard and the check never part on a spelling (an IPv4 range
+// written as IPv6 is refused by both). An empty setting reads nothing.
 func checkScopeExternal(list string) error {
 	const key = "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS"
-	var ranges []netip.Prefix
+	var entries []string
 	for _, entry := range strings.Split(list, ",") {
-		if prefix, err := netip.ParsePrefix(strings.TrimSpace(entry)); err == nil {
-			ranges = append(ranges, prefix)
+		if entry = strings.TrimSpace(entry); entry != "" {
+			entries = append(entries, entry)
 		}
 	}
-	if len(ranges) == 0 {
+	ranges, err := netguard.ParseExternalRanges(entries)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	if ranges.Empty() {
 		return nil
-	}
-	holding := func(addr netip.Addr) (netip.Prefix, bool) {
-		addr = addr.Unmap().WithZone("")
-		for _, prefix := range ranges {
-			if prefix.Contains(addr) {
-				return prefix.Masked(), true
-			}
-		}
-		return netip.Prefix{}, false
 	}
 	const advice = "list only the company's ranges outside the cluster's pod, Service and node networks, or leave it empty " +
 		"(README, \"Hedef politikası\")"
 	if host := strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_HOST")); host != "" {
 		if addr, err := netip.ParseAddr(host); err == nil {
-			if prefix, ok := holding(addr); ok {
+			if prefix, ok := ranges.Holding(addr); ok {
 				return fmt.Errorf("%s: %s holds the API server's address %s (KUBERNETES_SERVICE_HOST), in the cluster's Service network: "+
 					"a user limited to some namespaces could reach every Service in it by its ClusterIP; %s", key, prefix, addr, advice)
 			}
@@ -925,7 +927,7 @@ func checkScopeExternal(list string) error {
 		return fmt.Errorf("%s: the backend's own addresses, which no range may hold, cannot be read: %w", key, err)
 	}
 	for _, addr := range own {
-		if prefix, ok := holding(addr); ok {
+		if prefix, ok := ranges.Holding(addr); ok {
 			return fmt.Errorf("%s: %s holds %s, an address of the backend's own pod (its pod IP or loopback): "+
 				"a user limited to some namespaces could reach the pods in it by address; %s", key, prefix, addr.WithZone(""), advice)
 		}

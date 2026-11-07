@@ -174,6 +174,20 @@ func TestExternalRanges(t *testing.T) {
 			t.Errorf("ParseExternalRanges(%q) took it", bad)
 		}
 	}
+	// An IPv4 range written as IPv6, or one over where IPv6 writes IPv4,
+	// would match no address, since Contains reads ::ffff:10.50.0.1 as IPv4:
+	// it is refused, with the IPv4 spelling where there is one.
+	for entry, want := range map[string]string{
+		"::ffff:10.50.0.0/112": "write it as 10.50.0.0/16",
+		"::ffff:10.50.0.1/128": "write it as 10.50.0.1/32",
+		"::ffff:0:0/96":        "write it as 0.0.0.0/0",
+		"::/0":                 "write IPv4 ranges as IPv4",
+		"::/80":                "write IPv4 ranges as IPv4",
+	} {
+		if _, err := ParseExternalRanges([]string{"10.50.0.0/16", entry}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("ParseExternalRanges(%q): err = %v, want one saying %q", entry, err, want)
+		}
+	}
 
 	for ip, want := range map[string]bool{
 		// Company addresses are outside the cluster, however they are written.

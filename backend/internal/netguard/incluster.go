@@ -112,23 +112,43 @@ type Resolver interface {
 // (guardrails.External, the scheduler's host limits) classify as InCluster
 // does.
 //
-// The ranges must stay outside the cluster's pod, Service and node networks:
-// an address of theirs listed here is one a scoped user reaches with no
-// namespace to answer for. config.Load refuses ranges that hold the API
-// server's address or one of the backend's own; the rest of those networks,
-// and the cluster's VIPs, are the operator's to keep out.
+// The ranges must stay outside the cluster's pod, Service and node networks
+// and its API VIP: an address of theirs listed here is one a scoped user
+// reaches with no namespace to answer for. The router's VIP is the one
+// cluster address an operator may list, on purpose and as a /32, for on-prem
+// Routes, and every Route behind it then opens to scoped users. config.Load
+// refuses ranges that hold the API server's address or one of the backend's
+// own; the rest is the operator's to keep out (README, "Hedef politikası").
 type ExternalRanges struct{ prefixes []netip.Prefix }
+
+// mappedIPv4 is where IPv6 writes IPv4 addresses (::ffff:10.50.0.1).
+// Contains reads such an address as IPv4, so a range written in it would
+// hold nothing.
+var mappedIPv4 = netip.MustParsePrefix("::ffff:0:0/96")
 
 // ParseExternalRanges reads ExternalRanges from CIDRs such as
 // "10.50.0.0/16", one range each; an entry that is not a CIDR is an error.
+// So is one written in, or over, mappedIPv4 (::ffff:10.50.0.0/112): it
+// would match no address, and the operator would not see why. The error
+// gives the IPv4 spelling.
 func ParseExternalRanges(cidrs []string) (ExternalRanges, error) {
 	var e ExternalRanges
 	for _, entry := range cidrs {
-		prefix, err := netip.ParsePrefix(strings.TrimSpace(entry))
+		entry = strings.TrimSpace(entry)
+		prefix, err := netip.ParsePrefix(entry)
 		if err != nil {
 			return ExternalRanges{}, fmt.Errorf("scope external range %q: %w", entry, err)
 		}
-		e.prefixes = append(e.prefixes, prefix.Masked())
+		prefix = prefix.Masked()
+		if prefix.Overlaps(mappedIPv4) {
+			if prefix.Bits() >= mappedIPv4.Bits() {
+				return ExternalRanges{}, fmt.Errorf("scope external range %q is an IPv4 range written as IPv6, which no address matches; write it as %s",
+					entry, netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-mappedIPv4.Bits()))
+			}
+			return ExternalRanges{}, fmt.Errorf("scope external range %q holds %s, where IPv6 writes IPv4 addresses, which no address matches; write IPv4 ranges as IPv4, such as 10.50.0.0/16",
+				entry, mappedIPv4)
+		}
+		e.prefixes = append(e.prefixes, prefix)
 	}
 	return e, nil
 }
@@ -149,16 +169,23 @@ func (e ExternalRanges) String() string {
 // written as IPv6 (::ffff:10.50.0.1) is taken as that IPv4 address, and a
 // zone is dropped, as InClusterAddr reads them.
 func (e ExternalRanges) Contains(addr netip.Addr) bool {
+	_, ok := e.Holding(addr)
+	return ok
+}
+
+// Holding returns the first range that holds addr, read as Contains reads
+// it, for config.Load to name the range its start guard refuses.
+func (e ExternalRanges) Holding(addr netip.Addr) (netip.Prefix, bool) {
 	plain := addr.Unmap().WithZone("")
 	if !plain.IsValid() {
-		return false
+		return netip.Prefix{}, false
 	}
 	for _, prefix := range e.prefixes {
 		if prefix.Contains(plain) {
-			return true
+			return prefix, true
 		}
 	}
-	return false
+	return netip.Prefix{}, false
 }
 
 // InClusterAddr is the scope's reading of an address: inside the cluster
