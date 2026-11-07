@@ -2327,6 +2327,30 @@ S43 ([#147](https://github.com/yusufceng/Kubeat/issues/147)) sprint 10'da. Tetik
 değişmedi: S43 merge edildikten sonra 3 binden fazla pod'lu gerçek bir kurulum ya da
 bir OOMKill.
 
+Güncelleme (2026-11-07, S43 [#147](https://github.com/yusufceng/Kubeat/issues/147)):
+annotation eşitlemesinin okuma hataları artık sayılıyor
+(`kubeat_discovery_sync_errors_total{reason}`); büyük bir listenin `UPTIME_KUBE_TIMEOUT`
+içinde gelmemesi `reason="timeout"` olarak görünür ve turu hiçbir şeyi değiştirmeden
+bitirir. OOMKill'in kendisi bu sayaçta görünmez (süreç ölür, sayaç sıfırlanır).
+Tetikleyici değişmedi.
+
+## Annotation eşitlemesinin cluster'ı hiç okuyamadığı tur için chart kuralı (S43 takibi)
+
+2026-11-07'de ertelendi (S43 [#147](https://github.com/yusufceng/Kubeat/issues/147);
+[sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52'nin
+`KubeatDiscoveryNamespaceSkipped` kuralı yalnız namespace sınırlı keşifte atlanan
+namespace'lere bakar (`kubeat_discovery_namespaces_skipped`). Cluster'ın hiç okunamadığı
+tur (yanıt alınamayan istek, reddedilen kimlik bilgisi, cluster geneli keşifte okuma
+hatası) hiçbir şeyi değiştirmez; `kubeat_discovery_sync_errors_total{reason}` onu sayar
+ve backend WARN yazar, ama chart kuralı yoktur. Bilerek eklenmedi: PO kararı tek kural
+("namespace atlıyor"); sayaçtan "eşitleme sürekli düşüyor" diyen güvenilir bir ifade
+için son turun sonucunu taşıyan bir gauge (ör. son başarılı turun zamanı) gerekir.
+Cluster geneli keşifte API sunucusunun gidişi workload monitor'lerinde ve Keşif
+sayfasında zaten görünür. Aynı maddede, kuralın 10 dakikasının Recreate'te baştan
+başlaması da ele alınabilir (yeni pod ilk turundan önce 0 bildirir). Tetikleyici:
+eşitlemenin uzun süre sessizce düştüğü bir kurulum ya da bu sinyali isteyen bir SRE
+bulgusu.
+
 ## Açıkça kapatılmış `UPTIME_TARGET_SCOPE_TRUST_PROXY` için açılış WARN'ını INFO'ya indirmek
 
 2026-11-07'de ertelendi (S81 [#121](https://github.com/yusufceng/Kubeat/issues/121)
