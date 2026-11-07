@@ -28,7 +28,7 @@ tamamlayıcıdır. Ingress controller'ı ve cert-manager'ı olan bir cluster'a
 kurulum (OpenShift'te "OpenShift" bölümündeki komut):
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 \
   -n kubeat --create-namespace \
   --set podSecurityContext.fsGroup=1001 \
   --set ingress.enabled=true --set ingress.className=<kümenin sınıfı> \
@@ -56,7 +56,7 @@ Kubeat'in kendisi düşerse cluster dışındaki bir heartbeat alıcısı haber 
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum".
@@ -73,7 +73,7 @@ beri imajlar ve chart imzalıdır; sürümün GitHub Release'i digest'leri ve
 SBOM'ları taşır (bkz. "Tedarik zinciri"). 0.44.0 ve öncesi imzasızdır. Herhangi bir cluster'a kurulum:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 \
   --set podSecurityContext.fsGroup=1001 \
   -n kubeat --create-namespace
 ```
@@ -262,7 +262,7 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
@@ -3351,7 +3351,7 @@ satır:
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 ### Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`

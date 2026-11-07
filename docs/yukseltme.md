@@ -48,14 +48,14 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.49'e
+### 0.42'den 0.50'ye
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
    başarısız kanalları düzeltin ya da kapatın; aynı PagerDuty servisine
    bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
    0.46'dan beri uyarıya döner: 1 dakikadan ya da bir denemenin
-   süresinden kısa bir değer 0.46, 0.47 ve 0.48'de backend'i durdurmaz, alt
+   süresinden kısa bir değer 0.46–0.50'de backend'i durdurmaz, alt
    sınıra yükseltilir ve her açılışta `WARN` yazılır; değeri yine de
    düzeltin: 0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu
    ayarı tanımaz).
@@ -88,29 +88,36 @@ geri dönüş başladığınız sürüme olur.
    cluster'da backend'in cluster DNS'ine (kube-dns/openshift-dns) egress'ine
    izin verin, yoksa kapsamı sınırlı kullanıcıların dış hedef create'i güvenli
    tarafta reddedilir.
-9. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46–0.49'da değişmedi:
-   yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi Alertmanager
-   yönlendirmesine ekleyin; kuralları kopyalıyorsanız 0.48'inkileri kopyalayın
-   (0.49'da değişmedi, 0.45'inkilerle aynı).
-10. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
+9. 0.50'nin adımları ("0.50'ye yükseltme", Yapılacak): `UPTIME_TRUST_PROXY_HOPS`'u
+   arayüz yoluna göre yeniden türetilen rehbere göre ayarlayın (fazla değer
+   artık güvenli taraf değildir, emin değilseniz küçüğünü seçin) ve
+   `sign-in refused` satırının `source` alanıyla doğrulayın; chart dışı
+   kurulumda değer `0`'dan büyükse backend'e `UPTIME_FRONTEND_TOKEN`, arayüze
+   `FRONTEND_TOKEN` olarak aynı değeri verin; vekilli kurulumda, vekil cluster
+   dışındaysa, isteğe bağlı `UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi değerlendirin.
+10. Alarm kuralları 0.43, 0.44 ve 0.45'te değişti, 0.46–0.50'de değişmedi:
+    yeni `kubeat.self` alarmlarını ve `KubeatUnhealthy`'yi Alertmanager
+    yönlendirmesine ekleyin; kuralları kopyalıyorsanız 0.50'ninkileri
+    kopyalayın (0.45'inkilerle aynı).
+11. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
     yerine `--reset-then-reuse-values`, Helm 3.14+):
 
     ```sh
-    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0 -f values.yaml
+    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 -f values.yaml
     ```
 
-11. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
-    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.49'in yeniden denemesi,
+12. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
+    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.50'nin yeniden denemesi,
     kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
     PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.49'e
+### 0.41'den 0.50'ye
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.49'e"deki adımlar.
+2. Sonra "0.42'den 0.50'ye"deki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
 0.43, 0.44 ya da 0.45'ten gelirken başladığınız sürümden sonraki bölümleri
@@ -220,6 +227,152 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 0.50'ye yükseltme
+
+0.50 bir güvenlik sürümüdür: 0.48–0.49'da yayımlanan kaynak-başına giriş
+throttle'ını (CWE-307) kullanıcının asıl yolunda (tarayıcı → Route/Ingress →
+arayüz → backend) çalışır kılar ve backend'in `X-Forwarded-For`'a yalnız
+arayüzden gelen istekte güvenmesini sağlar. "0.49'a yükseltme"deki iki giriş
+sınırı ("arayüz yolu istemci adresini taşımaz", "cluster içinden uydurma
+`X-Forwarded-For`") bu sürümle kapanır; arayüzün ağ politikası kapalıyken
+arayüz Service'ine doğrudan gelen uydurma başlık kalır (aşağıda). Ayrıca
+vekilli kurulum için opt-in bir kapsam ayarı getirir ve yedeğin cluster dışına
+alınmasını doğrulamalı tek bir bloğa bağlar. Şema değişmez (26), migration
+yok; chart kurulumunda yeni zorunlu ayar yok. Arayüz yolu `go test` ve chart
+testleriyle sınandı; gerçek bir Route arkasındaki prova sürümden sonradır ve
+aşağıdaki hop değerlerinin hiçbiri henüz gerçek bir cluster'da ölçülmedi.
+
+### Yapılacak
+
+- **Giriş bir Route ya da Ingress arkasındaysa `UPTIME_TRUST_PROXY_HOPS`'u yeni
+  rehbere göre gözden geçirin.** Değer artık arayüzün önündeki vekillerinizin
+  `X-Forwarded-For`'a yazdığı girdi sayısıdır (README "Hesaplar ve giriş",
+  "Vekil-hop rehberi"):
+  - düz OpenShift Route `1`; önünde başlığı yazan bir WAF ya da L7 yük
+    dengeleyici olan Route `2` (`2`'yi yalnız WAF başlığı yazıyorsa seçin);
+  - GKE `ingress-nginx` (L4 LoadBalancer, varsayılan ayarlar) `1`; GKE'nin
+    kendi Ingress'i (GCE) `2`; önde L7 GCLB + `ingress-nginx` yalnız
+    `use-forwarded-headers` ve `compute-full-forwarded-for` açıksa `3`,
+    varsayılanlarla `1` (kaynak o zaman GCLB vekilidir);
+  - vekil yok ve arayüze yalnız port-forward ile ulaşılıyorsa `1`; arayüz
+    Service'i önünde vekil olmadan doğrudan dışarı açıksa (`LoadBalancer`,
+    `NodePort`) `0`.
+
+  0.48–0.49 rehberiyle verilmiş değerlerden GKE'nin kendi Ingress'i `1` → `2`
+  olur; düz Route `1` ve WAF'lı Route `2` aynı kalır. **Fazla değer artık
+  güvenli taraf değildir:** başlığa ekleyen bir vekilin (Route `Append`, GCLB)
+  arkasında istemci başlığı fazladan bir girdiyle uzatıp kaynağını seçebilir
+  ve bu isteklerde `WARN` düşmez. Eksik değer `WARN` vermez, throttle'ı vekilin
+  adresine anahtarlar. **Emin değilseniz küçük değeri seçin.** Yükseltmeden
+  sonra arayüzden bir kez yanlış parola deneyin ve `sign-in refused` satırının
+  `source` alanının tarayıcınızın adresi olduğunu doğrulayın (README "Görülen
+  kaynağı doğrulamak"). Chart varsayılanı `0` kaldı; kurulum notu (NOTES)
+  Route ya da Ingress açıkken giriş türüne uyan değeri önerir. Değeri
+  `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` ile verin.
+- **Chart dışı kurulumda değer `0`'dan büyükse arayüzün sırrını verin:**
+  backend'e `UPTIME_FRONTEND_TOKEN`, arayüze `FRONTEND_TOKEN` olarak aynı
+  rastgele değer (ör. `openssl rand -hex 24`; yazdırılabilir ASCII, boşluksuz).
+  Verilmezse backend açılışta `WARN` yazar ve `X-Forwarded-For`'a hiçbir eşten
+  güvenmez: her tarayıcı arayüz pod'una anahtarlanır (tek paylaşılan kilit,
+  bypass değil). Chart sırrı kendisi üretir (`<release>-frontend-token`);
+  GitOps'ta Secret'ı kendiniz oluşturup `frontendToken.existingSecret` ile
+  verin.
+- **İsteğe bağlı: arayüzün ağ politikası.** Değer `0`'dan büyükken cluster
+  içindeki bir pod arayüz Service'ine kendi yazdığı bir `X-Forwarded-For` ile
+  bağlanıp kaynağını seçebilir; bunu yalnız `frontend.networkPolicy.enabled=true`
+  (varsayılan kapalı; NetworkPolicy uygulayan bir ağ eklentisi ister) kapatır.
+  `from`'un varsayılanı OpenShift router'ıdır; başka bir platformda ingress
+  controller'ın namespace'ini (GCE Ingress'te yük dengeleyicinin aralıklarını)
+  verin. `networkPolicy.enabled` de açıksa push gönderen namespace'leri `from`'a
+  ekleyin, yoksa push monitor'leri yanlış DOWN düşer (README "Arayüzün ağ
+  politikası"). Kurulum notu bu amaçla artık `networkPolicy.enabled`'ı değil
+  bunu önerir.
+- **İsteğe bağlı, vekilli kurulumda: `UPTIME_TARGET_SCOPE_TRUST_PROXY`.** Dış
+  adları yalnız kurumsal vekilin çözdüğü bir kurulumda (`HTTP_PROXY`/`HTTPS_PROXY`,
+  `NO_PROXY`) kapsamı sınırlı kullanıcının vekile giden HTTP/WebSocket
+  monitor'leri ve webhook türü kanalları 0.49'dan beri yerel NXDOMAIN yüzünden
+  reddediliyordu. `true` (varsayılan `false`) bu NXDOMAIN'i kabul eder; cluster
+  içine çözülen ad, SERVFAIL ve zaman aşımı yine reddedilir. **Yalnız vekil
+  cluster dışındaysa açın:** o zaman kapsamın sınırı vekilin ulaştığı yerdir ve
+  node IP'lerini, VIP'leri ve kurum aralıklarını vekilin ACL'i kapatmalıdır;
+  kapatmıyorsa ya da vekil cluster içindeyse ayar kapalı kalır (README "Hedef
+  politikası" → "Vekilli kurulum").
+- **Yedeği yeni doğrulamalı blokla alın**
+  ([yedek-geri-yukleme.md "Yedek kopyaları cluster dışına almak"](yedek-geri-yukleme.md#yedek-kopyaları-cluster-dışına-almak);
+  yukarıda "Yükseltmeden önce yedek"). Blok "yedek doğrulandı" demiyorsa
+  yükseltmeyin. Düz `exec … cat` ile alınmış eski bir kopya doğrulanmamıştır:
+  yeni kuruluma geri yükleme onu yalnız açık onayla (`DOGRULAMASIZ=1`) yükler,
+  kesik bir kopyayı hiç yüklemez. Dolu-disk alarm örneğini runbook'tan
+  kopyaladıysanız PVC adı `<release>-data`'dır (örnek önceden sabit
+  `kubeat-data` yazıyordu).
+
+### Davranış değişikliği
+
+- **Arayüz istemci adresini taşır
+  ([#118](https://github.com/yusufceng/Kubeat/issues/118)).** Arayüz giriş,
+  parola değiştirme ve durum sayfası kilidi isteklerinde tarayıcıdan gelen
+  `X-Forwarded-For`'u backend'e aynen taşır. Değer rehbere göre ayarlıysa
+  Route/Ingress arkasında giriş throttle'ı artık istemcinin adresine
+  anahtarlanır. Değer `0` kaldıysa `WARN` artık arayüz yolunda da düşer ve
+  metni değerin nasıl seçileceğini söyler. 0.49'da arayüz yolunda beklenen
+  "zincir kısa" `WARN`'ı 0.50'de yalnız değer fazlayken düşer (backend'e
+  doğrudan gelen giriş "güvenilmeyen eş" `WARN`'ı verir); sürüyorsa değeri
+  düşürün. `sign-in refused` satırı throttle'ın anahtarladığı adresi `source`
+  alanında yazar (yalnız operatör logu). Parola değiştirme ve durum sayfası
+  kilidinin sayaçları henüz kaynağa göre değil, hesaba ve sayfaya göredir.
+- **`X-Forwarded-For`'a yalnız arayüzden güvenilir
+  ([#119](https://github.com/yusufceng/Kubeat/issues/119)).** Değer `0`'dan
+  büyükken backend başlığı yalnız arayüzün sırrını (`X-Frontend-Token`) sunan
+  istekte okur. Başka bir eşte (backend'e doğrudan bağlanan bir pod, bir betik,
+  backend'e port-forward) kaynak o eştir ve dakika-sınırlı bir "güvenilmeyen
+  eş" `WARN`'ı düşer: cluster içindeki bir pod uydurma kaynaklarla hesap
+  tavanını doldurup `admin`'i kilitleyemez. Chart sırrı `<release>-frontend-token`
+  Secret'ında üretir ve iki pod'a verir. Değer `0` iken bir şey değişmez.
+- **Yükseltme sırasında kısa bir pencere.** Backend `Recreate` ile, arayüz
+  rolling update ile yenilenir. Değer `0`'dan büyükse yeni backend açıldığında
+  henüz yenilenmemiş 0.49 arayüz pod'ları sırrı göndermez ve backend onları
+  güvenilmeyen eş sayar: bu sürede tarayıcı girişleri arayüz pod'una
+  anahtarlanır (0.49'daki gibi tek paylaşılan kilit) ve "güvenilmeyen eş"
+  `WARN`'ı düşer. Yeni arayüz pod'ları hazır olunca kendiliğinden biter.
+- **Hedef kapsamında host'un yazılışı
+  ([#121](https://github.com/yusufceng/Kubeat/issues/121)).** Kapsamı sınırlı
+  bir kullanıcı için host vekilin ve çözücünün okuduğu gibi okunur: küçük
+  harfle ve sondaki noktalar atılarak (`api.odeme.svc..` `api.odeme.svc`'dir).
+  Adres gibi yazılmamış rakamlı bir host (`172.30.1`, `0xac.0x1e.0.1`,
+  `2887647233`) ve ASCII olmayan bir host artık reddedilir; adres `172.30.0.1`
+  gibi, uluslararası ad `xn--` biçiminde yazılır. Yalnız yeni hedef, klon ve
+  hedef değişikliği etkilenir; var olan monitor'ler ve kanallar yeniden
+  denetlenmez, admin ve kapsamı `*` olan kullanıcılar etkilenmez.
+  `UPTIME_TARGET_SCOPE_TRUST_PROXY` kapalıyken başka bir şey değişmez;
+  `HTTP_PROXY`/`HTTPS_PROXY` verilmiş ve ayar kapalıysa backend açılışta bir
+  kez `WARN` yazar (vekil cluster içindeyse bu satır bilgi içindir).
+- **Zamanlayıcı ([#127](https://github.com/yusufceng/Kubeat/pull/127)).**
+  Kuyrukta yer varken sırası gelen kontrol, tick süresi dolmuş olsa da artık
+  her zaman gönderilir. `kubeat_scheduler_dispatch_skipped_total` yalnız tüm
+  worker'lar gerçekten doluyken artar; önceden nadiren boş worker varken de
+  artabiliyordu. Kapanışta bağlam iptal edilince kuyruğa yeni iş girmez. Ayar
+  ya da chart değişikliği yok.
+
+### Geri dönüş
+
+Şema aynı (26), `helm rollback` ile 0.49.0'a. `<release>-frontend-token`
+Secret'ı yetim kalır (chart varsayılanında `helm.sh/resource-policy: keep`
+taşır); 0.49 onu okumaz, zararsızdır ve 0.50'ye yeniden geçişte aynı sır
+kullanılır. Dönüşte arayüzün `X-Forwarded-For` taşıması, backend'in başlığa
+yalnız arayüzden güvenmesi, `frontend.networkPolicy`,
+`UPTIME_TARGET_SCOPE_TRUST_PROXY`, host yazılışı denetimi, `source` alanı ve
+zamanlayıcı düzeltmesi kalkar; "0.49'a yükseltme"deki iki giriş sınırı geri
+gelir (değer `0`'dan büyükse 0.49'da `networkPolicy.enabled=true` backend'e
+doğrudan geleni kapatır). 0.50 rehberiyle verilmiş bir hop değeri 0.49'da
+kaynakları ayırmaz: kaynak arayüz pod'u kalır ve "zincir kısa" `WARN`'ı düşer.
+
+### Alarm kuralları: değişmedi
+
+Chart'ın PrometheusRule'u 0.49'a göre değişmedi; kuralları kopyaladıysanız
+yeniden kopyalamanız gerekmez. `KubeatWorkersSaturated`'ın ifadesi aynıdır;
+baktığı `kubeat_scheduler_dispatch_skipped_total` artık yalnız tüm worker'lar
+doluyken artar (yukarıda "Zamanlayıcı").
 
 ## 0.49'a yükseltme
 

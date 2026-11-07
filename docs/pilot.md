@@ -87,15 +87,15 @@ cp ~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json .
 
 # İmajlar ve chart, imzalarıyla
 R=registry.sirket.local/kubeat
-oras cp -r ghcr.io/yusufceng/kubeat-backend:0.49.0  $R/kubeat-backend:0.49.0
-oras cp -r ghcr.io/yusufceng/kubeat-frontend:0.49.0 $R/kubeat-frontend:0.49.0
-oras cp -r ghcr.io/yusufceng/charts/kubeat:0.49.0   registry.sirket.local/charts/kubeat:0.49.0
+oras cp -r ghcr.io/yusufceng/kubeat-backend:0.50.0  $R/kubeat-backend:0.50.0
+oras cp -r ghcr.io/yusufceng/kubeat-frontend:0.50.0 $R/kubeat-frontend:0.50.0
+oras cp -r ghcr.io/yusufceng/charts/kubeat:0.50.0   registry.sirket.local/charts/kubeat:0.50.0
 
 # İç ağda, aynalanan kopyaların imzası
 cosign verify --trusted-root trusted_root.json \
-  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v0.49.0 \
+  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v0.50.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  $R/kubeat-backend:0.49.0 $R/kubeat-frontend:0.49.0 registry.sirket.local/charts/kubeat:0.49.0
+  $R/kubeat-backend:0.50.0 $R/kubeat-frontend:0.50.0 registry.sirket.local/charts/kubeat:0.50.0
 ```
 
 - `oras cp -r` imajı iki mimarisi, SBOM'u ve provenance'ıyla, `-r` de imza
@@ -117,10 +117,10 @@ doğrulama yapılamaz (README "İmzalarla aynalamak"). Yalnızca imza
 doğrulanmayacaksa:
 
 ```sh
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.49.0  docker://$R/kubeat-backend:0.49.0
-skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.49.0 docker://$R/kubeat-frontend:0.49.0
-helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0        # kubeat-0.49.0.tgz
-helm push kubeat-0.49.0.tgz oci://registry.sirket.local/charts
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-backend:0.50.0  docker://$R/kubeat-backend:0.50.0
+skopeo copy --all docker://ghcr.io/yusufceng/kubeat-frontend:0.50.0 docker://$R/kubeat-frontend:0.50.0
+helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0        # kubeat-0.50.0.tgz
+helm push kubeat-0.50.0.tgz oci://registry.sirket.local/charts
 ```
 
 ## Kurulum
@@ -217,7 +217,7 @@ yalnız bu satır beklenir. 0.49 bu ayarı tanımaz ve yok sayar.
 ### 3. Kurulum
 
 ```sh
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.49.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.50.0 \
   -n kubeat -f values-pilot.yaml
 oc -n kubeat rollout status deploy/kubeat-backend
 oc -n kubeat rollout status deploy/kubeat-frontend
