@@ -1071,8 +1071,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     - varsa her biri kendi namespace'inin kapsamına bağlanır (namespace'siz
       monitor hiçbir şeye tabi değildir, keşiften gelenin kendi host'u
       namespace'iyle kapsamdadır) ve açılış sayılarını bir `WARN` satırıyla
-      yazar. Bir yöneticinin bir namespace'e koyup başka bir namespace'e ya da
-      çıplak bir adrese bağlanan monitor'ü de böylece DOWN olur; yönetici onu
+      yazar. Bir yöneticinin bir namespace'e koyup başka bir namespace'e,
+      çıplak bir adrese, kurum ağına (aralık tanımlı değilse) ya da vekilli
+      kurulumda yalnız vekilin çözdüğü bir dış ada bağlanan monitor'ü de
+      böylece DOWN olur; yönetici onu
       bir kez kaydedince (formu değiştirmeden kaydetmek ya da hedefi aynı
       değerle `PATCH` etmek) kaydı yazılır ve düzelir. Aynı kayıt kapsamı
       sınırlı bir kullanıcının kurduğu eski monitor'ü de kapsamdan çıkarır:
