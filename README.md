@@ -4669,6 +4669,12 @@ HTTPS hedeflerde her kontrol sertifikanın bitiş tarihini de kaydeder.
   beri; kapsama bağlı ve annotation monitor'leri dahil, bütün HTTP
   monitor'lerinde). Yenilenen sertifika bu yüzden bir sonraki kontrolde
   görünür ve olay o kontrolle kapanır.
+- **Birden çok sunucu.** Hedefin arkasında ayrı sertifika sunan birden çok
+  sunucu varsa (L4 yük dengeleyici, DNS round-robin, ayrı yenilenen iki
+  cluster) her kontrol başka birine düşebilir. Biri yenilenmemişse sertifika
+  olayı kontrolden kontrole açılıp kapanabilir; 0.51'de bağlantı kontroller
+  arasında tek sunucuda kalabiliyordu. Her pod'u ayrı izlemek (`each_pod`) ya da
+  yenilenmeyen sunucuyu düzeltmek olayı durdurur.
 - **Yönlendirme.** İzlenen yönlendirmede okunan, yanıtı veren son isteğin
   bağlantısındaki sertifikadır.
 

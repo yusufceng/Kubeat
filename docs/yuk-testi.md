@@ -108,7 +108,12 @@ kalanlardır. Aralıklar tekrarlanan koşulardandır (0.51.0 dört, 0.52 üç ko
   havuzu aynı hedefe en çok 2 bağlantı tutuyordu.
 - **Kontrol süresi.** Loopback'te ve 20 eşzamanlı el sıkışmayla ölçüldü.
   Gerçek ağda her kontrole ad çözme ve bağlantı kurmanın gidiş-dönüşleri
-  eklenir; eşik için README "Yavaş yanıt".
+  eklenir; eşik için README "Yavaş yanıt". Kapasite (worker sayısı / ortalama
+  kontrol süresi) buna göre düşer: örneğin 1000 monitor, 30 sn aralık ve
+  200 ms gidiş-dönüşte HTTPS hedeflerinde ortalama dolu worker sayısı kabaca
+  13'ten 26'ya çıkar ve 20'lik varsayılanı aşar. Uzak HTTPS hedefi çok olan
+  kurulumda yükseltmeden sonra `kubeat_scheduler_dispatch_skipped_total` ve
+  `KubeatWorkersSaturated` izlenmeli, gerekirse `UPTIME_WORKERS` artırılmalı.
 - **Sertifika.** Sunucu sertifikasını değiştirince 0.51.0'da sonraki kontrol
   eski bağlantıdan eski sertifikanın bitişini raporladı; 0.52'de bir sonraki
   kontrol yenisini raporlar ve sertifika olayı kapanır (checker testi
