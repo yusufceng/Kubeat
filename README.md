@@ -1858,17 +1858,31 @@ Dikkat edilecekler:
   istemci başlığı kendisi yazıp her denemede kaynağını seçer: kaynak-başına
   sınır atlanır (yalnız hesap tavanı kalır) ve adresi bilinen bir kurban
   kilitlenebilir. `0`'da WARN sürer, çünkü throttle gerçekten tek paylaşılan
-  kilittedir; kaynakları ayırmak için arayüzün önüne başlığı yazan bir vekil
-  (Route, Ingress) koyun.
+  kilittedir; chart'ın kuralları açıksa `KubeatSignInSourceDegraded` de
+  `hops_zero` ile yanar ve susturulur (0.52, aşağıda "Sayaç ve kural").
+  Kaynakları ayırmak için arayüzün önüne başlığı yazan bir vekil (Route,
+  Ingress) koyun.
 - Vekilsiz kurulumda `0` bırakılırsa aşağıdaki WARN düşer, çünkü Next.js
   başlığı her istekte yazar; port-forward'da bütün istemciler zaten tek
   kaynaktır (`127.0.0.1`), pratik bir fark yoktur.
-- Başlığı yazmayan bir katman (L4 yük dengeleyici, TCP geçişli WAF) sayılmaz:
-  arkasındaki vekil istemciyi değil o katmanı görür (PROXY protocol yoksa),
-  throttle o katmanın adresine anahtarlanır ve WARN düşmez. GKE'de L4
-  Service'in `externalTrafficPolicy: Cluster` (varsayılan) olması da böyledir:
+- Başlığı yazmayan bir katman (L4 yük dengeleyici, TCP geçişli WAF, NAT)
+  sayılmaz: arkasındaki vekil istemciyi değil o katmanı görür (PROXY protocol
+  yoksa) ve throttle o katmanın adresine anahtarlanır. GKE'de L4 Service'in
+  `externalTrafficPolicy: Cluster` (varsayılan) olması da böyledir:
   `ingress-nginx` istemciyi değil node'u görür. İkisini de aşağıdaki log
   satırının `source` alanından görürsünüz.
+  - WARN genelde düşmez. 0.52'den beri bir istisnası var: katman Kubeat'in
+    genel adresinden bağlanıyorsa (`UPTIME_PUBLIC_URL`'ün host'unun çözüldüğü
+    adres) istek `hops_too_low` sayılır ve WARN "hop değeri gerekenden küçük"
+    der. Örnekler: hem `*.apps` kaydının çözüldüğü adres hem de router'a
+    bağlanan kaynak olan tek arayüzlü bir HAProxy (`mode tcp`, PROXY protocol
+    yok) ya da kaynağı genel adrese çeviren bir hairpin NAT.
+  - O zaman değeri artırmayın. Hiçbir değer istemcileri ayırmaz, fazlası
+    dürüst istemcileri `hops_too_high` ile eşe düşürür ve uydurma başlık
+    gönderene kaynağını seçtirir (bypass). Değer, başlığı yazan vekillerinizin
+    girdi sayısı kalır. Çare katmanda PROXY protocol ya da yerine başlığı
+    yazan bir L7 vekil; o zamana kadar alarmı susturun (aşağıda "Yanlış ayar
+    sessizce etkisiz kalmaz" → "Sayaç ve kural").
 - Değer doğrusundan büyükse güvenli tarafa düşmez (0.50). Başlığa ekleyen bir
   vekilin (Route `Append`, GCLB) arkasında istemci başlığı fazladan bir girdiyle
   uzatıp kaynağını seçer: kaynak-başına sınır atlanır (yalnız hesap tavanı
@@ -2013,6 +2027,10 @@ beri her biri ayrıca sayılır ve chart'ın kuralıyla alarma bağlanır (aşa�
   (`UPTIME_TRUST_PROXY_HOPS=1 is lower than needed`), adresi ve paylaşılan
   kilidi yazar, doğru değeri ister. Kaynak değişmez: her tarayıcı o adrese
   anahtarlanır, tek paylaşılan kilit kalır.
+  - Aynı adres, başlığı yazmayan ve Kubeat'in genel adresinden bağlanan bir
+    katmanın (PROXY protocol'süz L4 yük dengeleyici, NAT) adresi de olabilir.
+    WARN bu ikinci olasılığı da yazar: o zaman hiçbir değer yardım etmez ve
+    değeri artırmak bypass'tır (yukarıda "Dikkat edilecekler").
   - Adresler açılışta ve 5 dakikada bir arka planda çözülür; istek yolunda DNS
     sorgusu yapılmaz. Bulunan adresler ya da sinyalin neden sustuğu değişince
     backend bir `INFO` satırı yazar (`throttle: ... public URL's addresses`).
@@ -2052,6 +2070,29 @@ kural söyler:
 - **Port-forward.** Arayüze yalnız port-forward ile ulaşılan bir kurulumda
   değer `0` kalırsa kural yanar (Next.js başlığı yazar, yukarıda "Dikkat
   edilecekler"); orada değer `1`'dir.
+- **Doğru değerde de yanar: hop değerini değiştirmeyin.** İki kurulumda kural
+  doğru ayarda sürekli yanar. Söylediği doğrudur, throttle gerçekten tek
+  paylaşılan kilittedir; ama çaresi hop değeri değildir ve değeri artırmak
+  kaynak-başına sınırı atlatılabilir kılar:
+  - Arayüz Service'i önünde başlığı yazan bir vekil olmadan dışarı açıksa
+    (`frontend.service.type` `LoadBalancer` ya da `NodePort`), değer `0`
+    kalır (yukarıda "Dikkat edilecekler"). Next.js başlığı her istekte
+    yazdığı için arayüzden gelen her giriş `hops_zero` sayılır. `1`
+    vermeyin: her istemci başlığı kendisi yazıp her denemede kaynağını seçer
+    (bypass). WARN'daki "1 with none" önerisi yalnız port-forward içindir.
+  - Başlığı yazmayan bir katman Kubeat'in genel adresinden bağlanıyorsa
+    (yukarıda "Dikkat edilecekler"), istek `hops_too_low` sayılır. Burada da
+    değeri artırmayın.
+  - Çare kurulumdadır: arayüzün önüne başlığı yazan bir vekil (Route ya da
+    Ingress) koyun ya da katmana PROXY protocol verin. O zamana kadar alarmı
+    Alertmanager'da susturun: `alertname="KubeatSignInSourceDegraded"`,
+    `reason="hops_zero"` (ya da `hops_too_low`) ve kurulumun `namespace`'i ile
+    eşleşen bir silence, kalıcı olarak da bu eşleşmeyi boş bir alıcıya
+    (`receiver`) yönlendiren bir route. Böylece öteki nedenler ve öteki
+    kurulumlar alarm vermeye devam eder. Vekili koyup değeri ayarlayınca
+    susturmayı kaldırın.
+  - Kuralı tek başına kapatan bir values anahtarı yoktur:
+    `metrics.prometheusRule.enabled=false` chart'ın bütün kurallarını kapatır.
 
 **Parola değiştirme ve durum sayfası kilidinde (0.51).** Bu iki yüzey de
 kaynağı aynı yoldan okur, bu yüzden yukarıdakiler onlar için de geçerlidir:
@@ -3925,7 +3966,7 @@ yapılır. Kurallar:
 | --- | --- |
 | `KubeatMonitorDown` | Monitor'un açık kesintisi var (`kubeat_monitor_incident_open`); etiketlerinde `monitor`, `monitor_namespace`, `type`, `namespace`, `job` ve `severity` (`metrics.prometheusRule.severity`, varsayılan `warning`). Kesinti kapanınca bir sonraki scrape'te çözülür, scrape boşluğunda açık kalır (bkz. aşağıda "Scrape boşluğu") |
 | `KubeatCertificateExpiring` | Sertifikanın bitişine `metrics.prometheusRule.certWarningDays` (14) günden az kaldı; scrape boşluğunda açık kalır |
-| `KubeatSignInSourceDegraded` | 0.52, `kubeat.signin` grubu: son 15 dakikada giriş throttle'ı istemcileri ayıramadı (`kubeat_signin_source_degraded_total`'da `hops_zero`, `no_frontend_token`, `hops_too_high` ya da `hops_too_low`); her tarayıcı tek adrese, throttle ad, sayfa ve hesap başına tek kilide geriledi. Kurulum ve `reason` başına tek alarm, yüzeyler ve Recreate dahil; `severity` `metrics.prometheusRule.signInSeverity` (`warning`). `untrusted_peer` bağlanmaz. Kurulum notunu görmeyen GitOps ve Terraform kurulumlarının yanlış hop ayarını görme yolu (bkz. "Hesaplar ve giriş" → "Yanlış ayar sessizce etkisiz kalmaz") |
+| `KubeatSignInSourceDegraded` | 0.52, `kubeat.signin` grubu: son 15 dakikada giriş throttle'ı istemcileri ayıramadı (`kubeat_signin_source_degraded_total`'da `hops_zero`, `no_frontend_token`, `hops_too_high` ya da `hops_too_low`); her tarayıcı tek adrese, throttle ad, sayfa ve hesap başına tek kilide geriledi. Kurulum ve `reason` başına tek alarm, yüzeyler ve Recreate dahil; `severity` `metrics.prometheusRule.signInSeverity` (`warning`). `untrusted_peer` bağlanmaz. Kurulum notunu görmeyen GitOps ve Terraform kurulumlarının yanlış hop ayarını görme yolu (bkz. "Hesaplar ve giriş" → "Yanlış ayar sessizce etkisiz kalmaz"). Arayüz Service'i vekilsiz dışarı açıkken (`hops_zero`) ya da başlığı yazmayan bir katman genel adresten bağlanırken (`hops_too_low`) doğru değerde de yanar: hop değerini değiştirmeyin, susturun (orada "Sayaç ve kural") |
 | `KubeatDown` | Backend 5 dakikadır scrape edilemiyor ya da hiç backend pod'u yok: pod bekliyor, silindi ya da uyutuldu (`critical`). `up{job="<release>-backend", namespace="<namespace>"}` serisine bakar; ServiceMonitor kapalıyken bu etiketlerle toplayan başka bir scrape yoksa sürekli yanar. Bu sırada kesinti, sertifika ve yedek alarmları 10 dakika açık kalır, sonra çözülür (bkz. aşağıda susturma kuralları) |
 | `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |
 | `KubeatUnhealthy` | `kubeat_self_healthy` 5 dakikadır 0: kontroller zamanlanmıyor ya da sonuçlarının hiçbiri yazılamıyor (dolu ya da salt okunur veri volume'u, takılı bir yazım) (`critical`). Heartbeat olmadan da yanar; yalnızca bazı sonuçların düşmesi `KubeatResultsDropped`'ın uyarısıdır. Backend pod'u yokken yanmaz, o `KubeatDown`'ın işidir; scheduler durunca `KubeatSchedulerStalled` ile birlikte yanar |

@@ -211,8 +211,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   sayfa ve hesap başına gevşek tavan girişinkidir
   (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, yeni ayar yok); değer `0` ya da
   eksikse veya sır eksikse bu iki yüzey de tek paylaşılan kilide geriler
-  (eksik değer WARN vermez), fazla değerde girişteki gibi başlığını uzatan
-  istemci kaynağını seçebilir; WARN yüzeyi adlandırır. Bu iki yüzeyin 429'ları
+  (0.51'de eksik değer WARN vermezdi; 0.52'de bkz. aşağıda S85 dilim 1),
+  fazla değerde girişteki gibi başlığını uzatan istemci kaynağını seçebilir;
+  WARN yüzeyi adlandırır. Bu iki yüzeyin 429'ları
   0.51'de yalnız dakikalık WARN'da görünüyordu; 0.52'den beri sayılır (aşağıda
   S85 dilim 1). Gerçek
   tarayıcı yolunda iki kaynaklı prova sandbox Route'unda geçti (sprint 9). Dizin
@@ -240,7 +241,11 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   yanlış hop ayarını kurulum notunu görmeyen GitOps ve Terraform kurulumlarına da
   duyurur. Kalanlar: `hops_too_low` host çözülemezken ya da CNAME/CDN arkasında
   susar ve GKE'de ölçülmedi; kaynak genel adres değilken eksik değer (WAF'lı
-  Route'ta `1`) yine WARN ve sayaç vermez; dizine ulaşılamaması ve hesap tavanı
+  Route'ta `1`) yine WARN ve sayaç vermez; arayüz Service'i vekilsiz dışarı
+  açıkken (`hops_zero`) ve başlığı yazmayan bir katman genel adresten
+  bağlanırken (`hops_too_low`) kural doğru değerde de sürekli yanar ve
+  Alertmanager'da susturulur, çünkü kuralı tek başına kapatan bir values
+  anahtarı yok (README "Sayaç ve kural"); dizine ulaşılamaması ve hesap tavanı
   kilidi için chart kuralı dilim 2'de ([backlog](backlog.md) "Yeni
   giriş/dizin/throttle metrikleri için chart PrometheusRule ...").
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve

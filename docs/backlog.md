@@ -2124,7 +2124,12 @@ parola değiştirme 429'ları için `kubeat_throttled_total{surface,kind}` ve ch
 `hops_too_low` `UPTIME_PUBLIC_URL`'ün host'unu açılışta ve 5 dakikada bir çözer, CNAME'de ve
 çözülemeyen host'ta susar; GKE'de ölçülmedi. Bu maddede kalan yalnız dilim 2: (a)'nın
 dizine ulaşılamıyor ve hesap tavanı kuralları ve README "Kopyalamak" örneklerinin kurulu
-değerlerle render etmesi. Tetikleyici değişmedi.
+değerlerle render etmesi. Tetikleyici değişmedi. Bilinen sınır: kural iki kurulumda doğru
+değerde de sürekli yanar (arayüz Service'i vekilsiz dışarı açık, `hops_zero`; başlığı
+yazmayan bir katman genel adresten bağlanıyor, `hops_too_low`) ve kuralı tek başına
+kapatan bir values anahtarı yok; README "Sayaç ve kural" Alertmanager'da `alertname` +
+`reason` + `namespace` ile susturmayı veriyor. Kural başına bir anahtar, susturmayı
+yetersiz bulan ilk kurulumda dilim 2 ile birlikte değerlendirilir.
 
 ## Kapsam-dışı hedef reddi denetimini keşif-import/restore, bakım ve workload yollarına genişletmek + flood cap (S68 takibi)
 
