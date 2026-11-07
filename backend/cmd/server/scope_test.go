@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/api"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/netguard"
@@ -128,7 +130,8 @@ func TestScopeRefusedIsCountedAndWrittenOnce(t *testing.T) {
 	db := openDB(t, filepath.Join(t.TempDir(), "kubeat.db"))
 	meter := metrics.New("test")
 	var logs bytes.Buffer
-	refused := scopeRefused(db, meter, "tr", slog.New(slog.NewTextHandler(&logs, nil)))
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	refused := scopeRefused(db, meter, "tr", api.NewAuditCap(0, checkRefusalsDropped, logger), time.Now, logger)
 	m := store.Monitor{ID: 42, Name: "orders", Namespace: "shop", Scope: &store.TargetScope{Namespaces: []string{"shop"}}}
 	refused(m, "api.payments.svc", netguard.RefusedOutside, true)
 	refused(m, "api.payments.svc", netguard.RefusedOutside, false)
@@ -153,9 +156,86 @@ func TestScopeRefusedIsCountedAndWrittenOnce(t *testing.T) {
 		!strings.Contains(e.Summary, "orders") || !strings.Contains(e.Summary, "api.payments.svc") || !strings.Contains(e.Summary, "reddedildi") {
 		t.Errorf("audit entry = %+v", e)
 	}
-	if strings.Count(logs.String(), "level=WARN") != 1 || !strings.Contains(logs.String(), "monitor_id=42") ||
-		!strings.Contains(logs.String(), "reason=connection") {
+	if strings.Count(logs.String(), "level=WARN") != 1 ||
+		!strings.Contains(logs.String(), "monitor_id=42 monitor=orders namespace=shop source=user host=api.payments.svc reason=connection") {
 		t.Errorf("log: %s", logs.String())
+	}
+}
+
+// A check's WARN line names the monitor's namespace and whose record holds
+// it, so that a central log tells an annotation monitor, or one set up
+// before the scope was recorded, from a user's.
+func TestScopeRefusedWarnNamesNamespaceAndSource(t *testing.T) {
+	db := openDB(t, filepath.Join(t.TempDir(), "kubeat.db"))
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	refused := scopeRefused(db, metrics.New("test"), "en", api.NewAuditCap(0, checkRefusalsDropped, logger), time.Now, logger)
+	refused(store.Monitor{ID: 2, Name: "web", Namespace: "shop", Source: "ingress/web", Managed: true, Scope: store.ObjectScope("shop")},
+		"login.example.test", netguard.RefusedUnresolved, true)
+	refused(store.Monitor{ID: 3, Name: "old", Namespace: "billing"}, "api.payments.svc", netguard.RefusedOutside, true)
+	for _, want := range []string{
+		"monitor_id=2 monitor=web namespace=shop source=annotation host=login.example.test reason=resolve_error",
+		"monitor_id=3 monitor=old namespace=billing source=unrecorded host=api.payments.svc reason=connection",
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("log lacks %q: %s", want, logs.String())
+		}
+	}
+}
+
+// Of a minute's first refusals of checks, no more than
+// UPTIME_LOGIN_AUDIT_PER_MINUTE leave a row and a WARN line, by the clock
+// given; every refused check is counted all the same. The next minute
+// writes again and first says how many rows the minute before left out.
+func TestScopeRefusedRowsCappedPerMinute(t *testing.T) {
+	ctx := context.Background()
+	db := openDB(t, filepath.Join(t.TempDir(), "kubeat.db"))
+	meter := metrics.New("test")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	at := time.Date(2026, 11, 7, 12, 0, 10, 0, time.UTC)
+	refused := scopeRefused(db, meter, "en", api.NewAuditCap(2, checkRefusalsDropped, logger), func() time.Time { return at }, logger)
+	annotated := func(id int64) store.Monitor {
+		return store.Monitor{ID: id, Name: "web-" + strconv.FormatInt(id, 10), Namespace: "shop", Source: "ingress/web", Managed: true, Scope: store.ObjectScope("shop")}
+	}
+	// A fault of the cluster's DNS after a start: every annotation monitor's
+	// first refusal at once.
+	for id := int64(1); id <= 5; id++ {
+		refused(annotated(id), "login.example.test", netguard.RefusedUnresolved, true)
+	}
+	rows := func() int {
+		t.Helper()
+		entries, err := db.ListAudit(ctx, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(entries)
+	}
+	got, err := meter.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := got["kubeat_target_scope_denied_total{reason=resolve_error}{source=annotation}"]; n != 5 {
+		t.Errorf("reason=resolve_error source=annotation = %v, want 5", n)
+	}
+	if n := rows(); n != 2 {
+		t.Errorf("deny rows = %d, want 2, the minute's cap", n)
+	}
+	if n := strings.Count(logs.String(), "a check was refused"); n != 2 {
+		t.Errorf("WARN lines = %d, want 2\n%s", n, logs.String())
+	}
+
+	// The next minute: its first row is written, after the warning about
+	// the three the minute before left out.
+	at = at.Add(time.Minute)
+	refused(annotated(6), "login.example.test", netguard.RefusedUnresolved, true)
+	if n := rows(); n != 3 {
+		t.Errorf("deny rows the next minute = %d, want 3", n)
+	}
+	log := logs.String()
+	if strings.Count(log, checkRefusalsDropped) != 1 || !strings.Contains(log, "dropped=3") || !strings.Contains(log, "limit=2") ||
+		strings.Index(log, checkRefusalsDropped) > strings.Index(log, "monitor=web-6") {
+		t.Errorf("log: %s", log)
 	}
 }
 
@@ -175,7 +255,8 @@ func TestScopeRefusedTellsReasonAndSource(t *testing.T) {
 			db := openDB(t, filepath.Join(t.TempDir(), "kubeat.db"))
 			meter := metrics.New("test")
 			var logs bytes.Buffer
-			refused := scopeRefused(db, meter, language, slog.New(slog.NewTextHandler(&logs, nil)))
+			logger := slog.New(slog.NewTextHandler(&logs, nil))
+			refused := scopeRefused(db, meter, language, api.NewAuditCap(0, checkRefusalsDropped, logger), time.Now, logger)
 			for _, m := range []store.Monitor{recorded, annotated, unrecorded} {
 				refused(m, "login.example.test", netguard.RefusedUnresolved, true)
 				refused(m, "login.example.test", netguard.RefusedUnresolved, false)

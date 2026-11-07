@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -179,6 +180,7 @@ func (h *handler) createMaintenance(w http.ResponseWriter, r *http.Request) {
 		m.MonitorName, m.MonitorNamespace = monitor.Name, monitor.Namespace
 	}
 	if p := principal(r); !canEditMaintenance(p, m) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, maintenanceNamespace(m), "")
 		scopeError(w, p)
 		return
 	}
@@ -212,6 +214,7 @@ func (h *handler) deleteMaintenance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canEditMaintenance(p, windows[i]) {
+		h.auditScopeDenied(r, metrics.ScopeDeniedNamespace, maintenanceNamespace(windows[i]), "")
 		scopeError(w, p)
 		return
 	}

@@ -211,8 +211,13 @@ type Options struct {
 	PublicAddresses *PublicAddresses
 	// now, when set, is the clock the throttled password checks read (the
 	// sign-in, the password change and the status-page unlock), so that a
-	// test can run their lockout on a fake one; nil is the time.
+	// test can run their lockout on a fake one; nil is the time. The
+	// target-scope refusals of requests are held to their cap by it too.
 	now func() time.Time
+	// auditLater, when set, schedules the audit caps' warnings about a
+	// minute that left rows out, so that a test can run them along with
+	// now; nil is time.AfterFunc.
+	auditLater func(d time.Duration, f func())
 	// LoginConcurrency bounds the bcrypt comparisons that run at once; zero
 	// means half the CPUs, at least one, and two with LDAP (see
 	// passwordCheckSlots). Directory binds have slots of their own
@@ -224,7 +229,9 @@ type Options struct {
 	// LoginAuditPerMinute caps the failed sign-ins written to the audit log
 	// in a minute, but for the wrong passwords of names with an account
 	// here (local, or a directory or SSO user who signed in before); zero
-	// means no cap.
+	// means no cap. The target-scope refusals of requests (deny rows and
+	// their WARN lines) are held to as many a minute, under a cap of their
+	// own (auditScopeDenied).
 	LoginAuditPerMinute int
 	// LDAP, if set, lets directory accounts sign in. A directory user gets
 	// the role of the group mappings that match their groups, or else
@@ -348,10 +355,13 @@ type handler struct {
 	opts Options
 	// passwordChecks are the slots bcrypt comparisons run in, and
 	// directoryBinds those directory sign-ins run in; failedLogins decides
-	// which failed sign-ins the audit log gets.
+	// which failed sign-ins the audit log gets, and scopeDenials which
+	// target-scope refusals of requests it and the log get, each a minute's
+	// worth of LoginAuditPerMinute rows of its own.
 	passwordChecks *slots
 	directoryBinds *slots
-	failedLogins   *auditCap
+	failedLogins   *AuditCap
+	scopeDenials   *AuditCap
 	// creations bounds the monitors one account creates in a minute.
 	creations *createLimiter
 	// proxyWarn warns, rate-limited, when X-Forwarded-For cannot be
@@ -373,9 +383,13 @@ func NewHandler(opts Options) http.Handler {
 		opts:           opts,
 		passwordChecks: newSlots(passwordCheckSlots(opts.LoginConcurrency, runtime.GOMAXPROCS(0), opts.LDAP != nil), opts.LoginQueueWait),
 		directoryBinds: newSlots(directoryConcurrency, opts.LoginQueueWait),
-		failedLogins:   newAuditCap(opts.LoginAuditPerMinute, opts.Logger),
+		failedLogins:   NewAuditCap(opts.LoginAuditPerMinute, failedSignInsDropped, opts.Logger),
+		scopeDenials:   NewAuditCap(opts.LoginAuditPerMinute, ScopeDenialsDropped, opts.Logger),
 		creations:      newCreateLimiter(opts.MonitorCreatePerMinute),
 		proxyWarn:      newProxyWarn(opts.Logger),
+	}
+	if opts.auditLater != nil {
+		h.failedLogins.later, h.scopeDenials.later = opts.auditLater, opts.auditLater
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)

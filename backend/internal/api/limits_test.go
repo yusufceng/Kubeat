@@ -69,14 +69,14 @@ func TestPasswordCheckSlots(t *testing.T) {
 
 func TestAuditCap(t *testing.T) {
 	var logs bytes.Buffer
-	c := newAuditCap(2, slog.New(slog.NewTextHandler(&logs, nil)))
+	c := NewAuditCap(2, failedSignInsDropped, slog.New(slog.NewTextHandler(&logs, nil)))
 	var later []func()
 	c.later = func(_ time.Duration, f func()) { later = append(later, f) }
 
 	t0 := time.Date(2026, 10, 16, 12, 0, 10, 0, time.UTC)
 	var allowed []bool
 	for i := range 5 {
-		allowed = append(allowed, c.allow(t0.Add(time.Duration(i)*time.Second)))
+		allowed = append(allowed, c.Allow(t0.Add(time.Duration(i)*time.Second)))
 	}
 	if want := []bool{true, true, false, false, false}; !slices.Equal(allowed, want) {
 		t.Errorf("in one minute: %v, want %v", allowed, want)
@@ -97,10 +97,10 @@ func TestAuditCap(t *testing.T) {
 	// failure after it, if that comes before the scheduled report.
 	logs.Reset()
 	t1 := t0.Add(time.Minute)
-	if !c.allow(t1) || !c.allow(t1) || c.allow(t1) {
+	if !c.Allow(t1) || !c.Allow(t1) || c.Allow(t1) {
 		t.Error("the next minute did not start afresh")
 	}
-	if !c.allow(t1.Add(time.Minute)) {
+	if !c.Allow(t1.Add(time.Minute)) {
 		t.Error("the minute after was refused")
 	}
 	if !strings.Contains(logs.String(), "dropped=1") {
@@ -112,7 +112,7 @@ func TestAuditCap(t *testing.T) {
 		t.Errorf("reported twice: %s", logs.String())
 	}
 
-	if unlimited := newAuditCap(0, slog.Default()); !unlimited.allow(t0) || !unlimited.allow(t0) || !unlimited.allow(t0) {
+	if unlimited := NewAuditCap(0, failedSignInsDropped, slog.Default()); !unlimited.Allow(t0) || !unlimited.Allow(t0) || !unlimited.Allow(t0) {
 		t.Error("no cap refused")
 	}
 }

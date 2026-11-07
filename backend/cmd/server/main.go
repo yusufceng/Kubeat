@@ -250,7 +250,7 @@ func main() {
 			Rules: netguard.ScopeRules{
 				External: scopeExternal, TrustProxy: cfg.TargetScopeTrustProxy,
 			},
-			Refused: scopeRefused(db, meter, cfg.Language, logger),
+			Refused: scopeRefused(db, meter, cfg.Language, api.NewAuditCap(cfg.LoginAuditPerMinute, checkRefusalsDropped, logger), time.Now, logger),
 		},
 		Logger: logger,
 	}), scheduler.Options{
@@ -809,15 +809,25 @@ func recordTargetScopes(ctx context.Context, db *store.SQLite, cfg config.Config
 	return nil
 }
 
+// checkRefusalsDropped is the warning that a minute left target-scope
+// refusals of checks out of the audit log and the log (api.AuditCap).
+const checkRefusalsDropped = "target-scope refusals of checks left out of the audit log and the log: more than UPTIME_LOGIN_AUDIT_PER_MINUTE in a minute; kubeat_target_scope_denied_total counts every refused check"
+
 // scopeRefused records the checks a monitor's target scope refused a
 // connection of: every one in kubeat_target_scope_denied_total, by reason —
 // "connection" for a host outside the scope, "resolve_error" for a name the
 // resolver could not answer for — and by whose record holds the monitor
 // (metrics.ScopeSource); and the first for each reason under a monitor's
-// settings in the log and the audit log, beside the writes the API refused,
-// so that a monitor which starts to reach outside its namespaces leaves one
-// row, not one a check, and a fault of the cluster's DNS reads as one.
-func scopeRefused(db *store.SQLite, meter *metrics.Metrics, language string, logger *slog.Logger) func(store.Monitor, string, netguard.Refusal, bool) {
+// settings in the audit log and, after it, the log, beside the writes the
+// API refused, so that a monitor which starts to reach outside its
+// namespaces leaves one row, not one a check, and a fault of the cluster's
+// DNS reads as one. The log line names the monitor, its namespace and the
+// source, so a central log tells an annotation monitor or one set up before
+// the scope was recorded from a user's. rows caps those rows and lines at
+// UPTIME_LOGIN_AUDIT_PER_MINUTE a minute by now's clock, apart from the
+// API's and the sign-ins': a first refusal it leaves out is not written
+// later, and the minute's warning says how many there were.
+func scopeRefused(db *store.SQLite, meter *metrics.Metrics, language string, rows *api.AuditCap, now func() time.Time, logger *slog.Logger) func(store.Monitor, string, netguard.Refusal, bool) {
 	return func(m store.Monitor, host string, why netguard.Refusal, first bool) {
 		reason := metrics.ScopeDeniedConnection
 		message := "a check was refused a connection outside its monitor's target scope; the monitor is down while it is"
@@ -825,18 +835,19 @@ func scopeRefused(db *store.SQLite, meter *metrics.Metrics, language string, log
 			reason = metrics.ScopeDeniedResolveError
 			message = "a check was refused a connection to a name that did not resolve, as the target scope refuses a name it cannot place; the monitor is down while it is, more often for a fault of the cluster's DNS than for an attempt"
 		}
-		meter.TargetScopeDenied(reason, metrics.ScopeSource(m))
-		if !first {
+		source := metrics.ScopeSource(m)
+		meter.TargetScopeDenied(reason, source)
+		if !first || !rows.Allow(now()) {
 			return
 		}
-		logger.Warn(message, "monitor_id", m.ID, "monitor", m.Name, "host", host, "reason", reason)
 		err := db.AppendAudit(context.Background(), store.AuditEntry{
-			At: time.Now().UTC(), Username: checker.ScopeActor, Action: "deny", ObjectType: "target-scope", ObjectID: m.ID,
+			At: now().UTC(), Username: checker.ScopeActor, Action: "deny", ObjectType: "target-scope", ObjectID: m.ID,
 			Summary: checker.ScopeAuditSummary(language, m.Name, host, why),
 		})
 		if err != nil {
 			logger.Error("audit entry lost", "action", "deny", "object", "target-scope", "error", err)
 		}
+		logger.Warn(message, "monitor_id", m.ID, "monitor", m.Name, "namespace", m.Namespace, "source", source, "host", host, "reason", reason)
 	}
 }
 
