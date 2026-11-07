@@ -182,7 +182,7 @@ secret() {
     [ "$want" = lacks ] || failed "$name: $file lacks \"$text\""
   fi
 }
-for f in admin-secret.yaml api-token.yaml metrics-token.yaml; do
+for f in admin-secret.yaml api-token.yaml metrics-token.yaml frontend-token.yaml; do
   secret "defaults" "$f" has "helm.sh/resource-policy: keep"
   # A release upgraded with --reuse-values from before the switch renders it
   # as null; read with a default of true, the Secret is kept all the same.
@@ -194,13 +194,21 @@ done
 secret "metrics auth off" metrics-token.yaml absent "" --set metrics.auth.enabled=false
 secret "auth.existingSecret" admin-secret.yaml absent "" --set auth.existingSecret=my-admin
 secret "apiToken.existingSecret" api-token.yaml absent "" --set apiToken.existingSecret=my-api-token
+secret "frontendToken.existingSecret" frontend-token.yaml absent "" --set frontendToken.existingSecret=my-frontend-token
+# A release upgraded with --reuse-values from 0.49 has no frontendToken: the
+# chart generates the Secret all the same.
+secret "frontendToken missing from older values" frontend-token.yaml has "token:" --set frontendToken=null
 
 # The install notes name the kept Secrets and the command that deletes them,
 # and that command names exactly the ones the chart generated and kept.
 DELETE_SECRET="kubectl -n kubeat delete secret"
-notes "kept secrets" says "$DELETE_SECRET kubeat-admin kubeat-api-token kubeat-metrics-token" --namespace kubeat
-notes "kept secrets without the value" says "$DELETE_SECRET kubeat-admin kubeat-api-token kubeat-metrics-token" \
+notes "kept secrets" says "$DELETE_SECRET kubeat-admin kubeat-api-token kubeat-metrics-token kubeat-frontend-token" --namespace kubeat
+notes "kept secrets without the value" says "$DELETE_SECRET kubeat-admin kubeat-api-token kubeat-metrics-token kubeat-frontend-token" \
   --namespace kubeat --set backend.persistence.keepOnUninstall=null
+notes "frontend token from frontendToken.existingSecret" says "$DELETE_SECRET kubeat-admin kubeat-api-token kubeat-metrics-token" \
+  --namespace kubeat --set frontendToken.existingSecret=my-frontend-token
+notes "frontend token from frontendToken.existingSecret" omits "kubeat-frontend-token" \
+  --namespace kubeat --set frontendToken.existingSecret=my-frontend-token
 notes "secrets not kept" omits "delete secret" --namespace kubeat --set backend.persistence.keepOnUninstall=false
 notes "admin from auth.existingSecret" says "$DELETE_SECRET kubeat-api-token kubeat-metrics-token" --namespace kubeat --set auth.existingSecret=my-admin
 notes "admin from auth.existingSecret" omits "kubeat-admin" --namespace kubeat --set auth.existingSecret=my-admin
@@ -242,15 +250,23 @@ notes "TLS-off Ingress without SSO" omits "$NEEDS_HTTPS" --set ingress.enabled=t
 
 # The sign-in throttle behind the Route or Ingress: the notes give README
 # "Hesaplar ve giriş"'s hop values while UPTIME_TRUST_PROXY_HOPS is 0, and
-# the network policy while it is off; without a Route or Ingress, neither.
+# the frontend's network policy while it is off; without a Route or Ingress,
+# neither. The backend's own policy is no longer what keeps a pod from
+# picking its source: the backend reads X-Forwarded-For only from the
+# frontend, which presents its token; a pod that reaches the frontend's
+# Service is what the frontend's policy keeps out.
 THROTTLE="Sign-in throttle:"
 HOPS_ZERO="UPTIME_TRUST_PROXY_HOPS is 0"
 SET_HOPS="--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1"
-NEEDS_POLICY="--set networkPolicy.enabled=true"
-# Turning the policy on cuts push jobs sending to the backend from other
-# namespaces, and outside OpenShift the Prometheus scrape: the notes say so.
-POLICY_PUSH='"Ağ erişimi": push jobs in other namespaces must send to the frontend'
-POLICY_METRICS="outside OpenShift set networkPolicy.metricsFrom to your Prometheus namespace"
+NEEDS_POLICY="--set frontend.networkPolicy.enabled=true"
+OLD_POLICY="--set networkPolicy.enabled=true"
+TOKEN_SECRET="with the Secret kubeat-frontend-token"
+POLICY_ROUTER="which by default lets in only the OpenShift router"
+POLICY_FROM="with frontend.networkPolicy.from set to your ingress controller's namespace"
+POLICY_GUIDE='giriş", "Arayüzün ağ politikası")'
+# With networkPolicy.enabled push jobs of other namespaces send to the
+# frontend: the notes say to let them in.
+POLICY_PUSH="list their namespaces in frontend.networkPolicy.from too"
 # A value too high is no longer the safe side: behind a proxy that appends,
 # a client lengthening the header picks its source, so the notes ask for the
 # lower value when unsure.
@@ -262,16 +278,21 @@ notes "Route, hops unset" omits "ingress-nginx" "${ROUTE[@]}"
 notes "Route, hops unset" says "$HOPS_LOWER" "${ROUTE[@]}"
 notes "Route, hops unset" says "$SET_HOPS" "${ROUTE[@]}"
 notes "Route, hops unset" says "$NEEDS_POLICY" "${ROUTE[@]}"
-notes "Route, hops unset" says "$POLICY_PUSH" "${ROUTE[@]}"
-notes "Route, hops unset" says "$POLICY_METRICS" "${ROUTE[@]}"
+notes "Route, hops unset" omits "$OLD_POLICY" "${ROUTE[@]}"
+notes "Route, hops unset" says "$TOKEN_SECRET" "${ROUTE[@]}"
+notes "Route, hops unset" says "$POLICY_ROUTER" "${ROUTE[@]}"
+notes "Route, hops unset" omits "$POLICY_FROM" "${ROUTE[@]}"
+notes "Route, hops unset" says "$POLICY_GUIDE" "${ROUTE[@]}"
+notes "Route, hops unset" omits "$POLICY_PUSH" "${ROUTE[@]}"
 notes "Ingress, hops unset" says "$HOPS_ZERO" "${INGRESS[@]}"
 notes "Ingress, hops unset" says "ingress-nginx with its default settings: 1; GKE's own Ingress (GCE): 2;" "${INGRESS[@]}"
 notes "Ingress, hops unset" says "use-forwarded-headers and compute-full-forwarded-for: 3" "${INGRESS[@]}"
 notes "Ingress, hops unset" omits "a plain Route" "${INGRESS[@]}"
 notes "Ingress, hops unset" says "$HOPS_LOWER" "${INGRESS[@]}"
 notes "Ingress, hops unset" says "$NEEDS_POLICY" "${INGRESS[@]}"
-notes "Ingress, hops unset" says "$POLICY_PUSH" "${INGRESS[@]}"
-notes "Ingress, hops unset" says "$POLICY_METRICS" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "$POLICY_FROM" "${INGRESS[@]}"
+notes "Ingress, hops unset" omits "$POLICY_ROUTER" "${INGRESS[@]}"
+notes "Ingress, hops unset" says "$POLICY_GUIDE" "${INGRESS[@]}"
 notes "neither Route nor Ingress" omits "$THROTTLE"
 notes "neither Route nor Ingress, policy off" omits "$NEEDS_POLICY"
 notes "Route, hops 0 given" says "$HOPS_ZERO" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=0
@@ -280,11 +301,84 @@ notes "Route, hops 1" omits "$HOPS_ZERO" "${ROUTE[@]}" --set-string backend.extr
 notes "Route, hops 1" omits "$HOPS_LOWER" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 notes "Route, hops 1" says "$NEEDS_POLICY" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 notes "Ingress, hops 2 as a number" omits "$HOPS_ZERO" "${INGRESS[@]}" --set backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
-notes "Route, hops 1, policy on" omits "$THROTTLE" "${ROUTE[@]}" \
+# The backend's policy is not the frontend's: on its own it still leaves the
+# frontend open, and the notes still ask for the frontend's, saying that the
+# push jobs it sends to the frontend must be let in.
+notes "Route, hops 1, backend policy on" says "$NEEDS_POLICY" "${ROUTE[@]}" \
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1 --set networkPolicy.enabled=true
-notes "Route, hops unset, policy on" says "$HOPS_ZERO" "${ROUTE[@]}" --set networkPolicy.enabled=true
-notes "Route, hops unset, policy on" omits "$NEEDS_POLICY" "${ROUTE[@]}" --set networkPolicy.enabled=true
-notes "Route, hops unset, policy on" omits "$POLICY_PUSH" "${ROUTE[@]}" --set networkPolicy.enabled=true
+notes "Route, hops 1, backend policy on" says "$POLICY_PUSH" "${ROUTE[@]}" \
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1 --set networkPolicy.enabled=true
+notes "Route, hops 1, frontend policy on" omits "$THROTTLE" "${ROUTE[@]}" \
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1 --set frontend.networkPolicy.enabled=true
+notes "Route, hops unset, frontend policy on" says "$HOPS_ZERO" "${ROUTE[@]}" --set frontend.networkPolicy.enabled=true
+notes "Route, hops unset, frontend policy on" omits "$NEEDS_POLICY" "${ROUTE[@]}" --set frontend.networkPolicy.enabled=true
+notes "frontend token of one's own" says "with the Secret my-frontend-token" "${ROUTE[@]}" \
+  --set frontendToken.existingSecret=my-frontend-token
+# The README section the notes point at gives the values they suggest.
+README="$CHART/../../../README.md"
+for text in "frontend.networkPolicy.enabled=true" "frontend.networkPolicy.from" "**Arayüzün ağ politikası" \
+  "policy-group.network.openshift.io/ingress" "kubernetes.io/metadata.name: ingress-nginx" "35.191.0.0/16" "130.211.0.0/22"; do
+  grep -qF -- "$text" "$README" || failed "README lacks \"$text\", which the notes and values point at"
+done
+
+# The frontend's network policy: a switch of its own, off by default and
+# not turned on by networkPolicy.enabled, whose push jobs it would cut off.
+# On, it lets in the OpenShift router by default, or the sources given; an
+# empty list, which would let every source in, is refused.
+# policy NAME POLICY has|lacks|absent TEXT VALUES...: the NetworkPolicy
+# POLICY rendered with these values has TEXT, lacks it, or is not rendered.
+policy() {
+  local name="$1" policy="$2" want="$3" text="$4"
+  shift 4
+  if ! helm template kubeat "$CHART" --show-only templates/networkpolicy.yaml "$@" >"$WORK/policies" 2>"$WORK/err"; then
+    if grep -q "could not find template" "$WORK/err"; then
+      [ "$want" = absent ] || failed "$name: no NetworkPolicy is rendered"
+    else
+      failed "$name: refused: $(cat "$WORK/err")"
+    fi
+    return
+  fi
+  awk -v policy="$policy" '
+    function flush() {
+      if (index(doc, "\nkind: NetworkPolicy\n") && index(doc, "\n  name: " policy "\n")) printf "%s", doc
+      doc = "\n"
+    }
+    BEGIN { doc = "\n" }
+    /^---/ { flush(); next }
+    { doc = doc $0 "\n" }
+    END { flush() }
+  ' "$WORK/policies" >"$WORK/policy"
+  if [ ! -s "$WORK/policy" ]; then
+    [ "$want" = absent ] || failed "$name: $policy is not rendered"
+  elif [ "$want" = absent ]; then
+    failed "$name: $policy is rendered"
+  elif grep -qF -- "$text" "$WORK/policy"; then
+    [ "$want" = has ] || failed "$name: $policy has \"$text\""
+  else
+    [ "$want" = lacks ] || failed "$name: $policy lacks \"$text\""
+  fi
+}
+FRONTEND_POLICY=(--set frontend.networkPolicy.enabled=true)
+policy "defaults" kubeat-frontend absent ""
+policy "backend policy on" kubeat-frontend absent "" --set networkPolicy.enabled=true
+policy "backend policy on" kubeat-backend has "app.kubernetes.io/component: backend" --set networkPolicy.enabled=true
+policy "frontend policy on" kubeat-frontend has "app.kubernetes.io/component: frontend" "${FRONTEND_POLICY[@]}"
+policy "frontend policy on" kubeat-frontend has "policy-group.network.openshift.io/ingress: \"\"" "${FRONTEND_POLICY[@]}"
+policy "frontend policy on" kubeat-frontend has "- port: http" "${FRONTEND_POLICY[@]}"
+policy "frontend policy on" kubeat-backend absent "" "${FRONTEND_POLICY[@]}"
+policy "both policies" kubeat-frontend has "policy-group.network.openshift.io/ingress" "${FRONTEND_POLICY[@]}" --set networkPolicy.enabled=true
+policy "both policies" kubeat-backend has "app.kubernetes.io/component: backend" "${FRONTEND_POLICY[@]}" --set networkPolicy.enabled=true
+# A release upgraded with --reuse-values from 0.49 has no such values.
+policy "frontend values missing" kubeat-frontend absent "" --set frontend.networkPolicy=null
+INGRESS_NGINX='[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"ingress-nginx"}}},{"ipBlock":{"cidr":"35.191.0.0/16"}}]'
+policy "sources given" kubeat-frontend has "kubernetes.io/metadata.name: ingress-nginx" "${FRONTEND_POLICY[@]}" \
+  --set-json "frontend.networkPolicy.from=$INGRESS_NGINX"
+policy "sources given" kubeat-frontend has "cidr: 35.191.0.0/16" "${FRONTEND_POLICY[@]}" \
+  --set-json "frontend.networkPolicy.from=$INGRESS_NGINX"
+policy "sources given" kubeat-frontend lacks "policy-group.network.openshift.io/ingress" "${FRONTEND_POLICY[@]}" \
+  --set-json "frontend.networkPolicy.from=$INGRESS_NGINX"
+refuses "frontend policy letting everyone in" "frontend.networkPolicy.from is empty" "${FRONTEND_POLICY[@]}" \
+  --set-json 'frontend.networkPolicy.from=[]'
 
 # The license: mounted whole, so that a renewed Secret reaches the file.
 helm template kubeat "$CHART" --set license.existingSecret=kubeat-license >"$WORK/license.yaml" 2>"$WORK/err" ||
@@ -397,6 +491,28 @@ placement "Service type NodePort" frontend.yaml has "type: NodePort" --set front
 placement "no Service annotations" frontend.yaml lacks "cloud.google.com/neg:"
 placement "Service annotation" frontend.yaml has "cloud.google.com/neg:" \
   --set-json 'frontend.service.annotations={"cloud.google.com/neg":"{\"ingress\": true}"}'
+
+# The frontend token: both pods read it from the same Secret, the chart's
+# or the one named in frontendToken.existingSecret, so that the backend
+# reads X-Forwarded-For from the frontend alone.
+for file in backend.yaml frontend.yaml; do
+  var=FRONTEND_TOKEN
+  [ "$file" = backend.yaml ] && var=UPTIME_FRONTEND_TOKEN
+  placement "frontend token in $file" "$file" has "- name: $var"
+  helm template kubeat "$CHART" --show-only "templates/$file" >"$WORK/token" 2>"$WORK/err" || failed "frontend token in $file: refused"
+  grep -A4 -- "- name: $var\$" "$WORK/token" | grep -qF "name: kubeat-frontend-token" ||
+    failed "frontend token in $file: $var is not read from kubeat-frontend-token"
+  helm template kubeat "$CHART" --show-only "templates/$file" --set frontendToken.existingSecret=my-frontend-token >"$WORK/token" 2>"$WORK/err" ||
+    failed "frontend token of one's own in $file: refused"
+  grep -A4 -- "- name: $var\$" "$WORK/token" | grep -qF "name: my-frontend-token" ||
+    failed "frontend token of one's own in $file: $var is not read from my-frontend-token"
+  grep -A4 -- "- name: $var\$" "$WORK/token" | grep -qF "key: token" ||
+    failed "frontend token in $file: $var is not read from the key token"
+  # A Secret that is not there (yet) must not keep the pods from starting:
+  # the monitoring never stops for a setting.
+  grep -A5 -- "- name: $var\$" "$WORK/token" | grep -qF "optional: true" ||
+    failed "frontend token in $file: $var is not optional"
+done
 
 # Kubeat's own failures: the install notes warn while neither a heartbeat
 # nor the alert rules would tell of them, and say when no backups are taken.

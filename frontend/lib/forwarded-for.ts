@@ -4,8 +4,9 @@
  * backend sees this pod connect for every client. It keys failed attempts
  * on the source address (CWE-307, ADR-0004), and reads that address from
  * X-Forwarded-For when UPTIME_TRUST_PROXY_HOPS says how many entries to
- * trust; without the header it can only key on this pod, one shared lock
- * for everyone.
+ * trust, and only from this UI, which proves itself with its token
+ * (lib/frontend-token.ts); without the header it can only key on this pod,
+ * one shared lock for everyone.
  *
  * So the throttled calls (sign-in, password change, status-page unlock)
  * pass on the X-Forwarded-For the request came with, as it came: nothing

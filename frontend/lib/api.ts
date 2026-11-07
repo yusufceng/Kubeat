@@ -3,6 +3,7 @@ import type { ChannelEvent } from "@/lib/channel-types";
 
 import { config } from "@/lib/config";
 import { forwardedForHeader } from "@/lib/forwarded-for";
+import { withFrontendToken } from "@/lib/frontend-token";
 import { sessionToken } from "@/lib/session";
 
 /**
@@ -541,15 +542,20 @@ export class ApiError extends Error {
  * and the backend decides what that user may see and do. Without a
  * session, or with one the backend refuses, this fails with status 401;
  * lib/auth.ts turns that into the sign-in page. Open requests are those
- * the backend answers to anyone.
+ * the backend answers to anyone. Every request also carries the UI's token
+ * (lib/frontend-token.ts), by which the backend tells this UI from other
+ * peers.
  */
 async function request<T>(
   path: string,
-  init?: RequestInit,
+  init?: BackendRequestInit,
   options: { open?: boolean; token?: string } = {},
 ): Promise<T> {
   return (await requestWithHeaders<T>(path, init, options)).body;
 }
+
+/** A request's options, with its headers as a plain object. */
+type BackendRequestInit = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
 
 /**
  * request(), with the answer's headers beside its body: for what the
@@ -557,7 +563,7 @@ async function request<T>(
  */
 async function requestWithHeaders<T>(
   path: string,
-  init?: RequestInit,
+  init?: BackendRequestInit,
   { open = false, token }: { open?: boolean; token?: string } = {},
 ): Promise<{ body: T; headers: Headers }> {
   const bearer = token ?? (open ? null : await sessionToken());
@@ -566,10 +572,13 @@ async function requestWithHeaders<T>(
   try {
     res = await fetch(`${config.backendUrl}/api/v1${path}`, {
       ...init,
-      headers: {
-        ...init?.headers,
-        ...(bearer && { Authorization: `Bearer ${bearer}` }),
-      },
+      headers: withFrontendToken(
+        {
+          ...init?.headers,
+          ...(bearer && { Authorization: `Bearer ${bearer}` }),
+        },
+        config.frontendToken,
+      ),
       signal: AbortSignal.timeout(config.backendTimeoutMs),
     });
   } catch (err) {

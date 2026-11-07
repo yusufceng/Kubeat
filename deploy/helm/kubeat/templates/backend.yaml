@@ -111,6 +111,17 @@ spec:
                   name: {{ include "kubeat.metricsTokenSecret" . }}
                   key: token
             {{- end }}
+            # The UI presents it with every request; only then is the
+            # browser's X-Forwarded-For read (UPTIME_TRUST_PROXY_HOPS).
+            # Optional, so that a Secret not there (a frontendToken.
+            # existingSecret not yet created) never stops the monitoring:
+            # the header is then trusted from no peer, and the start says so.
+            - name: UPTIME_FRONTEND_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubeat.frontendTokenSecret" . }}
+                  key: token
+                  optional: true
             - name: UPTIME_SECRET_KEY
               valueFrom:
                 secretKeyRef:

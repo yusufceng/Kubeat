@@ -231,6 +231,66 @@ func TestLoginConcurrencyMayBeZero(t *testing.T) {
 	}
 }
 
+// The UI's token tells it from other peers: X-Forwarded-For is read only
+// from a request that carries it. With hops trusted and no token, no peer
+// is trusted, and the start says so once, as it does of a token a header
+// cannot carry (which the UI would never send as it is). Neither stops the
+// backend.
+func TestFrontendToken(t *testing.T) {
+	warnsOfNoToken := func(cfg Config) bool {
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "UPTIME_FRONTEND_TOKEN is not set") {
+				return true
+			}
+		}
+		return false
+	}
+	for _, tc := range []struct {
+		name, hops, token string
+		want              string
+		noTokenWarning    bool
+		unsendableWarning bool
+	}{
+		{name: "defaults", want: ""},
+		{name: "the chart's install: a token, hops 0", token: "Gh7k2Lm9", want: "Gh7k2Lm9"},
+		{name: "a token and hops", hops: "1", token: "Gh7k2Lm9", want: "Gh7k2Lm9"},
+		{name: "surrounding spaces and a newline go", hops: "1", token: " Gh7k2Lm9\n", want: "Gh7k2Lm9"},
+		{name: "hops without a token", hops: "2", want: "", noTokenWarning: true},
+		{name: "hops with a token of spaces", hops: "1", token: "   ", want: "", noTokenWarning: true},
+		{name: "a space inside", hops: "1", token: "Gh7k 2Lm9", want: "", noTokenWarning: true, unsendableWarning: true},
+		{name: "a byte outside ASCII", hops: "1", token: "Gh7kç2Lm9", want: "", noTokenWarning: true, unsendableWarning: true},
+		{name: "a control character inside, hops 0", token: "Gh7k\x012Lm9", want: "", unsendableWarning: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("UPTIME_TRUST_PROXY_HOPS", tc.hops)
+			t.Setenv("UPTIME_FRONTEND_TOKEN", tc.token)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.FrontendToken != tc.want {
+				t.Errorf("FrontendToken = %q, want %q", cfg.FrontendToken, tc.want)
+			}
+			if got := warnsOfNoToken(cfg); got != tc.noTokenWarning {
+				t.Errorf("warns of no token = %v, want %v: %q", got, tc.noTokenWarning, cfg.Warnings)
+			}
+			unsendable := false
+			for _, w := range cfg.Warnings {
+				if strings.Contains(w, "a character a header cannot carry") {
+					unsendable = true
+				}
+				// The token is a secret: no warning repeats it.
+				if tc.token != "" && strings.TrimSpace(tc.token) != "" && strings.Contains(w, strings.TrimSpace(tc.token)) {
+					t.Errorf("a warning names the token: %q", w)
+				}
+			}
+			if unsendable != tc.unsendableWarning {
+				t.Errorf("warns of an unsendable token = %v, want %v: %q", unsendable, tc.unsendableWarning, cfg.Warnings)
+			}
+		})
+	}
+}
+
 // The key can come from a file, a mounted Secret for instance, but not
 // from both places at once. The file is taken byte for byte, as the
 // variable is, its trailing newline too: the same Secret gives the same

@@ -63,11 +63,14 @@ reach it with a port-forward and the API token (README, "API"):
   curl -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors
 {{- /*
 The sign-in throttle's source address behind the Route or Ingress: the
-values README "Hesaplar ve giriş" gives, and the network policy that
-keeps pods from choosing their own source once the header is trusted.
+values README "Hesaplar ve giriş" gives, and the frontend's network policy
+that keeps pods from choosing their own source once the header is trusted.
+The backend trusts it from the frontend alone (the frontend token), so the
+backend's policy is not needed for that.
 */}}
 {{- $hops := dig "extraEnv" "UPTIME_TRUST_PROXY_HOPS" "" .Values.backend | default "0" | toString }}
-{{- if and (or .Values.route.enabled .Values.ingress.enabled) (or (eq $hops "0") (not .Values.networkPolicy.enabled)) }}
+{{- $frontendPolicy := dig "networkPolicy" "enabled" false .Values.frontend }}
+{{- if and (or .Values.route.enabled .Values.ingress.enabled) (or (eq $hops "0") (not $frontendPolicy)) }}
 
 Sign-in throttle: failed sign-ins are counted per client address, which
 the backend reads from the X-Forwarded-For the UI passes on.
@@ -89,13 +92,25 @@ high lets a client lengthen the header and pick its own source, unwarned.
 Upgrade with it, e.g.
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 {{- end }}
-{{- if not .Values.networkPolicy.enabled }}
-With UPTIME_TRUST_PROXY_HOPS above 0, also set
-  --set networkPolicy.enabled=true
-or any pod in the cluster can reach the backend with an X-Forwarded-For of
-its own and pick the address its sign-ins count against. First see README
-"Ağ erişimi": push jobs in other namespaces must send to the frontend, and
-outside OpenShift set networkPolicy.metricsFrom to your Prometheus namespace.
+{{- if not $frontendPolicy }}
+The backend reads the header only from the frontend, which proves itself
+with the Secret {{ include "kubeat.frontendTokenSecret" . }}. With UPTIME_TRUST_PROXY_HOPS
+above 0 any pod in the cluster can still reach the frontend's Service
+directly with an X-Forwarded-For of its own, which the frontend passes on,
+and pick the address its sign-ins count against. To close that, also set
+  --set frontend.networkPolicy.enabled=true
+{{- if .Values.route.enabled }}
+which by default lets in only the OpenShift router (README, "Hesaplar ve
+giriş", "Arayüzün ağ politikası").
+{{- else }}
+with frontend.networkPolicy.from set to your ingress controller's namespace,
+or for GKE's own Ingress to its load balancer's ranges (README, "Hesaplar ve
+giriş", "Arayüzün ağ politikası").
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+With networkPolicy.enabled push jobs in other namespaces send to the
+frontend: list their namespaces in frontend.networkPolicy.from too.
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if and (or .Values.oidc.issuer .Values.ldap.url) (not .Values.license.existingSecret) }}
@@ -165,12 +180,14 @@ To delete them once the release is uninstalled:
 {{- if not .Values.auth.existingSecret }}{{ $keptSecrets = append $keptSecrets (printf "%s-admin" .Release.Name) }}{{ end }}
 {{- if not .Values.apiToken.existingSecret }}{{ $keptSecrets = append $keptSecrets (printf "%s-api-token" .Release.Name) }}{{ end }}
 {{- if and (include "kubeat.metricsAuth" .) (not (dig "auth" "existingSecret" "" .Values.metrics)) }}{{ $keptSecrets = append $keptSecrets (printf "%s-metrics-token" .Release.Name) }}{{ end }}
+{{- if not (dig "existingSecret" "" (.Values.frontendToken | default dict)) }}{{ $keptSecrets = append $keptSecrets (printf "%s-frontend-token" .Release.Name) }}{{ end }}
 {{- end }}
 {{- with $keptSecrets }}
 
 helm uninstall also leaves these Secrets, so that installing again with the
 same release name and namespace keeps the administrator password, the API
-token and the metrics token (backend.persistence.keepOnUninstall):
+token, the metrics token and the frontend token
+(backend.persistence.keepOnUninstall):
 {{- range . }}
   - {{ . }}
 {{- end }}

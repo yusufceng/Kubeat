@@ -1,0 +1,33 @@
+{{- /*
+The token by which the backend tells the UI from any other peer: the UI
+sends it with every request to the backend, and the backend reads
+X-Forwarded-For, the browser's address for the sign-in throttle, only from
+a request that carries it. Any pod can reach the backend's Service and pod
+addresses come from one network, so no address can tell the UI apart.
+Generated once and kept across upgrades; set frontendToken.existingSecret to
+manage it yourself. It is also left in place when the release is removed,
+like the other tokens and tied to the same switch
+(backend.persistence.keepOnUninstall); a new one is harmless, as both pods
+read it from here.
+*/ -}}
+{{- if not (dig "existingSecret" "" (.Values.frontendToken | default dict)) }}
+{{- $name := printf "%s-frontend-token" .Release.Name }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kubeat.labels" . | nindent 4 }}
+  {{- if include "kubeat.keepData" . }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+type: Opaque
+data:
+  {{- if and $existing $existing.data (index $existing.data "token") }}
+  token: {{ index $existing.data "token" }}
+  {{- else }}
+  token: {{ randAlphaNum 48 | b64enc }}
+  {{- end }}
+{{- end }}

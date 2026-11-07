@@ -166,7 +166,7 @@ dönüş, alarm kurallarının değişip değişmediği, atlamalı yol ve yükse
 
 ### GitOps ile kurulum (Argo CD, OpenShift GitOps)
 
-Chart dört Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde
+Chart beş Secret'ı ilk kurulumda rastgele üretir ve sonraki güncellemelerde
 cluster'dan geri okuyarak korur:
 
 | Secret (anahtar) | İçerik | Kendi Secret'ınız için |
@@ -175,6 +175,7 @@ cluster'dan geri okuyarak korur:
 | `<release>-admin` (`password`) | İlk yöneticinin parolası | `auth.existingSecret` |
 | `<release>-api-token` (`token`) | API anahtarı | `apiToken.existingSecret` |
 | `<release>-metrics-token` (`token`) | Metrik anahtarı | `metrics.auth.existingSecret` |
+| `<release>-frontend-token` (`token`) | Arayüzün backend'e kendini tanıttığı sır (bkz. "Hesaplar ve giriş", "Güvenilir eş") | `frontendToken.existingSecret` |
 
 Cluster'a erişmeden şablon üreten araçlar (`helm template`, Argo CD,
 OpenShift GitOps) bu Secret'ları geri okuyamaz: her üretimde yeni değerler
@@ -183,9 +184,11 @@ anahtarındadır: backend bir sonraki açılışta yeni anahtarı reddeder ve es
 anahtarla şifrelenmiş değerler geri gelmez. API anahtarı da değişir; metrik
 anahtarı backend yeniden başlayana kadar ServiceMonitor'ün gönderdiğiyle
 uyuşmaz ve scrape'ler `401` alır; yönetici Secret'ı da artık gerçek parolayı
-göstermez.
+göstermez. Arayüzün sırrı değişince yeniden başlayan pod yenisini, ötekisi
+eskisini kullanır: ikisi de yeniden başlayana kadar backend arayüzü tanımaz ve
+tarayıcı girişleri arayüz pod'una anahtarlanır (tek paylaşılan kilit, WARN).
 
-Bu yüzden GitOps ile kurarken dört Secret'ı kendiniz oluşturun (Sealed
+Bu yüzden GitOps ile kurarken beş Secret'ı kendiniz oluşturun (Sealed
 Secrets, External Secrets Operator, ...) ve adlarını yukarıdaki
 `existingSecret` değerleriyle verin; chart o zaman bunları üretmez.
 
@@ -209,7 +212,7 @@ Notlar ayrıca LDAP ya da OIDC için lisansı (`license.existingSecret`),
 SSO'nun dönüş adresini (`publicURL` ya da `oidc.redirectURL`) ve elle
 yapılandırılmış bir Prometheus'un metrik anahtarını (bkz. "Metrik
 anahtarı") hatırlatır. OpenShift dışındaki bir GitOps values dosyası,
-yukarıdaki dört Secret'la birlikte:
+yukarıdaki beş Secret'la birlikte:
 
 ```yaml
 podSecurityContext:
@@ -223,6 +226,8 @@ apiToken:
 metrics:
   auth:
     existingSecret: kubeat-metrics-token
+frontendToken:
+  existingSecret: kubeat-frontend-token   # token anahtarı; harf ve rakam
 heartbeat:
   urlSecret:
     name: kubeat-heartbeat   # url anahtarlı Secret; ya da metrics.prometheusRule.enabled: true
@@ -427,6 +432,13 @@ raporu backend'e iletir. Chart `PUSH_INTERNAL_URL`'i bu adrese çevirir,
 monitor sayfası da cluster içi adres olarak bunu gösterir. API anahtarıyla
 backend'e doğrudan bağlanan betikler `networkPolicy.backendIngressFrom` ile
 izin almalıdır.
+
+Bu politika arayüze gelen bağlantıları kısıtlamaz. Arayüz için ayrı, isteğe
+bağlı bir politika vardır (`frontend.networkPolicy.enabled`, varsayılan
+kapalı): arayüze yalnız router'ın ya da ingress controller'ın bağlanmasına izin
+verir ve `networkPolicy.enabled` ile açılmaz. İkisi birlikte açıksa push
+gönderen namespace'ler `frontend.networkPolicy.from`'a eklenmelidir, yoksa
+raporları kesilir (bkz. "Hesaplar ve giriş", "Arayüzün ağ politikası").
 
 #### İzlenen namespace'ler
 
@@ -1208,6 +1220,105 @@ başlıktan okunur:
 - Parola değiştirme ve durum sayfası kilidinin sayaçları bugün kaynağa göre
   değil, hesaba ve sayfaya göredir; başlık orada ileride kullanılacak (S76).
 
+**Güvenilir eş: arayüz (0.50).** Cluster'daki her pod backend Service'ine
+bağlanabilir ve pod adresleri tek bir pod ağından dağıtılır: hiçbir adres
+arayüzü başka bir pod'dan ayıramaz. Bu yüzden backend `X-Forwarded-For`'u
+yalnız arayüzden gelen istekte okur ve arayüzü adresiyle değil bir sırla tanır
+(0.48–0.49 başlığa bağlanan eşe bakmadan güveniyordu; bkz.
+[docs/yukseltme.md](docs/yukseltme.md) "0.49'a yükseltme"):
+
+- Arayüz backend'e yaptığı her istekte sırrı `X-Frontend-Token` başlığıyla
+  gönderir. Chart sırrı ilk kurulumda `<release>-frontend-token` Secret'ında
+  (`token` anahtarı) üretir, güncellemelerde korur ve iki pod'a da verir:
+  backend'e `UPTIME_FRONTEND_TOKEN`, arayüze `FRONTEND_TOKEN`. Kendi
+  Secret'ınız için `frontendToken.existingSecret` (bkz. "GitOps ile kurulum").
+  Adı verilen Secret yoksa pod'lar yine başlar (izleme durmaz): sır boş kalır;
+  değer `0`'dan büyükse başlığa hiçbir eşten güvenilmez ve backend açılışta
+  WARN yazar.
+- Backend gelen değeri sabit zamanlı karşılaştırır. Başlık yoksa, yanlışsa ya
+  da birden fazla geldiyse eş güvenilmez sayılır.
+- Arayüz tarayıcıdan aynı adla gelen bir başlığı backend'e taşımaz; başlığı
+  yalnız kendisi yazar.
+- Sır loga yazılmaz: WARN satırları ne sırrı ne de bir isteğin onun yerine
+  sunduğu değeri yazar.
+- `UPTIME_TRUST_PROXY_HOPS` `0`'dan büyükken arayüzden gelmeyen bir istekte
+  (bir pod'un backend'e doğrudan isteği, bir betik, backend'e port-forward)
+  `X-Forwarded-For` ne yazarsa yazsın yok sayılır: throttle bağlanan eşe
+  anahtarlanır ve dakikada en fazla bir kez WARN düşer (aşağıda "Yanlış ayar
+  sessizce etkisiz kalmaz"). Tek bir pod böylece uydurma kaynaklarla
+  kaynak-başına sınırı atlayamaz, hesap tavanını
+  (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, 50) doldurup `admin`'i herkese
+  kilitleyemez: denemeleri kendi adresine sayılır ve
+  `UPTIME_LOGIN_MAX_FAILURES`'ta (10) durur.
+- Değer `0` iken bir şey değişmez: başlığa zaten hiçbir eşten güvenilmez.
+
+Chart dışı kurulumda değer `0`'dan büyükse iki tarafa aynı rastgele değeri
+verin: backend'e `UPTIME_FRONTEND_TOKEN`, arayüze `FRONTEND_TOKEN` (ör.
+`openssl rand -hex 24`). Değer yazdırılabilir ASCII olmalı ve boşluk
+içermemeli; başlık başka bir karakteri olduğu gibi taşıyamaz, böyle bir değer
+iki tarafta da yok sayılır (backend açılışta söyler). Verilmezse backend
+açılışta bir kez WARN yazar ve `X-Forwarded-For`'a hiçbir eşten güvenmez: her
+tarayıcı arayüz pod'una anahtarlanır, tek paylaşılan kilit kalır (bypass
+değil).
+
+Sırrı değiştirmek için Secret'ı silip `helm upgrade` yapın (chart yenisini
+üretir) ya da kendi Secret'ınızı güncelleyin; sonra iki Deployment'ı da
+yeniden başlatın: `kubectl -n kubeat rollout restart deploy/kubeat-backend
+deploy/kubeat-frontend`. Yalnız biri yeniden başlarsa öteki de başlayana kadar
+backend arayüzü tanımaz: tarayıcı girişleri arayüz pod'una anahtarlanır ve
+"güvenilmeyen eş" WARN'ı düşer. Sırrı arayüzden başka kimse kullanmaz; yenisi
+zararsızdır.
+
+**Arayüzün ağ politikası (isteğe bağlı, 0.50).** Güvenilir eş backend'e
+doğrudan geleni kapatır, arayüz Service'ine doğrudan geleni kapatmaz: arayüz
+gelen başlığı aynen taşır ve backend onu arayüzden geldiği için okur. Bunu
+chart'ın ayrı bir anahtarla açılan arayüz politikası kapatır:
+
+- `--set frontend.networkPolicy.enabled=true` (varsayılan kapalı) arayüze
+  (port 3000) yalnız `frontend.networkPolicy.from`'da sayılan kaynakların
+  bağlanmasına izin verir. NetworkPolicy uygulayan bir ağ eklentisi gerekir;
+  probe'lar node'dan gelir ve port-forward politikaya takılmaz.
+- `from` varsayılan olarak OpenShift router'ını seçer: OpenShift'in kendi
+  `allow-from-openshift-ingress` politikası gibi router'ın namespace'ini
+  `policy-group.network.openshift.io/ingress: ""` etiketiyle (bkz. "İzlenen
+  namespace'ler"). Başka bir platformda ingress controller'ın namespace'ini
+  yazın:
+
+  ```yaml
+  frontend:
+    networkPolicy:
+      enabled: true
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+  ```
+
+- Host ağında çalışan bir controller'ın kaynağı node'dur: node'ların aralığını
+  `ipBlock` ile verin. GKE'nin kendi Ingress'i (GCE) container-native (NEG)
+  modda arayüze Google yük dengeleyicisinin aralıklarından gelir: `ipBlock`
+  `35.191.0.0/16` ve `130.211.0.0/22`; `NodePort` modunda kaynak node olabilir.
+  Bu değerlerin hiçbiri henüz gerçek bir cluster'da ölçülmedi.
+- Anahtar `networkPolicy.enabled`'a bağlı değildir, onunla açılmaz: o politika
+  açıkken başka namespace'lerdeki push işleri raporlarını arayüze gönderir
+  (bkz. "Ağ erişimi") ve yalnız router'a izin veren bir politika onları keser,
+  push monitor'leri yanlış DOWN düşer. İkisini birlikte açıyorsanız push
+  gönderen namespace'leri `frontend.networkPolicy.from`'a ekleyin. Cluster
+  içinden arayüz Service'ine giden başka her şey (ör. Kubeat'in kendi
+  arayüzünü izleyen bir monitor) de bir girdi ister.
+- `from` boş olamaz: NetworkPolicy'de boş `from` her kaynağa izin verir, chart
+  böyle bir değeri reddeder.
+
+Politika kapalıyken kalan sınır: değer `0`'dan büyükken cluster içindeki bir
+pod arayüz Service'ine (arayüz `NodePort` ise node portuna yük dengeleyiciyi
+atlayıp node üzerinden gelen bir istemci de) kendi yazdığı bir
+`X-Forwarded-For` ile bağlanıp kaynağını seçebilir; her denemede yeni bir
+kaynak göstererek kaynak-başına sınırı atlayabilir ve hesap tavanını
+doldurabilir. Arayüzün kendi gördüğü eşi başlığa eklemesi bunu politika
+olmadan da kapatırdı, ama özel bir sunucu ister (backlog; ADR-0004). Kurulum
+notu Route ya da Ingress açıkken ve politika kapalıyken bunu söyler ve
+`frontend.networkPolicy.enabled=true`'yu önerir.
+
 **Vekil-hop rehberi.** Değer, arayüzün önündeki vekillerinizin
 `X-Forwarded-For`'a yazdığı girdi sayısıdır; hiçbiri yazmıyorsa `1`'dir (girdiyi
 Next.js yazar; yalnız port-forward'da, aşağıdaki ilk madde). Backend zinciri
@@ -1260,18 +1371,15 @@ Dikkat edilecekler:
   başlığı istemcinin yazabileceği en soldaki girdiyle değiştirir ve her istek
   kendi kaynağını seçer.
 - Backend'e doğrudan gelen giriş (backend Service'ine port-forward, API
-  betikleri) başlık taşımaz: değer `1` ya da üstündeyken kaynak eşe düşer ve
-  "zincir kısa" WARN'ı düşer. Bu beklenen durumdur.
-- Değer `0`'dan büyükken cluster içindeki bir pod backend'e ya da arayüze
-  doğrudan bağlanıp kendi yazdığı bir `X-Forwarded-For` ile kaynağını
-  seçebilir. Arayüz `NodePort` ise (ör. GCE Ingress için) node portuna yük
-  dengeleyiciyi atlayıp node üzerinden gelen bir istemci de (aynı VPC'deki bir
-  makine gibi) böyledir. Backend'e doğrudan geleni `networkPolicy.enabled=true`
-  kapatır (backend'e yalnız arayüz, Prometheus ve
-  `networkPolicy.backendIngressFrom` bağlanır; push işlerine etkisi "Ağ
-  erişimi"nde). Arayüz Service'ine ya da node portuna doğrudan gelen uydurma
-  başlık bugün kapanmaz (bilinen sınır,
-  [#119](https://github.com/yusufceng/Kubeat/issues/119)).
+  betikleri) arayüzün sırrını taşımaz: değer `1` ya da üstündeyken kaynak eşe
+  düşer ve "güvenilmeyen eş" WARN'ı düşer. Bu beklenen durumdur.
+- Değer `0`'dan büyükken cluster içindeki bir pod backend'e doğrudan bağlanıp
+  kaynağını seçemez: backend başlığı yalnız arayüzden okur (yukarıda "Güvenilir
+  eş"). Arayüz Service'ine (arayüz `NodePort` ise, ör. GCE Ingress için, node
+  portuna yük dengeleyiciyi atlayıp node üzerinden gelen bir istemci de) doğrudan
+  gelen uydurma başlık ise arayüzden geçip okunur; onu
+  `frontend.networkPolicy.enabled=true` kapatır (yukarıda "Arayüzün ağ
+  politikası").
 
 Chart'ın varsayılanı `0`'dır. `route.enabled` ya da `ingress.enabled` açıkken
 kurulum notu (NOTES) değerin `0` kaldığını söyler ve yukarıdaki satırlardan o
@@ -1279,13 +1387,15 @@ giriş türüne uyanları önerir: Route için `1` (önünde başlığı yazan b
 L7 yük dengeleyiciyle `2`); Ingress için `ingress-nginx` varsayılanlarıyla `1`,
 GCE Ingress'te `2`, önde L7 GCLB + `ingress-nginx` ile `3`. Emin değilseniz
 küçük değeri seçip `source` alanıyla doğrulamanızı söyler (fazla değer
-atlatılabilir, yukarıda). Ağ politikası
-kapalıysa `networkPolicy.enabled=true`'yu da önerir ve açmadan önce "Ağ
-erişimi"ni okumanızı söyler: politika açılınca başka namespace'lerdeki push
-işleri arayüze göndermelidir, OpenShift dışında `networkPolicy.metricsFrom`
-Prometheus'unuzun namespace'ini seçmelidir (yoksa push monitor'leri yanlış
-DOWN düşer, scrape kesilir). Değeri
-`--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` ile verin.
+atlatılabilir, yukarıda). Değeri
+`--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` ile verin. Arayüzün
+ağ politikası kapalıysa not `frontend.networkPolicy.enabled=true`'yu da önerir:
+Route'ta varsayılan `from` OpenShift router'ıdır; Ingress'te
+`frontend.networkPolicy.from`'u controller'ın namespace'ine (GCE Ingress'te
+yük dengeleyicinin aralıklarına) ayarlamanızı söyler; `networkPolicy.enabled`
+açıksa push gönderen namespace'leri de `from`'a eklemenizi hatırlatır. 0.50'den
+beri bu amaçla `networkPolicy.enabled`'ı önermez: backend'e doğrudan gelen
+uydurma başlığı artık arayüzün sırrı kapatır.
 
 **Görülen kaynağı doğrulamak.** Her başarısız giriş backend loguna bilgi
 satırı olarak yazılır; satırın `source` alanı throttle'ın anahtarladığı
@@ -1304,8 +1414,9 @@ kubectl -n kubeat logs deploy/kubeat-backend | grep 'sign-in refused'
   `ingress-nginx` varken `source` GCLB vekiliyse artırmak işe yaramaz
   (`ingress-nginx` GCLB'nin girdilerini siler): tablodaki iki ayarı açıp `3`
   verin.
-- Arayüz pod'unun adresiyse değer `0`'dır ya da fazladır; ikisinde de
-  aşağıdaki iki WARN'dan biri de düşer.
+- Arayüz pod'unun adresiyse değer `0`'dır, fazladır ya da backend arayüzü
+  tanımıyordur (sır eksik ya da iki tarafta farklı; "Güvenilir eş");
+  hepsinde aşağıdaki WARN'lardan biri de düşer.
 - Bir node'un adresiyse önde başlığı yazmayan bir L4 katmanı vardır (yukarıda).
 
 Satır yalnız operatör logudur: denetim kaydı ve istemci yanıtı adresi taşımaz,
@@ -1320,8 +1431,9 @@ WARN yazılır; 0.50'den beri bu arayüzden gelen girişte de böyledir:
   vekil var ama güvenilmiyor): throttle tek paylaşılan ada-başına kilide
   gerilemiştir; WARN, anahtarlanan eş adresini yazar. Arayüzden gelen girişte
   bu eş arayüz pod'udur.
-- `X-Forwarded-For` zinciri `UPTIME_TRUST_PROXY_HOPS`'tan kısa gelirse (değer
-  gerçek girdi sayısından büyük ya da bir istek vekili atlıyor): görülen kaynak
+- Arayüzden gelen istekte `X-Forwarded-For` zinciri
+  `UPTIME_TRUST_PROXY_HOPS`'tan kısa gelirse (değer gerçek girdi sayısından
+  büyük ya da istek arayüzün önündeki vekilleri atlıyor): görülen kaynak
   istemcinin ayarlayabileceği en soldaki girdiye değil, hiçbir istemcinin
   denetlemediği eşe (peer) düşer. Böylece uydurma bir `X-Forwarded-For` ile ne
   her istekte taze bir kaynak gibi görünüp throttle atlanabilir ne de bir kurban
@@ -1329,6 +1441,15 @@ WARN yazılır; 0.50'den beri bu arayüzden gelen girişte de böyledir:
   zinciri kısa gelen istek için geçerlidir: başlığa ekleyen bir vekilin
   arkasında zincirini uzatan istemci WARN almadan kaynağını seçer (yukarıda
   "Dikkat edilecekler").
+- Değer `0`'dan büyükken arayüzün sırrını sunmayan bir eşten giriş gelirse
+  (0.50; backend'e doğrudan bir istek ya da uydurma bir başlık): kaynak o eştir
+  ve WARN eşin adresini, isteğin `X-Forwarded-For` taşıyıp taşımadığını yazar;
+  sırrı ve isteğin sunduğu değeri yazmaz.
+- Değer `0`'dan büyük ama `UPTIME_FRONTEND_TOKEN` tanımsızsa (0.50; chart dışı
+  kurulum): açılışta bir kez, sonra çalışma anında dakikada en fazla bir kez
+  WARN düşer; başlığa hiçbir eşten güvenilmez, her tarayıcı arayüz pod'una
+  anahtarlanır. Başlığın taşıyamayacağı bir karakter içeren sır da açılışta
+  söylenir ve yok sayılır.
 
 Değerin eksik olması (ör. WAF'lı Route'ta `1`) WARN vermez: throttle o vekilin
 adresine anahtarlanır. Bunu yukarıdaki `source` alanından görürsünüz.
@@ -1356,8 +1477,10 @@ adresten görünür; kaynak-başına throttle onları ayırt edemez ve biri çok
 denerse o NAT'ın arkasındaki herkesin o ada girişi birlikte yavaşlar. Böyle bir
 popülasyonda hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`) NAT'lı
 kullanıcı sayısına göre yükseltin ya da `0` ile kapatıp yalnız kaynak-başına
-throttle'a bırakın. Kaynak-IP'ye dayanmayan gerçek bir ayrım (güvenilir-vekil
-IP allowlist) daha büyük bir iştir ve yön olarak izlenir (ADR-0004).
+throttle'a bırakın. Güvenilir-vekil allowlist'inin ilk dilimi 0.50'de geldi:
+`X-Forwarded-For`'a yalnız arayüzden güvenilir (yukarıda "Güvenilir eş"). NAT
+arkasındaki kullanıcıları kaynak-IP'ye dayanmadan ayırmak daha büyük bir iştir
+ve backlog'da izlenir (ADR-0004).
 
 Deneme, parola denetlenmeden önce sayılır: aynı anda gönderilen istekler de
 sınırı aşamaz. Dizine ulaşılamaması ya da devre dışı bir hesabın doğru parolası
@@ -1790,7 +1913,9 @@ S59 satırı).
 Route ya da Ingress arkasında giriş throttle'ının istemcileri ayırt etmesi için
 `UPTIME_TRUST_PROXY_HOPS` ayarlanmalıdır: değerler "Hesaplar ve giriş"teki
 vekil-hop rehberinde, kurulum notu Route ya da Ingress açıkken ve değer `0`
-iken önerir.
+iken önerir. Değer `0`'dan büyükken arayüz Service'ine cluster içinden
+doğrudan gelen uydurma başlığı `frontend.networkPolicy.enabled=true` kapatır
+("Hesaplar ve giriş", "Arayüzün ağ politikası").
 
 **Yükseltme notu:** Ingress bu sürümle varsayılan olarak TLS ile sunulur ve
 chart adresi `https://<ingress.host>` olarak türetir; adres `https://`
@@ -4452,7 +4577,8 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_SESSION_TTL` | `12h` | Oturum süresi |
 | `UPTIME_LOGIN_MAX_FAILURES` | `10` | Tek bir kaynak adresin bir kullanıcı adına yönelik girişlerini kilitleyen hatalı deneme sayısı (kaynak-başına; CWE-307, ADR-0004) |
 | `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES` | `50` | Bir adın tüm kaynaklardaki hatalı denemeleri için gevşek, çok yüksek tavan; dağıtık tahmini sınırlar, meşru sahibi kendi hatalarıyla kilitlemez. `0` kapatır (yalnız kaynak-başına throttle kalır) |
-| `UPTIME_TRUST_PROXY_HOPS` | `0` | Arayüzün önündeki vekillerinizin `X-Forwarded-For`'a yazdığı girdi sayısı; hiçbiri yazmıyorsa ve arayüze yalnız port-forward ile ulaşılıyorsa `1` (girdiyi Next.js yazar), arayüz Service'i doğrudan dışarı açıksa `0` kalır. Kaynak adres başlığın sağdan bu kadar girdisinden okunur; `0` başlığa güvenmez, eşi kullanır (arayüzden gelen girişte arayüz pod'u). Değerler: "Hesaplar ve giriş", "Vekil-hop rehberi" |
+| `UPTIME_TRUST_PROXY_HOPS` | `0` | Arayüzün önündeki vekillerinizin `X-Forwarded-For`'a yazdığı girdi sayısı; hiçbiri yazmıyorsa ve arayüze yalnız port-forward ile ulaşılıyorsa `1` (girdiyi Next.js yazar), arayüz Service'i doğrudan dışarı açıksa `0` kalır. Kaynak adres başlığın sağdan bu kadar girdisinden okunur; `0` başlığa güvenmez, eşi kullanır (arayüzden gelen girişte arayüz pod'u). Başlık yalnız arayüzden (`UPTIME_FRONTEND_TOKEN`) gelen istekte okunur. Değerler: "Hesaplar ve giriş", "Vekil-hop rehberi" |
+| `UPTIME_FRONTEND_TOKEN` | – | Arayüzün her backend isteğinde `X-Frontend-Token` başlığıyla sunduğu sır; backend `X-Forwarded-For`'u yalnız bunu sunan istekte okur, öteki eşlerde kaynak eştir. Arayüzün `FRONTEND_TOKEN`'ıyla aynı olmalı; yazdırılabilir ASCII, boşluksuz (başka bir karakter içeren değer yok sayılır). `UPTIME_TRUST_PROXY_HOPS` `0`'dan büyükken boşsa başlığa hiçbir eşten güvenilmez ve açılışta WARN düşer. Chart `<release>-frontend-token` Secret'ından verir. "Hesaplar ve giriş", "Güvenilir eş" |
 | `UPTIME_LOGIN_LOCKOUT` | `15m` | Kilidin süresi; denemesi bundan eski adlar bu aralıkla sayaçtan silinir |
 | `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu, kilitli olmayan en fazla kullanıcı adı; doluyken yeni bir ad, en az denenmiş adlardan en uzun süredir denenmeyenin yerini alır, kilitli adlar unutulmaz. Aynı zamanda sürmekte olan (sağlayıcıya gidip henüz dönmemiş) SSO girişlerinin en fazla sayısı; aşılınca en eskileri unutulur |
 | `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan bcrypt karşılaştırması sayısı; `0` CPU sayısının yarısı, en az 1, LDAP açıkken en az 2 (her dizin girişi de bir karşılaştırma harcar). Dizine bağlanmaların ayrı sırası vardır (aynı anda 16) |
@@ -4584,6 +4710,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_PAGERDUTY_EVENTS_URL` | `https://events.pagerduty.com/v2/enqueue` | PagerDuty Events API v2 adresi |
 | `BACKEND_URL` | `http://localhost:8080` | Frontend'in backend'e eriştiği adres |
 | `BACKEND_TIMEOUT_MS` | `3000` | Frontend'in backend isteği zaman aşımı (ms) |
+| `FRONTEND_TOKEN` | – | Frontend'in her backend isteğinde `X-Frontend-Token` başlığıyla gönderdiği sır; backend'in `UPTIME_FRONTEND_TOKEN`'ıyla aynı olmalı. Boşsa ya da başlığın taşıyamayacağı bir karakter içeriyorsa gönderilmez; tarayıcıdan aynı adla gelen başlık hiçbir zaman taşınmaz. Chart `<release>-frontend-token` Secret'ından verir |
 | `DEFAULT_LOCALE` | `en` | Tarayıcısı bizde olan bir dil istemeyen ziyaretçinin arayüz dili: `en` ya da `tr` |
 | `PUBLIC_URL` | – | Kullanıcıların Kubeat'e eriştiği adres (backend'deki `UPTIME_PUBLIC_URL`); `https://` ise oturum çerezi Secure işaretlenir ve HSTS gönderilir, `http://` ise `upgrade-insecure-requests` gönderilmez. Chart `publicURL`'den ya da Route/Ingress host'undan verir |
 | `COOKIE_SECURE` | `auto` | Oturum çerezinin Secure (yalnızca HTTPS) işaretlenmesi: `auto` (`PUBLIC_URL` `https://` ise ya da `X-Forwarded-Proto`'nun ilk, tarayıcıya bakan değeri `https` ise), `always` ya da `never` (`localhost` dışından düz HTTP ile erişim için; `upgrade-insecure-requests` de gönderilmez) |

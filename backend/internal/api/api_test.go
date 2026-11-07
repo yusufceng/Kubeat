@@ -21,6 +21,11 @@ import (
 // testToken is the service token every test request carries.
 const testToken = "test-token"
 
+// testFrontendToken is the secret by which the test handler tells the UI
+// from other peers (Options.FrontendToken), as the chart sets one: a
+// request that carries it in X-Frontend-Token acts as the UI.
+const testFrontendToken = "test-frontend-token"
+
 // newTestAPI serves the handler over a real SQLite store.
 func newTestAPI(t *testing.T) (*httptest.Server, *store.SQLite) {
 	t.Helper()
@@ -43,6 +48,7 @@ func newTestAPIWith(t *testing.T, customize func(*Options)) (*httptest.Server, *
 		Version:           "test",
 		Store:             db,
 		Token:             testToken,
+		FrontendToken:     testFrontendToken,
 		SessionTTL:        time.Hour,
 		PasswordMinLength: 8,
 		Throttle:          &auth.Throttle{MaxFailures: 3, Lockout: time.Minute},

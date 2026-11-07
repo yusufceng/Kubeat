@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { seeOther } from "@/app/auth/see-other";
 import { config } from "@/lib/config";
+import { withFrontendToken } from "@/lib/frontend-token";
 import { setSessionCookie, takeOidcState } from "@/lib/session";
 
 /**
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     res = await fetch(`${config.backendUrl}/api/v1/auth/oidc/callback`, {
       method: "POST",
       cache: "no-store",
-      headers: { "Content-Type": "application/json" },
+      headers: withFrontendToken({ "Content-Type": "application/json" }, config.frontendToken),
       body: JSON.stringify({ state, code }),
       signal: AbortSignal.timeout(config.backendTimeoutMs),
     });

@@ -50,6 +50,15 @@ spec:
               value: "http://{{ .Release.Name }}-backend:8080"
             - name: DEFAULT_LOCALE
               value: {{ .Values.language | quote }}
+            # Sent with every request to the backend, which reads the
+            # browser's X-Forwarded-For only from a request that carries it.
+            # Optional, as the backend's: without it the UI still serves.
+            - name: FRONTEND_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubeat.frontendTokenSecret" . }}
+                  key: token
+                  optional: true
             # What push monitors show to jobs in other namespaces. With the
             # NetworkPolicy only the frontend may reach the backend, so jobs
             # report to the frontend, which passes the reports on.

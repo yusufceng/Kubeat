@@ -256,13 +256,32 @@ görünür kılar. Şema değişmez (26); hiçbir madde yeni zorunlu ayar getirm
   `use-forwarded-headers` ve `compute-full-forwarded-for` açıksa `3`,
   varsayılanlarla `1` (kaynak o zaman GCLB vekilidir; istemciyi ayırmak için iki
   ayarı açın). Eksik değer `WARN` vermez. 0.49'da arayüz yolunda beklenen
-  "zincir kısa" `WARN`'ı 0.50'de yalnız değer fazlayken (ya da backend'e
-  doğrudan gelen girişte) düşer; sürüyorsa değeri düşürün. Fazla değer 0.50'de
-  güvenli tarafa düşmez: başlığa ekleyen bir vekilin (Route `Append`, GCLB)
-  arkasında istemci başlığı fazladan bir girdiyle uzatıp kaynağını seçebilir ve
-  bu isteklerde `WARN` düşmez; emin değilseniz küçük değeri seçin. Doğruluğu
-  `sign-in refused` satırının `source` alanından denetleyin. 0.49'da kalırken
-  kilitli bir hesap için README "Kilitli hesaba girmek" yolları geçerlidir.
+  "zincir kısa" `WARN`'ı 0.50'de yalnız değer fazlayken düşer (backend'e
+  doğrudan gelen giriş 0.50'de "güvenilmeyen eş" `WARN`'ı verir); sürüyorsa
+  değeri düşürün. Fazla değer 0.50'de güvenli tarafa düşmez: başlığa ekleyen
+  bir vekilin (Route `Append`, GCLB) arkasında istemci başlığı fazladan bir
+  girdiyle uzatıp kaynağını seçebilir ve bu isteklerde `WARN` düşmez; emin
+  değilseniz küçük değeri seçin. Doğruluğu `sign-in refused` satırının `source`
+  alanından denetleyin. 0.49'da kalırken kilitli bir hesap için README "Kilitli
+  hesaba girmek" yolları geçerlidir.
+- **Bilinen sınır (0.48–0.49): cluster içinden uydurma `X-Forwarded-For`.**
+  `UPTIME_TRUST_PROXY_HOPS` `0`'dan büyükken 0.48 ve 0.49'un backend'i başlığa
+  bağlanan eşe bakmadan güvenir: cluster'daki bir pod `backend:8080`'e kendi
+  yazdığı bir başlıkla bağlanıp her denemede yeni bir kaynak gösterebilir,
+  kaynak-başına sınırı atlayıp hesap tavanını (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`,
+  50) doldurarak `admin`'i herkese kilitleyebilir. 0.49'da kalırken
+  `networkPolicy.enabled=true` backend'e doğrudan geleni kapatır (push işlerine
+  etkisi README "Ağ erişimi"nde). 0.50 bunu düzeltir
+  ([#119](https://github.com/yusufceng/Kubeat/issues/119)): backend başlığı
+  yalnız arayüzün sırrını (`X-Frontend-Token`) sunan istekte okur, chart sırrı
+  `<release>-frontend-token` Secret'ında üretir ve iki pod'a verir. Chart dışı
+  bir kurulumda değer `0`'dan büyükse 0.50'ye geçerken backend'e
+  `UPTIME_FRONTEND_TOKEN`, arayüze `FRONTEND_TOKEN` olarak aynı rastgele değeri
+  verin; verilmezse `X-Forwarded-For` yok sayılır ve `WARN` düşer. GitOps'ta
+  Secret'ı kendiniz oluşturup `frontendToken.existingSecret` ile verin. Arayüz
+  Service'ine doğrudan gelen uydurma başlığı 0.50'de de yalnız isteğe bağlı
+  arayüz politikası (`frontend.networkPolicy.enabled`) kapatır (README
+  "Hesaplar ve giriş", "Arayüzün ağ politikası").
 - **Giriş bir vekilin arkasındaysa `UPTIME_TRUST_PROXY_HOPS`'u somut hop sayısına
   göre gözden geçirin.** 0.49, `X-Forwarded-For` görülürken `hops=0` iken ve
   ayarlanan hop sayısı gerçek zincirden kısa/uzun geldiğinde çalışma anında

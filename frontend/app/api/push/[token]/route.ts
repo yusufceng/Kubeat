@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
+import { withFrontendToken } from "@/lib/frontend-token";
 
 /**
  * Passes the report of a push monitor's source on to the backend, so that
@@ -14,6 +15,7 @@ async function forward(request: NextRequest, ctx: RouteContext<"/api/push/[token
     const res = await fetch(target, {
       method: request.method,
       cache: "no-store",
+      headers: withFrontendToken(undefined, config.frontendToken),
       signal: AbortSignal.timeout(config.backendTimeoutMs),
     });
     return new Response(await res.text(), {
