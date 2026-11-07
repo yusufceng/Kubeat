@@ -977,9 +977,11 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     verir (üçü de kabul). Ayar boşken ya da VIP listede değilken içe aktarma
     Route'u alır; aynı monitor'ün klonu ve aynı host'a hedef değişikliği ise
     reddedilir.
-  - **Sınır: ayarı daraltmak.** Aralığı daraltmak, ayarı boşaltmak ya da 0.50'ye
-    dönmek, ayar açıkken kabul edilmiş monitor ve kanalları yeniden denetlemez;
-    bunlar çalışmaya devam eder (S73, backlog).
+  - **Sınır: ayarı daraltmak.** Aralığı daraltmak ya da ayarı boşaltmak, ayar
+    açıkken kabul edilmiş kanalları yeniden denetlemez, bunlar çalışmaya devam
+    eder (S73, backlog); kapsamı sınırlı kullanıcının monitor'leri ise bir
+    sonraki kontrolde yeni ayara tabidir (aşağıda "Her bağlantıda"). 0.50'ye
+    dönmek kontrol anındaki denetimi de kaldırır.
 - **Her bağlantıda (0.51).** Kanal hedefi kısıta oluşturma ve değiştirmede
   tabidir. Monitor'de kısıt yalnız hedef belirlenirken değil, kontrolün yaptığı
   her bağlantıda uygulanır (ADR-0003 c, "Her bağlantıda kapsam"):
@@ -1007,13 +1009,20 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       kalır: yönetici kapsamı sınırlı kullanıcının monitor'ünü düzenleyince
       kapsam kalkmaz. Kaydı kendine almak isteyen hedefi ya da host adı taşıyan
       bir seçeneği değiştirir ya da monitor'ü kopyalar (kopya kopyalayanındır).
+      İstisna kaydı olmayan (0.51 öncesi) monitor'dür: her namespace'i gören
+      birinin her kaydı, formdan da, ona her namespace'in kaydını yazar;
+      kapsamı sınırlı kullanıcının kurduğu eski monitor dahil (aşağıda "Kaydı
+      olmayan monitor").
     - **Daraltma geniş.** Kaydın namespace'lerinin hepsini tutmayan biri
       kontrolün herhangi bir seçeneğini değiştirince kayıt ikisinin ortak
       namespace'lerine daralır: kapsamı sınırlı kullanıcı yöneticinin
       monitor'ünün gönderdiğini ya da okuduğunu değiştirirse kontrol onun
       kapsamına bağlanır. Formun bir seçeneği saklanandan farklı yazması da
-      (ör. API'yle kurulmuş bir monitor'de) değişiklik sayılır; böyle
-      daralmış bir monitor'ü yönetici yukarıdaki gibi geri alır.
+      (ör. API'yle kurulmuş bir monitor'de) değişiklik sayılır. Böyle
+      daralmış bir monitor'ü sahibi de yönetici de yukarıdaki gibi geri alır:
+      hedefi ya da host adı taşıyan bir seçeneği farklı bir değere çevirir ya
+      da monitor'ü kopyalar; içerik değişikliği ya da hedefi aynı değerle
+      `PATCH` etmek kaydı geri yazmaz.
     - Kontrolü değiştirmeyen bir kayıt kaydı korur: duraklatmak; ad, etiket ya
       da aralık değiştirmek.
     - Kapsamı sınırlı bir kullanıcı, hedefi kapsamının dışında olan bir
@@ -1065,7 +1074,10 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       yazar. Bir yöneticinin bir namespace'e koyup başka bir namespace'e ya da
       çıplak bir adrese bağlanan monitor'ü de böylece DOWN olur; yönetici onu
       bir kez kaydedince (formu değiştirmeden kaydetmek ya da hedefi aynı
-      değerle `PATCH` etmek) kaydı yazılır ve düzelir. Kapsamı sınırlı bir
+      değerle `PATCH` etmek) kaydı yazılır ve düzelir. Aynı kayıt kapsamı
+      sınırlı bir kullanıcının kurduğu eski monitor'ü de kapsamdan çıkarır:
+      ön kontrolün listelediği böyle bir monitor'ü yönetici kaydetmez,
+      kayıtsız kaldıkça namespace'ine bağlıdır. Kapsamı sınırlı bir
       kullanıcının, hedefi ya da host adı taşıyan bir seçeneği değiştirmeyen
       kaydı kaydı yazmaz; monitor namespace'ine bağlı kalır.
 

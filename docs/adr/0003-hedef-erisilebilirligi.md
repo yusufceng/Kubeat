@@ -280,7 +280,10 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
       (yönetici, daha çok namespace'i olan editör) kontrolün öteki
       seçeneklerini değiştirince ya da formu kaydedince kayıt olduğu gibi
       kalır; yoksa bir yöneticinin sıradan bir form kaydı kapsamı sınırlı
-      kullanıcının monitor'ünden kapsamı kaldırırdı.
+      kullanıcının monitor'ünden kapsamı kaldırırdı. İstisna kaydı olmayan
+      (0.51 öncesi) monitor'dür: kayıt yokken yazanın kim olduğu bilinmez,
+      her namespace'i gören birinin her kaydı her namespace'in kaydını yazar
+      (aşağıda "Kaydı olmayan monitor"); bedeli yükseltme notunda yazılı.
     - **Daraltma geniş.** Kaydın namespace'lerinin hepsini tutmayan biri
       kontrolün herhangi bir seçeneğini değiştirince (`store.SameCheck`)
       kayıt ikisinin ortak namespace'lerine daralır (`TargetScope.Within`):
