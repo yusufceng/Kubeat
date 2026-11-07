@@ -1744,8 +1744,9 @@ adresine anahtarlanır. Bunu yukarıdaki `source` alanından görürsünüz.
 kaynağı aynı yoldan okur, bu yüzden yukarıdakiler onlar için de geçerlidir:
 
 - Uyarılar bu isteklerde de düşer. Satır yüzeyi adlandırır (`sign-in`,
-  `password change`, `status-page unlock`) ve gerilenen kilidi yazar:
-  `per-name`, `per-account` ya da `per-page`.
+  `password change`, `status-page unlock`); tek paylaşılan kilide geriletenler
+  (değer `0`, sır eksik, zincir kısa) o kilidi de yazar: `per-name`,
+  `per-account` ya da `per-page`.
 - Dakika sınırı üç yüzeyde ortaktır: her yanlış ayar için dakikada en fazla
   bir satır düşer ve satır o dakikada yanlış ayara ilk takılan isteğin
   yüzeyini yazar. Durum sayfası ziyaretçileri satır sayısını artırmaz.
@@ -1917,7 +1918,12 @@ anahtarıyla korunan yüzeyde, bkz. "Metrik anahtarı"); istemci yanıtı deği�
   `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`). `account` artışı, ADR-0004'ün bilerek
   açık bıraktığı "dağıtık saldırıyla hesap kilitleniyor" anını görünür kılar.
   Yalnız girişleri sayar: durum sayfası kilidinin ve parola değiştirmenin
-  429'ları bu sayaca girmez, onların izi logdaki ret satırlarıdır.
+  429'ları bu sayaca girmez. Logdaki ret satırları (`status page unlock
+  refused`, `password change refused`) yalnız yanlış parolada yazılır; 429'lar,
+  sayfanın ya da hesabın tavan kilidi dahil, yalnız throttle'ın dakikalık
+  `sign-in attempts refused` WARN'ında görünür. O satırın `name` alanı son
+  reddedilen anahtardır: `sp:<slug>` ya da `pw:<id>`, kaynağın kilidinde önünde
+  kaynak adresle.
 
 Her iki sayacın serisi açılışta 0'dan başlar, böylece ilk olayı `increase()`
 ile yakalarsınız; etiket değerleri kapalı bir kümeden gelir ve kullanıcı adı
@@ -2679,6 +2685,10 @@ yoktur, girişin ayarları kullanılır:
 - Doğru parola, girişteki gibi, o kaynağın ve sayfanın tavandaki sayacını
   sıfırlar: bir olay sırasında sayfayı aynı anda açan çok sayıda ziyaretçinin
   yazım hataları tavanda birikip sayfayı herkese kilitlemesin diye.
+- IPv6'da her adres ayrı bir kaynaktır, önek toplanmaz: tek bir `/64` çok
+  sayıda kaynak demektir ve kaynağın kilidi onu yavaşlatmaz, yalnız tavan
+  sınırlar. Durum sayfası parolasını güçlü seçin; internete açık bir kurulumda
+  `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES=0` yapmayın.
 - Kaynak, girişteki gibi `UPTIME_TRUST_PROXY_HOPS`'tan okunur (bkz. "Hesaplar
   ve giriş" → "Vekil-hop rehberi"). Değer `0` ya da eksikse her ziyaretçi aynı
   kaynaktan görünür ve sayfa tek paylaşılan kilide geriler; `0`'da backend

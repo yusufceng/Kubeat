@@ -1763,9 +1763,20 @@ Güncelleme (2026-11-07, S76 [#134](https://github.com/yusufceng/Kubeat/issues/1
 kilidi ve parola değiştirme kaynak + kapsam anahtarına (`sp:`/`pw:`) geçti, gevşek
 tavan girişinkiyle aynı değerde kapsam başına (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`,
 yeni ayar yok); karar ADR-0004 "Sonuçlar"da. Kalanlar: bu iki yüzeyin 429'ları
-`kubeat_signin_throttled_total`'a girmez (yalnız log satırı; gerekirse S85'in
-throttle kurallarıyla birlikte), gerçek tarayıcı yolunda iki kaynaklı prova sürümden
-sonra (sandbox Route).
+`kubeat_signin_throttled_total`'a girmez (yalnız throttle'ın dakikalık WARN'ı;
+S85 kapsamında, sprint 10 adayı, sıra S76 → S88 → S85), gerçek tarayıcı yolunda
+iki kaynaklı prova sürümden sonra (sandbox Route). IPv6 kaynakları ayrı maddede
+("Throttle'da IPv6 kaynaklarını /64'e toplamak").
+
+## Throttle'da IPv6 kaynaklarını /64'e toplamak
+
+2026-11-07'de ertelendi (S76 incelemesi, [#134](https://github.com/yusufceng/Kubeat/issues/134)).
+Throttle kaynağı tam adres olarak tutar (`/128`): tek bir `/64`'ü olan biri her
+adresten ayrı deneme hakkı alır; girişte, parola değiştirmede ve durum sayfasında
+onu yalnız gevşek tavan sınırlar (ADR-0004 "Maliyetler ve riskler"). Seçenekler:
+IPv6 kaynağını `/64`'e toplamak (aynı `/64`'ü paylaşan kullanıcıları birleştirir)
+ya da kaynak ve `/64` için iki katlı anahtar. Tetikleyici: IPv6'lı ilk Route ya da
+Ingress.
 
 ## Çok kiracılı ve internete açık kurulum için tek sertleştirme kontrol listesi (S66 kalanı)
 

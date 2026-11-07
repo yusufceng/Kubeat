@@ -182,8 +182,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   0.50.0) arayüzün bu üç çağrıda gelen `X-Forwarded-For`'u aynen taşımasıyla
   düzeltir: hops=0 iken WARN arayüz yolunda da düşer, `sign-in refused` log
   satırı anahtarlanan kaynağı (`source`) yazar ve hop rehberi arayüz yoluna göre
-  yeniden türetildi (README "Hesaplar ve giriş"; hiçbir satır henüz bu yolda
-  ölçülmedi, sandbox Route provası sürümden sonra). Chart varsayılanı 0 kaldı;
+  yeniden türetildi (README "Hesaplar ve giriş"; bu yolda ölçülen tek satır
+  düz Route, sandbox 2026-11-07; ötekiler ölçülmedi). Chart varsayılanı 0 kaldı;
   kurulum notu Route/Ingress açıkken değeri önerir. Fazla hop değeri artık
   güvenli tarafa düşmez: başlığa ekleyen bir vekilin (Route, GCLB) arkasında
   istemci başlığı uzatıp kaynağını seçebilir ve WARN düşmez (0.49'da arayüz
@@ -205,8 +205,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   değiştirme ve durum sayfası kilidini de kaynağa göre yapar: bir kaynağın
   yanlış denemeleri yalnız o kaynağı kilitler (`UPTIME_LOGIN_MAX_FAILURES`),
   sayfa ve hesap başına gevşek tavan girişinkidir
-  (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, yeni ayar yok); hop yanlışken bu iki
-  yüzey de tek paylaşılan kilide geriler ve WARN yüzeyi adlandırır. Gerçek
+  (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, yeni ayar yok); değer `0` ya da
+  eksikse veya sır eksikse bu iki yüzey de tek paylaşılan kilide geriler
+  (eksik değer WARN vermez), fazla değerde girişteki gibi başlığını uzatan
+  istemci kaynağını seçebilir; WARN yüzeyi adlandırır. Gerçek
   tarayıcı yolunda iki kaynaklı prova sürümden sonra (sandbox Route). Dizin
   (LDAP/AD) hesap kilidiyle etkileşim belgelendi (README "LDAP" → "Dizin hesap
   kilidi", ADR-0004): dizinde bulunan bir adın her yanlış parolası dizine bir

@@ -256,6 +256,15 @@ Route'unda, gerçek tarayıcı yolunda görüldü). 0.51'de:
   değil, en az `ceil(50/10)=5` ayrı kaynaktan 50 istekle. Tavanı düşürmek bu
   maliyeti düşürür ve meşru sahibin kilitlenme riskini artırır; `0` tavanı
   tümüyle kaldırıp dağıtık tahmini sınırsız bırakır.
+- **IPv6'da kaynak ucuzdur.** Kaynak tam adrestir (`/128`), önek toplanmaz:
+  tek bir `/64`'ü olan biri her adresten ayrı `UPTIME_LOGIN_MAX_FAILURES`
+  deneme alır ve onu yalnız tavan sınırlar. Durum sayfasında her meşru açılış
+  tavanı da sıfırladığından, sık açılan paylaşılan parolalı bir sayfada tavan
+  fiilen iki doğru parola arasındaki hataları sınırlar (0.50'de sayfa başına
+  sert bir sınır vardı). Etki düşüktür, sayfa yalnız durum gösterir ve kaynak
+  başına sınır sürer; yine de durum sayfası parolası güçlü seçilmeli ve
+  internete açık kurulumda tavan `0` yapılmamalı. Kaynakları `/64`'e toplamak
+  backlog'da; tetikleyici IPv6'lı ilk Route ya da Ingress.
 - **Vekil güveni.** Doğru değer tam olarak arayüzün önündeki vekillerin
   `X-Forwarded-For`'a yazdığı girdi sayısıdır, hiçbiri yazmıyorsa `1`
   (0.48–0.49'da "önünüzdeki kendi vekillerinizin sayısı"). `0` ayarlanırsa
