@@ -2259,6 +2259,35 @@ açmadan `server resolve` ile sınanır (README "Vekilli kurulum" → "Ön sına
 `docs/pilot.md` "Vekilli kapsam"). Denetlenmeyen red yolları README "Hedef politikası"
 → "Kapsam ihlali denetimi" → "Denetlenmeyen red yolları"nda.
 
+## Kapsam reddi satır sınırında insanın reddini kayıtta tutmak (S82 takibi)
+
+2026-11-07'de ertelendi (S82 [#143](https://github.com/yusufceng/Kubeat/issues/143)
+incelemesi; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52'de
+kontrollerin `deny`/`target-scope` satırları ve `WARN`'ları dakikada
+`UPTIME_LOGIN_AUDIT_PER_MINUTE` ile sınırlı. Bir CoreDNS kesintisinde 60'tan fazla
+annotation monitor'ü aynı dakikada ilk `resolve_error` reddini verirse, o dakika kaydı
+bir kullanıcıya ait monitor'ün gerçek `connection` reddinin ilk satırı ve `WARN`'ı düşer
+ve sonradan yazılmaz (README "Hedef politikası" → "Kapsam ihlali denetimi" → "Satır
+sınırı"). Dakikanın uyarısı yalnız `dropped`, `minute` ve `limit` yazar, düşenlerin
+`source` ve `reason` dağılımını vermez. Sayaç `source="user",reason="connection"`
+sinyalini korur, bu yüzden 0.52'yi bekletmedi; merkezi loga bakan SOC ise o dakikadaki
+insan kaynaklı reddi logdan göremez. Seçenekler: dakikanın uyarısına `source` ve
+`reason` sayımı eklemek ya da `connection` redlerine `resolve_error`'dan önce bütçe
+vermek. Tetikleyici: bir pilotta ya da provada kesinti dakikasında kaybolan bir
+`source=user` satırı.
+
+## `server resolve`'un vekil istisnasını da değerlendirmesi (S82 takibi)
+
+2026-11-07'de ertelendi (S82 [#143](https://github.com/yusufceng/Kubeat/issues/143);
+[sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52'nin
+`server resolve NAME...` komutu yalnız ad alır ve pod'un çözücüsünün kararını yazar;
+`UPTIME_TARGET_SCOPE_TRUST_PROXY`'yi, `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`'yi okumaz.
+Çıktı ve README "Vekilli kurulum" → "Ön sınama" NXDOMAIN satırını "vekile giden
+HTTP(S) istekte" diye niteler; `NO_PROXY`'ye düşen bir ad için bu karar geçmez.
+Seçenek: komutun URL de alıp isteğin vekile gidip gitmediğini ve ayar açıkken
+kapsamın kararını yazması. Tetikleyici: vekilli bir kurulumda `NO_PROXY` listesinde
+olan dış bir adın ön sınamada yanlış okunması.
+
 ## Chart'ta Route/Ingress açıkken `UPTIME_TRUST_PROXY_HOPS` varsayılanını 1 yapmak
 
 2026-11-06'da ertelendi (sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).

@@ -987,7 +987,8 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       yazılır; satır host'u yazar.
   - **Satır sınırı (0.52).** `deny`/`target-scope` satırları ve onların `WARN`
     satırları dakikada en fazla `UPTIME_LOGIN_AUDIT_PER_MINUTE` (60) yazılır;
-    yeni ayar yoktur, `0` sınırı kaldırır. Bütçeler ayrıdır: API'nin redleri,
+    yeni ayar yoktur. Değer en az 1'dir; `0` ya da negatif değer backend'i
+    `invalid configuration` ile başlatmaz. Bütçeler ayrıdır: API'nin redleri,
     kontrollerin redleri ve başarısız girişler (`login_failed`) her biri kendi
     60'ını kullanır. Böylece bir DNS kesintisinde annotation monitor'lerinin
     ilk redleri insanın API'deki denemesini, bir giriş seli de kapsam redlerini
@@ -5565,7 +5566,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_LOGIN_THROTTLE_MAX_KEYS` | `100000` | Deneme sayacının tuttuğu, kilitli olmayan en fazla kullanıcı adı; doluyken yeni bir ad, en az denenmiş adlardan en uzun süredir denenmeyenin yerini alır, kilitli adlar unutulmaz. Aynı zamanda sürmekte olan (sağlayıcıya gidip henüz dönmemiş) SSO girişlerinin en fazla sayısı; aşılınca en eskileri unutulur |
 | `UPTIME_LOGIN_CONCURRENCY` | `0` | Aynı anda çalışan bcrypt karşılaştırması sayısı; `0` CPU sayısının yarısı, en az 1, LDAP açıkken en az 2 (her dizin girişi de bir karşılaştırma harcar). Dizine bağlanmaların ayrı sırası vardır (aynı anda 16) |
 | `UPTIME_LOGIN_QUEUE_WAIT` | `3s` | Bir girişin sırasını (bcrypt ya da dizin) en fazla bekleme süresi; sonra 503 |
-| `UPTIME_LOGIN_AUDIT_PER_MINUTE` | `60` | Kayda bir dakikada yazılan en fazla başarısız giriş (hesabı olan adların, yani yerel hesapların ve daha önce girmiş dizin ya da SSO kullanıcılarının yanlış parolası hariç); fazlası yalnızca uyarı olarak sayılır. 0.52'den beri aynı sınır, kendi bütçeleriyle, kapsam reddinin `deny`/`target-scope` satırlarına ve onların `WARN` satırlarına da uygulanır: bir bütçe API'nin redleri, bir bütçe kontrollerin redleri; `kubeat_target_scope_denied_total` her reddi sayar (bkz. "Hedef politikası" → "Kapsam ihlali denetimi"). `0` üçünü de sınırsız yapar |
+| `UPTIME_LOGIN_AUDIT_PER_MINUTE` | `60` | Kayda bir dakikada yazılan en fazla başarısız giriş (hesabı olan adların, yani yerel hesapların ve daha önce girmiş dizin ya da SSO kullanıcılarının yanlış parolası hariç); fazlası yalnızca uyarı olarak sayılır. 0.52'den beri aynı sınır, kendi bütçeleriyle, kapsam reddinin `deny`/`target-scope` satırlarına ve onların `WARN` satırlarına da uygulanır: bir bütçe API'nin redleri, bir bütçe kontrollerin redleri; `kubeat_target_scope_denied_total` her reddi sayar (bkz. "Hedef politikası" → "Kapsam ihlali denetimi"). Değer en az 1'dir; `0` ya da negatif değer backend'i `invalid configuration` ile başlatmaz |
 | `UPTIME_PASSWORD_MIN_LENGTH` | `8` | En kısa parola (karakter); en uzunu 72 bayttır |
 | `UPTIME_AUDIT_RETENTION` | `2160h` | Kayıt girdilerinin saklanma süresi (90 gün) |
 | `UPTIME_LDAP_URL` | – | Dizin adresi (`ldap://` ya da `ldaps://`); boşsa LDAP kapalı |
