@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -655,10 +656,12 @@ func TestScopeEveryConnection_ToldOncePerSettings(t *testing.T) {
 	}
 }
 
-// A held monitor's checks reuse the connections the checks before them made,
-// as every monitor's do, but never one made for another monitor, which may
-// be held to another scope or to none.
-func TestScopeEveryConnection_ConnectionsStayWithTheirMonitor(t *testing.T) {
+// A check's connections are its own: every check opens new ones, a held
+// monitor's as any other's, so that none is ever a connection made for
+// another check, of another monitor, which may be held to another scope or
+// to none. Within the check, a redirect to the same server goes on the
+// connection the check came on.
+func TestScopeEveryConnection_ConnectionsStayWithTheirCheck(t *testing.T) {
 	dns := scopeDNS(t)
 	var mu sync.Mutex
 	var peers []string
@@ -666,9 +669,19 @@ func TestScopeEveryConnection_ConnectionsStayWithTheirMonitor(t *testing.T) {
 		mu.Lock()
 		peers = append(peers, r.RemoteAddr)
 		mu.Unlock()
+		if r.URL.Path == "/again" {
+			http.Redirect(w, r, "/", http.StatusFound)
+		}
 	}))
 	defer srv.Close()
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	taken := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		seen := peers
+		peers = nil
+		return seen
+	}
 	r := &refusals{}
 	c := scopedChecker(t, dns, true, r, Options{})
 	a := held(httpMonitor("http://public.example.test:" + port + "/"))
@@ -676,14 +689,25 @@ func TestScopeEveryConnection_ConnectionsStayWithTheirMonitor(t *testing.T) {
 	b.ID = 8
 	admins := a
 	admins.ID, admins.Scope = 9, &store.TargetScope{Namespaces: []string{store.AllNamespaces}}
-	for _, m := range []store.Monitor{a, a, b, admins} {
+	for _, m := range []store.Monitor{a, a, b, admins, admins} {
 		if got := check(c, m); !got.Up {
 			t.Fatalf("monitor %d: %+v", m.ID, got)
 		}
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(peers) != 4 || peers[0] != peers[1] || peers[2] == peers[0] || peers[3] == peers[0] || peers[3] == peers[2] {
-		t.Errorf("connections = %v: want the first two shared, the others each their own", peers)
+	seen := taken()
+	distinct := slices.Clone(seen)
+	slices.Sort(distinct)
+	if len(seen) != 5 || len(slices.Compact(distinct)) != 5 {
+		t.Errorf("connections = %v: want each check its own", seen)
+	}
+
+	for _, m := range []store.Monitor{a, admins} {
+		m.Target += "again"
+		if got := check(c, m); !got.Up {
+			t.Fatalf("monitor %d redirected: %+v", m.ID, got)
+		}
+		if seen := taken(); len(seen) != 2 || seen[0] != seen[1] {
+			t.Errorf("monitor %d redirected to the same server: connections = %v, want the one", m.ID, seen)
+		}
 	}
 }
