@@ -312,6 +312,75 @@ func TestScopeEveryConnection_HTTPBehindAProxy(t *testing.T) {
 	refusedByTheScope(t, "a proxied name in the cluster behind the exception", check(trusting, withHost("http://api.payments/ok", "")), r, "api.payments")
 }
 
+// failingResolver answers as next does, but fails the lookup of name as a
+// resolver whose upstream does not answer does (SERVFAIL).
+type failingResolver struct {
+	next netguard.Resolver
+	name string
+}
+
+func (r failingResolver) LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error) {
+	if netguard.ScopeHost(host) == r.name {
+		return nil, &net.DNSError{Err: "server misbehaving", Name: host, IsTemporary: true}
+	}
+	return r.next.LookupNetIP(ctx, network, host)
+}
+
+// An annotation monitor is held to its object's namespace in every install
+// (store.ObjectScope). Behind a proxy, in an install whose resolver knows no
+// public name, its own host is in scope by that namespace without being
+// resolved, and another external host its check reaches is held to the full
+// rule: one the backend cannot resolve is refused, unless the proxy
+// exception is on, which lets an NXDOMAIN through and nothing else. This is
+// what README "Hedef politikası" and ADR-0003 (c) tell such an install.
+func TestScopeEveryConnection_AnnotationMonitorBehindAProxy(t *testing.T) {
+	dns := scopeDNS(t)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/to" {
+			http.Redirect(w, r, "http://"+r.URL.Query().Get("host")+"/ok", http.StatusFound)
+		}
+	}))
+	defer proxy.Close()
+	proxyURL, _ := url.Parse(proxy.URL)
+	toProxy := func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	// Neither app.example.test nor login.example.test resolves here.
+	annotated := func(path string) store.Monitor {
+		m := httpMonitor("http://app.example.test" + path)
+		m.Namespace, m.Source, m.Managed, m.Scope = "shop", "ingress/web", true, store.ObjectScope("shop")
+		return m
+	}
+	onTo := annotated("/to?host=login.example.test")
+	r := &refusals{}
+	behind := func(trust bool, resolver func(netguard.Resolver) netguard.Resolver) *Checker {
+		c := scopedChecker(t, dns, true, r, Options{Proxy: toProxy})
+		c.opts.Scope.Rules.TrustProxy, c.opts.Scope.Rules.Proxy = trust, toProxy
+		if resolver != nil {
+			c.opts.Scope.Rules.Resolver = resolver(c.opts.Scope.Rules.Resolver)
+		}
+		return c
+	}
+
+	strict := behind(false, nil)
+	if got := check(strict, annotated("/ok")); !got.Up {
+		t.Errorf("its own host: %+v", got)
+	}
+	if seen := r.take(); len(seen) != 0 {
+		t.Errorf("its own host told refusals: %+v", seen)
+	}
+	refusedByTheScope(t, "another external host the backend cannot resolve", check(strict, onTo), r, "login.example.test")
+
+	if got := check(behind(true, nil), onTo); !got.Up {
+		t.Errorf("another external host behind the exception: %+v", got)
+	}
+	if seen := r.take(); len(seen) != 0 {
+		t.Errorf("behind the exception told refusals: %+v", seen)
+	}
+	servfail := behind(true, func(next netguard.Resolver) netguard.Resolver {
+		return failingResolver{next: next, name: "login.example.test"}
+	})
+	refusedByTheScope(t, "another external host whose lookup fails, behind the exception", check(servfail, onTo), r, "login.example.test")
+}
+
 // A DNS check is held to the scope at every connection it makes, and in
 // what it reads.
 func TestScopeEveryConnection_DNS(t *testing.T) {
