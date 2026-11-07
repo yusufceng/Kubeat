@@ -211,6 +211,41 @@ için kilitleyemez; meşru sahip başka bir kaynaktan girmeye devam eder. Sayaç
 bir IP seli altında bellek sınırını (`UPTIME_LOGIN_THROTTLE_MAX_KEYS`) aynı
 kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
 
+**İki yüzey daha: durum sayfası kilidi ve parola değiştirme (0.51).** Karar iki
+parolaya daha genişler ([#134](https://github.com/yusufceng/Kubeat/issues/134)):
+parolalı bir durum sayfasının parolası ve parola değiştirirken sorulan mevcut
+parola. 0.50'ye kadar ikisinin sayacı sayfa ve hesap başınaydı: tek bir kaynağın
+`UPTIME_LOGIN_MAX_FAILURES` yanlış denemesi sayfayı bütün ziyaretçilere, parola
+değiştirmeyi hesabın sahibine kapatıyordu (sprint 8 provasında sandbox
+Route'unda, gerçek tarayıcı yolunda görüldü). 0.51'de:
+
+- Birincil anahtar kaynak + kapsamdır (`sp:<slug>`, `pw:<hesap kimliği>`; iki
+  nokta üst üste kullanıcı adlarında olmadığı için giriş anahtarlarıyla
+  karışmaz).
+  Sınır ve süre girişinkidir (`UPTIME_LOGIN_MAX_FAILURES`,
+  `UPTIME_LOGIN_LOCKOUT`); yeni ayar yoktur.
+- Gevşek tavan girişinkiyle aynı değerdir (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`)
+  ve kapsam başına ayrı sayılır; `0` onu da kapatır. Taviz girişinkiyle
+  aynıdır: tavan dolunca sayfa ya da hesabın parola değiştirmesi, meşru
+  kullanıcı dahil, kilit süresince herkese kapanır.
+- Doğru parola, girişteki gibi, kaynağın ve kapsamın tavandaki sayacını
+  sıfırlar. Bir sayfanın parolasını ziyaretçileri paylaşır; olay anında sayfayı
+  birlikte açanların yazım hataları tavanda birikip sayfayı herkese
+  kilitlemesin diye seçildi. Bedeli: sık açılan bir sayfada tavan, dağıtık bir
+  tahmini kilit süresi içinde son doğru paroladan bu yana sınırlar.
+- Kaynak aynı yoldan (`clientIP`) okunur ve aynı sınırları taşır: değer `0`
+  ya da eksikse veya sır eksikse iki yüzey de giriş gibi tek paylaşılan kilide
+  geriler; değer fazlaysa zinciri kısa gelen istek aynı kilide düşer, başlığını
+  uzatan istemci kaynağını seçebilir (aşağıda "Vekil güveni"). Çalışma anı
+  WARN'ı yüzeyi adlandırır ve dakika sınırını girişle paylaşır: yüzey başına
+  ayrı sınır seçilmedi, ki herkese açık bir sayfanın ziyaretçileri log
+  satırlarını çoğaltmasın.
+- Yanıt değişmez: yanlış parola 401 (sayfa) ya da 400 (parola değiştirme),
+  kilit 429 + `Retry-After`; kaynağın kilidi ile tavanınki aynı yanıtı alır.
+  `kubeat_signin_throttled_total` bu iki yüzeyi saymaz; ret satırları
+  (`status page unlock refused`, `password change refused`) logda `source`
+  alanını taşır.
+
 **Maliyetler ve riskler.**
 
 - **Dağıtık tahmine karşı daha zayıf.** Kaynak-başına throttle, çok sayıda
@@ -252,6 +287,21 @@ kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
   Ingress açıkken bunu söyler. Sır sızarsa (Secret'ı okuyabilen biri) aynı
   sınır backend'e doğrudan da açılır; Secret'ı silip `helm upgrade` ve iki
   Deployment'ı yeniden başlatmak sırrı döndürür.
+- **Dizin (LDAP/AD) hesap kilidi.** Throttle Kubeat'in sayacıdır; dizinin kendi
+  kilidi (AD'de "Account lockout threshold") ondan bağımsız sayar. Yerel hesabı
+  olmayan ve dizinde bulunan bir adın her yanlış parolası dizine o kullanıcının
+  DN'iyle bir bind'dir. Kaynak + ad sınırı (`UPTIME_LOGIN_MAX_FAILURES`)
+  dizinin eşiğine eşit ya da üstündeyse tek bir kaynak dizin hesabını Kubeat
+  onu durdurmadan önce kilitler ve hesap dizine bağlı her yerde kilitlenir.
+  Bugünkü ara önlem belgedir (README "LDAP" → "Dizin hesap kilidi"):
+  `UPTIME_LOGIN_MAX_FAILURES`'ı dizinin eşiğinin altında ve
+  `UPTIME_LOGIN_LOCKOUT`'u dizinin sayacı sıfırlama süresinden kısa olmayacak
+  biçimde tutmak. Kalanlar: çok kaynaktan bir ada gelen denemelerin toplamı
+  (hesap tavanı yerel hesapları da kapsadığından dizin eşiğinin altına
+  çekilmesi önerilmez; `admin`'i birkaç kaynaktan kilitlenebilir yapar) ve bir
+  kaynağın bütün adlardaki denemeleri (parola spreyi). Kaynak başına, adlardan
+  bağımsız tavan ayrı bir karar olarak bu ADR'ye eklenecek (S88, sprint 10
+  kuyruğu).
 - **Tek replica.** Sayaç bellektedir; backend yeniden başlayınca ya da başka
   replicada sıfırlanır. Çok replicalı dağıtık throttle yol haritasında bilinen
   sınırdır.
@@ -259,4 +309,5 @@ kurallarla korur (kilitli anahtarlar tutulur, uydurma adlar birbirini iter).
   `helm rollback` ile 0.47.0'a (kullanıcı-adı bazlı kilit) dönülebilir. Yeni
   ayarlar kaldırılınca varsayılanlar devreye girer. 0.50'den 0.49'a dönüşte
   `<release>-frontend-token` Secret'ı yetim kalır, zararsızdır; başlığa yine
-  eşe bakılmadan güvenilir.
+  eşe bakılmadan güvenilir. 0.51'den 0.50'ye dönüşte durum sayfası kilidi ve
+  parola değiştirme yeniden sayfa ve hesap başına kilitlenir; şema yine 26.

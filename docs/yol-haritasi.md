@@ -200,12 +200,19 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   üzerinden (arayüz `NodePort` ise node portuna node üzerinden gelen bir istemci
   de) uydurma `X-Forwarded-For` ile kaynak seçebiliyor; politikanın router ve
   ingress controller seçicileri hiçbir platformda ölçülmedi, cluster içi
-  uydurma başlık provası sürümden sonra (sandbox); parola değiştirme ve durum
-  sayfası kilidi başlığı alıyor ama sayaçları henüz kaynağa göre değil (S76,
-  sprint 9, [#134](https://github.com/yusufceng/Kubeat/issues/134)). Dizin
-  (LDAP/AD) hesap kilidiyle etkileşim sprint 9'da belgelenir (S76 içinde): her
-  yanlış deneme dizine bir bind'dir; bir kaynağın bütün adlardaki denemelerine
-  tavan yoktur (S88, sprint 10 kuyruğu). Paylaşılan kurumsal NAT ayrımı
+  uydurma başlık provası sürümden sonra (sandbox). S76
+  ([#134](https://github.com/yusufceng/Kubeat/issues/134), 0.51.0) parola
+  değiştirme ve durum sayfası kilidini de kaynağa göre yapar: bir kaynağın
+  yanlış denemeleri yalnız o kaynağı kilitler (`UPTIME_LOGIN_MAX_FAILURES`),
+  sayfa ve hesap başına gevşek tavan girişinkidir
+  (`UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`, yeni ayar yok); hop yanlışken bu iki
+  yüzey de tek paylaşılan kilide geriler ve WARN yüzeyi adlandırır. Gerçek
+  tarayıcı yolunda iki kaynaklı prova sürümden sonra (sandbox Route). Dizin
+  (LDAP/AD) hesap kilidiyle etkileşim belgelendi (README "LDAP" → "Dizin hesap
+  kilidi", ADR-0004): dizinde bulunan bir adın her yanlış parolası dizine bir
+  bind'dir; ara önlem `UPTIME_LOGIN_MAX_FAILURES`'ı dizinin eşiğinin altında
+  tutmak. Bir kaynağın bütün adlardaki denemelerine tavan yoktur (S88 kodu,
+  sprint 10 kuyruğu). Paylaşılan kurumsal NAT ayrımı
   backlog'da ([backlog](backlog.md) "Giriş throttle için güvenilir-vekil IP
   allowlist").
 - `/metrics` monitor adlarını, namespace'lerini, sertifika bitişlerini ve
@@ -220,7 +227,10 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   bir önbellek konmalıdır. Okuma havuzunda bağlantı sınırı da yoktur: çok
   sayıda eşzamanlı istek backend'i bellek limitine itebilir (S21,
   [backlog](backlog.md) "Okuma havuzuna bağlantı sınırı ve durum sayfasına
-  eşzamanlılık sınırı").
+  eşzamanlılık sınırı"). Sayfa izlenen cluster ve Kubeat ile birlikte düşer;
+  Kubeat yükseltilirken ya da backend pod'u taşınırken bir iki dakika
+  okunamaz, rozetler 502 verir (README "Durum sayfaları" → "Sınırlar"; son
+  görünümü önbellekten göstermek [backlog](backlog.md)'ta).
 - Gizli değerler `UPTIME_SECRET_KEY` ile şifrelenir; anahtar değiştirme
   (rotation) yoktur ve push token'ları şifrelenmez (S58, [backlog](backlog.md)
   "Şifreleme anahtarını döndürmek ve anahtar sızınca izlenecek yol").
