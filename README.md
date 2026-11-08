@@ -85,8 +85,8 @@ Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum"
 > Atlanabilir: kapsam ve kurum aralığı (["Hedef politikası"](#hedef-politikası)),
 > ["LDAP"](#ldap), ["OpenShift"](#openshift) ve denetim
 > (["Hedef politikası" → "Kapsam ihlali denetimi"](#hedef-politikası)). Annotation
-> monitor'ü her kurulumda nesnesinin namespace'ine bağlıdır; `blocked_by_scope` ile
-> düşerse: ["Hedef politikası" → "Her bağlantıda"](#hedef-politikası).
+> monitor'ü her kurulumda nesnesinin namespace'ine bağlıdır; kapsam reddiyle DOWN
+> olursa: ["Hedef politikası" → "Her bağlantıda"](#hedef-politikası).
 
 ## Cluster'a kurulum
 
@@ -2704,27 +2704,28 @@ bilgi olarak loglanır. Böylece uydurma adlarla bir deneme seli diski
 dolduramaz ve Kubeat'in tanıdığı hesaplara yönelik denemeleri kayıttan
 gizleyemez.
 
-**Denetim kaydını SIEM'e almak.** Kayıt SIEM'e kendiliğinden akmaz; bir zamanlayıcı
-(cron ya da CronJob) onu API anahtarıyla düzenli çeker (adres, anahtar ve
-NetworkPolicy: ["API"](#api)). Lisansta `audit` gerekir, yoksa yanıt `402`'dir
-([ADR-0002](docs/adr/0002-open-core-lisans.md)). Yanıt yeniden eskiye sıralıdır ve
-`since` parametresi yoktur: her çekme son `limit` satırı alır, gönderilmiş olanlar
-`id`'ye göre ayıklanır:
+**Denetim kaydını SIEM'e almak.** Kayıt SIEM'e kendiliğinden akmaz; cron ya da bir
+CronJob onu API anahtarıyla düzenli çeker (adres, anahtar ve NetworkPolicy:
+["API"](#api)). Lisansta `audit` gerekir, yoksa yanıt `402`'dir
+([ADR-0002](docs/adr/0002-open-core-lisans.md)). Yanıt yeniden eskiye sıralıdır, `since`
+yoktur: her çekme son `limit` satırı alır, gönderilmiş olanlar `id`'ye göre ayıklanır:
 
 ```
 last=$(cat audit-last-id 2>/dev/null || echo 0)
-curl -sSf -H "Authorization: Bearer $TOKEN" "$KUBEAT/api/v1/audit?limit=1000" |
-  jq -c --argjson last "$last" 'map(select(.id > $last)) | sort_by(.id) | .[]' >audit-new.jsonl &&
+curl -sSf -H "Authorization: Bearer $TOKEN" "$KUBEAT/api/v1/audit?limit=1000" -o audit.json &&
+  jq -c --argjson last "$last" 'if (map(.id) | max // $last) < $last then error("audit id went back")
+    else map(select(.id > $last)) | sort_by(.id) | .[] end' audit.json >audit-new.jsonl &&
   cat audit-new.jsonl >>kubeat-audit.jsonl &&
   jq -s --argjson last "$last" 'map(.id) + [$last] | max' audit-new.jsonl >audit-last-id
 ```
 
-`$KUBEAT` backend'in adresi, `kubeat-audit.jsonl` SIEM ajanının okuduğu dosyadır.
-Aralık, iki çekme arasında yazılan satırlar `limit`'i (en çok `UPTIME_MAX_RESULTS`,
-1000) aşmayacak kadar kısa olmalı, yoksa aradakiler kaçar. Yedekten geri yüklemeden
-sonra `audit-last-id`'ye geri yüklenen kaydın en büyük `id`'sini (`limit=1`) yazın,
-yoksa yeni satırlar atlanır. Kayıt bugün yalnız böyle çekilir;
-kaydın tamamını stdout'a yazmak backlog'da (S83).
+`$KUBEAT` backend'in adresi, `kubeat-audit.jsonl` SIEM ajanının okuduğu dosyadır. Aralık,
+iki çekme arasında yazılan satırlar `limit`'i (en çok `UPTIME_MAX_RESULTS`, 1000)
+aşmayacak kadar kısa olmalı, yoksa aradakiler kaçar. Çekme hatasında (ör. `402`) ve `id`
+geri gidince zincir hata koduyla durur. Yedekten geri yüklemeden sonra `audit-last-id`'ye
+geri yüklenen kaydın en büyük `id`'sini (`limit=1`), kayıt `UPTIME_AUDIT_RETENTION`
+boyunca yeni satır almadan boşaldıysa (`id` 1'den başlar) `0` yazın. Kayıt bugün yalnız
+böyle çekilir; kaydın tamamını stdout'a yazmak backlog'da (S83).
 
 **API anahtarı.** `UPTIME_API_TOKEN` betikler ve otomasyon içindir: onu
 `Authorization: Bearer ...` ile sunan istek yönetici yetkisiyle çalışır ve
@@ -3740,6 +3741,7 @@ eklenmelidir.
 | --- | --- | --- |
 | `GET` | `/api/v1/health` | Backend sağlık durumu |
 | `GET` | `/api/v1/license` | Lisansın durumu (`community`, `active`, `expiring`, `expired`, `invalid`), şu an açık özellikler ve bitiş tarihi. Müşteri adını, lisans numarasını ve sorunu yalnızca yöneticiler görür |
+| `GET` | `/api/v1/audit?limit=100` | Denetim kaydı, yeniden eskiye; `limit` en çok ve verilmezse `UPTIME_MAX_RESULTS`. Yalnızca yönetici; lisansta `audit` yoksa `402` (bkz. "Hesaplar ve giriş" → "Denetim kaydını SIEM'e almak") |
 | `GET` | `/metrics` | Prometheus metrikleri |
 | `GET` | `/api/v1/monitors?window=24h` | Monitor'lar; son durum ve uptime ile. İsteğe bağlı: `namespace=x`, `ids=1,2`, `history=40` (her monitor'un son kontrolleri) |
 | `POST` | `/api/v1/monitors` | Monitor ekler |

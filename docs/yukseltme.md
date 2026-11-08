@@ -663,8 +663,9 @@ sayfası kilidi ve parola değiştirmenin iki kaynaklı provası ve uydurma
   uygulamanın kendi host'unda, kimlik doğrulaması istemeyen bir sağlık yolunda
   tutun; Service'i annotation'la izleyip `kubeat.io/path` verin (README "Keşif"
   → "Annotation ile sürekli keşif"). Route ve Ingress'te `kubeat.io/path` henüz
-  tanınmıyor (S94, sonraki sprint adayı). Öteki çareler (kurum aralığı, vekilli
-  kurulum ayarı) yukarıda. Açılışta log:
+  geçmez: verilirse nesne keşif durumunda atlanmış görünür, önceden kurulmuş
+  monitor olduğu gibi kalır (S94, sonraki sprint adayı). Öteki çareler (kurum
+  aralığı, vekilli kurulum ayarı) yukarıda. Açılışta log:
   `annotation monitors set up before the target scope was recorded are held
   to their object's namespace`.
 - **Durum sayfası kilidi ve parola değiştirme kaynak adrese göre
