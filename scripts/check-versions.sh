@@ -16,6 +16,8 @@
 # nothing.
 # Given a tag, as release.yml gives the one it publishes, Chart.yaml's
 # version must be the tag's, which is the tag without its leading v.
+# The docs must also run the image of the README's negative step by the
+# digest pinned below, next to its tag (CURL_REF).
 # Prints file:line for each place that differs and exits 1.
 # Usage: scripts/check-versions.sh [TAG], e.g. scripts/check-versions.sh v0.45.0
 set -u
@@ -118,8 +120,47 @@ if [ -n "$docs" ]; then
   FAILED=$((FAILED + $(printf '%s\n' "$docs" | wc -l)))
 fi
 
+# The image the README's negative step runs in another namespace ("Arayüzün
+# ağ politikası" → "Politikanın uygulandığını doğrulamak"), pinned to its
+# digest next to its tag: a mirror copies, and the cluster runs, what the
+# step was written for, whatever the tag later points at. The digest is the
+# tag's multi-arch list digest, read from the registry's API when the tag was
+# checked (docs/sprints/2026-11-07-sprint-10.md, "Sprint başında"); a new tag
+# takes its own digest, read the same way, here and in the docs at once.
+# Every reference to the image with a tag or a digest, in any of the docs,
+# a mirror's copy among them, must be CURL_REF, and README.md must hold one:
+# the check would otherwise pass there while checking nothing.
+CURL_REF="curlimages/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"
+CURL_FILE=README.md
+UNPINNED=0
+images="$(awk -v image="${CURL_REF%%:*}" -v want="$CURL_REF" -v must="$CURL_FILE" '
+  BEGIN { pat = image "[:@][-A-Za-z0-9_.:@]*" }
+  {
+    rest = $0
+    while (match(rest, pat)) {
+      ref = substr(rest, RSTART, RLENGTH)
+      rest = substr(rest, RSTART + RLENGTH)
+      # The full stop of a sentence that ends with the reference.
+      sub(/\.+$/, "", ref)
+      seen[FILENAME]++
+      if (ref != want) printf "%s:%d: %s, not %s\n", FILENAME, FNR, ref, want
+    }
+  }
+  END { if (!seen[must]) printf "%s: no command runs %s\n", must, image }
+' "${DOCS[@]}")"
+if [ -n "$images" ]; then
+  echo "$images"
+  UNPINNED=$(($(printf '%s\n' "$images" | wc -l)))
+fi
+
 if [ "$FAILED" -gt 0 ]; then
   echo "$FAILED place(s) do not name Chart.yaml's version $version; CONTRIBUTING.md (\"Sürümler\") lists what a release raises"
+fi
+if [ "$UNPINNED" -gt 0 ]; then
+  echo "$UNPINNED place(s) do not run $CURL_REF; the comment above CURL_REF in scripts/check-versions.sh says how a new tag is pinned"
+fi
+if [ "$FAILED" -gt 0 ] || [ "$UNPINNED" -gt 0 ]; then
   exit 1
 fi
 echo "versions: Chart.yaml, Makefile, ${DOCS[*]} name $version"
+echo "images: the docs run $CURL_REF"

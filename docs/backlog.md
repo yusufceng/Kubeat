@@ -2880,6 +2880,13 @@ etiket sprint 10'un "Sprint başında" adımında doğrulandı; liste digest'i
 denetim S66'nın ([#164](https://github.com/yusufceng/Kubeat/issues/164)) kabul ölçütünde;
 madde #164 merge edilince kapanır.
 
+Kapandı (2026-11-08, S66 [#164](https://github.com/yusufceng/Kubeat/issues/164), 0.53):
+README'deki adım `curlimages/curl:8.10.1@sha256:d9b4…ef4b` ile koşar.
+`scripts/check-versions.sh` (CI'ın chart işi ve yayımın ilk işi) belgelerde imajın
+etiketli ya da digest'li her anışının betikteki `CURL_REF` olmasını ve README'de en az bir
+anış bulunmasını ister; `scripts/test-check-versions.sh` sınar. Yeni bir etiketin
+digest'i registry API'sinden okunur, betikte ve belgelerde birlikte değişir.
+
 ## Kaynak tavanının ilk reddi için denetim satırı
 
 2026-11-07'de ertelendi (S88 [#145](https://github.com/yusufceng/Kubeat/issues/145)

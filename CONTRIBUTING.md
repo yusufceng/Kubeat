@@ -117,6 +117,11 @@ notu" tablosundan yeni sürümün bölümünü yazar:
   başka bir dosyaya taşınırsa betikteki dosya listesi de güncellenir; hiç
   sürümlü komut kalmayan dosya da, sürümlü komutu kalmayan "Hızlı başlangıç"
   da denetimi düşürür.
+- README'deki negatif adımın imajı (`curlimages/curl`) etiketinin yanında
+  liste digest'iyle yazılır. Betik, bu dosyalarda imajın etiketli ya da
+  digest'li her anışının betikteki `CURL_REF` olmasını, README'de de en az bir
+  anış ister. Yeni bir etiketin digest'i registry API'sinden okunur ve betikle
+  belgelerde birlikte değişir.
 - CI'ın chart işi her PR'da çalıştırır; sürüm PR'ında eksik kalan yer orada
   yakalanır. Yerelde `scripts/check-versions.sh` ya da `make lint`; betiğin
   kendi testi `scripts/test-check-versions.sh` (`make test`).
