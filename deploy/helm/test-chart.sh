@@ -527,7 +527,8 @@ notes "LDAP without a license" says "$NEEDS_LICENSE" --set ldap.url=ldap://ldap.
 notes "no SSO" omits "$NEEDS_LICENSE"
 
 # The internal CA recipe (README, "OpenShift", "Kurum CA'sı"): its values,
-# taken from the README, mount the ConfigMap whole, read-only, and point
+# taken from the README, mount the ConfigMap whole, read-only and optional
+# (a ConfigMap not there leaves the directory empty), and point
 # SSL_CERT_DIR, which adds to the system bundle file where SSL_CERT_FILE
 # replaces it, at the mount; the defaults have none of it. The README gives
 # OpenShift's injection label and the restart the bundle needs in both
@@ -567,13 +568,20 @@ else
   VOLUME="$(list_item "$WORK/trusted-ca.yaml" "name: kubeat-trusted-ca")"
   grep -qE "^ *(- )?configMap:\$" <<<"$VOLUME" && grep -qE "^ *(- )?name: trusted-ca\$" <<<"$VOLUME" ||
     failed "internal CA: the ConfigMap kubeat-trusted-ca is not the trusted-ca volume: ${VOLUME:-no volume}"
+  # A ConfigMap not there must not keep the pod from starting: with the
+  # Recreate strategy the old pod is already gone, and every check stops.
+  grep -qx " *optional: true" <<<"$VOLUME" ||
+    failed "internal CA: the trusted-ca volume is not optional, so a missing ConfigMap stops all monitoring: ${VOLUME:-no volume}"
+  grep -qF "#     optional: true" "$CHART/values.yaml" ||
+    failed "internal CA: values.yaml's example volume is not optional"
   grep -qF "SSL_CERT_FILE" "$WORK/trusted-ca.yaml" && failed "internal CA: SSL_CERT_FILE is set, which replaces the system bundle file"
 fi
 helm template kubeat "$CHART" --show-only templates/backend.yaml | grep -qE "SSL_CERT_DIR|trusted-ca" &&
   failed "internal CA: the defaults mount a CA bundle"
 for text in "**Kurum CA'sı.**" "config.openshift.io/inject-trusted-cabundle: \"true\"" \
   "oc -n kubeat rollout restart deploy/kubeat-backend" "kubectl -n kubeat rollout restart deploy/kubeat-backend" \
-  "**Kurum CA'sının kapsamı.**" "**Kurum CA'sı değişince.**" "[\"OpenShift\" → \"Kurum CA'sı\"](#openshift)"; do
+  "**Sıra ve eksik ConfigMap.**" "**Kurum CA'sının kapsamı.**" "**Kurum CA'sı değişince.**" \
+  "[\"OpenShift\" → \"Kurum CA'sı\"](#openshift)"; do
   grep -qF -- "$text" "$README" || failed "README lacks \"$text\" of the internal CA recipe"
 done
 

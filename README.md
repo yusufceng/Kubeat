@@ -374,6 +374,7 @@ backend:
     - name: trusted-ca
       configMap:
         name: kubeat-trusted-ca
+        optional: true   # ConfigMap yoksa da pod açılır: "Sıra ve eksik ConfigMap"
   extraVolumeMounts:
     - name: trusted-ca
       mountPath: /etc/kubeat/trusted-ca
@@ -399,13 +400,32 @@ Go'da demet dosyasının yerine geçer; önerilmez:
   demeti tamamen düşer: herkese açık sertifikalı her hedef
   `tls_unknown_authority` verir.
 
+**Sıra ve eksik ConfigMap.** Volume `optional: true`'dur; izleme ConfigMap'e
+bağlı kalmaz:
+
+- ConfigMap yoksa (henüz oluşturulmadı, başka bir namespace'te ya da sonradan
+  silindi) pod yine açılır. Dizin boş kalır, sistem demeti yerinde durur ve
+  yalnız kurum CA'lı monitor'ler `tls_unknown_authority` verir; öteki kontroller
+  sürer.
+- `optional` olmadan kubelet pod'u başlatmaz (`configmap ... not found`, pod
+  `ContainerCreating`'de kalır). Backend tek replika ve `Recreate` olduğu için
+  eski pod çoktan durmuştur: bütün izleme durur. Silinen bir ConfigMap'te bu
+  silme anında değil, pod'un sonraki yeniden zamanlanmasında (node drain,
+  eviction) olur.
+- ConfigMap values'tan önce ve Kubeat'in namespace'inde (örneklerde `kubeat`)
+  oluşturulur; volume yalnız pod'un namespace'indeki ConfigMap'i görür.
+- OpenShift'te `helm upgrade` yukarıdaki sayı 0'dan büyük olunca yapılır. Pod
+  demet dolmadan açıldıysa kökleri CA'sız yüklemiştir; sayı 0'dan büyük olunca
+  backend'i yeniden başlatın ("Kurum CA'sı değişince").
+
 **Kurum CA'sının kapsamı.**
 
 - Bütün TLS'li kontroller aynı demete güvenir: `http` (`https://`), `tcp`
   (`tls: true`), `grpc` (`tls: true`), `websocket` (`wss://`) ve `postgres`,
   `mysql`, `redis` (`tls: true`). Monitor başına CA seçilemez; tek bir monitor
   için doğrulamayı kapatmak yine `tls_skip_verify`'dır.
-- Bildirim kanalları (webhook, Slack, Teams vb. ve SMTP) de aynı demete güvenir.
+- Bildirim kanalları (webhook, Slack, Teams vb. ve SMTP) ve heartbeat adresi
+  (`UPTIME_HEARTBEAT_URL`) de aynı demete güvenir.
 - LDAP, OIDC ve Prometheus'un kendi `UPTIME_LDAP_CA_FILE`, `UPTIME_OIDC_CA_FILE`
   ve `UPTIME_PROMETHEUS_CA_FILE` ayarları ayrıdır. Verilince yalnız o dosyaya
   güvenirler, bu demete değil; verilmezse bu demete güvenirler.
@@ -427,9 +447,10 @@ sonraki ilk kontrolde UP olur.
 
 Go'nun bu davranışı CI'da alt süreç testiyle sınanır
 (`backend/internal/checker/trustedca_test.go`: ConfigMap'in bağlandığı dizin
-düzeni, HTTP ve TLS'li TCP); yukarıdaki values `deploy/helm/test-chart.sh`'ta
-render edilir. Cluster'da uçtan uca reçete, OpenShift enjeksiyonu ve gerçek bir
-kurum PKI'sı henüz ölçülmedi.
+düzeni, ConfigMap yokken kalan boş dizin, HTTP ve TLS'li TCP); yukarıdaki values
+`deploy/helm/test-chart.sh`'ta render edilir. Cluster'da uçtan uca reçete
+(ConfigMap'siz açılış dahil), OpenShift enjeksiyonu ve gerçek bir kurum PKI'sı
+henüz ölçülmedi.
 
 **Benzetim.** Elimizde gerçek bir OpenShift olmadığı için minikube,
 Kubeat'in gözünde OpenShift'e benzetilir:

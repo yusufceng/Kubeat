@@ -179,12 +179,17 @@ backend:
   # not recommended). Every TLS check and notification then trusts the CA;
   # LDAP, OIDC and Prometheus with a *_CA_FILE of their own trust that file
   # instead. Go reads the bundle once: restart the backend when the
-  # ConfigMap changes. These two lists replace, not merge with, the same
-  # lists in another values file: keep every entry in one list.
+  # ConfigMap changes. The volume is optional, so that a ConfigMap not there
+  # (not yet created, in another namespace, deleted) never stops the
+  # monitoring: the pod starts with an empty directory and only the checks
+  # of internally signed targets fail; without it the pod never starts.
+  # These two lists replace, not merge with, the same lists in another
+  # values file: keep every entry in one list.
   extraVolumes: []
     # - name: trusted-ca
     #   configMap:
     #     name: kubeat-trusted-ca
+    #     optional: true
   extraVolumeMounts: []
     # - name: trusted-ca
     #   mountPath: /etc/kubeat/trusted-ca

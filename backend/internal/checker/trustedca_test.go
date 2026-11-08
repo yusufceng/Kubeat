@@ -42,7 +42,10 @@ const trustedCATargetEnv = "KUBEAT_TEST_TRUSTED_CA_TARGET"
 // the links a ConfigMap volume is made of, while SSL_CERT_FILE replaces
 // that file. (SSL_CERT_DIR also replaces the default directories, which in
 // Kubeat's image hold the same bundle as the file; the README says what
-// that leaves of each variable there.) An HTTP check, over the shared
+// that leaves of each variable there.) The recipe's volume is optional: a
+// ConfigMap not there leaves the directory empty, which keeps the system
+// bundle, so that only the internally signed targets fail and the pod
+// still starts. An HTTP check, over the shared
 // transports, and a TCP check with TLS, over the configuration the gRPC,
 // WebSocket and database checks build alike, see the same roots. They are
 // read once in a process, so each case checks its target in a child
@@ -61,7 +64,10 @@ func TestTrustedCABundle(t *testing.T) {
 	publicTarget := public.server(t).Listener.Addr().String()
 
 	work := t.TempDir()
-	mounted := configMapVolume(t, filepath.Join(work, "trusted-ca"), "ca-bundle.crt", internal.pem)
+	mounted := configMapVolume(t, filepath.Join(work, "trusted-ca"), map[string][]byte{"ca-bundle.crt": internal.pem})
+	// What the kubelet mounts for an optional ConfigMap that is not there,
+	// and for the empty one OpenShift has yet to fill.
+	empty := configMapVolume(t, filepath.Join(work, "missing-ca"), nil)
 	// The system bundle file, standing for the image's: a CA of the test's
 	// own, so that what SSL_CERT_DIR keeps of it shows.
 	system := filepath.Join(work, "system-bundle.crt")
@@ -85,6 +91,8 @@ func TestTrustedCABundle(t *testing.T) {
 		{"the bundle file alone: its CA", []string{"SSL_CERT_FILE=" + system}, publicTarget, "up"},
 		{"SSL_CERT_FILE replaces the bundle file: the internal CA", []string{"SSL_CERT_FILE=" + internalOnly}, internalTarget, "up"},
 		{"SSL_CERT_FILE replaces the bundle file: the bundle's CA is lost", []string{"SSL_CERT_FILE=" + internalOnly}, publicTarget, explain.TLSUnknownAuthority},
+		{"the ConfigMap missing, an empty volume: the bundle's CA is kept", []string{"SSL_CERT_FILE=" + system, "SSL_CERT_DIR=" + empty}, publicTarget, "up"},
+		{"the ConfigMap missing, an empty volume: the internal CA is not trusted", []string{"SSL_CERT_FILE=" + system, "SSL_CERT_DIR=" + empty}, internalTarget, explain.TLSUnknownAuthority},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := runTrustedCAChild(t, c.target, c.env)
@@ -214,23 +222,26 @@ func serialNumber(t *testing.T) *big.Int {
 	return serial
 }
 
-// configMapVolume lays dir out as the kubelet mounts a ConfigMap volume,
-// with key holding data, and returns dir: the data in a directory of its
-// own, a "..data" link to it, and for the key a link through "..data".
-func configMapVolume(t *testing.T, dir, key string, data []byte) string {
+// configMapVolume lays dir out as the kubelet mounts a ConfigMap volume
+// with these keys, none for one that is empty or, optional, not there, and
+// returns dir: the data in a directory of its own, a "..data" link to it,
+// and for each key a link through "..data".
+func configMapVolume(t *testing.T, dir string, keys map[string][]byte) string {
 	t.Helper()
 	const timestamped = "..2026_11_08_12_00_00.000000001"
 	if err := os.MkdirAll(filepath.Join(dir, timestamped), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, timestamped, key), data, 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.Symlink(timestamped, filepath.Join(dir, "..data")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join("..data", key), filepath.Join(dir, key)); err != nil {
-		t.Fatal(err)
+	for key, data := range keys {
+		if err := os.WriteFile(filepath.Join(dir, timestamped, key), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join("..data", key), filepath.Join(dir, key)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return dir
 }
