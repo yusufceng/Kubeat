@@ -298,6 +298,17 @@ Güncelleme (2026-11-07, S82 [#143](https://github.com/yusufceng/Kubeat/issues/1
 satırının log satırı"). README "Kapsam ihlali denetimi" artık "kayıtlar API ve
 arayüzden, log satırı merkezi logdan okunur; SIEM'e kendiliğinden akmaz" diyor.
 
+Güncelleme (2026-11-08, S66 [#164](https://github.com/yusufceng/Kubeat/issues/164), 0.53):
+kodsuz ara yol README "Hesaplar ve giriş" → "Denetim kaydını SIEM'e almak"ta: API
+anahtarıyla zamanlanmış `GET /api/v1/audit?limit=`, gönderilmiş satırlar `id`'ye göre
+ayıklanır, lisansta `audit` gerekir; "Kapsam ihlali denetimi"nin SIEM cümlesi tarife
+bağlanır. Bu maddeye eklenen parça (kod): denetim API'sine `since` (ya da son `id`'den
+sonrası) parametresi. Bugün her çekme son `limit` satırı alır (en çok
+`UPTIME_MAX_RESULTS`); iki çekme arasında bundan çok satır yazılırsa aradakiler kaçar.
+Tetikleyici: bu yüzden satır kaçıran bir SIEM çekmesi ya da gerçek bir SIEM isteği. Kalan
+kısmın (kaydın tamamını stdout'a yazmak, süzgeçler, CSV, kaynak adresi) tetikleyicisi
+değişmedi.
+
 ## Oturuma boşta kalma süresi `UPTIME_SESSION_IDLE`
 
 2026-10-27'de ertelendi (S5). Kurumsal güvenlik kontrol listesi maddesi
@@ -1918,6 +1929,28 @@ olarak, sprintin en son merge'ü. Kapsamı:
 
 Çok kiracılı metni `docs/` altına taşımak 1.0 kararına bırakıldı (PO). Merge edilince bu
 madde kapanır.
+
+Kapandı (2026-11-08, S66 [#164](https://github.com/yusufceng/Kubeat/issues/164), 0.53):
+
+- kontrol listesi README "Güvenlik"in başında ("Çok kiracılı ve internete açık kurulum");
+  her satır bir ayar ya da adım ve bir bölüm bağlantısı, genel dille;
+- tek kiracılı kısa yol hızlı başlangıcın altındaki "Küçük ekip, tek kiracılı kurulum"
+  kutusunda;
+- denetim kaydını API'den çekme tarifi README "Hesaplar ve giriş" → "Denetim kaydını
+  SIEM'e almak"ta (S83'ün kalanı ve `since` parametresi kendi maddesinde);
+- SSO çaresi `docs/yukseltme.md` "0.51'e yükseltme" → "Annotation monitor'leri her
+  kurulumda"da.
+
+Kalanlar, tetikleyicileriyle:
+
+- Çok kiracılı metni `docs/` altına taşımak. README denetimleri bölüm adlarına bağlı.
+  Tetikleyici: 1.0 kararı.
+- 2026-11-04 kapsamındaki `docs/pilot.md` "Ön koşullar" satırı ve chart values'ta
+  sertleştirme bloğu yapılmadı. values.yaml'ın `backend.extraEnv` yorumu
+  `UPTIME_CHECK_SHOW_VALUE` ve `UPTIME_TARGET_DENY_CIDRS`'i zaten örnekliyor; pilot'un
+  values bloğunu bu sprintte S98 ([#162](https://github.com/yusufceng/Kubeat/issues/162))
+  değiştiriyor ve liste README'de tek yerde. Tetikleyici: pilot values'unda sertleştirme
+  ayarını isteyen bir prova ya da kurulum.
 
 ## Kapsam/yetki dışı hedef reddini denetim kaydına ve metriğe yazmak (S68)
 

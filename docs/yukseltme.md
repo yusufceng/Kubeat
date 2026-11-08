@@ -658,7 +658,13 @@ sayfası kilidi ve parola değiştirmenin iki kaynaklı provası ve uydurma
   kendi host'undan başka bir namespace'e ya da cluster içine, kurum aralığı
   tanımlı değilse özel adresli bir kurum host'una, vekilli kurulumda da
   backend'in çözemediği başka bir dış host'a ulaşan annotation monitor'ü
-  `blocked_by_scope` ile DOWN olur (çareler yukarıda). Açılışta log: 
+  `blocked_by_scope` ile DOWN olur (ör. SSO arkasındaki bir uygulamanın kimlik
+  sağlayıcısına yönlenen kontrolü). Önce kapsamı açmayan çare: kontrolü
+  uygulamanın kendi host'unda, kimlik doğrulaması istemeyen bir sağlık yolunda
+  tutun; Service'i annotation'la izleyip `kubeat.io/path` verin (README "Keşif"
+  → "Annotation ile sürekli keşif"). Route ve Ingress'te `kubeat.io/path` henüz
+  tanınmıyor (S94, sonraki sprint adayı). Öteki çareler (kurum aralığı, vekilli
+  kurulum ayarı) yukarıda. Açılışta log:
   `annotation monitors set up before the target scope was recorded are held
   to their object's namespace`.
 - **Durum sayfası kilidi ve parola değiştirme kaynak adrese göre
