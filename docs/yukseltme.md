@@ -337,6 +337,11 @@ editörün monitor'leri. Okunamayan namespace, iki node'lu bir minikube'da bir
 namespace'in RoleBinding'i kaldırılarak sınandı. HTTP bağlantılarının bellek
 ölçümü ajan içidir ([yuk-testi.md](yuk-testi.md) "HTTP kontrolünün
 bağlantıları"). GKE'nin kube-dns/Cloud DNS'i ve kurumsal DNS ölçülmedi.
+Sürümden sonra sandbox Route'unda ve UWM'de (2026-11-08) kaynak tavanı
+(A kaynağı altıncı adda 429, başka bir kaynak girdi) ve hop `0`'da
+`KubeatSignInSourceDegraded` sınandı; alarm hop `1`'e dönünce çözüldü.
+Yükseltmede sandbox'taki dış HTTPS monitor'lerinin yanıt süresi 140–160 ms
+arttı.
 
 ### Yapılacak
 
@@ -526,8 +531,10 @@ daha kısa bir monitor zaman aşımıdır.
     `hops_too_low`). Kurulum ve neden başına bir alarmdır.
   - Ciddiyet: `metrics.prometheusRule.signInSeverity` (varsayılan `warning`).
     `KubeatUnhealthy`'nin parçası değildir.
-  - Hop değeri yanlış bir kurulumda yükseltmeden sonraki ilk girişte yanar.
-    Doğru değerde yandığı iki kurulum yukarıda "Yapılacak"tadır.
+  - Hop değeri yanlış bir kurulumda, yükseltmeden sonra yeni pod'un ilk kez
+    örneklenmesinden sonraki ilk girişte yanar: seri örneklenmeden önceki
+    artışı `increase()` göremez (sandbox UWM'de ölçüldü, 2026-11-08). Doğru
+    değerde yandığı iki kurulum yukarıda "Yapılacak"tadır.
 - Yeni grup `kubeat.discovery` (sonda): `KubeatDiscoveryNamespaceSkipped`.
   Eşitleme 10 dakikadır en az bir namespace'i atlıyorsa yanar; ciddiyeti
   `warning`'dir; atlanan namespace'in adı etiketlerinde yoktur.
