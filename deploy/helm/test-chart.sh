@@ -776,7 +776,7 @@ fi
 rules "kubeat.signin between kubeat.monitors and kubeat.self" has '- name: kubeat.signin'
 if helm template kubeat "$CHART" --show-only templates/prometheusrule.yaml "${RULES[@]}" >"$WORK/rules" 2>"$WORK/err"; then
   groups="$(grep -E '^    - name: ' "$WORK/rules" | sed 's/^    - name: //' | tr '\n' ' ')"
-  [ "$groups" = "kubeat.monitors kubeat.signin kubeat.self kubeat.discovery " ] || failed "rule groups in order: $groups"
+  [ "$groups" = "kubeat.monitors kubeat.signin kubeat.self kubeat.discovery kubeat.scope " ] || failed "rule groups in order: $groups"
 else
   failed "rule groups: refused: $(cat "$WORK/err")"
 fi
@@ -790,19 +790,28 @@ rules "KubeatSignInSourceDegraded severity missing from older values" has 'sever
 # KubeatUnhealthy; no label of it names a namespace.
 rules "KubeatDiscoveryNamespaceSkipped in its group" has '- name: kubeat.discovery'
 rules "KubeatDiscoveryNamespaceSkipped reads the skipped namespaces" has 'expr: max without (instance, pod, endpoint, container, service) (kubeat_discovery_namespaces_skipped) > 0'
+# KubeatScopeResolveErrors, in a group of its own after kubeat.discovery,
+# reads the target scope's refusals of annotation monitors' connections to
+# names that did not resolve, one alert per installation and no part of
+# KubeatUnhealthy; a user's refusals are left to the README's query.
+rules "KubeatScopeResolveErrors in its group" has '- name: kubeat.scope'
+rules "KubeatScopeResolveErrors" has 'alert: KubeatScopeResolveErrors'
+rules "KubeatScopeResolveErrors per installation" has 'sum without (instance, pod, endpoint, container, service) ('
+rules "KubeatScopeResolveErrors on annotation monitors' resolve errors" has 'increase(kubeat_target_scope_denied_total{reason="resolve_error", source="annotation"}[5m])'
 
 # metrics.prometheusRule.clusterLabel, for rules evaluated over the series of
 # several clusters in one store. Empty, the rules it changes render as 0.44
 # rendered them, and KubeatUnhealthy and KubeatNotificationsFailing, whose
 # expressions came with 0.45, KubeatSignInSourceDegraded and
 # KubeatDiscoveryNamespaceSkipped, which came with 0.52, and
-# KubeatScopeExternalRangesIgnored, which came with 0.53, without the scrape
+# KubeatScopeExternalRangesIgnored and KubeatScopeResolveErrors, which came
+# with 0.53, without the scrape
 # labels as those do; given,
 # they group by it beside namespace and job and keep no other label a store
 # adds, and every other rule renders the same either way. promtool below
 # shows how they behave over two clusters' series.
 CLUSTER=(--set metrics.prometheusRule.clusterLabel=cluster)
-BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped|KubeatScopeExternalRangesIgnored): '
+BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped|KubeatScopeExternalRangesIgnored|KubeatScopeResolveErrors): '
 # exprs FILE: the expression of every rule in a rendered PrometheusRule, each
 # of its lines after the rule's alert name.
 exprs() {
@@ -872,7 +881,7 @@ if helm template kubeat "$CHART" --namespace kubeat --show-only templates/promet
   --set backup.enabled=true >"$WORK/rules-plain" 2>"$WORK/err" &&
   helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" \
     --set backup.enabled=true "${CLUSTER[@]}" >"$WORK/rules-cluster" 2>"$WORK/err"; then
-  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped|KubeatScopeExternalRangesIgnored): ' |
+  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped|KubeatScopeExternalRangesIgnored|KubeatScopeResolveErrors): ' |
     diff "$WORK/exprs-0.44" - >"$WORK/diff" ||
     failed "clusterLabel empty: the rules differ from 0.44's: $(cat "$WORK/diff")"
   exprs "$WORK/rules-plain" | grep '^KubeatNotificationsFailing: ' | diff "$WORK/channels-plain" - >"$WORK/diff" ||
@@ -898,6 +907,7 @@ rules "KubeatUnhealthy per cluster" has 'expr: max by (namespace, job, cluster) 
 rules "KubeatSignInSourceDegraded per cluster and reason" has 'sum by (namespace, job, cluster, reason) (' "${CLUSTER[@]}"
 rules "KubeatDiscoveryNamespaceSkipped per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_discovery_namespaces_skipped) > 0' "${CLUSTER[@]}"
 rules "KubeatScopeExternalRangesIgnored per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_target_scope_external_ranges_ignored) > 0' "${CLUSTER[@]}"
+rules "KubeatScopeResolveErrors per cluster" has 'sum by (namespace, job, cluster) (' "${CLUSTER[@]}"
 rules "no store label kept but the cluster's" lacks 'without (' "${CLUSTER[@]}"
 for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace channel channel_type reason surface severity; do
   refuses "clusterLabel $label" "metrics.prometheusRule.clusterLabel is \"$label\"" "${RULES[@]}" --set-string metrics.prometheusRule.clusterLabel="$label"
@@ -910,12 +920,27 @@ done
 # runs the scenarios of prometheusrule-test.yaml (no backend target, a failed
 # scrape, a Recreate, an outage that closes, a failing backup, a backend that
 # stores no result, a channel that does not take notifications, a namespace
-# the annotation sync cannot read) against the
+# the annotation sync cannot read, annotation monitors refused names that do
+# not resolve) against the
 # rules rendered for release "kubeat" in namespace "kubeat", and those of
 # prometheusrule-cluster-test.yaml (two clusters, one of them failing, gone,
 # in a scrape gap or recreated, and an HA pair the store does not
-# deduplicate) against the rules rendered with clusterLabel=cluster.
+# deduplicate) against the rules rendered with clusterLabel=cluster. The
+# PromQL examples of README "Kapsam ihlali denetimi" are taken from the
+# README as written there and run against prometheusrule-readme-test.yaml.
 PROMTOOL="${PROMTOOL:-promtool}"
+# The README's examples: the first code block after the bullet "Kapsam
+# ihlali denetimi", each expression under its comment, as the alerts
+# ReadmeScopeTarget and ReadmeScopeResolveError, in that order.
+README="$CHART/../../../README.md"
+awk '/^- \*\*Kapsam ihlali denetimi/ { found = 1 } found && /^ *```$/ { if (inblock) exit; inblock = 1; next } inblock' "$README" |
+  sed 's/^ *//' | grep -v -e '^#' -e '^$' >"$WORK/readme-exprs"
+if [ "$(grep -c . "$WORK/readme-exprs")" -eq 2 ]; then
+  awk 'BEGIN { split("ReadmeScopeTarget ReadmeScopeResolveError", names, " "); print "groups:\n  - name: readme.scope\n    rules:" }
+    { print "      - alert: " names[NR] "\n        expr: |-\n          " $0 }' "$WORK/readme-exprs" >"$WORK/readme-rules.yaml"
+else
+  failed "README \"Kapsam ihlali denetimi\": want its two PromQL examples in the first code block, found: $(cat "$WORK/readme-exprs")"
+fi
 # rulefile FILE VALUES...: writes the rule groups of the PrometheusRule
 # rendered with these values (and the rules on) to FILE.
 rulefile() {
@@ -930,14 +955,17 @@ rulefile() {
 }
 if command -v "$PROMTOOL" >/dev/null 2>&1; then
   mkdir -p "$WORK/promtool"
-  cp "$CHART/../prometheusrule-test.yaml" "$CHART/../prometheusrule-cluster-test.yaml" "$WORK/promtool/"
+  cp "$CHART/../prometheusrule-test.yaml" "$CHART/../prometheusrule-cluster-test.yaml" \
+    "$CHART/../prometheusrule-readme-test.yaml" "$WORK/promtool/"
   if rulefile "$WORK/promtool/rules.yaml" --set backup.enabled=true &&
     rulefile "$WORK/promtool/rules-without-backups.yaml" &&
-    rulefile "$WORK/promtool/rules-cluster.yaml" --set backup.enabled=true "${CLUSTER[@]}"; then
+    rulefile "$WORK/promtool/rules-cluster.yaml" --set backup.enabled=true "${CLUSTER[@]}" &&
+    cp "$WORK/readme-rules.yaml" "$WORK/promtool/readme-rules.yaml"; then
     "$PROMTOOL" check rules --lint-fatal "$WORK/promtool/rules.yaml" "$WORK/promtool/rules-without-backups.yaml" \
-      "$WORK/promtool/rules-cluster.yaml" >"$WORK/out" 2>&1 ||
+      "$WORK/promtool/rules-cluster.yaml" "$WORK/promtool/readme-rules.yaml" >"$WORK/out" 2>&1 ||
       failed "promtool check rules: $(cat "$WORK/out")"
-    "$PROMTOOL" test rules "$WORK/promtool/prometheusrule-test.yaml" "$WORK/promtool/prometheusrule-cluster-test.yaml" >"$WORK/out" 2>&1 ||
+    "$PROMTOOL" test rules "$WORK/promtool/prometheusrule-test.yaml" "$WORK/promtool/prometheusrule-cluster-test.yaml" \
+      "$WORK/promtool/prometheusrule-readme-test.yaml" >"$WORK/out" 2>&1 ||
       failed "promtool test rules: $(cat "$WORK/out")"
   fi
 elif [ -n "${CI:-}" ]; then
