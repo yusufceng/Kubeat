@@ -1049,9 +1049,11 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     geç 5 dakikada bir yinelenince yanar. Güvenlik değil işletim alarmıdır:
     annotation monitor'leri her kurulumda nesnelerinin namespace'ine
     bağlıdır ve bu red çoğu zaman cluster DNS'inin ya da backend'in ona
-    giden yolunun arızasıdır (yukarıda "Egress ve DNS"). Tek bir monitor'ün
-    geçici SERVFAIL'i yakmaz. Kuruluma göre tektir ve `KubeatUnhealthy`'ye
-    bağlı değildir.
+    giden yolunun arızasıdır (yukarıda "Egress ve DNS"). Vekilli kurulumda
+    `UPTIME_TARGET_SCOPE_TRUST_PROXY` kapalıyken backend'in çözemediği dış
+    adlara giden annotation monitor'leri de yakar ve sürekli yanık tutar
+    (yukarıda "Vekilli kurulum"). Tek bir monitor'ün geçici SERVFAIL'i
+    yakmaz. Kuruluma göre tektir ve `KubeatUnhealthy`'ye bağlı değildir.
   - **Kendi Prometheus'unuzda.** Girişimi ve kullanıcıların (kaydı olmayan
     monitor'ler dahil) çözüm hatasını chart alarmlamaz. Annotation
     gürültüsünden ayırarak şöyle alarmlayabilirsiniz; iki ifade CI'da bu
