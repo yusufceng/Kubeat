@@ -53,7 +53,10 @@ sonunda bakar ve yön verir.
    kabul ölçütü bir etki tablosu da sayar: satırlar kurulum türü (tek kiracılı,
    çok kiracılı, vekilli), sütunlar monitor kaynağı (yönetici ya da `*`, kapsamı
    sınırlı, annotation, kaydı olmayan); her hücrede sonuç, önce kapsamı açmayan
-   çare ve yükseltme notu cümlesi bulunur.
+   çare ve yükseltme notu cümlesi bulunur. Bir sinyali ayıran maddenin kabul
+   ölçütü ayrımın göründüğü her yüzeyi sayar (sayaç, log satırı, denetim satırı,
+   kontrol sonucu ya da bildirim metni); metni değişmeyen yüzey etki tablosunda
+   gerekçesiyle yazılır ve sonraki bir maddeye kesin bağlanır.
 3. **Öncelik**: PO sprint hedefini, en çok dört maddelik sıralı listeyi ve
    gerekçeli "yapılmayacaklar"ı verir. Bir hikâyenin bilinen yan etkisi
    sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
@@ -67,7 +70,8 @@ sonunda bakar ve yön verir.
    `auth.go`/`throttle.go`, `targetscope.go`) bilinen bir sınır bırakıyorsa, o
    sınırın takibi ve gözlemlenebilirliği aynı yüzeyde ard arda (sıralı merge)
    planlanır ve sınır plan aşamasında "sonraki sprint" ya da "kullanıcıda kalan"
-   olarak açık kayda geçer.
+   olarak açık kayda geçer. "Sonraki sprint" kuyruğundan düşen bir hikâye
+   yalnız eski sprint dosyasında kalmaz, backlog'a tetikleyicisiyle yazılır.
 5. **Geliştirme** (paralel, ayrı worktree): her developer bir issue'yu kendi
    dalında yapar, test eder, commit'ler; push etmez. Release manager
    teslimatın başında sandbox oturumunu denetler; düşmüşse kullanıcıdan
@@ -90,7 +94,11 @@ sonunda bakar ve yön verir.
    `git range-diff` ve patch-id ile yalnız çakışma çözümünü okur. Davranış
    değiştiren maddelerin yükseltme notu cümleleri her merge'de değil, sürüm
    PR'ında developer raporlarından "Yükseltme notu" tablosuna işlenir; BA
-   tabloyu okur ve okumasını sürüm PR'ına yorum olarak yazar.
+   tabloyu okur ve okumasını sürüm PR'ına yorum olarak yazar. Reviewer
+   developer raporunun "ertelendi" listesini PR'ın `docs/backlog.md` diff'iyle
+   karşılaştırır; eksik madde bir inceleme bulgusudur. README'de ya da yol
+   haritasında "bilinen sınır" diye yazılan bir parça backlog'a da
+   tetikleyicisiyle girer.
 7. **Sprint sonu**: release manager sürümü çıkarır. Sandbox'ı yükseltmeden
    önce en yeni yedeği ve şifreleme anahtarını dışarı alıp kopyayı pod'daki
    dosyayla karşılaştırır ([pilot.md](../pilot.md) "Yükseltmeden önce
@@ -107,7 +115,11 @@ sonunda bakar ve yön verir.
    belgeliyorsa o yol ya CI'da koşar ya da bu listeye zorunlu prova olarak
    yazılır; "isteğe bağlı" yalnızca yan yollar içindir. Ajan sınırında
    ölçülemeyen önerilen bir kurulum yolunun en az CI'da render edilen bir values
-   reçetesi olur (`test-chart.sh` senaryosu); "ölçülmedi" etiketi kalır. Backend'i
+   reçetesi olur (`test-chart.sh` senaryosu); "ölçülmedi" etiketi kalır. İncelemede
+   bulunan platforma özgü bir yan etki yükseltme notunun yanında README'nin o platform
+   bölümüne de yazılır. İki sprintten uzun kullanıcıda kalan ve ajan-içi benzetimi
+   olmayan bir platform provası için plan bir doğrulama runbook'u planlar: komut,
+   beklenen çıktı ve geri bildirim şablonu (`docs/openshift-dogrulama.md` deseni). Backend'i
    başlatmayan her yol (ör. bir ayar doğrulaması) için gerçek pod'da bir ajan-içi
    prova adımı planlanır. Release manager kullanıcıda kalan zorunlu provaları
    sprint sonu özetinin ilk satırında verir. Gerçek ya da çok

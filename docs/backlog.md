@@ -395,6 +395,16 @@ belge; sprint 11 belge turunda, aynı dosyaya (`docs/yedek-geri-yukleme.md`)
 yazan S90 ile ("Doğrulamalı yedek bloklarının kalanları"). S41 OpenShift geri
 yükleme provası kullanıcıda.
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+S7 sprint 11'e girmedi, S90 ile sonraki sprint kuyruğunda (5. sıra). Zararlı kısım plan
+dalında, slot almadan düzeltildi. README "GitOps ile kurulum" → "Kurulum notları görünmez"
+tablosunun "Yedek" satırı, Velero ya da OADP'nin yedeğin yerine ancak veri volume'unu CSI
+snapshot'la alıyorsa geçtiğini yazıyor. Kurulum notundaki aynı cümle
+(`deploy/helm/kubeat/templates/NOTES.txt:323-325`, "Velero, OADP") S7'nin chart kısmında
+kaldı; `test-chart.sh` o metni sınıyor. S41'in OADP adımı S98'in
+([#162](https://github.com/yusufceng/Kubeat/issues/162)) OpenShift runbook'unda "ölçülmedi,
+prova kullanıcıda" diye yer alır.
+
 ## Yedek kopyalarını S3 uyumlu depoya yüklemek
 
 2026-10-27'de ertelendi (S8). `UPTIME_BACKUP_S3_*` ile her başarılı kopyanın
@@ -474,6 +484,14 @@ B'nin GKE ve annotation yolunda, `k8s.go`'da S43'ün
 bugünkü çare: yönetilen monitor'de HTTP seçenekleri (yönlendirme sınırı, kabul edilen
 kodlar) arayüzden değiştirilebiliyor (`backend/internal/api/monitors.go:1198-1204`).
 Ada göre arama, `upsert` ve OpenAPI backlog'da; tetikleyicileri değişmedi.
+
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+S94 sprint 11'e girmedi. PO'nun gerekçeleri: geçici çare var ve B'nin GKE yolunda S95+S98
+öne alındı. Madde sonraki sprint kuyruğunda 2. sırada. Kurum CA'sı reçetesi (S2,
+[#163](https://github.com/yusufceng/Kubeat/issues/163)) bu sprintte geliyor; S94 onu hazır
+bulacak. SSO çaresi sprint 11'de Service'teki `kubeat.io/path` ile yazılıyor: S98
+([#162](https://github.com/yusufceng/Kubeat/issues/162)) `docs/pilot.md`'de, S66
+([#164](https://github.com/yusufceng/Kubeat/issues/164)) `docs/yukseltme.md` 0.51'de.
 
 ## Ücretsiz katmanda tek OIDC sağlayıcısıyla giriş; alternatifi TOTP 2FA
 
@@ -1888,6 +1906,19 @@ bilinen sınır olarak), doğru hop değeri ve negatif doğrulama adımı, host 
 router ve GKE satırları (S87), LDAP/AD kilidi (S88). Sprint 11'in en son merge'ü
 olarak yazılır.
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+tetikleyici doldu. S66 sprint 11'de [#164](https://github.com/yusufceng/Kubeat/issues/164)
+olarak, sprintin en son merge'ü. Kapsamı:
+
+- Müşteri B'nin tek kiracılı kısa yolu;
+- çok kiracılı ve internete açık kurulum listesi;
+- denetim kaydını API'den çekme tarifi (S83'ün kalanı backlog'da kalır);
+- `docs/yukseltme.md` 0.51'deki SSO çaresi;
+- curl digest'i.
+
+Çok kiracılı metni `docs/` altına taşımak 1.0 kararına bırakıldı (PO). Merge edilince bu
+madde kapanır.
+
 ## Kapsam/yetki dışı hedef reddini denetim kaydına ve metriğe yazmak (S68)
 
 2026-11-05'te sprint 7 kuyruğuna alındı (sprint 6 planı; [sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md)).
@@ -2069,6 +2100,29 @@ sprint 10 keşfi): kayda yazanın kimliği göçsüz bir JSON alanında S91'le g
 Tetikleyici (S80, S81 ve S82'nin merge'ü) sprint 10 sonunda dolar; S73 sprint 11
 taslağının ilk maddesi.
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+PO iki kararı bilerek değiştirdi.
+
+- **S73 sonraki sprintte.** Sprint 11 taslağının ilk maddesiydi. L; ADR-0003 (c)'yi
+  değiştiriyor ve beş yazma yoluna (rol, grup eşlemesi, namespace, silme, dizin girişi)
+  dokunuyor; sekiz PR'lık sprintte ilk kayan madde olurdu. Sonraki sprint kuyruğunda 1.
+  sırada; 1.0 kararı "henüz değil" çıkmazsa 1.0 "Bilinen sınırlar"ına girer. Kayda yazanın
+  kimliği (göçsüz JSON alanı) yeniden S73'ün ölçütünde.
+- **S91 backlog'da.** Kapsam: kaydı olmayan monitor'lerde kapsam kaydının kendiliğinden
+  genişlemesini bir kereye indirmek, kayda yazanı tutmak ve kaydı yöneticiye göstermek;
+  dilim 2'deki arayüz onayı dahil.
+  - Kaydı olmayan monitor yalnız 0.50 ya da öncesinden yükseltilen bir kurulumda oluşur
+    (`backend/cmd/server/main.go:771-773`; ADR-0003 (c) "Kaydı olmayan monitor").
+  - Kullanıcı kararı (a): hiçbir sürüm satılmadı, eski sürüm desteği yok. 0.53 ya da 1.0
+    ile yeni kurulan bir ortamda bu monitor'ler oluşmaz.
+  - Etkilenen tek kurulum sandbox (kaydı olmayan 9 monitor). `docs/yukseltme.md` "0.51'e
+    yükseltme"deki "kaydetmeyin" uyarısı onu kapsıyor.
+  - Hikâye yazılı (L); geri alma maliyeti düşük. Devreden prova ("kaydı olmayan yönetici
+    monitor'ü 0.50 → 0.51") S91 ile burada kalır.
+
+  Tetikleyici: 0.50 ya da öncesinden yükseltilen gerçek bir kurulum ya da 0.51 öncesi bir
+  yedekten geri yükleme isteği.
+
 ## Yeni giriş/dizin/throttle metrikleri için chart PrometheusRule ve throttle sessiz-etkisizlik metriği (S63/S72 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2143,6 +2197,12 @@ S88 [#145](https://github.com/yusufceng/Kubeat/issues/145) erteledi). Kurulum no
 F5/WAF önlü Route sınırı ayrı maddede ("`hops_too_low`'u önde başlık yazan katmanların
 çıkış aralıklarına genişletmek"). Sandbox UWM'de `hops_zero` ile yandı (sprint 10 prova
 (b)); artış yeni pod serisinin ilk örneklemesinden önceyse `increase()` onu görmez.
+
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+kurulum notundaki `KubeatSignInSourceDegraded` satırı S95'in
+([#161](https://github.com/yusufceng/Kubeat/issues/161)) kabul ölçütünde. Dilim 2'nin kendisi
+(dizine ulaşılamıyor ve hesap tavanı kuralları, `kind="source_total"` kuralı, README
+"Kopyalamak" örnekleri) sprint 11'e girmedi; tetikleyicisi değişmedi.
 
 ## Kapsam-dışı hedef reddi denetimini keşif-import/restore, bakım ve workload yollarına genişletmek + flood cap (S68 takibi)
 
@@ -2410,6 +2470,14 @@ başlaması da ele alınabilir (yeni pod ilk turundan önce 0 bildirir). Tetikle
 eşitlemenin uzun süre sessizce düştüğü bir kurulum ya da bu sinyali isteyen bir SRE
 bulgusu.
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+tetikleyici doldu (SRE, sprint 11 keşfi). Yanıt vermeyen bir namespace isteği bütün turu
+bitiriyor ve `kubeat_discovery_namespaces_skipped`'i güncellemiyor (`backend/internal/k8s/k8s.go:273`,
+`:285-293`). Madde S103 olarak hikâyeleşti: başarılı son tur gauge'u,
+`KubeatDiscoveryStale` kuralı ve zaman aşımına uğrayan namespace'in atlanması. PO, dört
+slot dolu olduğu için onu sonraki sprinte aldı (kuyrukta 7. sıra). Bugünkü sinyal sayaç ve
+`WARN`; sorun izlemeyi değil eşitlemeyi durduruyor.
+
 ## Açıkça kapatılmış `UPTIME_TARGET_SCOPE_TRUST_PROXY` için açılış WARN'ını INFO'ya indirmek
 
 2026-11-07'de ertelendi (S81 [#121](https://github.com/yusufceng/Kubeat/issues/121)
@@ -2522,6 +2590,11 @@ slotlar güvenlik ve kurulum işleriyle dolu. Ara önlem: plan dalında runbook'
 "Yeniden prova" bölümüne "GNU od/tr ile henüz sınanmadı" notu. Tetikleyici: S7
 ile aynı belge turu (sprint 11 adayı) ya da bloklara dokunan ilk madde.
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+S7 sprint 11'e girmediği için S90 da sonraki sprintte, S7 ile aynı belge turunda
+(kuyrukta 5. sıra). Bu turda yeni müşteri kanıtı yok. Bloklar macOS'ta ve sandbox'ta `oc`
+ile koşuldu; Linux istemci için "sınanmadı" notu kalır.
+
 ## ntfy kanal adresindeki host'u yönetici için de ASCII'ye zorlamak
 
 2026-11-07'de ertelendi (S81 [#121](https://github.com/yusufceng/Kubeat/issues/121): incelemenin düşük bulgusu ve developer'ın
@@ -2598,6 +2671,24 @@ denetiminin cluster içi sınıflamasını da beslemeli. Bugünkü açılış ko
 pod'daki davranışı sprint 10'un zorunlu provası (c)'de, çok node'lu minikube'da pod
 drain ile taşınarak ölçülür; sonuç sprint 11'in girdisi.
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+prova (c) CrashLoopBackOff'u ölçtü (iki node'lu minikube, izleme durdu). Madde sprint 11'de
+iki sıralı PR olarak geliyor:
+
+- S96 [#157](https://github.com/yusufceng/Kubeat/issues/157): ortama bağlı denetimlerde
+  yalnız çakışan girdi yok sayılır (SRE önerisi, PO kararı); `ERROR`, gauge ve
+  `KubeatScopeExternalRangesIgnored` verilir.
+- [#158](https://github.com/yusufceng/Kubeat/issues/158): `targetScope.clusterNetworks`
+  beyanı (`pods`, `services`, `nodes`), render hatası ve `UPTIME_TARGET_SCOPE_CLUSTER_CIDRS`.
+  Render denetimi yalnız IPv4.
+
+İkisi merge edilince madde kapanır. Ayrı kalanlar:
+
+- beyan edilen ağların kapsamın cluster içi sınıflamasını beslemesi ("Beyan edilen cluster
+  ağlarının kapsam denetiminin cluster içi sınıflamasını beslemesi (S96 takibi)");
+- router VIP'ini kendiliğinden bulmak ve dışlama sözdizimi. Bunların tetikleyicisi
+  değişmedi.
+
 ## Kurulum notunda `frontend.networkPolicy.from` önerisini Ingress sınıfına göre vermek
 
 2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
@@ -2619,6 +2710,11 @@ sprintte yalnız ara önlem: README GKE bölümünün GCE paragrafı ManagedCert
 için üç değeri birlikte veriyor (`ingress.tls.enabled=false`,
 `publicURL=https://<host>`, annotation; plan dalı).
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+S95 sprint 11'de [#161](https://github.com/yusufceng/Kubeat/issues/161) olarak, eşi S94 değil
+S98 ([#162](https://github.com/yusufceng/Kubeat/issues/162)). Madde #161 merge edilince
+kapanır; `gce-internal` için ayrı öneri bu bölümde kalır.
+
 ## `test-chart.sh`'in README denetimini kurulum notunun gösterdiği bölüme daraltmak
 
 2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133) BA incelemesinin düşük bulgusu; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
@@ -2631,6 +2727,9 @@ Tetikleyici: kurulum notuna dokunan bir sonraki madde.
 Güncelleme (2026-11-07, sprint 10 planı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
 tetikleyici doldu; madde S95'in kabul ölçütünde (sprint 11 adayı) ve S95 merge
 edilince kapanır.
+
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+S95 sprint 11'de [#161](https://github.com/yusufceng/Kubeat/issues/161).
 
 ## Keşiften içe aktarmayı monitor'ün kapsam kuralıyla hizalamak
 
@@ -2685,6 +2784,12 @@ bir registry sorgusuyla doğrulanır (release manager; cluster gerekmez). Etiket
 yanına digest'i yazmak ve `scripts/check-versions.sh`'in bu satırı denetlemesi sprint
 11 belge turunda yapılır. Tetikleyici: sprint 11 belge turu.
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+etiket sprint 10'un "Sprint başında" adımında doğrulandı; liste digest'i
+`sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b`. Sabitleme ve
+denetim S66'nın ([#164](https://github.com/yusufceng/Kubeat/issues/164)) kabul ölçütünde;
+madde #164 merge edilince kapanır.
+
 ## Kaynak tavanının ilk reddi için denetim satırı
 
 2026-11-07'de ertelendi (S88 [#145](https://github.com/yusufceng/Kubeat/issues/145)
@@ -2726,6 +2831,16 @@ denetimi"ndeki iki PromQL örneği (`reason="target",source="user"` ve
 DNS kesintisi böylece platform ekibine kapsam reddi diye değil işletim alarmı diye gider.
 Tetikleyici: S93 (sprint 11 önerisinde S96'nın zincirinde).
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+S93 sprint 11'de [#160](https://github.com/yusufceng/Kubeat/issues/160) olarak, S89'un
+zincirinde. İçeriği:
+
+- yeni `kubeat.scope` grubunda `KubeatScopeResolveErrors` (`source="annotation"`,
+  `for: 10m`, `warning`);
+- README'deki iki PromQL'in `test-chart.sh`'te belgeden çıkarılıp promtool'la sınanması.
+
+#160 merge edilince madde kapanır.
+
 ## README "Metrikler" tablosunda `kubeat_target_scope_denied_total`
 
 2026-11-08'de ertelendi (S82 [#142](https://github.com/yusufceng/Kubeat/issues/142);
@@ -2733,6 +2848,14 @@ Tetikleyici: S93 (sprint 11 önerisinde S96'nın zincirinde).
 sürümden önce de vardı. Satır `reason` (`target`, `namespace`, `connection`,
 `resolve_error`) ve `source` (`user`, `annotation`, `unrecorded`) etiketlerini ve "Kapsam
 ihlali denetimi"ne bağlantıyı verir. Tetikleyici: sprint 11 belge turu.
+
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+satır S93 [#160](https://github.com/yusufceng/Kubeat/issues/160) ile gelir, çünkü sayaç
+kuralın serisi; madde #160 merge edilince kapanır. Tablonun eksik öteki dokuz serisi, kural
+sayısını şablonla karşılaştıran CI denetimi ve README'yi kayıtlı serilerle eşleyen test S100
+olarak hikâyeleşti (sonraki sprint, kuyrukta 9. sıra). S100'ün iki olgusal hatası plan
+dalında düzeltildi: "Kopyalamak" artık 15 kural diyor ve `kubeat.discovery`'yi adlandırıyor;
+Actions adımı `--set backup.enabled=true`'yu taşıyor.
 
 ## OpenShift'te EgressIP ve vekil ACL reçetesi (S82 takibi)
 
@@ -2784,6 +2907,16 @@ pilot reçetesinde ve NOTES'ta F5/WAF satırının yanında yer alır. Ajan içi
 `ingress-nginx` önüne başlık yazan ikinci bir nginx ile ölçülebilir; gerçek F5 kullanıcıda.
 Tetikleyici: sprint 11'de boş bir slot (yedek) ya da F5/WAF önlü bir kurulumun pilotu.
 
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+S101 olarak hikâyeleşti. GKE'deki `externalTrafficPolicy: Cluster` durumu da kapsama girdi
+(Müşteri B, sprint 11 keşfi). Sprint 11'e girmedi, çünkü dört slot dolu; sonraki sprint
+kuyruğunda 4. sırada. Ara önlemler sprint 11'de:
+
+- `docs/pilot.md` "Hop değeri"nde uydurma XFF'li elle doğrulama (S98,
+  [#162](https://github.com/yusufceng/Kubeat/issues/162));
+- README GKE kontrol listesinde "`externalTrafficPolicy: Cluster`'da sinyal susar" cümlesi
+  (S95, [#161](https://github.com/yusufceng/Kubeat/issues/161)).
+
 ## İki cluster'lı promtool senaryoları: `KubeatSignInSourceDegraded` ve `KubeatDiscoveryNamespaceSkipped`
 
 2026-11-08'de ertelendi (S85 dilim 1 [#146](https://github.com/yusufceng/Kubeat/issues/146)
@@ -2792,3 +2925,132 @@ ve S43 [#147](https://github.com/yusufceng/Kubeat/issues/147); [sprints/2026-11-
 cluster'lı senaryo yok. `clusterLabel`'lı render `test-chart.sh`'ta `--lint-fatal` ile
 denetleniyor. Tetikleyici: kurallara dokunan bir sonraki madde (S85 dilim 2, S93) ya da
 `clusterLabel` kullanan bir kurulumda yanlış toplanan bir alarm.
+
+Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
+tetikleyici doldu. İki senaryo S93'ün
+([#160](https://github.com/yusufceng/Kubeat/issues/160)) kabul ölçütünde; madde #160 merge
+edilince kapanır.
+
+## Kurum CA'sı reçetesinin kalanları: chart'ın ConfigMap'i üretmesi ya da `trustedCA` değeri, annotation ile monitor başına CA (S2 takibi)
+
+2026-11-08'de ertelendi (S2 [#163](https://github.com/yusufceng/Kubeat/issues/163), PO
+kararı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)). S2 0.53'te
+yalnız reçete ve test olarak geliyor. Reçetede kurum CA'sı `backend.extraVolumes` ile
+bağlanır ve `SSL_CERT_DIR` ile sistem demetine eklenir. OpenShift'te demet
+`config.openshift.io/inject-trusted-cabundle` etiketli bir ConfigMap'ten gelir.
+
+Ertelenenler:
+
+- chart'ın ConfigMap'i bir değerle üretmesi (ör. `trustedCA`);
+- annotation ile monitor başına CA.
+
+Sprint 2 kararları korunur: init container yok, keşif sayfasından reçeteye bağlantı yok.
+GitOps'ta ConfigMap tek bir nesne olduğundan chart değeri bugün kazanç getirmiyor (Müşteri
+A: "kod gerekmiyor"). #163 merge'de ertelediği öteki parçaları buraya ekler. Tetikleyici:
+reçeteyi yetersiz bulan bir kurulum, örneğin aynı cluster'da farklı CA'lara güvenmesi
+gereken monitor'ler.
+
+## Sprint 6 kuyruğundan backlog'a girmeden kalan maddeler: S23, S40, S44, S57, S61
+
+2026-11-08'de eklendi (sprint 11 planı;
+[sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md); sprint 10 retrosu
+"değişecek 2"nin taraması). Sprint 6'nın "kuyruğun devamı" listesindeki
+([sprints/2026-11-05-sprint-06.md](sprints/2026-11-05-sprint-06.md) "Yapılmayacaklar" ve
+retro önerisi) şu hikâyeler sprint 7 kuyruğuna taşınmadı ve backlog'a da girmedi. Aynı
+listeden S2 bu sprintte geri geldi (#163). S7 ve S34 zaten backlog'da, S42 kendi
+bölümünde; S43 0.52'de yapıldı. Kod durumu 2026-11-08'de main `8bfbacc`'de yeniden okundu.
+
+- **S23: `ldap://` ile StartTLS kapalı birleşimine uyarı, sonra ret.**
+  - Önem: SRE orta, Müşteri A hoş olur (sprint 1–4).
+  - Durum: values örneği `ldap://` ile `startTLS: false`'u yan yana veriyor
+    (`deploy/helm/kubeat/values.yaml:339-342`). Backend bu birleşimde açılışta uyarmıyor;
+    `backend/internal/ldapauth/ldapauth.go:91` yalnız şemayı denetliyor. Bu birleşimde
+    parola dizine düz metin gider.
+  - Sprint 2 kararı: önce açılış `WARN`'ı, NOTES satırı ve `ldaps` örneği; reddetmek
+    sonraki minor'da, yükseltme notuyla. Pilot `ldaps` kullanıyor.
+  - Tetikleyici: `config.go`'ya ya da `ldapauth`'a dokunan bir madde, ya da `ldap://` ile
+    kurulan dizinli bir kurulum.
+- **S40: yeniden başlatmada eski kesintinin gecikmeli ya da tekrarlı kanala duyurulması.**
+  - Önem: Müşteri A ve SRE orta, B düşük (sprint 3–5).
+  - Durum: kanal kesinti açılırken kapalı ya da kapsam dışıysa, yeniden başlatma ona eski
+    kesintiyi yine duyuruyor. "Kesintiden önce var olan kanal" kuralı (`CreatedAt`) yalnız
+    gecikmesiz ve tekrarsız kanallarda uygulanıyor
+    (`backend/internal/alert/schedule.go:887-903`).
+  - Sprint 2 PO kararı ("kapsamı sonradan genişleyen eski kanal alabilir") S40 alınınca
+    tersine çevrilir. Bu, "S25'in incelemesinde kalan bildirim köşeleri"nin 2. köşesi.
+  - Tetikleyici: `alert` paketine dokunan bir sonraki madde ya da pilotta yeniden
+    başlatmadan sonra yanlış kanala giden bir kesinti.
+- **S44: raporlarda takvim ayı.**
+  - Önem: Müşteri A önemli, B düşük (sprint 3–5).
+  - Durum: rapor yalnız son N günü, UTC'de ve o anki saatle biten bir dönemi veriyor
+    (`backend/internal/api/report.go:91-105`). README "Raporlar" ise CSV'yi ekiplere giden
+    aylık rapor için anlatıyor.
+  - Karar taslağı (BA varsayılanı, sprint 3): API `from`/`to` alır, "Geçen ay"
+    tarayıcının saat diliminde hesaplanır. Sınır yol haritası "Bilinen sınırlar"da yazılı.
+  - Tetikleyici: aylık SLA raporunu Kubeat'ten alan bir kurulum ya da raporlara dokunan
+    bir madde.
+- **S57: tek seferlik sertifika uyarısının bir teslimat hatasında kaybolması.**
+  - Önem: Müşteri B orta (sprint 4–5).
+  - Durum: kanal almazsa sertifika, hatırlatma ve yavaşlık bildirimi bir kez daha
+    denenmiyor (`backend/internal/alert/alert.go:162-164`); bir Slack kesintisi tek uyarıyı
+    yutar.
+  - Cluster içi yedek yol var: chart kuralları açıkken `KubeatCertificateExpiring`. `alert`
+    paketinde sıra S40'tan sonra.
+  - Tetikleyici: `alert` paketine dokunan bir sonraki madde ya da sertifika uyarısının
+    kaybolduğu bir olay.
+- **S61: kurulum notunun uyarılarını backend'in açılış log'una da yazmak.**
+  - Önem: Müşteri A ve SRE önemli, B orta (sprint 4).
+  - Durum: belge kısmı 0.46'da geldi (README "GitOps ile kurulum" → "Kurulum notları
+    görünmez"). Kod kısmı yapılmadı: chart'tan yeni bir ortam değişkeniyle backend aynı
+    uyarıları log'a yazacaktı.
+  - 0.49–0.52'nin açılış `WARN`'ları (hop, vekil, LDAP tavanı) bir kısmını karşılıyor.
+    fsGroup, heartbeat ve kural yokluğu, yedek ve Thanos 9091 uyarıları log'da yok.
+  - "Kurulum notu uyarılarını Argo CD'de sync hatası olarak göstermek (S95 takibi)" ile
+    birlikte tartılır.
+  - Tetikleyici: o madde ya da NOTES'u görmeyen bir kurulumda kaçırılmış bir uyarı.
+
+## Beyan edilen cluster ağlarının kapsam denetiminin cluster içi sınıflamasını beslemesi (S96 takibi)
+
+2026-11-08'de ertelendi (S96 [#158](https://github.com/yusufceng/Kubeat/issues/158), PO
+kararı; Müşteri B'nin sprint 10 keşfi;
+[sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)). 0.53'ün
+`targetScope.clusterNetworks` beyanı yalnız kurum aralıklarının cluster ağlarıyla
+çakışmasını denetler (render anında ve açılışta). Müşteri B, beyan edilen ağların kapsam
+denetiminin cluster içi sınıflamasını da beslemesini önerdi. Bu, kapsamın güvenlik anlamını
+değiştirir ve ayrı bir ADR kararı ile güvenlik incelemesi ister. Ayrıntı herkese açık metne
+yazılmaz (gizlilik); değerlendirme SRE'nin yerel kaydında. Tetikleyici: beyanı kullanan bir
+kurulumda sınıflamanın yetersiz kaldığı bir vaka ya da ADR-0003'e dokunan bir sonraki madde.
+
+## Kurulum notu uyarılarını Argo CD'de sync hatası olarak göstermek: koşulları bir manifest şablonuna taşımak (S95 takibi)
+
+2026-11-08'de ertelendi (S95 [#161](https://github.com/yusufceng/Kubeat/issues/161), PO
+kararı; Müşteri A'nın sprint 11 keşfindeki yeni bulgu 5, hoş olur;
+[sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)). Kurulum notları
+(`NOTES.txt`) Argo CD'de ve OpenShift GitOps'ta render edilmez. Yalnız NOTES'ta duran bir
+`fail`, örneğin bir `notes.failOnWarning` değeri, orada etkisizdir. 0.53 bunun yerine bir
+CI tarifi verir: README "Kurulum notları görünmez"de `helm install --dry-run=client` ile
+notları basıp WARNING'leri saymak.
+
+Uyarıyı sync hatasına çevirmek, koşulları render anında `fail` eden bir manifest
+şablonuna taşımayı ister. Bu, NOTES'un bugün yalnız uyardığı değerleri (fsGroup, hop, arayüz
+politikası) render hatasına çevirir ve var olan kurulumları kırabilir; opt-in bir değer ve
+ayrı karar ister. S61 (uyarıları backend log'una yazmak; "Sprint 6 kuyruğundan backlog'a
+girmeden kalan maddeler") ile birlikte tartılır. Tetikleyici: CI tarifini yetersiz bulan bir
+GitOps kurulumu.
+
+## Cluster DNS kesintisinde Kubeat'in kendi kanal bildirimlerini gruplamak ya da bastırmak (S97 takibi)
+
+2026-11-08'de eklendi (sprint 11 planı, PO;
+[sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)). 0.52'den beri her HTTP
+kontrolü bağlantısını kendisi açtığı için adı her kontrolde çözülüyor. Cluster DNS'i
+kesilince her HTTP monitor'ü kendi zaman aşımında, aynı turda DOWN oluyor (sprint 10 prova
+(a), minikube). Her ekibin kanalına ayrı bir kesinti bildirimi gidiyor; çok kiracılı
+kurulumda bu 60 ekip demek.
+
+S97 (sonraki sprint) nedene göre bir sayaç ve tek bir "cluster DNS" chart alarmı getirir;
+Kubeat'in kendi kanal bildirimlerine dokunmaz. Bildirimleri bastırmak ya da gruplamak olay
+doğruluğunu değiştirir: aynı anda gerçek bir kesinti de olabilir. "İzleme asla durmaz"
+ilkesine karşı tartılması gereken ayrı bir karar. Ara yol, S97'nin kuralı sürerken
+Alertmanager `inhibit_rules` ile `KubeatMonitorDown`'ı bastırmak; bu yalnız chart
+kurallarını alan kurulumda işe yarar. Tetikleyici: S97 geldiğinde onun ölçütüne kesin
+bağlanır, ya da DNS kesintisinde kanal fırtınası yaşayan bir kurulum.
