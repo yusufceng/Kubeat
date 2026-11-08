@@ -1270,12 +1270,14 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
 
       0.53'ten önce yazılmış sonuçlar `blocked_by_scope` kodunu taşır ve
       bugünkü metinle görünür (annotation monitor'ününki de).
-    - **Neden yalnız yöneticiye (0.53).** Yönetici (ve API token'ı) monitor
-      ayrıntısında, sonuçlarda ve olayın zaman çizelgesinde reddin nedenini
-      görür: API'de `diagnostics.scope_reason` `connection` (bağlantı
-      kapsamın dışına gidiyor) ya da `resolve_error` (ad çözülemedi), arayüzde
-      "Reddin nedeni" satırı. Öteki kullanıcıların, her namespace'i
-      görenlerin de, yanıtında bu alan yoktur.
+    - **Neden yalnız yöneticiye (0.53).** Yönetici (ve API token'ı) reddin
+      nedenini görür: `connection` (bağlantı kapsamın dışına gidiyor) ya da
+      `resolve_error` (ad çözülemedi). API'de sonucun taşındığı her yanıtta
+      (monitor ve liste, sonuçlar, pencere, olayın zaman çizelgesi)
+      `diagnostics.scope_reason` alanındadır; arayüzde monitor sayfasının
+      "Neden?" panelinde ve başarısız kontrol satırlarında "Reddin nedeni"
+      satırıdır. Öteki kullanıcıların, her namespace'i görenlerin de,
+      yanıtında bu alan yoktur.
   - **0.51 öncesinden kalan monitor'ler.** Kayıtları yoktur; backend açılışta
     bakar:
     - annotation'la kurulan monitor'ler her kurulumda nesnenin namespace'ine
