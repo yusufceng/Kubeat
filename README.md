@@ -1315,6 +1315,12 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       Kurulum değişmez, çalışan backend eski değerlerle sürer. CIDR olmayan
       ya da IPv6 biçiminde yazılmış IPv4 ağı olan bir beyan da render'ı
       durdurur.
+    - **Yazım hatası denetimi kapatmaz.** `targetScope.clusterNetworks`
+      altında `pods`, `services` ve `nodes` dışındaki bir anahtar (ör. `pod`),
+      `targetScope` altında `clusterNetworks` dışındaki bir anahtar ve
+      `backend.extraEnv.UPTIME_TARGET_SCOPE_CLUSTER_CIDRS` render'ı adıyla
+      durdurur. Render yalnız `targetScope.clusterNetworks`'teki ağları
+      karşılaştırır; `extraEnv`'deki değişken pod'da chart'ın verdiğini ezerdi.
     - **Sınır: render yalnız IPv4'ü karşılaştırır.** Helm'in şablon dilinde
       CIDR fonksiyonu yoktur, denetim IPv4 önek aritmetiğiyle yazıldı. IPv6
       ağları ve aralıkları render'da karşılaştırılmaz, açılışta
@@ -1326,15 +1332,18 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       geçerli kalır; `ERROR` satırı (`overlaps fd02::/48, a cluster network declared in UPTIME_TARGET_SCOPE_CLUSTER_CIDRS`),
       gauge ve kural aynıdır. Beyanın biçim hatası backend'i başlatmaz.
       Chart dışı kurulumda ayar doğrudan verilir.
-    - **Tek adres karşılaştırılmaz.** `/32` (IPv6'da `/128`) yazılan bir
-      girdi beyanla karşılaştırılmaz, ne render'da ne açılışta: "Şart"a göre
-      node ağındaki router VIP'i böyle, bilerek yazılır. API sunucusunun ve
-      pod'un kendi adresiyle karşılaştırma tek adrese de uygulanır.
-    - **Ne değişmez.** Beyan yoksa render ve backend 0.52'deki gibidir.
-      Beyan yalnız bu karşılaştırmayı besler; kapsam denetiminin cluster içi
-      sınıflaması onu okumaz. API VIP'i beyana girmez, onu dışarıda tutmak
-      sizdedir. Ağları `backend.extraEnv`'de değil `targetScope.clusterNetworks`'te
-      verin: render yalnız oradakileri karşılaştırır.
+    - **Tek adres karşılaştırılmaz.** Kurum aralıklarında `/32` (IPv6'da
+      `/128`) yazılan bir girdi beyanla karşılaştırılmaz, ne render'da ne
+      açılışta: "Şart"a göre node ağındaki router VIP'i böyle, bilerek
+      yazılır. API sunucusunun ve pod'un kendi adresiyle karşılaştırma tek
+      adrese de uygulanır. Beyanda tek adres olarak yazılan bir ağ (ör.
+      `nodes: [192.168.40.4/32]`) ise karşılaştırılır: onu içeren
+      `192.168.40.4/30` render'ı durdurur.
+    - **Beyan yoksa.** Chart `UPTIME_TARGET_SCOPE_CLUSTER_CIDRS`'i vermez ve
+      render'ı durdurmaz; açılış koruması yukarıdaki gibidir.
+    - **Beyanın kapsamı.** Beyan yalnız bu karşılaştırmayı besler; kapsam
+      denetiminin cluster içi sınıflaması onu okumaz. API VIP'i beyana girmez,
+      onu dışarıda tutmak sizdedir.
   - **Ad çözümü ve vekil.** Kurum adı backend'in kendi çözücüsünde çözülmelidir:
     cluster DNS'i kurum alanını kurumsal DNS'e iletir (OpenShift'te
     `dns.operator/default`'un `servers` alanı). Kurum aralıkları vekilli
@@ -5891,7 +5900,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_TARGET_RESOLVE_TIMEOUT` | `2s` | Yalnız API'de: kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir ve `reason="resolve_error"` ile sayılır, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun. 0.52'den beri kontrol anındaki çözüm bu ayara bağlı değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de varsayılan 5 sn; vekile giden kontrol de bunu kullanıyordu). Bkz. "Hedef politikası" → "Zaman aşımı". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
 | `UPTIME_TARGET_SCOPE_TRUST_PROXY` | `false` | `true` iken kapsamı sınırlı kullanıcının hedefi backend'in çözücüsünde yalnız NXDOMAIN alıyor ve istek vekile gidiyorsa (`HTTP_PROXY`/`HTTPS_PROXY`, `NO_PROXY` dışında; HTTP, anahtar kelime, JSON, WebSocket monitor'leri ve webhook türü kanallar) reddedilmez. Yalnız vekil cluster dışındaysa açın. Cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine reddedilir. Vekil verilmiş ve ayar kapalıysa açılışta bir `WARN` gelir. Bkz. "Hedef politikası" → "Vekilli kurulum" |
 | `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` | – | Kapsam denetiminin özel olsa da cluster dışı saydığı kurum aralıkları; virgülle ayrılmış CIDR. Bu aralıktaki bir adres (çıplak yazılmış ya da bir addan çözülmüş) kapsamı sınırlı kullanıcı için genel bir adres gibi kabul edilir. Hedef politikası ve yük korumaları bu ayarı okumaz. Cluster'ın pod, Service ve node ağları ile API VIP'i listeye girmez; router VIP'i yalnız on-prem Route'lar için bilerek (node ağındaysa `/32` ile) girer ve o VIP'teki her Route kapsamı sınırlı kullanıcıya açılır. CIDR olmayan girdi ve IPv6 biçiminde yazılmış IPv4 aralığı backend'i başlatmaz. Beyan edilen bir cluster ağıyla (`UPTIME_TARGET_SCOPE_CLUSTER_CIDRS`) çakışan, API sunucusunun adresini ya da backend'in kendi adresini içeren aralık 0.53'ten beri backend'i durdurmaz: yalnız o girdi yok sayılır, öteki aralıklar geçerli kalır; açılışta `ERROR` satırı, `kubeat_target_scope_external_ranges_ignored` ve `KubeatScopeExternalRangesIgnored`. Bkz. "Hedef politikası" → "Kurum ağı" → "Açılış koruması" |
-| `UPTIME_TARGET_SCOPE_CLUSTER_CIDRS` | – | 0.53: cluster'ın beyan edilen pod, Service ve node ağları; virgülle ayrılmış CIDR. Yalnız açılış okur: bunlardan biriyle çakışan (ağı içeren ya da ağın bir parçası olan, IPv4 ya da IPv6) bir `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` girdisi yok sayılır; tek adres (`/32`, `/128`) karşılaştırılmaz. Kapsam denetimi bu ayarı okumaz. CIDR olmayan girdi ve IPv6 biçiminde yazılmış IPv4 ağı backend'i başlatmaz. Chart bunu `targetScope.clusterNetworks`'ten verir ve IPv4 çakışmasında render'ı durdurur; `backend.extraEnv` ile vermeyin. Bkz. "Hedef politikası" → "Kurum ağı" → "Cluster ağlarının beyanı" |
+| `UPTIME_TARGET_SCOPE_CLUSTER_CIDRS` | – | 0.53: cluster'ın beyan edilen pod, Service ve node ağları; virgülle ayrılmış CIDR. Yalnız açılış okur: bunlardan biriyle çakışan (ağı içeren ya da ağın bir parçası olan, IPv4 ya da IPv6) bir `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` girdisi yok sayılır; tek adres (`/32`, `/128`) karşılaştırılmaz. Kapsam denetimi bu ayarı okumaz. CIDR olmayan girdi ve IPv6 biçiminde yazılmış IPv4 ağı backend'i başlatmaz. Chart bunu `targetScope.clusterNetworks`'ten verir ve IPv4 çakışmasında render'ı durdurur; `backend.extraEnv`'de verilirse render durur. Bkz. "Hedef politikası" → "Kurum ağı" → "Cluster ağlarının beyanı" |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL` | `30s` | Hedefi cluster dışında olan bir monitor'un en kısa kontrol (ve tekrar) aralığı; `UPTIME_MIN_CHECK_INTERVAL`'dan kısa olamaz, `0` ayrı kural yok demektir. Bkz. "Hedef yükü" |
 | `UPTIME_TARGET_MAX_RATE` | `60` | Cluster dışındaki bir host'a tüm monitor'ların birlikte dakikada yapabileceği en fazla kontrol; fazlası sonraki tick'i bekler. `0` sınırsız |
