@@ -248,7 +248,7 @@ bir `output` ile okunur). Notların uyarıları ve her birini kapatan değer:
 | --- | --- | --- |
 | fsGroup | OpenShift dışında `podSecurityContext` boş: backend volume'lara yazamayabilir, açılışta `open database failed` ile durur | `podSecurityContext.fsGroup: 1001` (OpenShift'te boş kalır, SCC atar) |
 | Heartbeat ve kurallar | İkisi de kapalı: Kubeat'in kendi arızasını kimse duymaz | `heartbeat.urlSecret.name` (Secret'ın `url` anahtarı; bkz. "Aracın kendi sağlığı") ya da `metrics.prometheusRule.enabled: true`. Notlar kural seçeneğini yalnızca PrometheusRule CRD'sini gördüğünde önerir; `helm template` `--api-versions monitoring.coreos.com/v1` verilmeden CRD'li cluster'da da görmez |
-| Yedek | `backup.enabled: false` (varsayılan): veri volume'u giderse monitor'lar, kanallar ve geçmiş de gider | `backup.enabled: true`; volume'u Velero ya da OADP ile yedekliyorsanız gerekmez |
+| Yedek | `backup.enabled: false` (varsayılan): veri volume'u giderse monitor'lar, kanallar ve geçmiş de gider | `backup.enabled: true`; Velero ya da OADP onun yerine ancak veri volume'unu CSI snapshot'la alıyorsa geçer (dosya düzeyindeki yedek, fs-backup, çalışan SQLite'ı ve WAL'ını tutarlı almaz) |
 | Thanos 9091 | `prometheus.url` 9091'de ve keşif cluster çapında: pod'ların CPU ve belleği boş kalır | `prometheus.openshiftMonitoringView: true` |
 | Prometheus sertifikası denetlenmiyor | `prometheus.tokenFile` ile birlikte `prometheus.insecureSkipVerify: true`: token'ı o adreste yanıt veren alır | `prometheus.insecureSkipVerify: false` ve `prometheus.caFile` |
 | Ingress TLS | TLS Secret'ı yok (düz HTTP'de kimse giriş yapamaz) ya da Ingress TLS'siz (parolalar düz metin gider) | Secret'ı oluşturun ya da cert-manager'a oluşturtun (`ingress.annotations`); TLS Ingress'in önünde bitiyorsa `ingress.tls.enabled: false` ve `https://` ile `publicURL` |
@@ -4410,7 +4410,8 @@ reddedilir. Kubeat'in kendi alarmları orada üç yoldan birine gider; ilki
   depoya `mimirtool rules sync` ile taşınır. Kopya chart'la yükselmez:
   kural sayısı 0.42'de 5, 0.43'te 12, 0.45'te 13'tü; 0.44'te kopyalayan
   0.45'te `KubeatUnhealthy` olmadan sessizce sürer. 0.52 `kubeat.signin`
-  grubunu ve `KubeatSignInSourceDegraded`'i ekler (yedek açıkken 14 kural):
+  (`KubeatSignInSourceDegraded`) ve `kubeat.discovery`
+  (`KubeatDiscoveryNamespaceSkipped`) gruplarını ekler (yedek açıkken 15 kural):
   0.51'in kopyasıyla kalan bir kurulum yanlış hop ayarını, kurulum notu da
   görünmediği için, alarmsız sürdürür (bkz. "Hesaplar ve giriş" → "Yanlış
   ayar sessizce etkisiz kalmaz"). Bu yüzden eşitleme komutu her yükseltmede
@@ -4447,7 +4448,8 @@ reddedilir. Kubeat'in kendi alarmları orada üç yoldan birine gider; ilki
       { echo "namespace: kubeat"
         helm template kubeat oci://ghcr.io/yusufceng/charts/kubeat --version "$KUBEAT_VERSION" \
           -n kubeat --show-only templates/prometheusrule.yaml \
-          --set metrics.prometheusRule.enabled=true --set metrics.prometheusRule.clusterLabel=cluster |
+          --set metrics.prometheusRule.enabled=true --set metrics.prometheusRule.clusterLabel=cluster \
+          --set backup.enabled=true |
           awk 'f { sub(/^  /, ""); print } /^spec:$/ { f = 1 }'
       } > kubeat-rules.yaml
       mimirtool rules sync kubeat-rules.yaml
