@@ -216,6 +216,20 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
     (SRE). Biçim hataları backend'i yine başlatmaz: aynı okuyucu
     (`netguard.ParseExternalRanges`) IPv6 biçiminde yazılmış IPv4 aralığını
     reddeder; koruma ve kapsam denetimi bir yazımda ayrışmaz;
+  - 0.53'te (S96, [#158](https://github.com/yusufceng/Kubeat/issues/158))
+    operatör cluster'ın pod, Service ve node ağlarını chart'ta beyan edebilir
+    (`targetScope.clusterNetworks`, opt-in; chart cluster'dan okumaz). Beyan
+    edilen bir ağla çakışan kurum aralığı `helm template`/`helm upgrade`'de
+    render hatası verir ("İzleme asla durmaz": render anında yakalanabilen
+    çakışma chart'ta yakalanır; kurulum değişmez). Sprig'de CIDR fonksiyonu
+    olmadığından render denetimi yalnız IPv4'tür (PO kararı). Beyan backend'e
+    `UPTIME_TARGET_SCOPE_CLUSTER_CIDRS` olarak da gider; açılış her aralığı
+    ağların tamamına karşı, IPv6 dahil, denetler ve çakışan girdiyi yukarıdaki
+    gibi yok sayar. Böylece pod ağının başka bir parçasını içeren aralık
+    drain'den önce yakalanır. Tek adres (`/32`, `/128`) beyanla
+    karşılaştırılmaz: node ağındaki router VIP'i böyle, bilerek yazılır;
+    yasaklamak on-prem Route yolunu kapatırdı. Beyan kapsam denetiminin
+    cluster içi sınıflamasını beslemez (ayrı karar, backlog);
   - listeye ne girer (README "Kurum ağı", "Şart"): pod, Service ve node ağı
     ile API VIP'i hiç girmez; korumanın yakalamadığı çakışmayı dışarıda tutmak
     operatörün sorumluluğundadır. Router VIP'i

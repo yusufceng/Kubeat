@@ -2697,6 +2697,19 @@ sayılıyor, `ERROR` satırı, `kubeat_target_scope_external_ranges_ignored` ve
 [#158](https://github.com/yusufceng/Kubeat/issues/158) (beyan ve render hatası) merge
 edilince kapanır.
 
+Kapandı (sprint 11, [#158](https://github.com/yusufceng/Kubeat/issues/158) dalı; 0.53):
+operatör cluster ağlarını opt-in `targetScope.clusterNetworks` ile (pod, Service, node;
+node ağı elle, `lookup` yok) beyan ediyor. Beyan edilen bir ağla çakışan kurum aralığı
+`helm template`/`helm upgrade`'de render hatası veriyor (yalnız IPv4); beyan
+`UPTIME_TARGET_SCOPE_CLUSTER_CIDRS` olarak backend'e de gidiyor ve açılış IPv6 dahil
+ağların tamamına karşı denetleyip çakışan girdiyi yok sayıyor. Tek adres (`/32`, `/128`)
+beyanla karşılaştırılmıyor: node ağındaki router VIP'i böyle, bilerek yazılıyor. Kalanlar
+kendi maddelerinde: "Render anındaki cluster ağı denetimini IPv6'ya genişletmek (S96
+takibi)", "API VIP'ini ve tek adresleri cluster ağı beyanıyla denetlemek (S96 takibi)",
+"Beyan edilen cluster ağlarının kapsam denetiminin cluster içi sınıflamasını beslemesi (S96
+takibi)"; router VIP'ini kendiliğinden bulmak ve dışlama sözdizimi yukarıdaki
+tetikleyiciyle burada kalıyor.
+
 ## Kurulum notunda `frontend.networkPolicy.from` önerisini Ingress sınıfına göre vermek
 
 2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
@@ -3081,6 +3094,37 @@ denetiminin cluster içi sınıflamasını da beslemesini önerdi. Bu, kapsamın
 değiştirir ve ayrı bir ADR kararı ile güvenlik incelemesi ister. Ayrıntı herkese açık metne
 yazılmaz (gizlilik); değerlendirme SRE'nin yerel kaydında. Tetikleyici: beyanı kullanan bir
 kurulumda sınıflamanın yetersiz kaldığı bir vaka ya da ADR-0003'e dokunan bir sonraki madde.
+
+## Render anındaki cluster ağı denetimini IPv6'ya genişletmek (S96 takibi)
+
+Sprint 11'de ertelendi (S96 [#158](https://github.com/yusufceng/Kubeat/issues/158), PO
+kararı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)). 0.53'te
+`targetScope.clusterNetworks` ile beyan edilen bir ağla çakışan kurum aralığını chart
+yalnız IPv4'te render hatasıyla durduruyor: sprig'de CIDR fonksiyonu yok ve önek
+aritmetiği `_helpers.tpl`'de 32 bit için yazıldı. IPv6 ağı ve aralığı render'da
+karşılaştırılmıyor; backend açılışta karşılaştırıp çakışan girdiyi yok sayıyor (`ERROR`,
+`kubeat_target_scope_external_ranges_ignored`, `KubeatScopeExternalRangesIgnored`), yani
+çakışma Argo CD'de sync hatası değil çalışma anı alarmı olarak görünüyor (README "Kurum
+ağı", "Cluster ağlarının beyanı", "Sınır"). 128 bitlik aritmetik şablonda grup grup
+yazılabilir; bedeli şablonun karmaşıklığı. Tetikleyici: beyanı IPv6 ya da çift yığınlı
+bir cluster'da kullanan bir kurulum, ya da IPv6 çakışmasının render'da durmasını isteyen
+bir GitOps kullanıcısı.
+
+## API VIP'ini ve tek adresleri cluster ağı beyanıyla denetlemek (S96 takibi)
+
+Sprint 11'de ertelendi (S96 [#158](https://github.com/yusufceng/Kubeat/issues/158),
+developer varsayımı, SRE incelemesine açık; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)).
+0.53'ün `targetScope.clusterNetworks` beyanı pod, Service ve node ağlarını alıyor; API
+VIP'i (cluster dışından API'ye ulaşılan adres) beyanda yok. Kurum aralıklarındaki tek
+adres (`/32`, `/128`) beyanla karşılaştırılmıyor, çünkü README "Şart" node ağındaki router
+VIP'ini böyle, bilerek yazdırıyor; yasaklamak on-prem Route yolunu kapatırdı. Bu yüzden
+API VIP'i ya da node ağındaki bir node'un adresi `/32` olarak listeye girerse ne render ne
+açılış yakalar (yalnız API sunucusunun ClusterIP'si ve pod'un kendi adresi yakalanıyor);
+pod ya da Service ağındaki tek adres de öyle. Seçenekler: beyana bir `apiVIP` alanı;
+tek adres istisnasını yalnız node ağına daraltmak (backend'in ağ türünü bilmesi, yani ayrı
+bir ayar ya da değer sözdizimi ister); router VIP'i için açık bir değer. Tetikleyici: pilotta
+ya da provada API VIP'inin ya da bir node adresinin `/32` olarak listeye girdiğinin
+görülmesi, ya da SRE incelemesinin istisnayı daraltma kararı.
 
 ## Kurulum notu uyarılarını Argo CD'de sync hatası olarak göstermek: koşulları bir manifest şablonuna taşımak (S95 takibi)
 
