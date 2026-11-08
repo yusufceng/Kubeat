@@ -713,8 +713,8 @@ done
 # network. IPv4 only: an IPv6 network goes to the backend
 # (UPTIME_TARGET_SCOPE_CLUSTER_CIDRS), whose start compares it. A single
 # address, the router's VIP in the node network, is not compared. Without a
-# declaration, as with values from before it, the render is the same as
-# before it.
+# declaration, as with values from before it, backend.yaml renders as
+# without the value.
 # clusterEnv NAME WANT VALUES...: the backend renders with these values and
 # UPTIME_TARGET_SCOPE_CLUSTER_CIDRS set to WANT, as quoted in the manifest,
 # or without it when WANT is empty.
@@ -771,6 +771,28 @@ refuses "every network over 0.0.0.0/0" "0.0.0.0/0 overlaps 10.128.0.0/14, the cl
 refuses "the message points at the README" '(README, "Hedef politikası", "Kurum ağı")' "${NETWORKS[@]}" --set-json "$(company 10.0.0.0/8)"
 refuses "a declaration in --set" "10.0.0.0/8 overlaps 10.128.0.0/14" --set 'targetScope.clusterNetworks.pods={10.128.0.0/14}' \
   --set backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS=10.0.0.0/8
+# A network declared as a single address, a node's own, is compared to its
+# edges: a company range that starts or ends at it overlaps it, one next to
+# it does not.
+NODES=(--set-json 'targetScope.clusterNetworks.nodes=["192.168.40.4/32","192.168.40.7/32"]')
+refuses "company range starting at a declared node address" "192.168.40.4/30 overlaps 192.168.40.4/32, the cluster's node network" \
+  "${NODES[@]}" --set-json "$(company 192.168.40.4/30)"
+refuses "company range ending at a declared node address" "192.168.40.4/30 overlaps 192.168.40.7/32, the cluster's node network" \
+  "${NODES[@]}" --set-json "$(company 192.168.40.4/30)"
+renders "company ranges next to declared node addresses" "${NODES[@]}" --set-json "$(company '192.168.40.0/30,192.168.40.8/29')"
+# A key no template reads, and the variable in extraEnv, fail the render
+# rather than turn the comparison off unsaid.
+refuses "declared networks under pod" "targetScope.clusterNetworks.pod is not read: give pods, services and nodes" \
+  --set-json 'targetScope.clusterNetworks.pod=["10.128.0.0/14"]' --set-json "$(company 10.0.0.0/8)"
+refuses "declared networks under node and pod" "targetScope.clusterNetworks.node, targetScope.clusterNetworks.pod are not read" \
+  --set-json 'targetScope.clusterNetworks={"pod":["10.128.0.0/14"],"node":["192.168.40.0/24"]}'
+refuses "declared networks under clusterNetwork" "targetScope.clusterNetwork is not read: give targetScope.clusterNetworks" \
+  --set-json 'targetScope.clusterNetwork={"pods":["10.128.0.0/14"]}' --set-json "$(company 10.0.0.0/8)"
+refuses "targetScope not a map" "targetScope is corp: give targetScope.clusterNetworks" --set targetScope=corp
+for value in 10.128.0.0/14 ""; do
+  refuses "UPTIME_TARGET_SCOPE_CLUSTER_CIDRS=$value in extraEnv" "backend.extraEnv.UPTIME_TARGET_SCOPE_CLUSTER_CIDRS: the chart sets this variable itself" \
+    --set-string "backend.extraEnv.UPTIME_TARGET_SCOPE_CLUSTER_CIDRS=$value"
+done
 # Not compared, left to the backend: the router's VIP as a /32 in the node
 # network, an IPv6 range over an IPv6 network, an entry the backend refuses.
 renders "router's VIP as a /32 in the node network" "${NETWORKS[@]}" --set-json "$(company '10.50.0.0/16,192.168.40.5/32')"

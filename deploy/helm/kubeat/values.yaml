@@ -213,7 +213,8 @@ backend:
 # The cluster's own networks, declared for the company ranges of
 # UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS (backend.extraEnv), which must stay
 # outside them (README, "Hedef politikası", "Kurum ağı"). Empty by default:
-# the render and the backend are then as up to 0.52. Declared, a company
+# nothing is compared at render and UPTIME_TARGET_SCOPE_CLUSTER_CIDRS is not
+# set; the start guard is as without this value. Declared, a company
 # range that overlaps one fails the render (helm template, helm upgrade, an
 # Argo CD sync), naming the range and the network, and the install stays as
 # it was. The render compares IPv4 only; the backend gets every network as
@@ -222,9 +223,10 @@ backend:
 # kubeat_target_scope_external_ranges_ignored and
 # KubeatScopeExternalRangesIgnored. A single address (/32) is not compared:
 # the router's VIP in the node network is written so, on purpose. Set the
-# networks here, not as UPTIME_TARGET_SCOPE_CLUSTER_CIDRS in
-# backend.extraEnv, which the render does not compare. Nothing is read from
-# the cluster (no lookup): give each cluster its own values.
+# networks here: UPTIME_TARGET_SCOPE_CLUSTER_CIDRS in backend.extraEnv, and a
+# key other than pods, services and nodes (such as pod), fail the render.
+# Nothing is read from the cluster (no lookup): give each cluster its own
+# values.
 targetScope:
   clusterNetworks:
     # OpenShift: oc get network.config/cluster -o jsonpath='{.status.clusterNetwork[*].cidr}'

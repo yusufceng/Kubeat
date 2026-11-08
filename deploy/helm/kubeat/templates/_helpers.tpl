@@ -307,15 +307,39 @@ The cluster's own networks declared in targetScope.clusterNetworks, as a JSON
 list of {kind, name, cidr}: kind is pods, services or nodes, name the value's
 path, cidr the entry trimmed. Read with dig and defaults: the value came
 after 0.52, and a release upgraded with --reuse-values from before has none.
-A value of the wrong shape fails the render, naming it.
+A value of the wrong shape fails the render, naming it, and so does a key
+no template reads (targetScope.clusterNetwork, targetScope.clusterNetworks.
+pod): a slip of the pen would otherwise turn the comparison off unsaid.
 */}}
 {{- define "kubeat.clusterNetworks" -}}
-{{- $networks := dig "clusterNetworks" (dict) (.Values.targetScope | default dict) | default dict -}}
+{{- $scope := .Values.targetScope | default dict -}}
+{{- if not (kindIs "map" $scope) -}}
+{{- fail (printf "targetScope is %v: give targetScope.clusterNetworks with pods, services and nodes, each a list of CIDRs" $scope) -}}
+{{- end -}}
+{{- $unread := list -}}
+{{- range $key := keys $scope | sortAlpha -}}
+{{- if ne $key "clusterNetworks" -}}
+{{- $unread = append $unread (printf "targetScope.%s" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- with $unread -}}
+{{- fail (printf "%s %s not read: give targetScope.clusterNetworks with pods, services and nodes, each a list of CIDRs" (join ", " .) (ternary "is" "are" (eq (len .) 1))) -}}
+{{- end -}}
+{{- $networks := get $scope "clusterNetworks" | default dict -}}
 {{- if not (kindIs "map" $networks) -}}
 {{- fail (printf "targetScope.clusterNetworks is %v: give pods, services and nodes, each a list of CIDRs" $networks) -}}
 {{- end -}}
+{{- $kinds := list "pods" "services" "nodes" -}}
+{{- range $key := keys $networks | sortAlpha -}}
+{{- if not (has $key $kinds) -}}
+{{- $unread = append $unread (printf "targetScope.clusterNetworks.%s" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- with $unread -}}
+{{- fail (printf "%s %s not read: give pods, services and nodes, each a list of CIDRs" (join ", " .) (ternary "is" "are" (eq (len .) 1))) -}}
+{{- end -}}
 {{- $out := list -}}
-{{- range $kind := list "pods" "services" "nodes" -}}
+{{- range $kind := $kinds -}}
 {{- $list := get $networks $kind | default list -}}
 {{- if not (kindIs "slice" $list) -}}
 {{- fail (printf "targetScope.clusterNetworks.%s is %v: give a list of CIDRs, such as [10.128.0.0/14]" $kind $list) -}}
@@ -373,9 +397,14 @@ it. A single address (/32) is not compared, as the backend does not compare
 it either: README's "Şart" has the router's VIP written so when it sits in
 the node network. A company range the backend cannot read is left to its
 start, which refuses it. No company range is read while no network is
-declared.
+declared. UPTIME_TARGET_SCOPE_CLUSTER_CIDRS in backend.extraEnv fails the
+render too: the render would not compare it, and the pod would get the
+variable twice, the last one, extraEnv's, in effect.
 */}}
 {{- define "kubeat.checkClusterNetworks" -}}
+{{- if hasKey (.Values.backend.extraEnv | default dict) "UPTIME_TARGET_SCOPE_CLUSTER_CIDRS" -}}
+{{- fail "backend.extraEnv.UPTIME_TARGET_SCOPE_CLUSTER_CIDRS: the chart sets this variable itself, and the render would not compare this one; give the cluster's networks in targetScope.clusterNetworks (pods, services and nodes)" -}}
+{{- end -}}
 {{- $kinds := dict "pods" "pod network" "services" "Service network" "nodes" "node network" -}}
 {{- $declared := list -}}
 {{- range include "kubeat.clusterNetworks" . | fromJsonArray -}}
