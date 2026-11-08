@@ -326,16 +326,23 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   0.51'de opt-in `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` operatörün verdiği kurum
   aralıklarını (çıplak IP ve çözülen ad) kapsam için cluster dışı sayıyor (S80,
   sprint 9, [#132](https://github.com/yusufceng/Kubeat/issues/132)). API
-  sunucusunun ya da backend'in kendi adresini içeren aralık backend'i
-  başlatmıyor; koruma pod'un o açılıştaki adresine baktığı için pod başka bir
-  node'a taşınınca (drain) ilk açılışta geçen bir aralık backend'i
-  başlatmayabilir (iki node'lu minikube'da ölçüldü, 2026-11-08: öteki node'un pod
-  ağını içeren aralıkla taşınan pod CrashLoopBackOff'a girdi, izleme durdu); ortama bağlı denetimlerde yalnız çakışan girdiyi yok sayıp
-  izlemeyi sürdüren geri düşüş (`ERROR`, gauge ve kural) ve cluster ağlarının chart'ta
-  beyanıyla render anındaki çakışma hatası sprint 11'de (S96,
-  [#157](https://github.com/yusufceng/Kubeat/issues/157), [#158](https://github.com/yusufceng/Kubeat/issues/158); S80'in "backend
-  başlamaz" kararı bu denetimler için değişti, biçim hataları yine başlatmaz); pod ve Service ağının geri kalanı, node ağı ve API VIP'iyle
-  çakışma operatörün sorumluluğunda, router VIP'i yalnız bilerek (node
+  sunucusunun ya da backend'in kendi adresini içeren aralık 0.51 ve 0.52'de
+  backend'i başlatmıyordu; koruma pod'un o açılıştaki adresine baktığı için pod
+  başka bir node'a taşınınca (drain) ilk açılışta geçen bir aralık backend'i
+  durduruyordu (iki node'lu minikube'da ölçüldü, 2026-11-08: öteki node'un pod
+  ağını içeren aralıkla taşınan pod CrashLoopBackOff'a girdi, izleme durdu).
+  0.53'te bu ortama bağlı denetimlerde (API sunucusunun adresi, pod'un kendi
+  adresleri, adreslerin okunamaması) backend durmuyor: yalnız çakışan girdi yok
+  sayılıyor, listenin geri kalanı geçerli; açılışta `ERROR` satırı,
+  `kubeat_target_scope_external_ranges_ignored` ve `KubeatScopeExternalRangesIgnored`
+  (S96 [#157](https://github.com/yusufceng/Kubeat/issues/157); S80'in "backend
+  başlamaz" kararı bu denetimler için değişti, biçim hataları yine başlatmaz). Yok
+  sayılan aralığa giden kapsamı sınırlı monitor'ler `blocked_by_scope` ile DOWN
+  oluyor; drain'de ölçülmesi sprint 11'in zorunlu provası (a). Cluster ağlarının
+  chart'ta beyanı ve render anındaki çakışma hatası ayrı PR'da
+  ([#158](https://github.com/yusufceng/Kubeat/issues/158), sprint 11 planı); o
+  gelene kadar pod ve Service ağının geri kalanı, node ağı ve API VIP'iyle
+  çakışma operatörün sorumluluğunda; router VIP'i yalnız bilerek (node
   ağındaysa `/32` ile) giriyor ve o VIP'teki her Route'u açıyor. Keşiften
   içe aktarma yalnız namespace'e baktığı için aralık Route'un VIP'ini
   içermiyorsa bu hedefi yine alıyor, klonu ve hedef
