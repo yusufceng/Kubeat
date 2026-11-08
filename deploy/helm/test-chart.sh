@@ -379,8 +379,12 @@ notes "Ingress gce annotation, hops unset" omits "$HOPS_CONFLICT" "${GCE[@]}"
 notes "Ingress nginx, hops 2" says "WARNING: UPTIME_TRUST_PROXY_HOPS is 2, $NGINX_CONFLICT" "${NGINX[@]}" \
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
 notes "Ingress nginx, hops 2" says "$SET_HOPS" "${NGINX[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
-notes "Ingress nginx, hops 2" says "and compute-full-forwarded-for on (README" "${NGINX[@]}" \
-  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+# 3 is right behind an L7 Google Cloud load balancer; the line says so and
+# that the warning stays there, and points at the hop guide.
+for text in "compute-full-forwarded-for on, it is 1 plus the" "3 behind an L7 Google Cloud load" \
+  "Keep such a value; this warning stays" "$HOP_GUIDE"; do
+  notes "Ingress nginx, hops 2" says "$text" "${NGINX[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+done
 notes "Ingress nginx, hops 3" says "WARNING: UPTIME_TRUST_PROXY_HOPS is 3, $NGINX_CONFLICT" "${NGINX[@]}" \
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=3
 notes "Ingress nginx, hops 1" omits "$HOPS_CONFLICT" "${NGINX[@]}" "${GIVEN_ONE[@]}"
@@ -541,13 +545,17 @@ readme_says "Hesaplar ve giriş" "Politikanın uygulandığını doğrulamak" "$
 readme_says "Hesaplar ve giriş" "Sayaç ve kural" "KubeatSignInSourceDegraded" "metrics.prometheusRule.enabled=true" \
   "hops_zero" "hops_too_high" "hops_too_low" "no_frontend_token"
 # fsGroup, and GKE's own Ingress: TLS at the load balancer and the policy's
-# two ranges.
+# two ranges. The checklist also says that behind an L7 Google Cloud load
+# balancer ingress-nginx's 3 is right though the notes warn, and how the CI
+# recipe counts only.
 readme_says "Cluster'a kurulum" "" "--set podSecurityContext.fsGroup=1001"
 readme_says "Cluster'a kurulum" "GKE" "ingress.tls.enabled=false" "publicURL=https://<host>" \
   "networking.gke.io/managed-certificates" "ingress.gcp.kubernetes.io/pre-shared-cert"
 readme_says "Cluster'a kurulum" "GKE kontrol listesi" "$SET_HOPS_TWO" "frontend:" "networkPolicy:" \
   "cidr: 35.191.0.0/16" "cidr: 130.211.0.0/22" "KubeatSignInSourceDegraded" \
-  "\`externalTrafficPolicy: Cluster\`'da sinyal susar; \`sign-in refused\`"
+  "\`externalTrafficPolicy: Cluster\`'da sinyal susar; \`sign-in refused\`" \
+  "Önde L7 GCLB olan \`ingress-nginx\`'te" "\`3\`'tür (\"Hesaplar ve giriş\" → \"Vekil-hop rehberi\")" \
+  "Değeri değiştirmeyin: \`1\`'de bütün tarayıcılar" "\`&& [ \"\$n\" -eq 0 ]\`'ı silin"
 # The heartbeat and the rules; the API.
 readme_says "Aracın kendi sağlığı" "" "--set metrics.prometheusRule.enabled=true" \
   "kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=" \

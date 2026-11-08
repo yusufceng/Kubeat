@@ -150,3 +150,11 @@ Values'u değiştirdiğinizde çelişkiyi kurulum notu söyler: sınıf `gce` ik
    namespace'ten zaman aşımı).
 4. Bağlantı yükü: özel cluster'da Cloud NAT ve DNS, README "Cluster'a kurulum"
    → "Bağlantı yükü (GKE)".
+5. Düz HTTP. GCE Ingress 80'de de dinler ve Kubeat `http://`'yi `https://`'e
+   yönlendirmez: `http://kubeat.example.com` giriş formunu açar, parola düz
+   metin gider (HSTS ancak tarayıcının ilk HTTPS ziyaretinden sonra geçerlidir).
+   Sertifika `Active` olduktan sonra 80'i `ingress.annotations` altında
+   `kubernetes.io/ingress.allow-http: "false"` ile kapatın ya da bir
+   FrontendConfig'in `redirectToHttps`'iyle (Ingress'te
+   `networking.gke.io/v1beta1.FrontendConfig` annotation'ı) `https://`'e
+   yönlendirin. İkisi de ölçülmedi.

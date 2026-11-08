@@ -2751,8 +2751,13 @@ ediliyor. Kalanlar:
   kurulum.
 - Önde L7 GCLB olan `ingress-nginx`'te doğru değer `3`'tür, ama sınıf `nginx` iken çelişki
   satırı yine çıkar. Bu, PO'nun kabul ölçütüdür ("`nginx` iken `1` değilse"). Satırı o
-  kurulum için susturan bir işaret (ör. bir values anahtarı) yok. Tetikleyici: önde
-  GCLB'li bir `ingress-nginx` kurulumunun README'deki CI tarifini kullanması.
+  kurulum için susturan bir işaret (ör. bir values anahtarı) yok. Önünde `X-Forwarded-For`
+  yazan başka bir vekil (WAF ya da başka bir bulutun L7 yük dengeleyicisi) olan
+  `ingress-nginx` de aynıdır: `use-forwarded-headers` ve `compute-full-forwarded-for`
+  açıkken değer `1` artı o vekillerin yazdığı girdilerdir. Satır bunu söyler ve değeri
+  değiştirmemeyi ister; README "GKE kontrol listesi" CI'da yalnız saymayı yazar.
+  Tetikleyici: önde GCLB'li ya da başka bir L7 vekilli bir `ingress-nginx` kurulumunun
+  README'deki CI tarifini kullanması.
 
 ## `test-chart.sh`'in README denetimini kurulum notunun gösterdiği bölüme daraltmak
 

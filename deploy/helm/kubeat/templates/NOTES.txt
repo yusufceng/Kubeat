@@ -162,10 +162,11 @@ name; higher, a client lengthens the header and picks its own source
 
 WARNING: UPTIME_TRUST_PROXY_HOPS is {{ $hops }}, but behind ingress-nginx it is 1,
 provided its LoadBalancer Service has externalTrafficPolicy: Local.
-Higher, a client lengthens the header and picks its own source; 3 holds
-only behind an L7 Google Cloud load balancer, with use-forwarded-headers
-and compute-full-forwarded-for on (README, "Hesaplar ve giriş",
-"Vekil-hop rehberi"). Otherwise upgrade with
+Higher, a client lengthens the header and picks its own source. With
+use-forwarded-headers and compute-full-forwarded-for on, it is 1 plus the
+entries the proxies in front write: 3 behind an L7 Google Cloud load
+balancer. Keep such a value; this warning stays
+(README, "Hesaplar ve giriş", "Vekil-hop rehberi"). Otherwise upgrade with
 {{- end }}
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS={{ $hopsWant }}
 {{- end }}

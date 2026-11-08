@@ -204,7 +204,14 @@ notunda hop, TLS ya da politika uyarısı çıkmadığını sınar; gerçek bir 
    Service'inde `externalTrafficPolicy: Local`; GCE Ingress'te ve GKE
    Gateway'de `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2`.
    Kurulum notu sınıf `gce` iken değer `2` değilse, `nginx` iken `1` değilse
-   WARNING yazar (`0`'da değeri önerir).
+   WARNING yazar (`0`'da değeri önerir). Önde L7 GCLB olan `ingress-nginx`'te
+   (`use-forwarded-headers` ve `compute-full-forwarded-for` açık) doğru değer
+   `3`'tür ("Hesaplar ve giriş" → "Vekil-hop rehberi"). Kurulum notu orada da
+   WARNING yazar ve "Kurulum notları görünmez"deki CI tarifi düşer.
+   Değeri değiştirmeyin: `1`'de bütün tarayıcılar yük dengeleyicinin adresine
+   sayılır, ad başına tek paylaşılan kilit kalır. CI'da yalnız saymak için
+   `&& [ "$n" -eq 0 ]`'ı silin ([backlog](docs/backlog.md), "Kurulum notunda
+   `frontend.networkPolicy.from` önerisini Ingress sınıfına göre vermek").
 2. Arayüz politikası. `--set frontend.networkPolicy.enabled=true` ve
    `frontend.networkPolicy.from`'da `ingress-nginx`'in namespace'i; GCE
    Ingress'te (NEG) ve GKE Gateway'de yük dengeleyicinin aralıkları:
@@ -372,9 +379,10 @@ n=$(grep -E '^ *WARNING:' notes.txt | grep -cv 'WARNING: the Secret "' || true);
   dışarıda bırakır: notlar Secret'ı cluster'da `lookup` ile arar, cluster'sız
   render onu hep yok görür.
 - Son komut uyarı varsa ya da notlar render edilemediyse (chart'ın reddettiği
-  bir değer) adımı düşürür; yalnız saymak için `&& [ "$n" -eq 0 ]`'ı silin.
-  Release adını ve namespace'i kendinizinkilerle yazın; notlardaki komutlara
-  onlar girer.
+  bir değer) adımı düşürür; yalnız saymak için `&& [ "$n" -eq 0 ]`'ı silin
+  (ör. önde L7 GCLB olan `ingress-nginx`'te doğru hop `3` de uyarı alır, bkz.
+  "GKE kontrol listesi"). Release adını ve namespace'i kendinizinkilerle
+  yazın; notlardaki komutlara onlar girer.
 - `helm install --dry-run=client` bunun yerine geçmez: `--api-versions` almaz,
   Helm 3'te de cluster'a bağlanır (3.22.1'de ölçüldü).
 - Tarif CI'da Helm 3 ve Helm 4 ile koşar ve [docs/gke.md](docs/gke.md)'nin
@@ -2357,9 +2365,11 @@ verirsiniz. `route.enabled` ya da `ingress.enabled` açıkken kurulum notu
   bütün girişleri tek kilide bağlar, "Kaynak tavanı" → "Önce hop değeri"); değeri
   `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` gibi verirsiniz.
 - Verilen değer sınıfınkiyle çelişirse (0.53) WARNING yazar ve sınıfın değerini
-  önerir: sınıf `gce` iken `2` değilse, `nginx` iken `1` değilse (`nginx`'te `3`
-  yalnız önde L7 GCLB ve iki ayarla doğrudur, uyarı yine çıkar). Başka bir
-  sınıfta ve Route'ta çelişki satırı yoktur.
+  önerir: sınıf `gce` iken `2` değilse, `nginx` iken `1` değilse. `nginx`'te
+  `use-forwarded-headers` ve `compute-full-forwarded-for` açıkken değer `1` artı
+  öndeki vekillerin yazdığı girdilerdir (önde L7 GCLB ile `3`); uyarı orada da
+  çıkar, değeri değiştirmeyin (CI tarifi için "Cluster'a kurulum" → "GKE kontrol
+  listesi"). Başka bir sınıfta ve Route'ta çelişki satırı yoktur.
 - Kurallar açıkken (`metrics.prometheusRule.enabled`) bu bölümde
   `KubeatSignInSourceDegraded`'i de anar: notları görmeyen kurulumda yanlış
   değeri o söyler (aşağıda "Sayaç ve kural").
