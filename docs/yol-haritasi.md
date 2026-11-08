@@ -122,9 +122,6 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 
 - Backend tek replica çalışır; güncelleme sırasında kontroller durur
   (gerçek OpenShift'te ölçülen boşluk 23–27 sn).
-- Kapanışta (yükseltme, pod taşıma) yarıda kalan ters monitor kontrolü açık
-  kesintiyi kapatıp sahte bir düzelme bildirimi gönderebilir; açılışta kesinti
-  yeniden açılır (S89, sprint 11, [#159](https://github.com/yusufceng/Kubeat/issues/159)).
 - 0.52'den beri her HTTP kontrolü bağlantısını kendisi açtığı için adı her kontrolde
   çözülür: cluster DNS'i kesilince her HTTP monitor'ü kendi zaman aşımında aynı turda
   DOWN olur (sprint 10 prova (a), minikube) ve her ekibin kanalına ayrı bir bildirim

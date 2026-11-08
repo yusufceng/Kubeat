@@ -23,6 +23,7 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	// None of these may panic.
 	m.CheckStarted()
 	m.CheckDone("http", true, time.Second)
+	m.CheckInterrupted()
 	m.SchedulerTick(time.Now())
 	m.DispatchSkipped(3)
 	m.Results(5, 1)
@@ -330,6 +331,9 @@ func TestEventCounters(t *testing.T) {
 	m.CheckDone("http", true, 120*time.Millisecond)
 	m.CheckDone("tcp", false, time.Second)
 	m.CheckStarted()
+	// A check a shutdown interrupted is no check: neither counted nor timed.
+	m.CheckStarted()
+	m.CheckInterrupted()
 	m.SchedulerTick(now)
 	m.DispatchSkipped(4)
 	m.DispatchSkipped(0)
