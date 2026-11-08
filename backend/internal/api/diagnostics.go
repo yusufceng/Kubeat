@@ -3,13 +3,15 @@ package api
 import (
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/explain"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
 // diagnosticsResponse is why a failed check failed, as far as the check
 // could tell (store.Diagnostics). Every field is present; what the check
-// did not learn is null.
+// did not learn is null. The one exception is ScopeReason, which only an
+// administrator's response carries.
 type diagnosticsResponse struct {
 	// Explanation is what the failure most likely means; null when no rule
 	// recognized it.
@@ -32,6 +34,13 @@ type diagnosticsResponse struct {
 	// Pod is the pod these details are about, for a monitor that checks
 	// each pod behind its service.
 	Pod *string `json:"pod"`
+	// ScopeReason is why the target scope refused a connection of the
+	// check: "connection", it leads outside the scope, or "resolve_error",
+	// a name that did not resolve. Only administrators get it, and only for
+	// a check the scope refused; it is absent for everyone else, who read
+	// the one explanation of either reason (ADR-0003 d): a user held to the
+	// scope must not learn from a result whether a name resolved.
+	ScopeReason string `json:"scope_reason,omitempty"`
 }
 
 // explanationResponse is what a failure most likely means: a stable code
@@ -72,13 +81,18 @@ type tlsResponse struct {
 	NotAfter *time.Time `json:"not_after"`
 }
 
-func toDiagnosticsResponse(d store.Diagnostics) *diagnosticsResponse {
+// toDiagnosticsResponse is d as the principal p reads it: the reason of a
+// scope's refusal goes to administrators alone.
+func toDiagnosticsResponse(p auth.Principal, d store.Diagnostics) *diagnosticsResponse {
 	resp := &diagnosticsResponse{
 		RemoteAddr: nullable(d.RemoteAddr),
 		StatusLine: nullable(d.StatusLine),
 		Headers:    d.Headers,
 		Redirects:  d.Redirects,
 		Pod:        nullable(d.Pod),
+	}
+	if p.IsAdmin() {
+		resp.ScopeReason = d.ScopeReason
 	}
 	if resp.Headers == nil {
 		resp.Headers = map[string]string{}

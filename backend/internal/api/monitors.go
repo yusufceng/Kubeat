@@ -130,10 +130,11 @@ type resultResponse struct {
 	Diagnostics *diagnosticsResponse `json:"diagnostics"`
 }
 
-func toResultResponse(r store.CheckResult) resultResponse {
+// toResultResponse is r as the principal p reads it (toDiagnosticsResponse).
+func toResultResponse(p auth.Principal, r store.CheckResult) resultResponse {
 	resp := resultResponse{CheckedAt: r.CheckedAt, Up: r.Up, LatencyMS: r.Latency.Milliseconds()}
 	if r.Diagnostics != nil {
-		resp.Diagnostics = toDiagnosticsResponse(*r.Diagnostics)
+		resp.Diagnostics = toDiagnosticsResponse(p, *r.Diagnostics)
 	}
 	if r.StatusCode != 0 {
 		resp.StatusCode = &r.StatusCode
@@ -203,7 +204,7 @@ func toMonitorResponse(p auth.Principal, st store.MonitorStatus, window time.Dur
 		resp.OpenIncident = &incident
 	}
 	if st.Last != nil {
-		last := toResultResponse(*st.Last)
+		last := toResultResponse(p, *st.Last)
 		resp.Last = &last
 		resp.Status = statusDown
 		if st.Last.Up {
@@ -1278,8 +1279,9 @@ func (h *handler) listResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := make([]resultResponse, 0, len(results))
+	p := principal(r)
 	for _, res := range results {
-		resp = append(resp, toResultResponse(res))
+		resp = append(resp, toResultResponse(p, res))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

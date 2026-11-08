@@ -65,7 +65,17 @@ export type Diagnostics = {
   redirects: number;
   /** For a monitor that checks each pod: the pod these details are about, the first one that failed. */
   pod: string | null;
+  /**
+   * Why the target scope refused a connection of the check: it leads outside
+   * the scope, or a name did not resolve. Only administrators get it, and only
+   * for a check the scope refused; everyone else reads the one explanation of
+   * either reason.
+   */
+  scope_reason?: ScopeReason | (string & {});
 };
+
+/** The reasons the target scope refuses a connection of a check, as kubeat_target_scope_denied_total names them. */
+export type ScopeReason = "connection" | "resolve_error";
 
 /**
  * The only headers a failed check keeps, values cut to 100 bytes. A location
@@ -150,6 +160,7 @@ export type ExplanationCode =
   // Failures to get an answer at all.
   | "blocked_by_policy"
   | "blocked_by_scope"
+  | "blocked_by_scope_object"
   | "dns_service_not_found"
   | "dns_not_found"
   | "dns_failed"

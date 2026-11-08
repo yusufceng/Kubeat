@@ -19,6 +19,17 @@ export function explanationText(d: Diagnostics, t: T): string | null {
   return text !== key ? text : e.text || null;
 }
 
+/**
+ * Why the target scope refused the check, a connection outside it or a name
+ * that did not resolve, in the viewer's language; the API's own word for a
+ * reason this version does not know. Only administrators are sent it.
+ */
+function scopeReasonText(reason: string, t: T): string {
+  const key = `monitorPage.why.scopeReason.${reason}`;
+  const text = t(key);
+  return text !== key ? text : reason;
+}
+
 /** The error a check reported, with its status code when the error does not say it. */
 export function checkError(r: Pick<CheckResult, "status_code" | "error" | "detail">): string {
   const code = r.status_code ? `HTTP ${r.status_code}` : null;
@@ -55,8 +66,17 @@ export function WhyBody({ result, inverted = false, t }: { result: CheckResult; 
             {error}
           </p>
         )}
-        {d && (d.remote_addr || d.status_line || d.redirects > 0 || d.pod) && (
+        {d && (d.remote_addr || d.status_line || d.redirects > 0 || d.pod || d.scope_reason) && (
           <dl className="mon-facts">
+            {d.scope_reason && (
+              <div className="mon-fact">
+                <dt>{t("monitorPage.why.scopeReason")}</dt>
+                <dd>
+                  {scopeReasonText(d.scope_reason, t)}
+                  <small>{t("monitorPage.why.scopeReason.hint")}</small>
+                </dd>
+              </div>
+            )}
             {d.remote_addr && (
               <div className="mon-fact">
                 <dt>{t("monitorPage.why.address")}</dt>

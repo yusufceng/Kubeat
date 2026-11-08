@@ -165,9 +165,11 @@ func spelledOut(s *netguard.Scope, m store.Monitor) bool {
 
 // refusedByScope is the outcome of a check of m the scope refused a
 // connection of, host the first one and why the reason: its error says only
-// that, and its diagnostics only what it means, without the address, the
-// reason or the phases of the connection refused. The connections the check
-// made before stay its hops.
+// that, and its diagnostics only what it means, worded by whose record holds
+// m (scopeRefusalCode) and the same for either reason, without the address
+// or the phases of the connection refused. The reason is kept beside them
+// for the administrators (store.Diagnostics.ScopeReason), whom the API alone
+// tells it. The connections the check made before stay its hops.
 func (c *Checker) refusedByScope(m store.Monitor, out outcome, host string, why netguard.Refusal) outcome {
 	key := scopeSettings(m)
 	c.mu.Lock()
@@ -182,11 +184,30 @@ func (c *Checker) refusedByScope(m store.Monitor, out outcome, host string, why 
 	if c.opts.Scope.Refused != nil {
 		c.opts.Scope.Refused(m, host, why, first)
 	}
+	reason := store.ScopeReasonConnection
+	if why == netguard.RefusedUnresolved {
+		reason = store.ScopeReasonResolveError
+	}
 	return outcome{
-		err:  errScopeRefusal,
-		diag: &store.Diagnostics{Explanation: &store.Explanation{Code: explain.BlockedByScope}},
+		err: errScopeRefusal,
+		diag: &store.Diagnostics{
+			Explanation: &store.Explanation{Code: scopeRefusalCode(m)},
+			ScopeReason: reason,
+		},
 		hops: out.hops,
 	}
+}
+
+// scopeRefusalCode is the explanation of a refused check of m, by whose
+// record holds it, so that its readers get the remedy that fits: a monitor
+// the annotation sync manages is held to its object's namespace in every
+// install, and no administrator setting it up helps it; any other, a user's
+// or one with no record (held to its namespace), may be set up by one.
+func scopeRefusalCode(m store.Monitor) string {
+	if m.Managed {
+		return explain.BlockedByScopeObject
+	}
+	return explain.BlockedByScope
 }
 
 // scopeSettings are the settings of m that decide where its check connects

@@ -81,12 +81,13 @@ type refusalSeen struct {
 	host    string
 	why     netguard.Refusal
 	first   bool
+	managed bool // the monitor's, whose explanation tells it apart
 }
 
 func (r *refusals) tell(m store.Monitor, host string, why netguard.Refusal, first bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.seen = append(r.seen, refusalSeen{m.ID, host, why, first})
+	r.seen = append(r.seen, refusalSeen{m.ID, host, why, first, m.Managed})
 }
 
 func (r *refusals) take() []refusalSeen {
@@ -147,16 +148,17 @@ func check(c *Checker, m store.Monitor) store.CheckResult {
 
 // refusedByTheScope asserts that got is the scope's refusal: down, with the
 // one generic error and nothing else of the connection refused, explained
-// as the scope's, and told once with host, as one that leads outside the
-// scope. It returns what was told.
+// as the scope's by whose record holds the monitor, and told once with
+// host, as one that leads outside the scope. It returns what was told.
 func refusedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) []refusalSeen {
 	t.Helper()
 	return refusedFor(t, what, got, r, host, netguard.RefusedOutside)
 }
 
 // unresolvedByTheScope asserts that got is the scope's refusal of a name
-// that did not resolve: the same result as any refusal, told with host as
-// unresolved, so that only the operator tells the two apart.
+// that did not resolve: the same error and explanation as any refusal, told
+// with host as unresolved, so that only the operator, and in the result the
+// reason kept for the administrators, tell the two apart.
 func unresolvedByTheScope(t *testing.T, what string, got store.CheckResult, r *refusals, host string) []refusalSeen {
 	t.Helper()
 	return refusedFor(t, what, got, r, host, netguard.RefusedUnresolved)
@@ -167,10 +169,6 @@ func refusedFor(t *testing.T, what string, got store.CheckResult, r *refusals, h
 	if got.Up || got.Error != scopeRefusalText {
 		t.Errorf("%s: up = %v, error %q; want the scope's refusal", what, got.Up, got.Error)
 	}
-	want := &store.Diagnostics{Explanation: &store.Explanation{Code: explain.BlockedByScope}}
-	if !reflect.DeepEqual(got.Diagnostics, want) {
-		t.Errorf("%s: diagnostics = %+v, want only the scope's explanation", what, got.Diagnostics)
-	}
 	for _, leak := range []string{"127.0.0", "payments", "kube", "sslip", "10.0.0", "10.96"} {
 		if strings.Contains(got.Error+got.Detail, leak) {
 			t.Errorf("%s: the result names %q: %q", what, leak, got.Error)
@@ -179,6 +177,17 @@ func refusedFor(t *testing.T, what string, got store.CheckResult, r *refusals, h
 	seen := r.take()
 	if len(seen) != 1 || seen[0].host != host || seen[0].why != why {
 		t.Errorf("%s: told %+v, want one refusal of %s, %v", what, seen, host, why)
+	}
+	code, reason := explain.BlockedByScope, store.ScopeReasonConnection
+	if len(seen) == 1 && seen[0].managed {
+		code = explain.BlockedByScopeObject
+	}
+	if why == netguard.RefusedUnresolved {
+		reason = store.ScopeReasonResolveError
+	}
+	want := &store.Diagnostics{Explanation: &store.Explanation{Code: code}, ScopeReason: reason}
+	if !reflect.DeepEqual(got.Diagnostics, want) {
+		t.Errorf("%s: diagnostics = %+v, want only the scope's explanation and reason %+v", what, got.Diagnostics, want)
 	}
 	return seen
 }
@@ -222,12 +231,16 @@ func TestScopeEveryConnection_HTTP(t *testing.T) {
 	}
 
 	// A name the check is led to that does not resolve is refused as one
-	// that lands in the cluster is, with the same result: a result of its
-	// own would tell which names exist there.
+	// that lands in the cluster is, with the same error and explanation: a
+	// result of its own would tell which names exist there. Only the reason
+	// kept for the administrators differs, which the API tells no one else.
 	landing := check(c, held(httpMonitor(at("public.example.test", "/to?host=api.payments"))))
 	missing := check(c, held(httpMonitor(at("public.example.test", "/to?host=nosuch.payments"))))
-	if landing.Error != missing.Error || !reflect.DeepEqual(landing.Diagnostics, missing.Diagnostics) || landing.Up || missing.Up {
+	if landing.Error != missing.Error || landing.Up || missing.Up || landing.Diagnostics == nil || missing.Diagnostics == nil ||
+		!reflect.DeepEqual(landing.Diagnostics.Explanation, missing.Diagnostics.Explanation) {
 		t.Errorf("a name in the cluster and one that does not exist differ: %+v and %+v", landing, missing)
+	} else if landing.Diagnostics.ScopeReason != store.ScopeReasonConnection || missing.Diagnostics.ScopeReason != store.ScopeReasonResolveError {
+		t.Errorf("reasons kept: %q and %q", landing.Diagnostics.ScopeReason, missing.Diagnostics.ScopeReason)
 	}
 	r.take()
 	for _, host := range []string{"nosuch.payments", "gone.example.test"} {

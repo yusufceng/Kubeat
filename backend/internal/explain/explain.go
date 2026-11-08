@@ -46,9 +46,10 @@ const (
 
 	// Failures to get an answer at all.
 	BlockedByPolicy       = "blocked_by_policy"
-	BlockedByScope        = "blocked_by_scope"      // a connection outside the namespaces of whoever set the monitor up
-	DNSServiceNotFound    = "dns_service_not_found" // {service} {namespace}
-	DNSNotFound           = "dns_not_found"         // {host}
+	BlockedByScope        = "blocked_by_scope"        // the target scope refused a connection of a monitor a user set up, or one with no record of the scope
+	BlockedByScopeObject  = "blocked_by_scope_object" // the same for a monitor an annotated object set up, held to the object's namespace
+	DNSServiceNotFound    = "dns_service_not_found"   // {service} {namespace}
+	DNSNotFound           = "dns_not_found"           // {host}
 	DNSFailed             = "dns_failed"
 	ConnectionRefused     = "connection_refused"
 	ConnectionReset       = "connection_reset"

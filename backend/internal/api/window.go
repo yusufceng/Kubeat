@@ -104,7 +104,7 @@ func (h *handler) monitorWindow(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, f := range failures {
-			resp.Failures = append(resp.Failures, toResultResponse(f))
+			resp.Failures = append(resp.Failures, toResultResponse(principal(r), f))
 		}
 		resp.FailuresTruncated = sum.Failed > len(failures)
 	}

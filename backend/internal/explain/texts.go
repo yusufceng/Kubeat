@@ -26,7 +26,8 @@ var languages = map[string]map[string]string{
 		Status504: "A proxy in front of the application waited too long for its answer: the application is slow or hanging.",
 
 		BlockedByPolicy:       "Kubeat's target policy does not allow this address (loopback, link-local or a range the operator denied); UPTIME_TARGET_ALLOW_CIDRS can allow it.",
-		BlockedByScope:        "Kubeat's target scope refused a connection of this check: it leads outside the namespaces of whoever set up the monitor; an administrator can set it up.",
+		BlockedByScope:        "The target scope refused a connection of this check: it leads outside the namespaces of whoever set up the monitor, or DNS failed to resolve its name; if DNS works, an administrator can set it up.",
+		BlockedByScopeObject:  "The target scope refused a connection of this check: it leads outside the annotated object's namespace, or DNS failed to resolve its name; check the app's own host at a health path needing no sign-in.",
 		DNSServiceNotFound:    "There is no Service {service} in the namespace {namespace}: check both names in the address.",
 		DNSNotFound:           "The name {host} does not resolve: check its spelling, and that what it names exists.",
 		DNSFailed:             "The name could not be looked up: the DNS server did not answer in time, or failed.",
@@ -65,7 +66,8 @@ var languages = map[string]map[string]string{
 		Status504: "Uygulamanın önündeki proxy yanıtını çok uzun bekledi: uygulama yavaş ya da takılmış.",
 
 		BlockedByPolicy:       "Kubeat'in hedef politikası bu adrese izin vermiyor (loopback, link-local ya da yöneticinin yasakladığı bir aralık); UPTIME_TARGET_ALLOW_CIDRS izin verebilir.",
-		BlockedByScope:        "Kubeat'in hedef kapsamı bu kontrolün bir bağlantısını reddetti: bağlantı monitor'ü kuranın namespace'lerinin dışına gidiyor; monitor'ü bir yönetici kurabilir.",
+		BlockedByScope:        "Hedef kapsamı kontrolün bir bağlantısını reddetti: bağlantı monitor'ü kuranın namespace'lerinin dışına gidiyor ya da adı o an çözülemedi; DNS arızası değilse monitor'ü bir yönetici kurabilir.",
+		BlockedByScopeObject:  "Hedef kapsamı kontrolün bir bağlantısını reddetti: nesnenin namespace'i dışına gidiyor ya da adı DNS'te çözülemedi; kontrolü uygulamanın kendi host'unda, oturum istemeyen bir sağlık yolunda tutun.",
 		DNSServiceNotFound:    "{namespace} namespace'inde {service} adında bir Service yok: adresteki iki adı da kontrol edin.",
 		DNSNotFound:           "{host} adı çözülmüyor: yazımını ve gösterdiği şeyin var olduğunu kontrol edin.",
 		DNSFailed:             "Ad çözülemedi: DNS sunucusu zamanında yanıt vermedi ya da hata verdi.",
