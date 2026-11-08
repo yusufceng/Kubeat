@@ -267,10 +267,12 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   aralığındaki bir adres `kesin` görünür, `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'teyse
   reddedilmez. `LIMITED=false` iken yalnız annotation monitor'lerine bakar.
   Süzgeç yalnız hedefe ve host adı taşıyan seçeneğe bakar; kontrolün çalışırken
-  ulaştığı öteki yerler önceden görülemez. Yükseltmeden sonra kesin liste:
+  ulaştığı öteki yerler önceden görülemez. Yükseltmeden sonra kesin liste
+  (0.53'ten beri annotation monitor'lerinin kodu `blocked_by_scope_object`,
+  süzgeç ikisini de alır):
 
   ```sh
-  api monitors | jq -r '.[] | select(.last_result.diagnostics.explanation.code == "blocked_by_scope")
+  api monitors | jq -r '.[] | select(.last_result.diagnostics.explanation.code // "" | startswith("blocked_by_scope"))
     | "\(.id)\t\(.namespace)\t\(.name)\t\(.target)"'
   ```
 
