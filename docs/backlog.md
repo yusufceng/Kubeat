@@ -2136,6 +2136,14 @@ kapatan bir values anahtarı yok; README "Sayaç ve kural" Alertmanager'da `aler
 `reason` + `namespace` ile susturmayı veriyor. Kural başına bir anahtar, susturmayı
 yetersiz bulan ilk kurulumda dilim 2 ile birlikte değerlendirilir.
 
+Güncelleme (2026-11-08, sprint 10 kapanışı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)):
+dilim 2'ye kaynak tavanının kuralı da girer (`kubeat_signin_throttled_total{kind="source_total"}`;
+S88 [#145](https://github.com/yusufceng/Kubeat/issues/145) erteledi). Kurulum notuna
+`KubeatSignInSourceDegraded` satırı S95 ile gelir (sprint 11 önerisi). `hops_too_low`'un
+F5/WAF önlü Route sınırı ayrı maddede ("`hops_too_low`'u önde başlık yazan katmanların
+çıkış aralıklarına genişletmek"). Sandbox UWM'de `hops_zero` ile yandı (sprint 10 prova
+(b)); artış yeni pod serisinin ilk örneklemesinden önceyse `increase()` onu görmez.
+
 ## Kapsam-dışı hedef reddi denetimini keşif-import/restore, bakım ve workload yollarına genişletmek + flood cap (S68 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2689,3 +2697,98 @@ Güvenlik ekibi bir spreyin kilitlendiği anı denetim kaydında göremez. Öner
 ilk reddinde tek bir satır (ör. `login_locked_source`), denetim satırı sınırıyla
 (`UPTIME_LOGIN_AUDIT_PER_MINUTE`). Tetikleyici: denetim kaydını okuyan gerçek bir
 güvenlik ekibi isteği ya da S83'ün kalanı.
+
+## API'de birden çok adı sınayan istekte ilk çözüm hatası ve iki çözümün süresi (S82 takibi)
+
+2026-11-08'de ertelendi (S82 [#142](https://github.com/yusufceng/Kubeat/issues/142)
+incelemesi; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52'de API bir isteği ilk reddiyle sayar: istek birden çok ad
+sınıyorsa ve ilk ad çözülemiyorsa ret, ötekiler sınanmadan `resolve_error` sayılır ve
+denetim satırı ilk adı yazar (README "Hedef politikası" → "Kapsam ihlali denetimi",
+"Bilinen sınır"). İstek yine 403 alır, sızıntı yok; ama öteki ad cluster'a götürse de
+`reason="target"` alarmı yanmaz. Kontrol anında bütün adlar sınanır. Seçenek: oluşturma,
+klon ve değiştirmede bütün adların yazılışını çözümden önce sınamak; bu, 400/403 ile
+namespace ve hedef reddinin öncelik sırasını değiştirir. Aynı yüzeyde ikinci parça: iki
+çözüm ayrı 2 sn'lik bütçe kullandığından birden çok ad sınayan bir isteğin
+oluşturması ~4 sn sürebilir ve arayüzün 3 sn'sini aşar; seçenek isteğe tek bir son tarih
+(belge düzeltmesi seçildi, kod değişikliği testte gerçek saat ister). Tetikleyici: S73 ya
+da S93'ün `targetscope.go` turu, ya da `target` yerine `resolve_error` sayılan gerçek bir
+girişim.
+
+## Kapsam reddi için chart'ta işletim kuralı ve README'deki PromQL örneklerinin promtool'la sınanması (S82 takibi)
+
+2026-11-08'de ertelendi (S82 [#142](https://github.com/yusufceng/Kubeat/issues/142), PO
+kararı: chart'a kapsam reddi alarmı kapsam dışı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52
+`resolve_error`'u sayaçta ayırıyor ama chart'ta kural yok. README "Kapsam ihlali
+denetimi"ndeki iki PromQL örneği (`reason="target",source="user"` ve
+`reason="resolve_error"`) promtool'la ya da gerçek bir Prometheus'ta denenmedi. Müşteri A
+(sprint 10 bulgusu 1, önemli): `metrics.prometheusRule` altında
+`resolve_error{source="annotation"}` artışı için promtool'la sınanan bir işletim kuralı;
+DNS kesintisi böylece platform ekibine kapsam reddi diye değil işletim alarmı diye gider.
+Tetikleyici: S93 (sprint 11 önerisinde S96'nın zincirinde).
+
+## README "Metrikler" tablosunda `kubeat_target_scope_denied_total`
+
+2026-11-08'de ertelendi (S82 [#142](https://github.com/yusufceng/Kubeat/issues/142);
+[sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). README "Aracın kendi sağlığı" → "Metrikler" tablosu sayacı listelemiyor; eksik bu
+sürümden önce de vardı. Satır `reason` (`target`, `namespace`, `connection`,
+`resolve_error`) ve `source` (`user`, `annotation`, `unrecorded`) etiketlerini ve "Kapsam
+ihlali denetimi"ne bağlantıyı verir. Tetikleyici: sprint 11 belge turu.
+
+## OpenShift'te EgressIP ve vekil ACL reçetesi (S82 takibi)
+
+2026-11-08'de ertelendi (S82 [#143](https://github.com/yusufceng/Kubeat/issues/143); Müşteri
+A'nın sprint 8 bulgusu 3'ünün ilk yarısı; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52'nin `server resolve`'u vekilli
+kurulumun NXDOMAIN ön şartını sınıyor. Çıkış adresi (EgressIP) ve vekil ACL'i için bir
+OpenShift reçetesi, backend pod'undan node adresine ve API VIP'ine red bekleyen iki sınama
+satırı yok. #143'ün kabul ölçütünde değildi, PO'ya bırakıldı. Tetikleyici: vekilli kurumsal
+OpenShift provası ya da pilotun "Vekilli kapsam" adımını koşan bir kurulum.
+
+## Kapsama bağlı monitor başına HTTP taşıyıcısını kaldırmak (S92 takibi)
+
+2026-11-08'de ertelendi (S92 [#144](https://github.com/yusufceng/Kubeat/issues/144);
+[sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). 0.52'de her HTTP kontrolü bağlantılarını kapatıyor, monitor başına taşıyıcı yapısı
+PO kararıyla kaldı. 2000 kapsama bağlı monitor'de ~8 MiB heap kalıyor (monitor başına ~4
+KiB); taşıyıcıyı kontrol başına klonlamak bunu sıfırlar. S42 (keşif belleği) ile birlikte
+tartılır. Tetikleyici: S42 ya da bellek limitine yaklaşan gerçek bir kurulum.
+
+## Kaynak tavanının kalanları: öteki yüzeyler, açık değerin bildirimi ve ret satırının metni (S88 takibi)
+
+2026-11-08'de ertelendi (S88 [#145](https://github.com/yusufceng/Kubeat/issues/145) ve
+Müşteri A'nın #145 puan yorumu; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)).
+
+- Tavan yalnız girişi kapsar; durum sayfası kilidi ve parola değiştirme kaynak + ad
+  sınırında (S76) kalır (issue kapsam dışı).
+- LDAP tanımlıyken açık bir değer (>0) açılışta bildirilmiyor; yalnız eksikken `WARN`,
+  `0`'da `INFO` var.
+- Tavan reddinin `WARN`'ı `throttle=source_total` alanını taşıyor ama metni "the name is
+  locked" diyor (sandbox, sprint 10 prova (b)); tavan için kaynağı adlandıran bir metin.
+
+Tavanın chart kuralı S85 dilim 2'de, denetim satırı "Kaynak tavanının ilk reddi için
+denetim satırı"nda. Müşteri A NAT, VDI ve vekil arkasındaki kullanıcıları yüzünden tavanı
+`0`'da tutacak. Tetikleyici: tavanı açan bir kurulum ya da `throttle.go`/`auth.go`'ya dokunan
+bir sonraki madde (metin için).
+
+## `hops_too_low`'u önde başlık yazan katmanların çıkış aralıklarına genişletmek (F5/WAF önlü Route; S85 takibi)
+
+2026-11-08'de ertelendi (S85 dilim 1 [#146](https://github.com/yusufceng/Kubeat/issues/146);
+Müşteri A, sprint 10 bulgusu 2, önemli; [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)). `hops_too_low` yalnız anahtarlanan kaynak
+`UPTIME_PUBLIC_URL` host'unun çözüldüğü adreslerden biriyse sayılır. Router'ın önünde F5 ya
+da WAF varsa katman router'a kendi çıkış adresinden (SNAT havuzu) bağlanır: değer `2` yerine
+`1` olsa da sayaç, `WARN` ve kural susar ve throttle bütün tarayıcılar için tek kilide düşer.
+LDAP'lı kurulumda bu, dizin hesap kilidine giden yol (README "Yanlış ayar sessizce etkisiz
+kalmaz"). A kayıtlı bir CDN'in arkası da yakalanmaz. Öneri: opt-in bir ayar önde başlık
+yazan katmanların bilinen çıkış aralıklarını (CIDR) alır ve kaynak bu aralıktaysa
+`hops_too_low` sayılır. Ayar `X-Forwarded-For`'a güven vermez, yalnız sinyali besler ("XFF
+güveni için cluster dışındaki güvenilir vekillerin CIDR listesi" maddesinden ayrı). Satır
+pilot reçetesinde ve NOTES'ta F5/WAF satırının yanında yer alır. Ajan içinde minikube'da
+`ingress-nginx` önüne başlık yazan ikinci bir nginx ile ölçülebilir; gerçek F5 kullanıcıda.
+Tetikleyici: sprint 11'de boş bir slot (yedek) ya da F5/WAF önlü bir kurulumun pilotu.
+
+## İki cluster'lı promtool senaryoları: `KubeatSignInSourceDegraded` ve `KubeatDiscoveryNamespaceSkipped`
+
+2026-11-08'de ertelendi (S85 dilim 1 [#146](https://github.com/yusufceng/Kubeat/issues/146)
+ve S43 [#147](https://github.com/yusufceng/Kubeat/issues/147); [sprints/2026-11-07-sprint-10.md](sprints/2026-11-07-sprint-10.md)).
+`deploy/helm/prometheusrule-cluster-test.yaml`'da 0.52'nin iki yeni kuralı için iki
+cluster'lı senaryo yok. `clusterLabel`'lı render `test-chart.sh`'ta `--lint-fatal` ile
+denetleniyor. Tetikleyici: kurallara dokunan bir sonraki madde (S85 dilim 2, S93) ya da
+`clusterLabel` kullanan bir kurulumda yanlış toplanan bir alarm.
