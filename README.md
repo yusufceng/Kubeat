@@ -922,8 +922,8 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   hedef bu kapının dışındadır (DNS rebinding), bunun için deny-CIDR ve çok
   kiracılı kurulumda düzenli bir prova derinlemesine savunma olarak kalır.
 - **Kapsam ihlali denetimi (0.49; kontrol anı 0.51; çözüm hatası, kaynak,
-  satır sınırı ve log satırı 0.52).** Kapsamı sınırlı bir kullanıcının kapsam
-  dışı bir hedefe ya da düzenleyemediği bir namespace'e monitor veya kanal
+  satır sınırı ve log satırı 0.52; kural 0.53).** Kapsamı sınırlı bir kullanıcının
+  kapsam dışı bir hedefe ya da düzenleyemediği bir namespace'e monitor veya kanal
   kurma/değiştirme, keşiften içe aktarma ya da geri yükleme, bakım penceresi
   kurma ya da silme girişimi yalnızca reddedilmekle kalmaz, bir denetim kaydı
   bırakır: `login_failed` gibi, `deny`/`target-scope` eylemiyle ve 90 gün
@@ -978,6 +978,12 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     yazılır (kullanıcı `checker`, nesne monitor'ün kimliği), monitor'ün
     bağlandığı yeri belirleyen ayarları değişince, monitor duraklatılıp yeniden
     açılınca ya da backend yeniden başlayınca bir satır daha.
+  - **Lisanssız kurulumda.** Denetim kaydını görmek bir lisans özelliğidir
+    (`audit`, bkz. "Kubeat Enterprise lisansı"): lisanssız kurulumda satırlar
+    yine yazılır ama denetim kaydı görünmez, lisans gelince geçmişiyle
+    görünür. Sayaç, log satırı ve kural lisanstan bağımsızdır; annotation
+    monitor'lerinin redleri lisanssız, tek kiracılı bir kurulumda da
+    bunlarla izlenir.
   - **Log satırı (0.52).** Her denetim satırından sonra backend log'u bir
     `WARN` yazar; merkezi logda insanın denemesi annotation ve yükseltme
     gürültüsünden ayrılır:
@@ -1034,15 +1040,30 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   yönetici monitor'üdür (`source="unrecorded"`; aşağıda "0.51 öncesinden kalan
   monitor'ler").
 
-  Chart hazır bir kural getirmez; kendi Prometheus'unuzda girişimi DNS
-  arızasından ve annotation gürültüsünden ayırarak şöyle alarmlayabilirsiniz:
+  Alarmlar:
 
-  ```
-  # Kapsamı sınırlı bir kullanıcı başka bir ekibin hedefine monitor ya da kanal kurmaya çalıştı
-  increase(kubeat_target_scope_denied_total{reason="target",source="user"}[5m]) > 0
-  # Kapsam çözümü cluster DNS'ine ulaşamıyor (güvenlik değil, işletim alarmı)
-  increase(kubeat_target_scope_denied_total{reason="resolve_error"}[5m]) > 0
-  ```
+  - **`KubeatScopeResolveErrors` (0.53).** `metrics.prometheusRule.enabled` ile
+    gelen `kubeat.scope` grubunda, `warning`. Annotation monitor'lerinin
+    kontrollerinde çözülemeyen bir ada giden bağlantının reddi
+    (`reason="resolve_error",source="annotation"`) 10 dakika boyunca, en
+    geç 5 dakikada bir yinelenince yanar. Güvenlik değil işletim alarmıdır:
+    annotation monitor'leri her kurulumda nesnelerinin namespace'ine
+    bağlıdır ve bu red çoğu zaman cluster DNS'inin ya da backend'in ona
+    giden yolunun arızasıdır (yukarıda "Egress ve DNS"). Tek bir monitor'ün
+    geçici SERVFAIL'i yakmaz. Kuruluma göre tektir ve `KubeatUnhealthy`'ye
+    bağlı değildir.
+  - **Kendi Prometheus'unuzda.** Girişimi ve kullanıcıların (kaydı olmayan
+    monitor'ler dahil) çözüm hatasını chart alarmlamaz. Annotation
+    gürültüsünden ayırarak şöyle alarmlayabilirsiniz; iki ifade CI'da bu
+    bölümden olduğu gibi alınıp promtool'la sınanır
+    (`deploy/helm/test-chart.sh`):
+
+    ```
+    # Kapsamı sınırlı bir kullanıcı başka bir ekibin hedefine monitor ya da kanal kurmaya çalıştı
+    increase(kubeat_target_scope_denied_total{reason="target",source="user"}[5m]) > 0
+    # Kapsam çözümü cluster DNS'ine ulaşamıyor; annotation monitor'lerininkini KubeatScopeResolveErrors duyurur
+    increase(kubeat_target_scope_denied_total{reason="resolve_error",source!="annotation"}[5m]) > 0
+    ```
 - **Kurum ağı (0.51, opt-in).** Genel bir adrese çözülen cluster dışı hedefler
   (genel internet, genel adresli bir OpenShift Route adı) yalnızca hedef
   politikasına tabidir; kapsam onları kısıtlamaz. Özel adresli kurum ağı ise
@@ -1226,11 +1247,33 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       Eşitleme yönettiği sürece kimin kaydettiğine bakılmaz; başka bir kayıt
       (ör. eşitleme kapalıyken yapılmış bir değişiklik) bir sonraki turda
       geri yazılır.
-  - **Reddedilince.** Kontrol DOWN olur. Sonucun hatası tek genel bir metindir,
-    adres ya da neden söylemez; açıklaması arayüzde ve bildirimde, Türkçe ve
-    İngilizce, bunun bir kapsam reddi olduğunu söyler. Ters (`inverted`)
-    monitor bunu beklediği başarısızlık saymaz. Denetim ve sayaç: yukarıda
-    "Kapsam ihlali denetimi".
+  - **Reddedilince.** Kontrol DOWN olur. Ters (`inverted`) monitor bunu
+    beklediği başarısızlık saymaz. Denetim, sayaç ve kural: yukarıda "Kapsam
+    ihlali denetimi".
+    - **Hata.** Sonucun hatası tek genel bir metindir; adres ya da neden
+      söylemez.
+    - **Açıklama (0.53'te kaynağa göre).** Arayüzde ve bildirimde, Türkçe ve
+      İngilizce, aynı metindir. Metin nedenden bağımsızdır: iki olasılığı da
+      söyler, bağlantı kapsamın dışına gidiyor ya da ad o an çözülemedi (DNS
+      arızası olabilir). Böylece kapsamı sınırlı kullanıcı sonuçtan bir adın
+      çözülüp çözülmediğini öğrenemez (yukarıda "Red mesajı"). Kod ve çare
+      monitor'ün kaydına göredir:
+      - `blocked_by_scope`: kaydı bir kullanıcının olan monitor ve kaydı
+        olmayan monitor. Çare: DNS arızası değilse monitor'ü bir yönetici
+        kurabilir.
+      - `blocked_by_scope_object`: annotation'la kurulan monitor. Çare:
+        kontrolü uygulamanın kendi host'unda, oturum istemeyen bir sağlık
+        yolunda tutmak; metin yöneticiyi önermez, çünkü eşitleme monitor'ü
+        nesnenin namespace'ine geri bağlar.
+
+      0.53'ten önce yazılmış sonuçlar `blocked_by_scope` kodunu taşır ve
+      bugünkü metinle görünür (annotation monitor'ününki de).
+    - **Neden yalnız yöneticiye (0.53).** Yönetici (ve API token'ı) monitor
+      ayrıntısında, sonuçlarda ve olayın zaman çizelgesinde reddin nedenini
+      görür: API'de `diagnostics.scope_reason` `connection` (bağlantı
+      kapsamın dışına gidiyor) ya da `resolve_error` (ad çözülemedi), arayüzde
+      "Reddin nedeni" satırı. Öteki kullanıcıların, her namespace'i
+      görenlerin de, yanıtında bu alan yoktur.
   - **0.51 öncesinden kalan monitor'ler.** Kayıtları yoktur; backend açılışta
     bakar:
     - annotation'la kurulan monitor'ler her kurulumda nesnenin namespace'ine
@@ -1284,12 +1327,14 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     - Vekile giden kontrolde çözüm hatası (SERVFAIL, zaman aşımı) ve
       kontrolün yöneldiği, ayarlarda yazılı olmayan bir adın çözüm hatası da
       kapsam reddi sayılır: CoreDNS kesintisinde kapsamı sınırlı ve
-      annotation'la kurulan monitor'lerin bu kontrolleri DOWN olur ve
-      bildirim DNS kesintisini kapsam reddi diye söyler. 0.52'den beri bu red
-      sayaçta, logda ve denetim satırında `resolve_error` olarak gerçek bir
-      reddinden ayrılır; kontrolün zaman aşımı ya da kapanış çözümü yarıda
-      keserse red sayılmaz, kontrol zaman aşımıyla biter (yukarıda "Zaman
-      aşımı").
+      annotation'la kurulan monitor'lerin bu kontrolleri DOWN olur. 0.52'den
+      beri bu red sayaçta, logda ve denetim satırında `resolve_error` olarak
+      gerçek bir reddinden ayrılır; 0.53'ten beri sonucun açıklaması ve
+      bildirim DNS arızası olasılığını da söyler, nedeni yönetici görür,
+      annotation monitor'lerininkini `KubeatScopeResolveErrors` duyurur
+      (yukarıda "Reddedilince", "Kapsam ihlali denetimi"). Kontrolün zaman
+      aşımı ya da kapanış çözümü yarıda keserse red sayılmaz, kontrol zaman
+      aşımıyla biter (yukarıda "Zaman aşımı").
     - Hassas aralıkları `UPTIME_TARGET_DENY_CIDRS` ile kapatmak her monitor ve
       kanal için derinlemesine savunma olarak geçerli kalır.
 
@@ -3848,6 +3893,8 @@ sırayla denenir, ilk eşleşen kazanır:
 | `http_to_tls_port` | 400 ve Go sunucularının "Client sent an HTTP request to an HTTPS server" ya da nginx'in "The plain HTTP request was sent to HTTPS port" yanıtı | TLS bekleyen porta düz HTTP gönderildi |
 | `http_401`, `http_403`, `http_404`, `http_429`, `http_500`, `http_502`, `http_503`, `http_504` | Yukarıdaki sayfalardan biri değilse durum kodu | Kodun genel anlamı; 404'te Ingress ya da Route kuralı eşleşmiyor olabilir |
 | `blocked_by_policy` | Hedef politikasının reddi | Adres yasak bir aralıkta; `UPTIME_TARGET_ALLOW_CIDRS` izin verebilir |
+| `blocked_by_scope` | Hedef kapsamı, kaydı bir kullanıcının olan ya da kaydı olmayan monitor'ün kontrolünün açtığı bir bağlantıyı reddetti | Bağlantı monitor'ü kuranın namespace'lerinin dışına gidiyor ya da ad o an çözülemedi (DNS arızası olabilir); DNS arızası değilse monitor'ü bir yönetici kurabilir (bkz. "Hedef politikası" → "Reddedilince") |
+| `blocked_by_scope_object` | Aynı ret, annotation'la kurulan monitor'de (0.53) | Bağlantı nesnenin namespace'inin dışına gidiyor ya da ad o an çözülemedi; kontrol uygulamanın kendi host'unda, oturum istemeyen bir sağlık yolunda tutulur |
 | `dns_service_not_found` (`service`, `namespace`) | `<service>.<namespace>.svc[...]` biçimindeki ad çözülmüyor | O namespace'te o adda Service yok; çoğu zaman adreste yanlış namespace |
 | `dns_not_found` (`host`) | Başka bir ad çözülmüyor | Ad yanlış ya da gösterdiği şey yok |
 | `dns_failed` | DNS sunucusu yanıt vermedi ya da hata döndü | Cluster DNS'i |
@@ -4054,6 +4101,7 @@ yayınlar. Başlıcaları:
 | `kubeat_signin_throttled_total{kind}` | Throttle'ın 429 ile reddettiği girişler: `source` (kaynak-ve-ad başına, `UPTIME_LOGIN_MAX_FAILURES`), `account` (tüm kaynaklardaki gevşek ad tavanı, `UPTIME_LOGIN_ACCOUNT_MAX_FAILURES`; ADR-0004'ün açık bıraktığı dağıtık kilidi görünür kılar) ya da `source_total` (0.52; bir kaynağın bütün adlardaki tavanı, `UPTIME_LOGIN_SOURCE_MAX_FAILURES`; tek kaynaktan parola spreyi). İstemci yanıtı değişmez; üç seri de açılışta 0'dan başlar |
 | `kubeat_throttled_total{surface,kind}` | Parola değiştirmenin (`password_change`) ve durum sayfası kilidinin (`status_page`) 429'ları (0.52): `source` (kaynağın kilidi) ya da `account` (sayfanın ya da hesabın tüm kaynaklardaki tavanı). Girişinkiler `kubeat_signin_throttled_total`'dadır; dört seri açılışta 0'dan başlar |
 | `kubeat_signin_source_degraded_total{reason,surface}` | Throttle'ın istemciye anahtarlayamadığı giriş, parola değiştirme ve durum sayfası kilidi istekleri (0.52), WARN'ın dakika sınırından bağımsız her biri: `hops_zero`, `no_frontend_token`, `hops_too_high`, `hops_too_low` (kaynak Kubeat'in kendi genel adresi) ve `untrusted_peer` (arayüzden gelmeyen istek; betikte beklenen). Adres taşımaz; 15 seri açılışta 0'dan başlar. `KubeatSignInSourceDegraded` ilk dördüne bakar (bkz. "Hesaplar ve giriş" → "Yanlış ayar sessizce etkisiz kalmaz") |
+| `kubeat_target_scope_denied_total{reason,source}` | Hedef kapsamının redleri (0.49; `source` 0.52), her biri: `reason` `target` ve `namespace` (API'nin redleri), `connection` (kontrolün açtığı bir bağlantı kapsamın dışına gidiyor, 0.51) ya da `resolve_error` (ad çözülemedi, API'de de, 0.52); `source` `user`, `annotation` ya da `unrecorded` (kaydı olmayan monitor). Adres ve monitor adı taşımaz; anlamlı sekiz seri açılışta 0'dan başlar. `KubeatScopeResolveErrors` `reason="resolve_error",source="annotation"`'a bakar (bkz. "Hedef politikası" → "Kapsam ihlali denetimi") |
 | `kubeat_backups_total{result}` | Yedek denemeleri, `ok` ya da `failed`; iki seri de açılışta 0'dan başlar |
 | `kubeat_backup_last_success_timestamp_seconds` | En yeni yedek kopyanın zamanı; yeniden başlatmada yedek dizinindeki en yeni dosyadan okunur (bkz. "Yedekleme ve geri yükleme") |
 | `kubeat_backup_last_failure_timestamp_seconds` | Son başarısız yedek denemesinin zamanı, süreç açıldığından beri; yoksa 0. Son başarılı kopyadan yeniyse yedekleme başarısızdır (`KubeatBackupFailing`) |
@@ -4095,16 +4143,17 @@ yapılır. Kurallar:
 | `KubeatBackupStale` | `backup.interval` değerinin iki katı süredir başarılı yedek yok; yalnızca `backup.enabled=true` iken üretilir |
 | `KubeatLicenseExpiring` | Kubeat Enterprise lisansının bitişine 30 günden az kaldı ya da lisans bitti; 7 günden az kalınca aynı adla ikinci bir kural `critical` ile yanar (bkz. "Kubeat Enterprise lisansı") |
 | `KubeatDiscoveryNamespaceSkipped` | `kubeat.discovery` grubunda, `warning`: namespace sınırlı keşifte annotation eşitlemesi 10 dakikadır en az bir namespace'i okuyamayıp atlıyor (`kubeat_discovery_namespaces_skipped > 0`); o namespace'in monitor'leri olduğu gibi kalıyor. Kuruluma göre tektir; namespace adını taşımaz, adlar keşif durumunda ve log'dadır. Bir ya da iki turluk aksamada yanmaz; Recreate'te (yükseltme) 10 dakika yeni pod'un ilk turundan yeniden başlar (bkz. "Keşif" → "Okunamayan namespace") |
+| `KubeatScopeResolveErrors` | 0.53, `kubeat.scope` grubunda, `warning`: annotation monitor'lerinin kontrollerinde çözülemeyen bir ada giden bağlantının reddi (`kubeat_target_scope_denied_total{reason="resolve_error",source="annotation"}`) 10 dakikadır, en geç 5 dakikada bir yineleniyor; çoğu zaman cluster DNS'inin arızasıdır, o monitor'ler bu sürede DOWN'dır. Tek bir monitor'ün geçici SERVFAIL'inde yanmaz. Kuruluma göre tektir ve `KubeatUnhealthy`'ye bağlı değildir; kullanıcıların ve kaydı olmayan monitor'lerin redleri için PromQL "Kapsam ihlali denetimi"ndedir (bkz. "Hedef politikası") |
 
 `kubeat.monitors` grubundaki ilk iki kural `severity` etiketini
 `metrics.prometheusRule.severity` değerinden, `kubeat.signin` grubundaki
 `KubeatSignInSourceDegraded` `metrics.prometheusRule.signInSeverity`
-değerinden alır (ikisinin de varsayılanı `warning`); `kubeat.self`
-grubundakiler kendileri koyar (`warning`, belirtilenlerde `critical`). Alarm
-belirtiyi söyler, nedeni backend'in log'undadır. Lisans alarmı `critical`
-olunca `warning` olanı da açık kalır; OpenShift'in ve kube-prometheus-stack'in
-varsayılan Alertmanager yapılandırması aynı addaki `warning` alarmı
-`critical` yanarken susturur.
+değerinden alır (ikisinin de varsayılanı `warning`); `kubeat.self`,
+`kubeat.discovery` ve `kubeat.scope` grubundakiler kendileri koyar (`warning`,
+belirtilenlerde `critical`). Alarm belirtiyi söyler, nedeni backend'in
+log'undadır. Lisans alarmı `critical` olunca `warning` olanı da açık kalır;
+OpenShift'in ve kube-prometheus-stack'in varsayılan Alertmanager yapılandırması
+aynı addaki `warning` alarmı `critical` yanarken susturur.
 
 **Scrape boşluğu.** Backend tek replica çalışır ve `Recreate` ile
 güncellenir; her yükseltmede, node drain'de ve başarısız bir scrape'te
@@ -4363,8 +4412,9 @@ bu değerle render edilen kurallar taşınır.
   çözülür.
 - **Ne değişir.** `KubeatDown`, `KubeatUnhealthy`, `KubeatBackupFailing`,
   `KubeatMonitorDown`, `KubeatCertificateExpiring`,
-  `KubeatNotificationsFailing`'in kanal ifadeleri ve (0.52)
-  `KubeatSignInSourceDegraded` bu etiketle, `namespace` ve `job`'un yanında
+  `KubeatNotificationsFailing`'in kanal ifadeleri, (0.52)
+  `KubeatSignInSourceDegraded` ve `KubeatDiscoveryNamespaceSkipped` ve (0.53)
+  `KubeatScopeResolveErrors` bu etiketle, `namespace` ve `job`'un yanında
   (ve monitor, kanal ya da `reason` etiketleriyle), cluster başına toplanır ve
   dış etiketlerden yalnızca onu taşır. Depo bir HA çiftinin
   kopyalarını tekilleştirmiyorsa kopyanın etiketi (ör. `prometheus_replica`)

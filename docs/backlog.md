@@ -2827,6 +2827,10 @@ oluşturması ~4 sn sürebilir ve arayüzün 3 sn'sini aşar; seçenek isteğe t
 da S93'ün `targetscope.go` turu, ya da `target` yerine `resolve_error` sayılan gerçek bir
 girişim.
 
+Güncelleme (2026-11-08, S93 [#160](https://github.com/yusufceng/Kubeat/issues/160)): S93
+`targetscope.go`'ya dokunmadı (kontrol anı reddinin açıklaması, yönetici alanı ve kural);
+madde issue'nun kapsam dışında. Tetikleyici S73 ya da gerçek bir girişim olarak kalır.
+
 ## Kapsam reddi için chart'ta işletim kuralı ve README'deki PromQL örneklerinin promtool'la sınanması (S82 takibi)
 
 2026-11-08'de ertelendi (S82 [#142](https://github.com/yusufceng/Kubeat/issues/142), PO
@@ -2849,6 +2853,16 @@ zincirinde. İçeriği:
 
 #160 merge edilince madde kapanır.
 
+Kapandı (2026-11-08, S93 [#160](https://github.com/yusufceng/Kubeat/issues/160), 0.53):
+`KubeatScopeResolveErrors` `kubeat.scope` grubunda; annotation monitor'lerinin
+`resolve_error` redleri 10 dakika, en geç 5 dakikada bir sürünce yanar, tek bir geçici
+SERVFAIL'de yanmaz (`prometheusrule-test.yaml`, iki cluster'lı senaryo
+`prometheusrule-cluster-test.yaml`'da). README "Hedef politikası" → "Kapsam ihlali
+denetimi"ndeki iki PromQL `test-chart.sh`'te bölümün ilk kod bloğundan olduğu gibi alınıp
+`prometheusrule-readme-test.yaml`'ın senaryolarıyla promtool'da sınanıyor. İkinci ifade
+artık `source!="annotation"` diyor; annotation monitor'lerininkini kural verir. Gerçek
+bir Prometheus'ta yanıp çözülmesi sprint 11 prova (b)'de (kullanıcıda kalanlar).
+
 ## README "Metrikler" tablosunda `kubeat_target_scope_denied_total`
 
 2026-11-08'de ertelendi (S82 [#142](https://github.com/yusufceng/Kubeat/issues/142);
@@ -2864,6 +2878,23 @@ sayısını şablonla karşılaştıran CI denetimi ve README'yi kayıtlı seril
 olarak hikâyeleşti (sonraki sprint, kuyrukta 9. sıra). S100'ün iki olgusal hatası plan
 dalında düzeltildi: "Kopyalamak" artık 15 kural diyor ve `kubeat.discovery`'yi adlandırıyor;
 Actions adımı `--set backup.enabled=true`'yu taşıyor.
+
+Kapandı (2026-11-08, S93 [#160](https://github.com/yusufceng/Kubeat/issues/160), 0.53):
+README "Aracın kendi sağlığı" → "Metrikler" tablosunda
+`kubeat_target_scope_denied_total{reason,source}` satırı (`reason` ve `source` değerleri,
+"Kapsam ihlali denetimi"ne bağlantı). Eksik öteki seriler S100'de kalır.
+
+## Kapsam reddinde reddedilen host'u yöneticiye monitor ayrıntısında göstermek (S93 takibi)
+
+2026-11-08'de ertelendi (S93 [#160](https://github.com/yusufceng/Kubeat/issues/160),
+issue'nun kapsam dışı; ADR-0003 (d) maskesi, ayrı karar). 0.53'ten beri yönetici kontrol
+anı reddinin nedenini (`resolve_error` ya da `connection`) monitor ayrıntısında, sonuçlarda
+ve olayın zaman çizelgesinde görür; reddedilen host'u görmez. Host bugün yalnız yöneticiye
+açık denetim kaydında (monitor ve neden başına ilk ret) ve backend log'unun `WARN`
+satırındadır. Sonuçta host'u tutmak ADR-0003 (d)'nin "sonuç bir iç servisin yanıtını
+okumanın yolu olmasın" kuralına ve S77'nin tek genel mesaj kararına karşı tartılır.
+Tetikleyici: denetim kaydında ya da logda host'u bulmakta zorlanan bir yöneticinin geri
+bildirimi ya da ADR-0003 (d)'ye dokunan bir sonraki madde.
 
 ## OpenShift'te EgressIP ve vekil ACL reçetesi (S82 takibi)
 
@@ -2938,6 +2969,12 @@ Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](spr
 tetikleyici doldu. İki senaryo S93'ün
 ([#160](https://github.com/yusufceng/Kubeat/issues/160)) kabul ölçütünde; madde #160 merge
 edilince kapanır.
+
+Kapandı (2026-11-08, S93 [#160](https://github.com/yusufceng/Kubeat/issues/160), 0.53):
+`prometheusrule-cluster-test.yaml`'da `KubeatSignInSourceDegraded` (bir cluster'ın
+`hops_zero`'su, tekilleştirilmemiş HA çiftinde tek alarm; öteki cluster'ın arayüzden
+gelmeyen istekleri yakmaz), `KubeatDiscoveryNamespaceSkipped` ve `KubeatScopeResolveErrors`
+için iki cluster'lı senaryolar.
 
 ## Kurum CA'sı reçetesinin kalanları: chart'ın ConfigMap'i üretmesi ya da `trustedCA` değeri, annotation ile monitor başına CA (S2 takibi)
 
