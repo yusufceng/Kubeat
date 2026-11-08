@@ -981,6 +981,115 @@ func TestTargetScopeExternalCIDRs(t *testing.T) {
 	}
 }
 
+// UPTIME_TARGET_SCOPE_CLUSTER_CIDRS declares the cluster's pod, Service and
+// node networks (the chart's targetScope.clusterNetworks), empty by default.
+// Set, it takes CIDRs only: an entry that is not one, or an IPv4 network
+// written as IPv6, keeps the backend from starting, the error naming the
+// variable. A company range that overlaps a declared network, any part of
+// it and of either family, is set aside with why, as one over the API
+// server's address is, and the backend starts (S96); a single address, the
+// router's VIP in the node network as README's "Şart" writes it, is not
+// compared with them. Empty, it changes nothing.
+func TestTargetScopeClusterCIDRs(t *testing.T) {
+	const key = "UPTIME_TARGET_SCOPE_CLUSTER_CIDRS"
+	const external = "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS"
+	// The API server's and the pod's own addresses are clear of every range
+	// below, so that only the declaration sets any aside.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "172.30.0.1")
+	pretendOwnAddrs(t, nil, "127.0.0.1", "::1", "10.128.2.15")
+
+	cfg, err := Load()
+	if err != nil || cfg.TargetScopeClusterCIDRs != "" || cfg.TargetScopeExternalIgnored != nil {
+		t.Fatalf("default: %q, ignored %v, %v; want empty, none ignored and no error", cfg.TargetScopeClusterCIDRs, cfg.TargetScopeExternalIgnored, err)
+	}
+
+	// A mistake names the variable and stops the start, whatever the
+	// company ranges are.
+	t.Setenv(external, "10.50.0.0/16")
+	for value, want := range map[string]string{
+		"10.128.0.0/14,corp":     `"corp" is not a CIDR`,
+		"10.128.0.0/33":          `"10.128.0.0/33" is not a CIDR`,
+		"192.168.40.0":           "write it as 192.168.40.0/32",
+		"::ffff:10.128.0.0/110":  "an IPv4 network written as IPv6; write it as 10.128.0.0/14",
+		"::ffff:0.0.0.0/96":      "write it as 0.0.0.0/0",
+		"fd02::/48,10.128.0.0/x": `"10.128.0.0/x" is not a CIDR`,
+	} {
+		t.Setenv(key, value)
+		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), key+": ") || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s=%q: err = %v, want one naming the variable and saying %q", key, value, err, want)
+		}
+	}
+
+	// Declared networks: OpenShift's default pod and Service networks, a
+	// node network, and an IPv6 pod network of a dual-stack cluster.
+	const declared = "10.128.0.0/14, 172.30.0.0/16,192.168.40.0/24,fd02::/48"
+	t.Setenv(key, declared)
+	why := func(network string) string {
+		return "overlaps " + network + ", a cluster network declared in UPTIME_TARGET_SCOPE_CLUSTER_CIDRS: " +
+			"a user limited to some namespaces could reach the pods, Services or nodes in it by address"
+	}
+	for _, tc := range []struct {
+		name, value, kept string
+		ignored           []IgnoredRange
+	}{
+		{"clear of every network", "10.50.0.0/16,fd50::/16", "10.50.0.0/16,fd50::/16", nil},
+		// A part of the pod network the pod's address is not in: the drain of
+		// sprint 10's rehearsal (c), caught at the first start.
+		{"a part of the pod network", "10.130.0.0/16", "", []IgnoredRange{{netip.MustParsePrefix("10.130.0.0/16"), why("10.128.0.0/14")}}},
+		{"over the pod network", "10.0.0.0/8,10.50.0.0/16", "10.50.0.0/16", []IgnoredRange{{netip.MustParsePrefix("10.0.0.0/8"), why("10.128.0.0/14")}}},
+		{"over the Service network, clear of the API server", "172.30.128.0/17", "", []IgnoredRange{{netip.MustParsePrefix("172.30.128.0/17"), why("172.30.0.0/16")}}},
+		{"over the node network", "10.50.0.0/16, 192.168.0.0/16", "10.50.0.0/16", []IgnoredRange{{netip.MustParsePrefix("192.168.0.0/16"), why("192.168.40.0/24")}}},
+		{"masked as the scope reads it", "192.168.40.77/28", "", []IgnoredRange{{netip.MustParsePrefix("192.168.40.64/28"), why("192.168.40.0/24")}}},
+		{"IPv6 over the pod network", "fd50::/16,fd02:0:0:5::/64", "fd50::/16", []IgnoredRange{{netip.MustParsePrefix("fd02:0:0:5::/64"), why("fd02::/48")}}},
+		{"IPv6 holding the pod network", "fd00::/8", "", []IgnoredRange{{netip.MustParsePrefix("fd00::/8"), why("fd02::/48")}}},
+		// The router's VIP in the node network, written on purpose as one
+		// address, and one IPv6 address: not compared with the declaration.
+		{"the router's VIP as a /32", "10.50.0.0/16,192.168.40.5/32", "10.50.0.0/16,192.168.40.5/32", nil},
+		{"one IPv6 address", "fd02::5/128", "fd02::5/128", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(external, tc.value)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v, want the backend to start", err)
+			}
+			if cfg.TargetScopeExternalCIDRs != tc.kept || !reflect.DeepEqual(cfg.TargetScopeExternalIgnored, tc.ignored) {
+				t.Errorf("%s=%q: kept %q, ignored %v; want kept %q, ignored %v", external, tc.value,
+					cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, tc.kept, tc.ignored)
+			}
+			if cfg.TargetScopeClusterCIDRs != declared {
+				t.Errorf("declared %q, want %q as given", cfg.TargetScopeClusterCIDRs, declared)
+			}
+		})
+	}
+
+	// A range over a declared network that also holds the API server's
+	// address is named by the declaration; the other comparisons still set
+	// aside a single address over the API server's or the pod's own.
+	t.Setenv(external, "172.16.0.0/12,172.30.0.1/32,10.128.2.15/32")
+	cfg, err = Load()
+	if err != nil || cfg.TargetScopeExternalCIDRs != "" || len(cfg.TargetScopeExternalIgnored) != 3 ||
+		cfg.TargetScopeExternalIgnored[0].String() != "172.16.0.0/12 "+why("172.30.0.0/16") ||
+		!strings.HasPrefix(cfg.TargetScopeExternalIgnored[1].String(), "172.30.0.1/32 holds the API server's address 172.30.0.1") ||
+		!strings.HasPrefix(cfg.TargetScopeExternalIgnored[2].String(), "10.128.2.15/32 holds 10.128.2.15, an address of the backend's own pod") {
+		t.Errorf("declared and environment: kept %q, ignored %v, %v", cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err)
+	}
+
+	// With no company range, a declaration sets nothing aside.
+	t.Setenv(external, "")
+	if cfg, err := Load(); err != nil || cfg.TargetScopeExternalCIDRs != "" || cfg.TargetScopeExternalIgnored != nil {
+		t.Errorf("no company range: kept %q, ignored %v, %v; want none", cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err)
+	}
+
+	// Emptied, the declaration changes nothing: the ranges it set aside are
+	// kept, as without it.
+	t.Setenv(key, "")
+	t.Setenv(external, "10.130.0.0/16,fd02:0:0:5::/64")
+	if cfg, err := Load(); err != nil || cfg.TargetScopeExternalCIDRs != "10.130.0.0/16,fd02:0:0:5::/64" || cfg.TargetScopeExternalIgnored != nil {
+		t.Errorf("declaration emptied: kept %q, ignored %v, %v; want both kept", cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err)
+	}
+}
+
 // The backend's own addresses are read from its interfaces, IPv4 ones as
 // IPv4, so a range is compared with them as the scope check compares it.
 func TestOwnAddrs(t *testing.T) {

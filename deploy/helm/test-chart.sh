@@ -706,6 +706,105 @@ for file in backend.yaml frontend.yaml; do
     failed "frontend token in $file: $var is not optional"
 done
 
+# The cluster's networks declared in targetScope.clusterNetworks (S96): a
+# company range of UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS that overlaps one fails
+# the render, so helm upgrade and an Argo CD sync stop before the backend
+# would ignore the range at its start; the message names the range and the
+# network. IPv4 only: an IPv6 network goes to the backend
+# (UPTIME_TARGET_SCOPE_CLUSTER_CIDRS), whose start compares it. A single
+# address, the router's VIP in the node network, is not compared. Without a
+# declaration, as with values from before it, the render is the same as
+# before it.
+# clusterEnv NAME WANT VALUES...: the backend renders with these values and
+# UPTIME_TARGET_SCOPE_CLUSTER_CIDRS set to WANT, as quoted in the manifest,
+# or without it when WANT is empty.
+clusterEnv() {
+  local name="$1" want="$2" got
+  shift 2
+  if ! helm template kubeat "$CHART" --show-only templates/backend.yaml "$@" >"$WORK/backend.yaml" 2>"$WORK/err"; then
+    failed "$name: refused: $(cat "$WORK/err")"
+    return
+  fi
+  got="$(awk '/^ *- name: UPTIME_TARGET_SCOPE_CLUSTER_CIDRS$/ { getline; sub(/^ *value: /, ""); print }' "$WORK/backend.yaml")"
+  [ "$got" = "$want" ] || failed "$name: want UPTIME_TARGET_SCOPE_CLUSTER_CIDRS ${want:-unset}, got: ${got:-unset}"
+}
+NETWORKS=(--set-json 'targetScope.clusterNetworks={"pods":["10.128.0.0/14","fd02::/48"],"services":["172.30.0.0/16"],"nodes":["192.168.40.0/24"]}')
+company() { printf 'backend.extraEnv={"UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS":"%s"}' "$1"; }
+OVERLAP="backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: "
+clusterEnv "no declaration" ""
+clusterEnv "no declaration, a company range over the pod network" "" --set-json "$(company 10.0.0.0/8)"
+clusterEnv "targetScope missing from older values" "" --set targetScope=null
+clusterEnv "empty declaration" "" --set-json 'targetScope.clusterNetworks={"pods":[],"services":[],"nodes":[]}'
+clusterEnv "declaration missing a kind" '"10.128.0.0/14"' --set-json 'targetScope.clusterNetworks={"pods":["10.128.0.0/14"]}'
+clusterEnv "declaration" '"10.128.0.0/14,fd02::/48,172.30.0.0/16,192.168.40.0/24"' "${NETWORKS[@]}"
+clusterEnv "declaration, company ranges clear of it" '"10.128.0.0/14,fd02::/48,172.30.0.0/16,192.168.40.0/24"' "${NETWORKS[@]}" \
+  --set-json "$(company '10.50.0.0/16, 172.31.0.0/16,192.168.41.0/24')"
+# Without a declaration the render is the same as with an empty one, and as
+# with values from before targetScope, whatever the company ranges.
+# undeclared NAME VALUES...: the backend renders alike with these values
+# alone, without targetScope and with an empty declaration.
+undeclared() {
+  local name="$1"
+  shift
+  helm template kubeat "$CHART" --show-only templates/backend.yaml "$@" >"$WORK/plain" 2>&1
+  helm template kubeat "$CHART" --show-only templates/backend.yaml "$@" --set targetScope=null >"$WORK/older" 2>&1
+  helm template kubeat "$CHART" --show-only templates/backend.yaml "$@" \
+    --set-json 'targetScope.clusterNetworks={"pods":[],"services":[],"nodes":[]}' >"$WORK/empty" 2>&1
+  cmp -s "$WORK/plain" "$WORK/older" || failed "$name: values without targetScope render otherwise"
+  cmp -s "$WORK/plain" "$WORK/empty" || failed "$name: an empty declaration renders otherwise"
+}
+undeclared "no declaration"
+undeclared "no declaration, a company range over the pod network" --set-json "$(company 10.0.0.0/8)"
+# A company range over a declared network, any part of it, its host bits
+# set or not: the message names each range and network, and its value.
+refuses "company range over the pod network" "${OVERLAP}10.0.0.0/8 overlaps 10.128.0.0/14, the cluster's pod network (targetScope.clusterNetworks.pods)" \
+  "${NETWORKS[@]}" --set-json "$(company 10.0.0.0/8)"
+refuses "company range in a part of the pod network" "10.130.0.0/16 overlaps 10.128.0.0/14, the cluster's pod network" \
+  "${NETWORKS[@]}" --set-json "$(company '10.50.0.0/16,10.130.0.0/16')"
+refuses "company range over the Service network" "172.16.0.0/12 overlaps 172.30.0.0/16, the cluster's Service network (targetScope.clusterNetworks.services)" \
+  "${NETWORKS[@]}" --set-json "$(company 172.16.0.0/12)"
+refuses "company range over the node network" "192.168.40.64/26 overlaps 192.168.40.0/24, the cluster's node network (targetScope.clusterNetworks.nodes)" \
+  "${NETWORKS[@]}" --set-json "$(company 192.168.40.64/26)"
+refuses "company range with host bits" "10.131.7.1/16 overlaps 10.128.0.0/14" "${NETWORKS[@]}" --set-json "$(company 10.131.7.1/16)"
+refuses "every network over 0.0.0.0/0" "0.0.0.0/0 overlaps 10.128.0.0/14, the cluster's pod network (targetScope.clusterNetworks.pods); 0.0.0.0/0 overlaps 172.30.0.0/16, the cluster's Service network (targetScope.clusterNetworks.services); 0.0.0.0/0 overlaps 192.168.40.0/24, the cluster's node network" \
+  "${NETWORKS[@]}" --set-json "$(company 0.0.0.0/0)"
+refuses "the message points at the README" '(README, "Hedef politikası", "Kurum ağı")' "${NETWORKS[@]}" --set-json "$(company 10.0.0.0/8)"
+refuses "a declaration in --set" "10.0.0.0/8 overlaps 10.128.0.0/14" --set 'targetScope.clusterNetworks.pods={10.128.0.0/14}' \
+  --set backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS=10.0.0.0/8
+# Not compared, left to the backend: the router's VIP as a /32 in the node
+# network, an IPv6 range over an IPv6 network, an entry the backend refuses.
+renders "router's VIP as a /32 in the node network" "${NETWORKS[@]}" --set-json "$(company '10.50.0.0/16,192.168.40.5/32')"
+renders "IPv6 company range over an IPv6 network" "${NETWORKS[@]}" --set-json "$(company 'fd02:0:0:5::/64,10.50.0.0/16')"
+renders "company entry that is not a CIDR" "${NETWORKS[@]}" --set-json "$(company 'corp,10.50.0.1')"
+# A declared network the backend would refuse fails the render, naming it.
+refuses "declared network not a CIDR" 'targetScope.clusterNetworks.services: "corp" is not a CIDR such as 10.128.0.0/14' \
+  --set-json 'targetScope.clusterNetworks.services=["corp"]'
+for cidr in 10.128.0.0 10.128.0.0/33 010.128.0.0/14 fd02::/129 fd02::1%eth0/64; do
+  refuses "declared network $cidr" "targetScope.clusterNetworks.pods: \"$cidr\" is not a CIDR" --set-json "targetScope.clusterNetworks.pods=[\"$cidr\"]"
+done
+refuses "declared IPv4 network written as IPv6" '"::ffff:10.128.0.0/110" is an IPv4 network written as IPv6' \
+  --set-json 'targetScope.clusterNetworks.pods=["::ffff:10.128.0.0/110"]'
+refuses "declared networks not a list" "targetScope.clusterNetworks.pods is 10.128.0.0/14: give a list of CIDRs" \
+  --set targetScope.clusterNetworks.pods=10.128.0.0/14
+# The pilot's declaration (docs/pilot.md, "Önce cluster'ın ağlarını okuyun")
+# renders with the pilot's company ranges, the router's VIP among them, and
+# refuses the 10.0.0.0/8 the pilot warns against.
+awk '/Önce cluster.ın ağlarını okuyun/ { section = 1; next }
+  section && /^  ```yaml$/ { inblock = 1; next }
+  inblock && /^  ```$/ { exit }
+  inblock { sub(/^  /, ""); print }' "$PILOT" >"$WORK/pilot-networks.yaml"
+if ! grep -q "^targetScope:" "$WORK/pilot-networks.yaml"; then
+  failed "pilot: no targetScope block under \"Önce cluster'ın ağlarını okuyun\" in docs/pilot.md"
+else
+  clusterEnv "pilot declaration" '"10.128.0.0/14,172.30.0.0/16,192.168.40.0/24"' -f "$WORK/pilot-networks.yaml" \
+    --set-json "$(company '10.50.0.0/16,192.168.40.5/32')"
+  refuses "pilot declaration, 10.0.0.0/8" "10.0.0.0/8 overlaps 10.128.0.0/14, the cluster's pod network" -f "$WORK/pilot-networks.yaml" \
+    --set-json "$(company 10.0.0.0/8)"
+fi
+for text in "targetScope.clusterNetworks" "UPTIME_TARGET_SCOPE_CLUSTER_CIDRS" "**Cluster ağlarının beyanı"; do
+  grep -qF -- "$text" "$README" || failed "README lacks \"$text\", which the render error points at"
+done
+
 # Kubeat's own failures: the install notes warn while neither a heartbeat
 # nor the alert rules would tell of them, and say when no backups are taken.
 UNHEARD="nobody hears when Kubeat itself fails"

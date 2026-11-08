@@ -482,11 +482,13 @@ func TestReportSourceCeiling(t *testing.T) {
 	}
 }
 
-// A company range over an address of the cluster's own no longer keeps the
+// A company range over an address of the cluster's own, or over a cluster
+// network declared in UPTIME_TARGET_SCOPE_CLUSTER_CIDRS, no longer keeps the
 // backend from starting (S96): Load sets it aside and keeps the others, and
 // the start says so once, in one ERROR line naming each range with why, and
 // in kubeat_target_scope_external_ranges_ignored. With the setting empty, or
-// every range clear of the cluster, it logs nothing and the gauge is 0.
+// every range clear of the cluster, it logs nothing and the gauge is 0, with
+// a declaration or without.
 func TestReportScopeExternal(t *testing.T) {
 	// The settings of the environment the tests run in are not the test's.
 	for _, kv := range os.Environ() {
@@ -507,23 +509,36 @@ func TestReportScopeExternal(t *testing.T) {
 	}
 	const apiServer = "172.16.0.0/12 holds the API server's address 172.30.0.1 (KUBERNETES_SERVICE_HOST)"
 	const ownPod = "127.0.0.0/8 holds 127.0.0.1, an address of the backend's own pod"
+	// Documentation ranges stand for the declared networks: no machine has
+	// an address in them, so only the declaration sets a range aside.
+	const declared = "192.0.2.0/24,2001:db8:2::/48"
+	const podNetwork = "192.0.2.128/25 overlaps 192.0.2.0/24, a cluster network declared in UPTIME_TARGET_SCOPE_CLUSTER_CIDRS"
+	const podNetworkV6 = "2001:db8:2:5::/64 overlaps 2001:db8:2::/48, a cluster network declared in UPTIME_TARGET_SCOPE_CLUSTER_CIDRS"
 	for _, tt := range []struct {
-		name, value, inEffect string
-		ignored               []string
-		needsLoopback         bool
+		name, value, cluster, inEffect string
+		ignored                        []string
+		needsLoopback                  bool
 	}{
-		{"empty", "", "", nil, false},
+		{"empty", "", "", "", nil, false},
+		{"empty, a declaration", "", declared, "", nil, false},
 		// 198.51.100.0/24 is for documentation: no machine has an address in it.
-		{"clear of the cluster", "198.51.100.0/24", "198.51.100.0/24", nil, false},
-		{"over the API server's address", "198.51.100.0/24, 172.16.0.0/12", "198.51.100.0/24", []string{apiServer}, false},
-		{"over the pod's own address", "127.0.0.0/8,198.51.100.0/24", "198.51.100.0/24", []string{ownPod}, true},
-		{"both, nothing left", "172.16.0.0/12,127.0.0.0/8", "", []string{apiServer, ownPod}, true},
+		{"clear of the cluster", "198.51.100.0/24", "", "198.51.100.0/24", nil, false},
+		{"clear of the cluster and of the declaration", "198.51.100.0/24", declared, "198.51.100.0/24", nil, false},
+		{"over the API server's address", "198.51.100.0/24, 172.16.0.0/12", "", "198.51.100.0/24", []string{apiServer}, false},
+		{"over the pod's own address", "127.0.0.0/8,198.51.100.0/24", "", "198.51.100.0/24", []string{ownPod}, true},
+		{"both, nothing left", "172.16.0.0/12,127.0.0.0/8", "", "", []string{apiServer, ownPod}, true},
+		{"over a declared network", "198.51.100.0/24,192.0.2.128/25", declared, "198.51.100.0/24", []string{podNetwork}, false},
+		{"over a declared IPv6 network", "2001:db8:2:5::/64,198.51.100.0/24", declared, "198.51.100.0/24", []string{podNetworkV6}, false},
+		{"declared and the API server's", "192.0.2.128/25,2001:db8:2:5::/64,172.16.0.0/12,198.51.100.0/24", declared, "198.51.100.0/24",
+			[]string{podNetwork, podNetworkV6, apiServer}, false},
+		{"declaration empty, the same ranges kept", "192.0.2.128/25,2001:db8:2:5::/64", "", "192.0.2.128/25,2001:db8:2:5::/64", nil, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.needsLoopback && !loopback {
 				t.Skip("this machine has no loopback address 127.0.0.1")
 			}
 			t.Setenv("UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS", tt.value)
+			t.Setenv("UPTIME_TARGET_SCOPE_CLUSTER_CIDRS", tt.cluster)
 			cfg, err := config.Load()
 			if err != nil {
 				t.Fatalf("Load: %v, want the backend to start", err)
