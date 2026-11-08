@@ -115,7 +115,8 @@ func TestResolveCommandUsage(t *testing.T) {
 }
 
 // The command reads the scope's settings as the backend does: a company
-// range it cannot read fails it before any lookup.
+// range it cannot read fails it before any lookup, and one the start sets
+// aside is left out and named.
 func TestResolveCommandReadsSettings(t *testing.T) {
 	// The settings of the environment the tests run in are not the test's.
 	for _, kv := range os.Environ() {
@@ -136,5 +137,21 @@ func TestResolveCommandReadsSettings(t *testing.T) {
 	if lines := strings.Split(strings.TrimSpace(stdout.String()), "\n"); len(lines) != 2 ||
 		!strings.HasPrefix(lines[0], "203.0.113.7: an address outside the cluster") || !strings.HasPrefix(lines[1], "172.30.0.1: refused by its spelling") {
 		t.Errorf("stdout = %q", stdout.String())
+	}
+
+	// A range the backend's start sets aside (S96) is left out as there, and
+	// named first; the command still answers.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "172.30.0.1")
+	t.Setenv("UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS", "172.16.0.0/12,198.51.100.0/24")
+	stdout.Reset()
+	stderr.Reset()
+	if code := resolveCommand([]string{"172.30.0.5", "198.51.100.7"}, &stdout, &stderr); code != 0 ||
+		!strings.HasPrefix(stderr.String(), "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: 172.16.0.0/12 holds the API server's address 172.30.0.1") ||
+		!strings.Contains(stderr.String(), "ignored, as the backend ignores it") {
+		t.Fatalf("a range set aside: %d, stderr %q", code, stderr.String())
+	}
+	if lines := strings.Split(strings.TrimSpace(stdout.String()), "\n"); len(lines) != 2 ||
+		!strings.HasPrefix(lines[0], "172.30.0.5: refused by its spelling") || !strings.HasPrefix(lines[1], "198.51.100.7: an address outside the cluster") {
+		t.Errorf("a range set aside: stdout = %q", stdout.String())
 	}
 }

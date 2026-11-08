@@ -42,6 +42,8 @@ type Metrics struct {
 	signInFailures    *prometheus.CounterVec
 	signInThrottled   *prometheus.CounterVec
 	targetScopeDenied *prometheus.CounterVec
+	// scopeExternalIgnored is how many company ranges the start set aside.
+	scopeExternalIgnored prometheus.Gauge
 	// throttle holds the throttle's counters beside the sign-in's
 	// (throttle.go).
 	throttle throttleMetrics
@@ -220,6 +222,10 @@ func New(version string) *Metrics {
 	for _, series := range scopeDeniedSeries {
 		m.targetScopeDenied.WithLabelValues(series[0], series[1])
 	}
+	m.scopeExternalIgnored = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "kubeat_target_scope_external_ranges_ignored",
+		Help: "Ranges of UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS the backend ignored at its start, the others staying in effect: those that hold the API server's address (KUBERNETES_SERVICE_HOST) or one of the backend's own pod, as after a drain moved it to a node whose pod network a range covers, and those it could not check because its own addresses could not be read. Written once at the start; 0 while none was ignored or the setting is empty. For a user limited to some namespaces an address in an ignored range is inside the cluster, as without the setting. The ranges and why are in the start's ERROR line (target scope external ranges ignored), never in a label.",
+	})
 	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_backup_last_success_timestamp_seconds",
 		Help: "When the newest database backup was taken: the last to succeed, or after a start the newest copy found in the backup directory; 0 while there is none.",
@@ -275,7 +281,7 @@ func New(version string) *Metrics {
 		m.backups, m.lastBackup, m.lastBackupFailure,
 		m.targetThrottled,
 		m.signInFailures, m.signInThrottled,
-		m.targetScopeDenied,
+		m.targetScopeDenied, m.scopeExternalIgnored,
 		m.licenseExpiry,
 	)
 	return m
@@ -346,6 +352,15 @@ func (m *Metrics) TargetThrottled(host string) {
 func (m *Metrics) TargetScopeDenied(reason, source string) {
 	if m != nil {
 		m.targetScopeDenied.WithLabelValues(reason, source).Inc()
+	}
+}
+
+// ScopeExternalRangesIgnored records how many ranges of
+// UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS the start set aside (config.Load), for
+// kubeat_target_scope_external_ranges_ignored.
+func (m *Metrics) ScopeExternalRangesIgnored(n int) {
+	if m != nil {
+		m.scopeExternalIgnored.Set(float64(n))
 	}
 }
 

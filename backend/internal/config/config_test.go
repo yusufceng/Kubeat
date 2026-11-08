@@ -864,36 +864,41 @@ func pretendOwnAddrs(t *testing.T, err error, ips ...string) {
 }
 
 // UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS is empty by default and reads nothing
-// then. Set, it takes CIDRs only, and the backend does not start while one of
-// its ranges holds the API server's address (KUBERNETES_SERVICE_HOST, in the
-// Service network) or one of the backend's own (its pod IP or loopback, in
-// the pod network); the error names the range and the address. Emptying the
-// setting lets it start again (S80, PO decision: an error, not a WARN).
+// then. Set, it takes CIDRs only: an entry that is not one, or an IPv4 range
+// written as IPv6, keeps the backend from starting, the error naming the
+// variable. A range that holds the API server's address
+// (KUBERNETES_SERVICE_HOST, in the Service network) or one of the backend's
+// own (its pod IP or loopback, in the pod network), or that cannot be checked
+// because those cannot be read, does not: it alone is set aside, named with
+// why, and the rest stay in effect (S96, PO decision; S80 refused the start).
 func TestTargetScopeExternalCIDRs(t *testing.T) {
 	const key = "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS"
 	t.Setenv("KUBERNETES_SERVICE_HOST", "172.30.0.1")
 	pretendOwnAddrs(t, nil, "127.0.0.1", "::1", "10.128.2.15", "fd01::2:15", "fe80::1%eth0")
 
 	cfg, err := Load()
-	if err != nil || cfg.TargetScopeExternalCIDRs != "" {
-		t.Fatalf("default: %q, %v; want empty and no error", cfg.TargetScopeExternalCIDRs, err)
+	if err != nil || cfg.TargetScopeExternalCIDRs != "" || cfg.TargetScopeExternalIgnored != nil {
+		t.Fatalf("default: %q, ignored %v, %v; want empty, none ignored and no error", cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err)
 	}
 
 	// Company ranges clear of the cluster's networks are taken as written.
 	t.Setenv(key, "10.50.0.0/16, 192.168.0.0/16,fd50::/16")
-	if cfg, err := Load(); err != nil || cfg.TargetScopeExternalCIDRs != "10.50.0.0/16, 192.168.0.0/16,fd50::/16" {
-		t.Errorf("company ranges: %q, %v; want them and no error", cfg.TargetScopeExternalCIDRs, err)
+	if cfg, err := Load(); err != nil || cfg.TargetScopeExternalCIDRs != "10.50.0.0/16, 192.168.0.0/16,fd50::/16" || cfg.TargetScopeExternalIgnored != nil {
+		t.Errorf("company ranges: %q, ignored %v, %v; want them, none ignored and no error", cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err)
 	}
 
-	// A mistake names the variable, and a bare address the CIDR meant.
+	// A mistake names the variable, and a bare address the CIDR meant; it
+	// stops the start even beside a range the start would set aside.
 	for value, want := range map[string]string{
 		"10.50.0.0/16,corp": `"corp" is not a CIDR`,
 		"10.50.0.0/33":      `"10.50.0.0/33" is not a CIDR`,
 		"10.50.0.1":         "write it as 10.50.0.1/32",
 		// An IPv4 range written as IPv6 would hold no address for the scope
 		// check, nor for this guard, which reads the ranges as it does.
-		"::ffff:10.50.0.0/112": "write it as 10.50.0.0/16",
-		"::ffff:0.0.0.0/96":    "write it as 0.0.0.0/0",
+		"::ffff:10.50.0.0/112":            "write it as 10.50.0.0/16",
+		"::ffff:0.0.0.0/96":               "write it as 0.0.0.0/0",
+		"10.0.0.0/8,::ffff:10.50.0.0/112": "write it as 10.50.0.0/16",
+		"10.0.0.0/8,corp":                 `"corp" is not a CIDR`,
 	} {
 		t.Setenv(key, value)
 		if _, err := Load(); err == nil || !strings.HasPrefix(err.Error(), key+": ") || !strings.Contains(err.Error(), want) {
@@ -901,9 +906,10 @@ func TestTargetScopeExternalCIDRs(t *testing.T) {
 		}
 	}
 
-	// A range over the API server's address or one of the backend's own.
+	// A range over the API server's address or one of the backend's own is
+	// set aside with why; the backend starts.
 	for _, tc := range []struct{ apiServer, value, want string }{
-		{"172.30.0.1", "10.50.0.0/16,172.16.0.0/12", "172.16.0.0/12 holds the API server's address 172.30.0.1"},
+		{"172.30.0.1", "172.16.0.0/12", "172.16.0.0/12 holds the API server's address 172.30.0.1 (KUBERNETES_SERVICE_HOST), in the cluster's Service network"},
 		{"10.96.0.1", "10.0.0.0/8", "10.0.0.0/8 holds the API server's address 10.96.0.1"},
 		{"fd00:10:96::1", "fd00::/8", "fd00::/8 holds the API server's address fd00:10:96::1"},
 		{"172.30.0.1", "10.128.0.0/14", "10.128.0.0/14 holds 10.128.2.15, an address of the backend's own pod"},
@@ -912,37 +918,66 @@ func TestTargetScopeExternalCIDRs(t *testing.T) {
 		{"172.30.0.1", "127.0.0.0/8", "127.0.0.0/8 holds 127.0.0.1"},
 		{"172.30.0.1", "fe80::/10", "fe80::/10 holds fe80::1,"},
 		{"172.30.0.1", "0.0.0.0/0", "0.0.0.0/0 holds the API server's address 172.30.0.1"},
-		{"", "10.0.0.0/8", "10.0.0.0/8 holds 10.128.2.15"}, // outside a pod, the own addresses still count
+		{"172.30.0.1", "10.128.2.15/32", "10.128.2.15/32 holds 10.128.2.15"},
+		{"172.30.0.1", "10.130.0.1/14", "10.128.0.0/14 holds 10.128.2.15"}, // named as the scope reads it, masked
+		{"", "10.0.0.0/8", "10.0.0.0/8 holds 10.128.2.15"},                 // outside a pod, the own addresses still count
 	} {
 		t.Setenv("KUBERNETES_SERVICE_HOST", tc.apiServer)
 		t.Setenv(key, tc.value)
-		_, err := Load()
-		if err == nil || !strings.HasPrefix(err.Error(), key+": ") || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("API server %q, %s=%q: err = %v, want one saying %q", tc.apiServer, key, tc.value, err, tc.want)
+		cfg, err := Load()
+		if err != nil || cfg.TargetScopeExternalCIDRs != "" || len(cfg.TargetScopeExternalIgnored) != 1 ||
+			!strings.HasPrefix(cfg.TargetScopeExternalIgnored[0].String(), tc.want) {
+			t.Errorf("API server %q, %s=%q: kept %q, ignored %v, err %v; want none kept, one ignored saying %q, no error",
+				tc.apiServer, key, tc.value, cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err, tc.want)
 		}
 	}
-	// Emptied, the setting lets the backend start again.
+
+	// Only the ranges over an address of the cluster's own are set aside,
+	// in the order written; the others stay as written.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "172.30.0.1")
+	t.Setenv(key, "10.50.0.0/16, 172.16.0.0/12 ,10.128.0.0/14,fd50::/16")
+	cfg, err = Load()
+	if err != nil || cfg.TargetScopeExternalCIDRs != "10.50.0.0/16,fd50::/16" {
+		t.Errorf("mixed: kept %q, %v; want the two company ranges and no error", cfg.TargetScopeExternalCIDRs, err)
+	}
+	wantIgnored := []IgnoredRange{
+		{netip.MustParsePrefix("172.16.0.0/12"), "holds the API server's address 172.30.0.1 (KUBERNETES_SERVICE_HOST), in the cluster's Service network: " +
+			"a user limited to some namespaces could reach every Service in it by its ClusterIP"},
+		{netip.MustParsePrefix("10.128.0.0/14"), "holds 10.128.2.15, an address of the backend's own pod (its pod IP or loopback): " +
+			"a user limited to some namespaces could reach the pods in it by address"},
+	}
+	if !reflect.DeepEqual(cfg.TargetScopeExternalIgnored, wantIgnored) {
+		t.Errorf("mixed: ignored %v, want %v", cfg.TargetScopeExternalIgnored, wantIgnored)
+	}
+
+	// Emptied, the setting reads nothing again.
 	t.Setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
 	t.Setenv(key, "")
-	if _, err := Load(); err != nil {
-		t.Errorf("setting emptied: %v, want none", err)
+	if cfg, err := Load(); err != nil || cfg.TargetScopeExternalIgnored != nil {
+		t.Errorf("setting emptied: ignored %v, %v; want none", cfg.TargetScopeExternalIgnored, err)
 	}
 	// A KUBERNETES_SERVICE_HOST that is not an address is not compared.
 	t.Setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
 	t.Setenv(key, "10.50.0.0/16")
-	if _, err := Load(); err != nil {
-		t.Errorf("API server given by name: %v, want none", err)
+	if cfg, err := Load(); err != nil || cfg.TargetScopeExternalCIDRs != "10.50.0.0/16" || cfg.TargetScopeExternalIgnored != nil {
+		t.Errorf("API server given by name: %q, ignored %v, %v; want the range kept", cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err)
 	}
 
-	// Own addresses that cannot be read keep a set range from starting the
-	// backend, and are not read while the setting is empty.
+	// Own addresses that cannot be read leave no range shown clear of them:
+	// every range is set aside, one over the API server's address for that,
+	// and the backend starts. They are not read while the setting is empty.
 	pretendOwnAddrs(t, errors.New("no interfaces"))
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "cannot be read") {
-		t.Errorf("own addresses unreadable: err = %v, want one saying so", err)
+	t.Setenv("KUBERNETES_SERVICE_HOST", "172.30.0.1")
+	t.Setenv(key, "10.50.0.0/16,172.16.0.0/12")
+	cfg, err = Load()
+	if err != nil || cfg.TargetScopeExternalCIDRs != "" || len(cfg.TargetScopeExternalIgnored) != 2 ||
+		cfg.TargetScopeExternalIgnored[0].String() != "10.50.0.0/16 cannot be checked: the backend's own addresses, which no range may hold, cannot be read: no interfaces" ||
+		!strings.HasPrefix(cfg.TargetScopeExternalIgnored[1].String(), "172.16.0.0/12 holds the API server's address 172.30.0.1") {
+		t.Errorf("own addresses unreadable: kept %q, ignored %v, %v; want both ignored with why", cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err)
 	}
 	t.Setenv(key, "")
-	if _, err := Load(); err != nil {
-		t.Errorf("own addresses unreadable, setting empty: %v, want none", err)
+	if cfg, err := Load(); err != nil || cfg.TargetScopeExternalIgnored != nil {
+		t.Errorf("own addresses unreadable, setting empty: ignored %v, %v; want none", cfg.TargetScopeExternalIgnored, err)
 	}
 }
 

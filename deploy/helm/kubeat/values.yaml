@@ -155,7 +155,7 @@ backend:
     # UPTIME_TARGET_DENY_CIDRS: "10.0.0.0/8"          # checks only outside the cluster
     # UPTIME_TARGET_RESOLVE_TIMEOUT: 2s               # API only: timeout of the per-user scope check's name lookup at create and edit; a name not resolved in time is refused on the safe side and counted as resolve_error (needs CoreDNS egress, as the checks' own lookups do), slow resolver does not hold a create open to the write timeout; keep it below the frontend's BACKEND_TIMEOUT_MS (3s); a check's lookups are bounded by the monitor's timeout, not by this
     # UPTIME_TARGET_SCOPE_TRUST_PROXY: "true"         # only behind an HTTP(S)_PROXY outside the cluster: a scoped user's proxied HTTP/WebSocket monitor or webhook whose name is NXDOMAIN here is not refused (NO_PROXY decides what is proxied); a name resolving into the cluster, SERVFAIL and timeout still are; off by default, warned at start while a proxy is set
-    # UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: "10.50.0.0/16" # the company's own ranges: a scoped user's monitor or webhook at an address in them (bare or resolved from a name) counts as outside the cluster; empty by default; the target policy does not read them; never the cluster's pod, Service or node networks or its API VIP; the router's VIP only on purpose, for on-prem Routes, as a /32 when in the node network (every Route behind it, other teams' too, then opens to scoped users); a range holding the API server's or the backend's own address, or an IPv4 range written as IPv6, stops the start
+    # UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: "10.50.0.0/16" # the company's own ranges: a scoped user's monitor or webhook at an address in them (bare or resolved from a name) counts as outside the cluster; empty by default; the target policy does not read them; never the cluster's pod, Service or node networks or its API VIP; the router's VIP only on purpose, for on-prem Routes, as a /32 when in the node network (every Route behind it, other teams' too, then opens to scoped users); an entry that is not a CIDR, or an IPv4 range written as IPv6, stops the start; a range holding the API server's or the backend pod's own address (as after a drain) is ignored and the others kept, said by an ERROR at start, kubeat_target_scope_external_ranges_ignored and KubeatScopeExternalRangesIgnored
     # Guardrails against monitors putting load on other systems (README,
     # "Hedef yükü"); "0" turns a limit off. External: a target whose host is
     # not a private address, a *.svc/*.cluster.local name or a bare name.
@@ -558,6 +558,11 @@ metrics:
   # days and after it ends). The outage, certificate, backup and channel
   # alerts hold their state over a scrape gap of up to 10 minutes, such as a
   # Recreate.
+  # KubeatScopeExternalRangesIgnored (kubeat.self group, warning, no part of
+  # KubeatUnhealthy): the start ignored a range of
+  # UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS over the API server's or its own pod's
+  # address, and monitoring goes on with the others; the backend's log names
+  # it, the alert does not.
   # KubeatDiscoveryNamespaceSkipped (kubeat.discovery group, warning): with
   # discovery.namespaces, the annotation sync has skipped for 10 minutes a
   # namespace it cannot read (its Role taken away, or deleted with its

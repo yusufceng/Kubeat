@@ -225,10 +225,18 @@ type Config struct {
 	// (netguard.ExternalRanges): a scoped user may aim a monitor or a
 	// webhook at an address in them, written bare or resolved from a name,
 	// as at a public one. Comma-separated CIDRs, empty by default; the
-	// target policy and the load guardrails do not read them. A range that
-	// holds the API server's address (KUBERNETES_SERVICE_HOST) or one of the
-	// backend's own is refused (checkScopeExternal).
+	// target policy and the load guardrails do not read them. An entry that
+	// is not a CIDR stops the start. A range that holds the API server's
+	// address (KUBERNETES_SERVICE_HOST) or one of the backend's own, or that
+	// cannot be checked because those cannot be read, is set aside: Load
+	// drops it from here, which then holds the ranges in effect, and lists
+	// it in TargetScopeExternalIgnored (checkScopeExternal).
 	TargetScopeExternalCIDRs string // UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS
+	// TargetScopeExternalIgnored are the ranges of
+	// UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS Load set aside, each with why, for
+	// the start to log as an error and to count in
+	// kubeat_target_scope_external_ranges_ignored; nil when none was.
+	TargetScopeExternalIgnored []IgnoredRange
 
 	MinCheckInterval time.Duration // UPTIME_MIN_CHECK_INTERVAL
 	StatsWindow      time.Duration // UPTIME_STATS_WINDOW
@@ -686,7 +694,7 @@ func Load() (Config, error) {
 	if err := checkCIDRs("UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS", cfg.TargetScopeExternalCIDRs); err != nil {
 		return Config{}, err
 	}
-	if err := checkScopeExternal(cfg.TargetScopeExternalCIDRs); err != nil {
+	if cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err = checkScopeExternal(cfg.TargetScopeExternalCIDRs); err != nil {
 		return Config{}, err
 	}
 	if cfg.AdminPasswordReset, err = envBool("UPTIME_ADMIN_PASSWORD_RESET", false); err != nil {
@@ -908,24 +916,52 @@ var ownAddrs = func() ([]netip.Addr, error) {
 	return out, nil
 }
 
-// checkScopeExternal refuses UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS, already
-// checked to be CIDRs, when one of its ranges holds an address of the
+// IgnoredRange is a range of UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS that Load
+// set aside (checkScopeExternal), and why.
+type IgnoredRange struct {
+	// Range is the range as the scope check reads it (masked).
+	Range netip.Prefix
+	// Reason says why, after the range: "holds the API server's address
+	// ...", "holds 10.128.2.15, an address of the backend's own pod ..." or
+	// "cannot be checked: ...".
+	Reason string
+}
+
+// String is the range and why, as the start's log line names them.
+func (r IgnoredRange) String() string { return r.Range.String() + " " + r.Reason }
+
+// checkScopeExternal reads UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS, already
+// checked to be CIDRs, and sets aside each range that holds an address of the
 // cluster's own: the API server's, which Kubernetes gives every pod as
 // KUBERNETES_SERVICE_HOST and which is in the Service network, or one of the
 // backend's own, in the pod network. Counted as outside the cluster, such a
 // range would let a user limited to some namespaces reach the Services or
-// the pods in it by address, with no namespace to answer for, so the backend
-// does not start until the range is narrowed or the setting emptied. It
-// catches the plain mistake (10.0.0.0/8 over a cluster's networks), not every
-// overlap: it compares the addresses of this start only, so a range over
-// another part of the pod network passes today and stops the backend once
-// the pod is scheduled there; the rest of the pod and Service networks, the
-// node network and the API VIP are the operator's to keep out (README, "Hedef
+// the pods in it by address, with no namespace to answer for. While the
+// backend's own addresses cannot be read, no range can be shown clear of
+// them, and every range is set aside. It returns the setting with the ranges
+// kept, as written, and the ranges set aside; the setting is returned as it
+// came when none is.
+//
+// These compare the ranges with the environment of this start, not with
+// themselves: a range clear of the pod's address on one node holds it on
+// the next, where a drain moves the pod. So they stop nothing (S96, PO
+// decision, after the drain of sprint 10's rehearsal (c) left the backend
+// in CrashLoopBackOff): a range set aside is read as if it were not listed,
+// the stricter side, its addresses inside the cluster for the scope as
+// without the setting, while the other ranges stay in effect and the start
+// says which went and why (an ERROR line, the gauge
+// kubeat_target_scope_external_ranges_ignored and its alert rule). Only an
+// entry that cannot be read stops the start: one that is not a CIDR
+// (checkCIDRs), and here an IPv4 range written as IPv6.
+//
+// It catches the plain mistake (10.0.0.0/8 over a cluster's networks), not
+// every overlap: the rest of the pod and Service networks, the node network
+// and the API VIP are the operator's to keep out (README, "Hedef
 // politikası"). The ranges are read by netguard.ParseExternalRanges and
-// compared by ExternalRanges.Holding, as the scope check reads and compares
+// compared by ExternalRanges.Contains, as the scope check reads and compares
 // them, so the guard and the check never part on a spelling (an IPv4 range
 // written as IPv6 is refused by both). An empty setting reads nothing.
-func checkScopeExternal(list string) error {
+func checkScopeExternal(list string) (string, []IgnoredRange, error) {
 	const key = "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS"
 	var entries []string
 	for _, entry := range strings.Split(list, ",") {
@@ -935,32 +971,53 @@ func checkScopeExternal(list string) error {
 	}
 	ranges, err := netguard.ParseExternalRanges(entries)
 	if err != nil {
-		return fmt.Errorf("%s: %w", key, err)
+		return "", nil, fmt.Errorf("%s: %w", key, err)
 	}
 	if ranges.Empty() {
-		return nil
+		return list, nil, nil
 	}
-	const advice = "list only the company's ranges outside the cluster's pod, Service and node networks, or leave it empty " +
-		"(README, \"Hedef politikası\")"
+	var apiServer netip.Addr
 	if host := strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_HOST")); host != "" {
 		if addr, err := netip.ParseAddr(host); err == nil {
-			if prefix, ok := ranges.Holding(addr); ok {
-				return fmt.Errorf("%s: %s holds the API server's address %s (KUBERNETES_SERVICE_HOST), in the cluster's Service network: "+
-					"a user limited to some namespaces could reach every Service in it by its ClusterIP; %s", key, prefix, addr, advice)
+			apiServer = addr
+		}
+	}
+	own, ownErr := ownAddrs()
+	var kept []string
+	var ignored []IgnoredRange
+	for _, entry := range entries {
+		// Each entry read alone, as ParseExternalRanges read it above.
+		one, err := netguard.ParseExternalRanges([]string{entry})
+		if err != nil {
+			return "", nil, fmt.Errorf("%s: %w", key, err)
+		}
+		reason := ""
+		switch {
+		case apiServer.IsValid() && one.Contains(apiServer):
+			reason = fmt.Sprintf("holds the API server's address %s (KUBERNETES_SERVICE_HOST), in the cluster's Service network: "+
+				"a user limited to some namespaces could reach every Service in it by its ClusterIP", apiServer)
+		case ownErr != nil:
+			reason = fmt.Sprintf("cannot be checked: the backend's own addresses, which no range may hold, cannot be read: %v", ownErr)
+		default:
+			for _, addr := range own {
+				if one.Contains(addr) {
+					reason = fmt.Sprintf("holds %s, an address of the backend's own pod (its pod IP or loopback): "+
+						"a user limited to some namespaces could reach the pods in it by address", addr.WithZone(""))
+					break
+				}
 			}
 		}
-	}
-	own, err := ownAddrs()
-	if err != nil {
-		return fmt.Errorf("%s: the backend's own addresses, which no range may hold, cannot be read: %w", key, err)
-	}
-	for _, addr := range own {
-		if prefix, ok := ranges.Holding(addr); ok {
-			return fmt.Errorf("%s: %s holds %s, an address of the backend's own pod (its pod IP or loopback): "+
-				"a user limited to some namespaces could reach the pods in it by address; %s", key, prefix, addr.WithZone(""), advice)
+		if reason == "" {
+			kept = append(kept, entry)
+			continue
 		}
+		prefix, _ := netip.ParsePrefix(entry)
+		ignored = append(ignored, IgnoredRange{Range: prefix.Masked(), Reason: reason})
 	}
-	return nil
+	if len(ignored) == 0 {
+		return list, nil, nil
+	}
+	return strings.Join(kept, ","), ignored, nil
 }
 
 // envIntOrZero is envPositiveInt for settings where zero means "choose for
