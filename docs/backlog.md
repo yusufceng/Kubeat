@@ -2204,6 +2204,10 @@ kurulum notundaki `KubeatSignInSourceDegraded` satırı S95'in
 (dizine ulaşılamıyor ve hesap tavanı kuralları, `kind="source_total"` kuralı, README
 "Kopyalamak" örnekleri) sprint 11'e girmedi; tetikleyicisi değişmedi.
 
+Güncelleme (2026-11-08, S95 [#161](https://github.com/yusufceng/Kubeat/issues/161)): kurulum
+notunun satırı geldi. Kurallar açıkken (`metrics.prometheusRule.enabled`) giriş throttle'ı
+bölümü `KubeatSignInSourceDegraded`'i anar. Dilim 2 değişmedi.
+
 ## Kapsam-dışı hedef reddi denetimini keşif-import/restore, bakım ve workload yollarına genişletmek + flood cap (S68 takibi)
 
 2026-11-06'da sprint 7 kapanışında eklendi ([sprints/2026-11-05-sprint-07.md](sprints/2026-11-05-sprint-07.md)).
@@ -2736,6 +2740,20 @@ S95 sprint 11'de [#161](https://github.com/yusufceng/Kubeat/issues/161) olarak, 
 S98 ([#162](https://github.com/yusufceng/Kubeat/issues/162)). Madde #161 merge edilince
 kapanır; `gce-internal` için ayrı öneri bu bölümde kalır.
 
+Güncelleme (2026-11-08, S95 [#161](https://github.com/yusufceng/Kubeat/issues/161)):
+**çözüldü.** Kurulum notu sınıf `gce` iken politika kapalıysa `from` için iki aralığı verir,
+açıksa ve `from` `35.191.0.0/16` ile `130.211.0.0/22`'yi birden içermiyorsa bir WARNING
+yazar. Hop çelişkisi (`gce` iken `2`, `nginx` iken `1` değilse) ve ManagedCertificate'li
+Ingress'te TLS çelişkisi de satır alır. `values-gke.yaml` `docs/gke.md`'de ve CI'da render
+ediliyor. Kalanlar:
+
+- `gce-internal` için ayrı öneri. Tetikleyici değişmedi: `gce-internal` ile kurulan bir
+  kurulum.
+- Önde L7 GCLB olan `ingress-nginx`'te doğru değer `3`'tür, ama sınıf `nginx` iken çelişki
+  satırı yine çıkar. Bu, PO'nun kabul ölçütüdür ("`nginx` iken `1` değilse"). Satırı o
+  kurulum için susturan bir işaret (ör. bir values anahtarı) yok. Tetikleyici: önde
+  GCLB'li bir `ingress-nginx` kurulumunun README'deki CI tarifini kullanması.
+
 ## `test-chart.sh`'in README denetimini kurulum notunun gösterdiği bölüme daraltmak
 
 2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133) BA incelemesinin düşük bulgusu; [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
@@ -2751,6 +2769,13 @@ edilince kapanır.
 
 Güncelleme (2026-11-08, sprint 11 planı; [sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)):
 S95 sprint 11'de [#161](https://github.com/yusufceng/Kubeat/issues/161).
+
+Güncelleme (2026-11-08, S95 [#161](https://github.com/yusufceng/Kubeat/issues/161)):
+**çözüldü.** `test-chart.sh` metinleri notun gösterdiği README bölümünde arar: başlığın
+altında, verilmişse o başlığın içindeki kalın açılışlı paragrafta. Daraltma ilk koşuda bir
+açık buldu: notun `ingress-nginx` için önerdiği
+`--set controller.service.externalTrafficPolicy=Local` "Hesaplar ve giriş"te değil yalnız
+hızlı başlangıçta geçiyordu; "Kurulum notunun önerisi"ne eklendi.
 
 ## Keşiften içe aktarmayı monitor'ün kapsam kuralıyla hizalamak
 
@@ -2969,6 +2994,10 @@ kuyruğunda 4. sırada. Ara önlemler sprint 11'de:
 - README GKE kontrol listesinde "`externalTrafficPolicy: Cluster`'da sinyal susar" cümlesi
   (S95, [#161](https://github.com/yusufceng/Kubeat/issues/161)).
 
+Güncelleme (2026-11-08, S95 [#161](https://github.com/yusufceng/Kubeat/issues/161)): README
+"GKE kontrol listesi"nin 4. maddesi cümleyi yazıyor; S101 gelince o madde güncellenir.
+Tetikleyici değişmedi.
+
 ## İki cluster'lı promtool senaryoları: `KubeatSignInSourceDegraded` ve `KubeatDiscoveryNamespaceSkipped`
 
 2026-11-08'de ertelendi (S85 dilim 1 [#146](https://github.com/yusufceng/Kubeat/issues/146)
@@ -3142,6 +3171,14 @@ politikası) render hatasına çevirir ve var olan kurulumları kırabilir; opt-
 ayrı karar ister. S61 (uyarıları backend log'una yazmak; "Sprint 6 kuyruğundan backlog'a
 girmeden kalan maddeler") ile birlikte tartılır. Tetikleyici: CI tarifini yetersiz bulan bir
 GitOps kurulumu.
+
+Güncelleme (2026-11-08, S95 [#161](https://github.com/yusufceng/Kubeat/issues/161)): CI
+tarifi geldi, ama `helm install --dry-run=client` ile değil. `helm install` `--api-versions`
+almıyor (Helm 3.22.1 ve 4.3.1). Helm 3'te `--dry-run=client` cluster'a da bağlanıyor
+(3.22.1'de `/version`'a gittiği bir dinleyiciyle ölçüldü). Tarif bunun yerine chart'ın bir
+kopyasında `NOTES.txt`'i bir ConfigMap'e sarıp `helm template --api-versions` ile render
+ediyor; `test-chart.sh` README'deki bloğu Helm 3 ve Helm 4 ile koşuyor. Tetikleyici
+değişmedi.
 
 ## Cluster DNS kesintisinde Kubeat'in kendi kanal bildirimlerini gruplamak ya da bastırmak (S97 takibi)
 

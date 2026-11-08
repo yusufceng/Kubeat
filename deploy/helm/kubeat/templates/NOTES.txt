@@ -17,6 +17,19 @@ Sign in as "admin" with the password
   kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-admin -o jsonpath='{.data.password}' | base64 -d; echo
 {{- end }}
 Then create the other accounts under "Kullanıcılar".
+{{- /*
+The Ingress class, where the notes suggest a value for it. GKE's own (GCE)
+Ingress reads its class from the kubernetes.io/ingress.class annotation, not
+from ingressClassName; with a certificate of Google's named in its
+annotations (a ManagedCertificate, or a pre-shared one) TLS ends at the load
+balancer, and the Ingress needs neither TLS of its own nor a Secret. With a
+Route the Ingress values are left over and say nothing.
+*/}}
+{{- $ingressClass := .Values.ingress.className | default (index (.Values.ingress.annotations | default dict) "kubernetes.io/ingress.class") | default "" | toString | lower }}
+{{- $ingressOnly := and .Values.ingress.enabled (not .Values.route.enabled) }}
+{{- $gce := and $ingressOnly (eq $ingressClass "gce") }}
+{{- $ingressAnnotations := .Values.ingress.annotations | default dict }}
+{{- $gceCert := and $gce (or (index $ingressAnnotations "networking.gke.io/managed-certificates") (index $ingressAnnotations "ingress.gcp.kubernetes.io/pre-shared-cert")) }}
 
 Open the UI:
 {{- if .Values.route.enabled }}
@@ -28,6 +41,21 @@ Open the UI:
 {{- else if .Values.ingress.enabled }}
   {{ include "kubeat.publicURL" . | default (printf "through the Ingress %q" .Release.Name) }}
 {{- if include "kubeat.ingressTLS" . }}
+{{- if $gceCert }}
+
+WARNING: the Ingress names a certificate of Google's
+(networking.gke.io/managed-certificates or
+ingress.gcp.kubernetes.io/pre-shared-cert), so TLS ends at GKE's load
+balancer, yet ingress.tls.enabled is on: the Ingress also names the TLS
+Secret "{{ include "kubeat.ingressTLSSecret" . }}", which nothing creates and the load balancer does not
+need. Turn it off
+{{- if hasPrefix "https://" (.Values.publicURL | default "" | toString) }} (README, "Cluster'a kurulum", "GKE"):
+  --set ingress.tls.enabled=false
+{{- else }}, and give the https:// address, which the chart would
+otherwise derive as http:// (README, "Cluster'a kurulum", "GKE"):
+  --set ingress.tls.enabled=false --set publicURL=https://{{ .Values.ingress.host }}
+{{- end }}
+{{- else }}
   The Ingress serves it over HTTPS with the certificate in the Secret
   "{{ include "kubeat.ingressTLSSecret" . }}"; create the Secret, or let cert-manager make it
   (see ingress.annotations).
@@ -40,6 +68,10 @@ then the ingress controller serves its own default certificate or plain
 HTTP, and over plain HTTP browsers drop the session cookie, which is Secure
 for an https:// address: nobody can sign in.
 {{- end }}
+{{- end }}
+{{- else if and $gceCert (hasPrefix "https://" (include "kubeat.publicURL" .)) }}
+  TLS ends at GKE's load balancer, with the certificate the Ingress's
+  annotations name.
 {{- else }}
 
 WARNING: the Ingress has no TLS. Unless TLS ends in front of the ingress
@@ -64,19 +96,25 @@ reach it with a port-forward and the API token (README, "API"):
 {{- /*
 The sign-in throttle's source address behind the Route or Ingress: the
 values README "Hesaplar ve giriş" gives, one for the Ingress class when the
-notes know it (GKE's own Ingress reads its class from the annotation, not
-from ingressClassName); the router's forwardedHeaderPolicy, under which a
-Route's value holds, unless the Route pins its own; and the frontend's
-network policy that keeps pods from choosing their own source once the
-header is trusted. The backend trusts it from the frontend alone (the
-frontend token), so the backend's policy is not needed for that.
+notes know it, and a warning when the value given is not that one
+(docs/agents/sprint-takimi.md, step 2: a value that contradicts the class's
+gets a line too); the router's forwardedHeaderPolicy, under which a Route's
+value holds, unless the Route pins its own; with the alert rules on, the
+rule that tells of a wrong value where the notes are not read; and the
+frontend's network policy that keeps pods from choosing their own source
+once the header is trusted. The backend trusts it from the frontend alone
+(the frontend token), so the backend's policy is not needed for that.
 */}}
 {{- $hops := dig "extraEnv" "UPTIME_TRUST_PROXY_HOPS" "" .Values.backend | default "0" | toString }}
+{{- /* As the backend reads it (strconv.Atoi): "02" is 2. */}}
+{{- if regexMatch "^[0-9]+$" $hops }}{{ $hops = atoi $hops | toString }}{{ end }}
 {{- $frontendPolicy := dig "networkPolicy" "enabled" false .Values.frontend }}
-{{- $ingressClass := .Values.ingress.className | default (index (.Values.ingress.annotations | default dict) "kubernetes.io/ingress.class") | default "" | toString | lower }}
 {{- $routeHeaders := index (.Values.route.annotations | default dict) "haproxy.router.openshift.io/set-forwarded-headers" | default "" | toString | lower }}
 {{- $routeNote := and .Values.route.enabled (not (has $routeHeaders (list "append" "replace"))) }}
-{{- if and (or .Values.route.enabled .Values.ingress.enabled) (or (eq $hops "0") (not $frontendPolicy) $routeNote) }}
+{{- $hopsWant := "" }}
+{{- if $gce }}{{ $hopsWant = "2" }}{{ else if and $ingressOnly (eq $ingressClass "nginx") }}{{ $hopsWant = "1" }}{{ end }}
+{{- $hopsConflict := and $hopsWant (ne $hops "0") (ne $hops $hopsWant) }}
+{{- if and (or .Values.route.enabled .Values.ingress.enabled) (or (eq $hops "0") $hopsConflict (not $frontendPolicy) $routeNote) }}
 
 Sign-in throttle: failed sign-ins are counted per client address, which
 the backend reads from the X-Forwarded-For the UI passes on.
@@ -105,6 +143,32 @@ high lets a client lengthen the header and pick its own source, unwarned.
 Upgrade with it, e.g.
   --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS={{ if and (not .Values.route.enabled) (eq $ingressClass "gce") }}2{{ else }}1{{ end }}
 {{- end }}
+{{- if .Values.metrics.prometheusRule.enabled }}
+With the alert rules on, KubeatSignInSourceDegraded tells of a wrong
+value at run time, also where these notes are not read
+{{- if eq $hops "0" }}; at 0 it fires
+on the first sign-in{{ end }} (README,
+"Hesaplar ve giriş", "Sayaç ve kural").
+{{- end }}
+{{- if $hopsConflict }}
+{{- if $gce }}
+
+WARNING: UPTIME_TRUST_PROXY_HOPS is {{ $hops }}, but behind GKE's own Ingress
+(GCE) it is 2: the load balancer writes the client's address and its own.
+Lower, every browser counts as the load balancer, one shared lock per
+name; higher, a client lengthens the header and picks its own source
+(README, "Hesaplar ve giriş", "Vekil-hop rehberi"). Upgrade with
+{{- else }}
+
+WARNING: UPTIME_TRUST_PROXY_HOPS is {{ $hops }}, but behind ingress-nginx it is 1,
+provided its LoadBalancer Service has externalTrafficPolicy: Local.
+Higher, a client lengthens the header and picks its own source; 3 holds
+only behind an L7 Google Cloud load balancer, with use-forwarded-headers
+and compute-full-forwarded-for on (README, "Hesaplar ve giriş",
+"Vekil-hop rehberi"). Otherwise upgrade with
+{{- end }}
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS={{ $hopsWant }}
+{{- end }}
 {{- if $routeNote }}
 A Route's value holds while the router appends to X-Forwarded-For or
 replaces it: forwardedHeaderPolicy Append, the default, or Replace. Under
@@ -116,6 +180,8 @@ Without that access, or under IfNone or Never, give this Route its own:
   --set-string 'route.annotations.haproxy\.router\.openshift\.io/set-forwarded-headers=append'
 {{- end }}
 {{- if not $frontendPolicy }}
+{{- if $hopsConflict }}
+{{ end }}
 The backend reads the header only from the frontend, which proves itself
 with the Secret {{ include "kubeat.frontendTokenSecret" . }}. With UPTIME_TRUST_PROXY_HOPS
 above 0 any pod in the cluster can still reach the frontend's Service
@@ -125,6 +191,10 @@ and pick the address its sign-ins count against. To close that, also set
 {{- if .Values.route.enabled }}
 which by default lets in only the OpenShift router (README, "Hesaplar ve
 giriş", "Arayüzün ağ politikası").
+{{- else if $gce }}
+with frontend.networkPolicy.from set to GKE's load balancer ranges,
+ipBlock 35.191.0.0/16 and 130.211.0.0/22
+(README, "Cluster'a kurulum", "GKE kontrol listesi").
 {{- else }}
 with frontend.networkPolicy.from set to your ingress controller's namespace,
 or for GKE's own Ingress to its load balancer's ranges (README, "Hesaplar ve
@@ -142,7 +212,9 @@ enforce NetworkPolicy ignores it without a word, so the notes ask for a
 check. Its default "from" selects the OpenShift router alone and matches
 nothing elsewhere; whether this is OpenShift is read from the APIs this
 render sees, which a GitOps render (helm template without --api-versions)
-does not, so it is a warning and never a failed render.
+does not, so it is a warning and never a failed render. Behind GKE's own
+Ingress the UI is reached from Google's load balancer ranges, which "from"
+must list, the default or not; that warning takes the default's place.
 */}}
 {{- if $frontendPolicy }}
 
@@ -151,10 +223,28 @@ network plugin that does not enforce NetworkPolicy ignores it without a
 word. From a pod in a namespace not in frontend.networkPolicy.from, a
 request to
   http://{{ .Release.Name }}-frontend.{{ .Release.Namespace }}.svc:3000/login
-must time out (README, "Hesaplar ve giriş", "Arayüzün ağ politikası").
+must time out (README, "Hesaplar ve giriş",
+"Politikanın uygulandığını doğrulamak").
 {{- $router := list (dict "namespaceSelector" (dict "matchLabels" (dict "policy-group.network.openshift.io/ingress" ""))) }}
 {{- $from := dig "networkPolicy" "from" $router .Values.frontend }}
-{{- if and (eq (toJson $from) (toJson $router)) (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) }}
+{{- $fromJSON := toJson $from }}
+{{- if and $gce (not (and (contains "\"35.191.0.0/16\"" $fromJSON) (contains "\"130.211.0.0/22\"" $fromJSON))) }}
+
+WARNING: GKE's own Ingress (GCE) reaches the UI from Google's load
+balancer ranges, 35.191.0.0/16 and 130.211.0.0/22, its health checks too,
+and frontend.networkPolicy.from does not list both: the load balancer
+cannot reach the UI. Add them, beside any source of your own
+(README, "Cluster'a kurulum", "GKE kontrol listesi"):
+  frontend:
+    networkPolicy:
+      from:
+        - ipBlock:
+            cidr: 35.191.0.0/16
+        - ipBlock:
+            cidr: 130.211.0.0/22
+With frontend.service.type NodePort the source can be a node: add the
+nodes' range as well.
+{{- else if and (eq $fromJSON (toJson $router)) (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) }}
 
 WARNING: frontend.networkPolicy.from is left at its default, which lets in
 only the OpenShift router, and this cluster does not look like OpenShift

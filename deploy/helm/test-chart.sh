@@ -348,6 +348,61 @@ done
 notes "Route with an Ingress class left in the values" says "a plain Route: 1" "${ROUTE[@]}" --set ingress.className=gce
 notes "Route with an Ingress class left in the values" says "$SET_HOPS" "${ROUTE[@]}" --set ingress.className=gce
 
+# A value given that is not the class's own gets a warning of its own
+# (docs/agents/sprint-takimi.md, step 2: a contradiction gets a line too):
+# GCE's other than 2, ingress-nginx's other than 1, with the class's value
+# and the README section that gives it; 0 keeps the suggestion above. Any
+# other class, and a Route, which keeps its own note, get none. The section
+# shows for the contradiction alone, and with the alert rules on names
+# KubeatSignInSourceDegraded, which tells of a wrong value where the notes
+# are not read.
+HOPS_CONFLICT="WARNING: UPTIME_TRUST_PROXY_HOPS is"
+GCE_CONFLICT="but behind GKE's own Ingress"
+NGINX_CONFLICT="but behind ingress-nginx it is 1,"
+HOP_GUIDE='(README, "Hesaplar ve giriş", "Vekil-hop rehberi")'
+GIVEN_ONE=(--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1)
+for hops in 1 3; do
+  notes "Ingress gce annotation, hops $hops" says "WARNING: UPTIME_TRUST_PROXY_HOPS is $hops, $GCE_CONFLICT" "${GCE[@]}" \
+    --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS="$hops"
+done
+# Read as the backend reads it: "02" is 2, "00" is 0.
+notes "Ingress gce annotation, hops 02" omits "$HOPS_CONFLICT" "${GCE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=02
+notes "Ingress gce annotation, hops 00" says "$HOPS_ZERO" "${GCE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=00
+notes "Ingress gce annotation, hops 1" says "$SET_HOPS_TWO" "${GCE[@]}" "${GIVEN_ONE[@]}"
+notes "Ingress gce annotation, hops 1" says "$HOP_GUIDE" "${GCE[@]}" "${GIVEN_ONE[@]}"
+notes "Ingress gce annotation, hops 1" omits "$HOPS_ZERO" "${GCE[@]}" "${GIVEN_ONE[@]}"
+notes "Ingress gce className, hops 1" says "$GCE_CONFLICT" --set ingress.enabled=true --set ingress.className=gce "${GIVEN_ONE[@]}"
+notes "Ingress gce, hops 1, frontend policy on" says "$THROTTLE" "${GCE[@]}" "${GIVEN_ONE[@]}" "${FRONTEND_POLICY[@]}"
+notes "Ingress gce annotation, hops 2" omits "$HOPS_CONFLICT" "${GCE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+notes "Ingress gce annotation, hops 2 as a number" omits "$HOPS_CONFLICT" "${GCE[@]}" --set backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+notes "Ingress gce annotation, hops unset" omits "$HOPS_CONFLICT" "${GCE[@]}"
+notes "Ingress nginx, hops 2" says "WARNING: UPTIME_TRUST_PROXY_HOPS is 2, $NGINX_CONFLICT" "${NGINX[@]}" \
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+notes "Ingress nginx, hops 2" says "$SET_HOPS" "${NGINX[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+notes "Ingress nginx, hops 2" says "and compute-full-forwarded-for on (README" "${NGINX[@]}" \
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+notes "Ingress nginx, hops 3" says "WARNING: UPTIME_TRUST_PROXY_HOPS is 3, $NGINX_CONFLICT" "${NGINX[@]}" \
+  --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=3
+notes "Ingress nginx, hops 1" omits "$HOPS_CONFLICT" "${NGINX[@]}" "${GIVEN_ONE[@]}"
+notes "Ingress nginx, hops unset" omits "$HOPS_CONFLICT" "${NGINX[@]}"
+for class in traefik ""; do
+  notes "Ingress class \"$class\", hops 2" omits "$HOPS_CONFLICT" --set ingress.enabled=true --set-string ingress.className="$class" \
+    --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+done
+notes "Route with an Ingress class gce left in the values, hops 1" omits "$HOPS_CONFLICT" "${ROUTE[@]}" --set ingress.className=gce "${GIVEN_ONE[@]}"
+notes "Route, hops 2" omits "$HOPS_CONFLICT" "${ROUTE[@]}" --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2
+RULE_LINE="With the alert rules on, KubeatSignInSourceDegraded tells of a wrong"
+RULE_GUIDE='"Hesaplar ve giriş", "Sayaç ve kural")'
+WITH_RULES=(--set metrics.prometheusRule.enabled=true)
+notes "Route, hops unset, rules on" says "$RULE_LINE" "${ROUTE[@]}" "${WITH_RULES[@]}"
+notes "Route, hops unset, rules on" says "at 0 it fires" "${ROUTE[@]}" "${WITH_RULES[@]}"
+notes "Route, hops unset, rules on" says "$RULE_GUIDE" "${ROUTE[@]}" "${WITH_RULES[@]}"
+notes "Route, hops unset, rules off" omits "$RULE_LINE" "${ROUTE[@]}"
+notes "Ingress gce annotation, hops 1, rules on" says "$RULE_LINE" "${GCE[@]}" "${GIVEN_ONE[@]}" "${WITH_RULES[@]}"
+notes "Ingress gce annotation, hops 1, rules on" omits "at 0 it fires" "${GCE[@]}" "${GIVEN_ONE[@]}" "${WITH_RULES[@]}"
+notes "neither Route nor Ingress, rules on" omits "$RULE_LINE" "${WITH_RULES[@]}"
+notes "Ingress, hops 1, frontend policy on, rules on" omits "$RULE_LINE" "${INGRESS[@]}" "${GIVEN_ONE[@]}" "${FRONTEND_POLICY[@]}" "${WITH_RULES[@]}"
+
 # A Route's value holds under the router's forwardedHeaderPolicy Append or
 # Replace; under IfNone or Never a client writes the header. With a Route
 # the notes say so whatever the value, give the oc line that reads the
@@ -416,17 +471,91 @@ notes "frontend policy off, no OpenShift API" omits "$DEFAULT_FROM_WARN" "${INGR
 renders "default from, no OpenShift API" "${INGRESS[@]}" "${FRONTEND_POLICY[@]}"
 
 # The README section the notes point at gives the values they suggest
-# (docs/agents/sprint-takimi.md, step 2).
+# (docs/agents/sprint-takimi.md, step 2): in that section, not merely
+# somewhere in the README, where another section may carry the same text.
+# A pointer (README, "HEADING", "LEAD") names a heading and, inside it, the
+# paragraphs that open with **LEAD.
 README="$CHART/../../../README.md"
-for text in "frontend.networkPolicy.enabled=true" "frontend.networkPolicy.from" "**Arayüzün ağ politikası" \
+# readme_section HEADING [LEAD]: the README's section under the heading
+# HEADING (of any level), up to the next heading of its level or above; with
+# LEAD, only its paragraphs from the one that opens with **LEAD followed by
+# ".", ":" or " (", up to the next paragraph that opens in bold or the next
+# heading. Code blocks belong to the section they are in.
+readme_section() {
+  awk -v heading="$1" -v lead="${2:-}" '
+    /^[ \t]*(```|~~~)/ { code = !code; if (out) print; next }
+    !code && /^#+[ \t]/ {
+      match($0, /^#+/)
+      depth = RLENGTH
+      title = $0
+      sub(/^#+[ \t]+/, "", title)
+      sub(/[ \t]+$/, "", title)
+      if (insection && depth <= level) exit
+      if (!insection) {
+        if (title == heading) { insection = 1; level = depth; out = (lead == "") }
+        next
+      }
+      if (lead != "" && out) exit
+      if (out) print
+      next
+    }
+    !code && insection && lead != "" && /^\*\*/ {
+      if (out) exit
+      rest = substr($0, length(lead) + 3)
+      if (index($0, "**" lead) == 1 && rest ~ /^(\.|:| \()/) out = 1
+    }
+    out { print }
+  ' "$README"
+}
+# readme_says HEADING LEAD TEXT...: the README section has each TEXT.
+readme_says() {
+  local heading="$1" lead="$2" where text
+  shift 2
+  where="\"$heading\"${lead:+, \"$lead\"}"
+  readme_section "$heading" "$lead" >"$WORK/readme-section"
+  if [ ! -s "$WORK/readme-section" ]; then
+    failed "README has no section $where, which the notes point at"
+    return
+  fi
+  for text in "$@"; do
+    grep -qF -- "$text" "$WORK/readme-section" || failed "README $where lacks \"$text\", which the notes point at"
+  done
+}
+# A paragraph ends where the next bold one opens.
+readme_section "Hesaplar ve giriş" "Arayüzün ağ politikası" | grep -qF "**Vekil-hop rehberi" &&
+  failed "README section \"Arayüzün ağ politikası\" runs on into the next paragraph"
+readme_section "Cluster'a kurulum" "GKE" | grep -qF "**GKE kontrol listesi" &&
+  failed "README section \"GKE\" runs on into \"GKE kontrol listesi\""
+# The sign-in throttle's values, the router's policy and the alert rule:
+# "Hesaplar ve giriş" and its paragraphs.
+readme_says "Hesaplar ve giriş" "" "$SET_HOPS" "$SET_HOPS_TWO" "$NGINX_LOCAL" "externalTrafficPolicy: Local" \
+  "use-forwarded-headers" "compute-full-forwarded-for" "$ROUTER_POLICY_CMD" "$ROUTE_OWN_POLICY" \
+  "**Vekil-hop rehberi" "**Uydurma başlıkla negatif adım" "X-Forwarded-For: 192.0.2.99"
+readme_says "Hesaplar ve giriş" "Vekil-hop rehberi" "| GKE'nin kendi Ingress'i (GCE) | \`2\` |" \
+  "\`externalTrafficPolicy: Local\`, varsayılan ayarlar | \`1\` |" "\`compute-full-forwarded-for: \"true\"\`) | \`3\` |" \
+  "haproxy.router.openshift.io/set-forwarded-headers: append" "GKE Gateway (\`gke-l7-global-external-managed\`"
+readme_says "Hesaplar ve giriş" "Arayüzün ağ politikası" "frontend.networkPolicy.enabled=true" "frontend.networkPolicy.from" \
   "policy-group.network.openshift.io/ingress" "kubernetes.io/metadata.name: ingress-nginx" "35.191.0.0/16" "130.211.0.0/22" \
-  "$SET_HOPS" "$SET_HOPS_TWO" "$NGINX_LOCAL" "externalTrafficPolicy: Local" "**Vekil-hop rehberi" \
-  "$ROUTER_POLICY_CMD" "$ROUTE_OWN_POLICY" "haproxy.router.openshift.io/set-forwarded-headers: append" \
-  "policy-group.network.openshift.io/host-network: \"\"" "$ROUTER_NETWORK_CMD" \
-  "**Politikanın uygulandığını doğrulamak" "GKE Gateway (\`gke-l7-global-external-managed\`" \
-  "X-Forwarded-For: 192.0.2.99" "**Uydurma başlıkla negatif adım"; do
-  grep -qF -- "$text" "$README" || failed "README lacks \"$text\", which the notes and values point at"
-done
+  "policy-group.network.openshift.io/host-network: \"\"" "$ROUTER_NETWORK_CMD"
+readme_says "Hesaplar ve giriş" "Politikanın uygulandığını doğrulamak" "$POLICY_CHECK_URL" "curl: (28)"
+readme_says "Hesaplar ve giriş" "Sayaç ve kural" "KubeatSignInSourceDegraded" "metrics.prometheusRule.enabled=true" \
+  "hops_zero" "hops_too_high" "hops_too_low" "no_frontend_token"
+# fsGroup, and GKE's own Ingress: TLS at the load balancer and the policy's
+# two ranges.
+readme_says "Cluster'a kurulum" "" "--set podSecurityContext.fsGroup=1001"
+readme_says "Cluster'a kurulum" "GKE" "ingress.tls.enabled=false" "publicURL=https://<host>" \
+  "networking.gke.io/managed-certificates" "ingress.gcp.kubernetes.io/pre-shared-cert"
+readme_says "Cluster'a kurulum" "GKE kontrol listesi" "$SET_HOPS_TWO" "frontend:" "networkPolicy:" \
+  "cidr: 35.191.0.0/16" "cidr: 130.211.0.0/22" "KubeatSignInSourceDegraded" \
+  "\`externalTrafficPolicy: Cluster\`'da sinyal susar; \`sign-in refused\`"
+# The heartbeat and the rules; the API.
+readme_says "Aracın kendi sağlığı" "" "--set metrics.prometheusRule.enabled=true" \
+  "kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=" \
+  "--reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat" "### Operator'süz cluster"
+readme_says "API" "" "port-forward svc/<release>-backend 8090:8080" "localhost:8090/api/v1/monitors"
+# The notes name those sections as the checks above read them.
+notes "frontend policy on" says '"Politikanın uygulandığını doğrulamak")' "${FRONTEND_POLICY[@]}"
+notes "no podSecurityContext" says '("Cluster'"'"'a kurulum")'
 
 # The bank pilot's values (docs/pilot.md, "2. values-pilot.yaml") render,
 # install 0.50's sign-in fix on (hops 1, so the notes do not say it is 0)
@@ -453,6 +582,218 @@ else
   else
     failed "pilot values: refused: $(cat "$WORK/err")"
   fi
+fi
+
+# GKE's own Ingress (GCE). A certificate of Google's named in the Ingress's
+# annotations (a ManagedCertificate, or a pre-shared one) ends TLS at the
+# load balancer: while ingress.tls.enabled is on the notes warn and give the
+# two values that go with it (and leave out the TLS Secret's warning), and
+# once it is off with an https:// publicURL they do not warn of an Ingress
+# without TLS. Behind it the UI is reached from Google's two ranges, which
+# the frontend's policy must let in: the notes warn while "from" lacks
+# either, in place of the default "from"'s warning, and with the policy off
+# name the two ranges.
+GCE_HOST=(--set ingress.host=kubeat.example.com)
+MANAGED_CERT=(--set 'ingress.annotations.networking\.gke\.io/managed-certificates=kubeat')
+PRESHARED_CERT=(--set 'ingress.annotations.ingress\.gcp\.kubernetes\.io/pre-shared-cert=kubeat')
+TLS_OFF=(--set ingress.tls.enabled=false)
+HTTPS_URL=(--set publicURL=https://kubeat.example.com)
+GCE_TLS_WARN="WARNING: the Ingress names a certificate of Google's"
+GCE_TLS_SET="--set ingress.tls.enabled=false --set publicURL=https://kubeat.example.com"
+GCE_TLS_GUIDE='(README, "Cluster'"'"'a kurulum", "GKE")'
+GCE_TLS_ENDS="TLS ends at GKE's load balancer"
+NO_TLS_WARN="WARNING: the Ingress has no TLS"
+SECRET_WARN='WARNING: the Secret "kubeat-tls" does not exist yet'
+notes "gce, managed certificate, TLS on" says "$GCE_TLS_WARN" "${GCE[@]}" "${GCE_HOST[@]}" "${MANAGED_CERT[@]}"
+notes "gce, managed certificate, TLS on" says "$GCE_TLS_SET" "${GCE[@]}" "${GCE_HOST[@]}" "${MANAGED_CERT[@]}"
+notes "gce, managed certificate, TLS on" says "$GCE_TLS_GUIDE" "${GCE[@]}" "${GCE_HOST[@]}" "${MANAGED_CERT[@]}"
+notes "gce, managed certificate, TLS on" omits "$SECRET_WARN" "${GCE[@]}" "${GCE_HOST[@]}" "${MANAGED_CERT[@]}"
+notes "gce, pre-shared certificate, TLS on" says "$GCE_TLS_SET" "${GCE[@]}" "${GCE_HOST[@]}" "${PRESHARED_CERT[@]}"
+notes "gce className, managed certificate, TLS on" says "$GCE_TLS_WARN" --set ingress.enabled=true --set ingress.className=gce "${MANAGED_CERT[@]}"
+notes "gce, managed certificate, TLS on, https publicURL" says "$GCE_TLS_WARN" "${GCE[@]}" "${MANAGED_CERT[@]}" "${HTTPS_URL[@]}"
+notes "gce, managed certificate, TLS on, https publicURL" omits "--set publicURL=" "${GCE[@]}" "${MANAGED_CERT[@]}" "${HTTPS_URL[@]}"
+notes "gce, no certificate annotation, TLS on" omits "$GCE_TLS_WARN" "${GCE[@]}"
+notes "gce, no certificate annotation, TLS on" says "$SECRET_WARN" "${GCE[@]}"
+notes "nginx, managed certificate annotation, TLS on" omits "$GCE_TLS_WARN" "${NGINX[@]}" "${MANAGED_CERT[@]}"
+notes "Route, gce values left over" omits "$GCE_TLS_WARN" "${ROUTE[@]}" --set ingress.className=gce "${MANAGED_CERT[@]}"
+notes "gce, managed certificate, TLS off, https publicURL" says "$GCE_TLS_ENDS" "${GCE[@]}" "${MANAGED_CERT[@]}" "${TLS_OFF[@]}" "${HTTPS_URL[@]}"
+notes "gce, managed certificate, TLS off, https publicURL" omits "$NO_TLS_WARN" "${GCE[@]}" "${MANAGED_CERT[@]}" "${TLS_OFF[@]}" "${HTTPS_URL[@]}"
+notes "gce, pre-shared certificate, TLS off, https publicURL" omits "$NO_TLS_WARN" "${GCE[@]}" "${PRESHARED_CERT[@]}" "${TLS_OFF[@]}" "${HTTPS_URL[@]}"
+notes "gce, managed certificate, TLS off, no publicURL" says "$NO_TLS_WARN" "${GCE[@]}" "${GCE_HOST[@]}" "${MANAGED_CERT[@]}" "${TLS_OFF[@]}"
+notes "gce, managed certificate, TLS off, no publicURL" omits "$GCE_TLS_ENDS" "${GCE[@]}" "${GCE_HOST[@]}" "${MANAGED_CERT[@]}" "${TLS_OFF[@]}"
+notes "gce, no certificate annotation, TLS off, https publicURL" says "$NO_TLS_WARN" "${GCE[@]}" "${TLS_OFF[@]}" "${HTTPS_URL[@]}"
+notes "nginx, managed certificate annotation, TLS off, https publicURL" says "$NO_TLS_WARN" "${NGINX[@]}" "${MANAGED_CERT[@]}" "${TLS_OFF[@]}" "${HTTPS_URL[@]}"
+GCE_RANGES='[{"ipBlock":{"cidr":"35.191.0.0/16"}},{"ipBlock":{"cidr":"130.211.0.0/22"}}]'
+NGINX_FROM='[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"ingress-nginx"}}}]'
+GCE_FROM_WARN="WARNING: GKE's own Ingress (GCE) reaches the UI from Google's load"
+GCE_FROM_GUIDE='(README, "Cluster'"'"'a kurulum", "GKE kontrol listesi")'
+GCE_FROM_OFF="with frontend.networkPolicy.from set to GKE's load balancer ranges"
+notes "gce, frontend policy, default from" says "$GCE_FROM_WARN" "${GCE[@]}" "${FRONTEND_POLICY[@]}"
+notes "gce, frontend policy, default from" says "cidr: 130.211.0.0/22" "${GCE[@]}" "${FRONTEND_POLICY[@]}"
+notes "gce, frontend policy, default from" says "$GCE_FROM_GUIDE" "${GCE[@]}" "${FRONTEND_POLICY[@]}"
+notes "gce, frontend policy, default from" omits "$DEFAULT_FROM_WARN" "${GCE[@]}" "${FRONTEND_POLICY[@]}"
+notes "gce className, frontend policy, default from" says "$GCE_FROM_WARN" --set ingress.enabled=true --set ingress.className=gce "${FRONTEND_POLICY[@]}"
+notes "gce, frontend policy, ingress-nginx's namespace" says "$GCE_FROM_WARN" "${GCE[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json "frontend.networkPolicy.from=$NGINX_FROM"
+notes "gce, frontend policy, one range" says "$GCE_FROM_WARN" "${GCE[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json 'frontend.networkPolicy.from=[{"ipBlock":{"cidr":"35.191.0.0/16"}}]'
+notes "gce, frontend policy, the two ranges" omits "$GCE_FROM_WARN" "${GCE[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json "frontend.networkPolicy.from=$GCE_RANGES"
+notes "gce, frontend policy, the two ranges" omits "$DEFAULT_FROM_WARN" "${GCE[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json "frontend.networkPolicy.from=$GCE_RANGES"
+notes "gce, frontend policy, the two ranges and a namespace" omits "$GCE_FROM_WARN" "${GCE[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json 'frontend.networkPolicy.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"probes"}}},{"ipBlock":{"cidr":"130.211.0.0/22"}},{"ipBlock":{"cidr":"35.191.0.0/16"}}]'
+notes "nginx, frontend policy, ingress-nginx's namespace" omits "$GCE_FROM_WARN" "${NGINX[@]}" "${FRONTEND_POLICY[@]}" \
+  --set-json "frontend.networkPolicy.from=$NGINX_FROM"
+notes "Route, gce class left over, frontend policy" omits "$GCE_FROM_WARN" "${ROUTE[@]}" --set ingress.className=gce "${FRONTEND_POLICY[@]}" "${OPENSHIFT[@]}"
+notes "gce, frontend policy off" says "$GCE_FROM_OFF" "${GCE[@]}" "${GIVEN_ONE[@]}"
+notes "gce, frontend policy off" says "$GCE_FROM_GUIDE" "${GCE[@]}" "${GIVEN_ONE[@]}"
+notes "gce, frontend policy off" omits "$POLICY_FROM" "${GCE[@]}" "${GIVEN_ONE[@]}"
+notes "gce, frontend policy off" omits "$GCE_FROM_WARN" "${GCE[@]}" "${GIVEN_ONE[@]}"
+notes "nginx, frontend policy off" says "$POLICY_FROM" "${NGINX[@]}" "${GIVEN_ONE[@]}"
+
+# GKE's own Ingress as docs/gke.md gives it ("2. values-gke.yaml"), taken
+# from the document as written (docs/agents/sprint-takimi.md, step 7: an
+# install path recommended but not measured has a values recipe rendered in
+# CI): it renders what it says, and its notes warn of nothing, the hop, TLS
+# and the frontend's policy among it.
+GKE_DOC="$CHART/../../../docs/gke.md"
+awk '/^## 2\. values-gke\.yaml/ { section = 1; next }
+  section && /^```yaml$/ { inblock = 1; next }
+  inblock && /^```$/ { exit }
+  inblock { print }' "$GKE_DOC" >"$WORK/values-gke.yaml"
+if [ ! -s "$WORK/values-gke.yaml" ]; then
+  failed "GKE: no values block under \"2. values-gke.yaml\" in docs/gke.md"
+else
+  GKE_VALUES=(-f "$WORK/values-gke.yaml")
+  renders "GKE values" "${GKE_VALUES[@]}"
+  for text in "$THROTTLE" "$HOPS_ZERO" "$HOPS_CONFLICT" "$GCE_TLS_WARN" "$NO_TLS_WARN" "$SECRET_WARN" \
+    "$GCE_FROM_WARN" "$DEFAULT_FROM_WARN" "$NEEDS_POLICY" "$UNWRITABLE" "WARNING:"; do
+    notes "GKE values" omits "$text" "${GKE_VALUES[@]}"
+  done
+  notes "GKE values" says "$GCE_TLS_ENDS" "${GKE_VALUES[@]}"
+  notes "GKE values" says "$POLICY_CHECK" "${GKE_VALUES[@]}"
+  if helm template kubeat "$CHART" "${GKE_VALUES[@]}" >"$WORK/gke-manifests" 2>"$WORK/err"; then
+    for text in "kubernetes.io/ingress.class: gce" "networking.gke.io/managed-certificates: kubeat" \
+      "cloud.google.com/neg: '{\"ingress\": true}'" "cidr: 35.191.0.0/16" "cidr: 130.211.0.0/22" \
+      "fsGroup: 1001"; do
+      grep -qF -- "$text" "$WORK/gke-manifests" || failed "GKE values: the manifests lack \"$text\""
+    done
+    grep -A1 -- "- name: UPTIME_TRUST_PROXY_HOPS\$" "$WORK/gke-manifests" | grep -qF 'value: "2"' ||
+      failed "GKE values: the backend's UPTIME_TRUST_PROXY_HOPS is not \"2\""
+    grep -A1 -- "- name: UPTIME_PUBLIC_URL\$" "$WORK/gke-manifests" | grep -qF 'value: "https://' ||
+      failed "GKE values: the backend's UPTIME_PUBLIC_URL is not https://"
+    grep -qF "secretName:" "$WORK/gke-manifests" && failed "GKE values: the Ingress names a TLS Secret"
+  else
+    failed "GKE values: refused: $(cat "$WORK/err")"
+  fi
+fi
+
+# The README's recipe for reading the notes in CI, where a GitOps render
+# shows none ("Kurulum notları görünmez"), run as written there with the
+# helm this script runs with, as CI runs it with Helm 3 and Helm 4; only the
+# chart it pulls is this one, and the values file one of these. It talks to
+# no cluster, prints the notes and counts their warnings but the TLS
+# Secret's, which a render without a cluster never finds; the step fails on
+# any, and on notes that did not render, under sh as under bash -e.
+# --api-versions as the README says: both for OpenShift with the
+# PrometheusRule CRD, none for GKE.
+awk '/^\*\*Kurulum notları görünmez\.\*\*/ { section = 1; next }
+  section && /^```sh$/ { inblock = 1; next }
+  inblock && /^```$/ { exit }
+  inblock { print }' "$README" >"$WORK/ci-notes.sh"
+# ci_notes NAME SHELL APIS EXIT COUNT VALUES [TEXT]: the recipe run with
+# SHELL ("bash -e" or "sh"), keeping its two --api-versions (APIS all) or
+# dropping them (none), with the values file VALUES, exits EXIT, prints the
+# notes (and TEXT in them) and counts COUNT warnings; COUNT - for notes
+# that do not render.
+ci_notes() {
+  local name="$1" shell="$2" apis="$3" want_exit="$4" want_count="$5" values="$6" text="${7:-Kubeat is installed.}" dir got
+  dir="$(mktemp -d "$WORK/ci-notes.XXXXXX")"
+  mkdir "$dir/ci"
+  cp -R "$CHART" "$dir/ci/kubeat"
+  sed -e '/^helm pull /d' -e "s|values-<cluster>\\.yaml|$values|" "$WORK/ci-notes.sh" |
+    if [ "$apis" = none ]; then sed 's| --api-versions [^ ]*||g'; else cat; fi >"$dir/run.sh"
+  # shellcheck disable=SC2086 # SHELL is a command and its flag
+  (cd "$dir" && $shell run.sh) >"$dir/out" 2>"$dir/err"
+  got=$?
+  [ "$got" = "$want_exit" ] || failed "CI notes recipe, $name: exits $got, want $want_exit: $(cat "$dir/err")"
+  [ "$want_count" = - ] && return
+  grep -qF "Kubeat is installed." "$dir/out" || failed "CI notes recipe, $name: the notes are not printed"
+  grep -qF -- "$text" "$dir/out" || failed "CI notes recipe, $name: the notes do not say \"$text\""
+  grep -qx "WARNING: $want_count" "$dir/out" ||
+    failed "CI notes recipe, $name: want \"WARNING: $want_count\", got: $(grep -E 'WARNING' "$dir/out")"
+}
+if [ ! -s "$WORK/ci-notes.sh" ]; then
+  failed "README: no sh block under \"Kurulum notları görünmez\""
+else
+  [ "$(wc -l <"$WORK/ci-notes.sh")" -le 6 ] || failed "README's CI notes recipe: more than 6 lines"
+  grep -qx 'helm pull oci://ghcr.io/yusufceng/charts/kubeat --version [0-9.]* --untar --untardir ci' "$WORK/ci-notes.sh" ||
+    failed "README's CI notes recipe: no \"helm pull ... --untar --untardir ci\" line, which this check replaces with the chart"
+  grep -qF -- "-f values-<cluster>.yaml" "$WORK/ci-notes.sh" || failed "README's CI notes recipe: no -f values-<cluster>.yaml"
+  grep -qF -- "--api-versions security.openshift.io/v1 --api-versions monitoring.coreos.com/v1" "$WORK/ci-notes.sh" ||
+    failed "README's CI notes recipe: not the two --api-versions"
+  sed '/^helm pull /d' "$WORK/ci-notes.sh" | grep -Eq '(^|[;|&(] *)(kubectl|oc|helm (install|upgrade|pull))( |$)' &&
+    failed "README's CI notes recipe: a command that may reach a cluster or the registry"
+  if [ -s "$WORK/values-gke.yaml" ]; then
+    ci_notes "GKE values" "bash -e" none 0 0 "$WORK/values-gke.yaml"
+    ci_notes "GKE values under sh" sh none 0 0 "$WORK/values-gke.yaml"
+    sed 's/UPTIME_TRUST_PROXY_HOPS: "2"/UPTIME_TRUST_PROXY_HOPS: "1"/' "$WORK/values-gke.yaml" >"$WORK/values-gke-hops-1.yaml"
+    ci_notes "GKE values, hops 1" "bash -e" none 1 1 "$WORK/values-gke-hops-1.yaml"
+    ci_notes "GKE values, hops 1, under sh" sh none 1 1 "$WORK/values-gke-hops-1.yaml"
+  fi
+  # Values the chart refuses: no notes, and the step fails without set -e too.
+  printf 'backend:\n  env:\n    UPTIME_RETENTION: 48h\n' >"$WORK/values-refused.yaml"
+  ci_notes "refused values" "bash -e" none 1 - "$WORK/values-refused.yaml"
+  ci_notes "refused values under sh" sh none 1 - "$WORK/values-refused.yaml"
+  # ingress-nginx with cert-manager's Secret, which the count leaves out.
+  cat >"$WORK/values-nginx.yaml" <<'EOF'
+podSecurityContext:
+  fsGroup: 1001
+ingress:
+  enabled: true
+  className: nginx
+  host: kubeat.example.com
+frontend:
+  networkPolicy:
+    enabled: true
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+backend:
+  extraEnv:
+    UPTIME_TRUST_PROXY_HOPS: "1"
+heartbeat:
+  urlSecret:
+    name: kubeat-heartbeat
+backup:
+  enabled: true
+EOF
+  ci_notes "ingress-nginx, the TLS Secret's line" "bash -e" none 0 0 "$WORK/values-nginx.yaml" "$SECRET_WARN"
+  # OpenShift: the Route with its own forwarded-headers policy, the router's
+  # default "from", no fsGroup. Without the OpenShift API the notes warn of
+  # both.
+  cat >"$WORK/values-openshift.yaml" <<'EOF'
+route:
+  enabled: true
+  host: kubeat.apps.example
+  annotations:
+    haproxy.router.openshift.io/set-forwarded-headers: append
+frontend:
+  networkPolicy:
+    enabled: true
+backend:
+  extraEnv:
+    UPTIME_TRUST_PROXY_HOPS: "1"
+metrics:
+  prometheusRule:
+    enabled: true
+backup:
+  enabled: true
+EOF
+  ci_notes "OpenShift values" "bash -e" all 0 0 "$WORK/values-openshift.yaml"
+  ci_notes "OpenShift values without the OpenShift API" "bash -e" none 1 2 "$WORK/values-openshift.yaml"
 fi
 
 # The frontend's network policy: a switch of its own, off by default and

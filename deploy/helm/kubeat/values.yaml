@@ -340,7 +340,9 @@ frontend:
     # "Hesaplar ve giriş", "Arayüzün ağ politikası"). Only the ingress-nginx
     # namespace was measured (minikube with Calico, 2026-11-07). Left
     # at this default where the render does not see OpenShift's API, the
-    # install notes warn: there it matches nothing.
+    # install notes warn: there it matches nothing. With GKE's own Ingress
+    # (class gce) they warn while either range is missing; docs/gke.md has
+    # the whole values file.
     from:
       - namespaceSelector:
           matchLabels:
