@@ -278,6 +278,12 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   Route yalnızca edge'dir, reencrypt seçeneği yoktur (S59,
   [backlog](backlog.md) "Route'ta reencrypt ve arayüz ile backend arasında
   cluster içi TLS").
+- Kurum CA'sı bütün kontrollere ve bildirimlere tek bir demetle eklenir (README
+  "OpenShift" → "Kurum CA'sı", S2,
+  [#163](https://github.com/yusufceng/Kubeat/issues/163)): monitor başına CA ve
+  istemci sertifikası (mTLS) yoktur, demet değişince backend yeniden
+  başlatılmalıdır (Go kökleri süreçte bir kez okur). Reçete cluster'da henüz
+  ölçülmedi ([backlog](backlog.md) "Kurum CA'sı reçetesinin kalanları").
 - Kontroller backend pod'undan çıkar: izlenen namespace'te gelen trafiği
   varsayılan olarak reddeden bir NetworkPolicy varsa (OpenShift proje
   şablonunun `default-deny`'ı) Service, `each_pod`, TCP, gRPC, veritabanı ve

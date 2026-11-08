@@ -332,6 +332,105 @@ kök dosya sistemiyle ve tüm capability'ler düşürülmüş olarak çalışır
 (`restricted-v2` SCC'nin istedikleri). Backend yalnızca `/data`, `/backup` ve
 `/tmp` dizinlerine yazar.
 
+**Kurum CA'sı.** Kurum CA'sıyla imzalı Route'ları, re-encrypt uçlarını ve iç
+API'leri monitor başına `tls_skip_verify` açmadan izlemek için CA, kontrollerin
+güvendiği demete eklenir. Kontroller sertifikayı imajın sistem demetiyle (UBI)
+doğrular; `SSL_CERT_DIR`'in gösterdiği dizindeki sertifikalar bu demete eklenir.
+Chart ConfigMap üretmez, ConfigMap sizin nesnenizdir:
+
+- **OpenShift'te** ConfigMap'i boş ve etiketli oluşturun. Cluster Network
+  Operator onu `ca-bundle.crt` anahtarıyla cluster'ın güvendiği demetle doldurur:
+  RHCOS'un sistem demeti ve cluster yöneticisinin `proxy/cluster` nesnesinde
+  `spec.trustedCA` ile verdiği kurum CA'ları. Kurum CA'sı orada değilse
+  enjeksiyon onu getirmez; OpenShift dışındaki yolu etiketsiz bir ConfigMap'le
+  kullanın (etiketli ConfigMap'in `ca-bundle.crt`'sini operatör yazar).
+- **OpenShift dışında** kurum CA'sını (PEM; bir ya da birkaç sertifika) kendiniz
+  bir ConfigMap'e koyun. Go dizindeki her dosyayı okur, anahtar adı serbesttir;
+  `ca-bundle.crt` values'u iki platformda aynı tutar.
+
+```yaml
+# OpenShift: boş bırakın, ca-bundle.crt'yi cluster doldurur
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubeat-trusted-ca
+  namespace: kubeat
+  labels:
+    config.openshift.io/inject-trusted-cabundle: "true"
+```
+
+```
+# OpenShift: demet doldu mu (0'dan büyük bir sayı)
+oc -n kubeat get configmap kubeat-trusted-ca -o jsonpath='{.data.ca-bundle\.crt}' | grep -c 'BEGIN CERTIFICATE'
+# OpenShift dışında: etiketli nesne yerine
+kubectl -n kubeat create configmap kubeat-trusted-ca --from-file=ca-bundle.crt=kurum-ca.pem
+```
+
+Values iki platformda aynıdır; kurulum komutuna `-f values-ca.yaml` ile eklenir:
+
+```yaml
+backend:
+  extraVolumes:
+    - name: trusted-ca
+      configMap:
+        name: kubeat-trusted-ca
+  extraVolumeMounts:
+    - name: trusted-ca
+      mountPath: /etc/kubeat/trusted-ca
+      readOnly: true
+  extraEnv:
+    SSL_CERT_DIR: /etc/kubeat/trusted-ca
+```
+
+`extraVolumes` ve `extraVolumeMounts` listedir: başka bir values dosyasında da
+varsa (ör. LDAP'ın CA'sı) Helm onları birleştirmez, son verilen kazanır; girdileri
+tek listede toplayın.
+
+`SSL_CERT_DIR` dizindeki sertifikaları imajın demet dosyasına
+(`/etc/pki/tls/certs/ca-bundle.crt`) ekler: herkese açık CA'larla imzalı
+hedefler doğrulanmaya devam eder (imajda 2026-11-08'de ölçüldü, sistem demetinin
+kökleri havuzda kalır). Birden çok dizin `:` ile ayrılır. `SSL_CERT_FILE` ise
+Go'da demet dosyasının yerine geçer; önerilmez:
+
+- Bugünkü imajda varsayılan dizinler (`/etc/pki/tls/certs`) aynı demeti
+  taşıdığı için tek başına sistem demetini düşürmez. Bu imajın dizin düzenine
+  bağlıdır.
+- `SSL_CERT_DIR` ile birlikte verilince varsayılan dizinler de okunmaz, sistem
+  demeti tamamen düşer: herkese açık sertifikalı her hedef
+  `tls_unknown_authority` verir.
+
+**Kurum CA'sının kapsamı.**
+
+- Bütün TLS'li kontroller aynı demete güvenir: `http` (`https://`), `tcp`
+  (`tls: true`), `grpc` (`tls: true`), `websocket` (`wss://`) ve `postgres`,
+  `mysql`, `redis` (`tls: true`). Monitor başına CA seçilemez; tek bir monitor
+  için doğrulamayı kapatmak yine `tls_skip_verify`'dır.
+- Bildirim kanalları (webhook, Slack, Teams vb. ve SMTP) de aynı demete güvenir.
+- LDAP, OIDC ve Prometheus'un kendi `UPTIME_LDAP_CA_FILE`, `UPTIME_OIDC_CA_FILE`
+  ve `UPTIME_PROMETHEUS_CA_FILE` ayarları ayrıdır. Verilince yalnız o dosyaya
+  güvenirler, bu demete değil; verilmezse bu demete güvenirler.
+
+**Kurum CA'sı değişince.** Go demeti süreçte bir kez okur. ConfigMap
+güncellenince dosya pod'da değişir, ama çalışan backend eski demetle doğrulamayı
+sürdürür. CA eklenince ya da dönünce, OpenShift demeti yenileyince backend'i
+yeniden başlatın (reçete values'a ilk eklenirken `helm upgrade` pod'u zaten
+yeniler):
+
+```
+oc -n kubeat rollout restart deploy/kubeat-backend        # OpenShift
+kubectl -n kubeat rollout restart deploy/kubeat-backend   # öteki cluster'lar
+```
+
+Backend tek replikadır (`Recreate`), yeniden başlarken kontroller kısa bir süre
+durur. Daha önce `tls_unknown_authority` veren monitor, yeniden başlatmadan
+sonraki ilk kontrolde UP olur.
+
+Go'nun bu davranışı CI'da alt süreç testiyle sınanır
+(`backend/internal/checker/trustedca_test.go`: ConfigMap'in bağlandığı dizin
+düzeni, HTTP ve TLS'li TCP); yukarıdaki values `deploy/helm/test-chart.sh`'ta
+render edilir. Cluster'da uçtan uca reçete, OpenShift enjeksiyonu ve gerçek bir
+kurum PKI'sı henüz ölçülmedi.
+
 **Benzetim.** Elimizde gerçek bir OpenShift olmadığı için minikube,
 Kubeat'in gözünde OpenShift'e benzetilir:
 
@@ -3540,6 +3639,9 @@ değişmez.
 - `max_redirects`: kaç yönlendirmenin izleneceği; varsayılan `10`. `0` ise ilk
   yanıt değerlendirilir, yönlendirme olsa bile.
 - `tls_skip_verify`: yalnızca bu monitor için sertifika doğrulamasını kapatır.
+  Kurum CA'sıyla imzalı hedeflerde doğrulamayı kapatmak yerine CA'yı bütün
+  kontrollerin güvendiği demete ekleyin: ["OpenShift" → "Kurum CA'sı"](#openshift)
+  (reçete OpenShift dışını da anlatır).
 
 Header değerleri ve `auth_secret` API yanıtlarında `********` olarak
 maskelenir; güncellemede bu değer gönderilirse kayıtlı değer korunur. Kayıtlı
