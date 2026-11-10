@@ -177,15 +177,24 @@ yolu için bunun yerine `frontend.service.annotations`'a `cloud.google.com/neg:
 '{"ingress": true}'` ekleyin (bir values dosyasında). TLS için GCE Ingress
 çoğunlukla cert-manager HTTP-01 yerine bir `ManagedCertificate` ister; bunun
 ayrı bir annotation'ı (`networking.gke.io/managed-certificates`) ve cluster'da
-bir ManagedCertificate nesnesi gerekir. Bu yolda TLS yük dengeleyicide bittiği
+bir ManagedCertificate nesnesi gerekir (önceden yüklenmiş bir sertifikanın
+annotation'ı `ingress.gcp.kubernetes.io/pre-shared-cert`). Bu yolda TLS yük dengeleyicide bittiği
 için üç değeri birlikte verin: `ingress.tls.enabled=false` (chart Ingress'e
 var olmayan bir TLS Secret'ı yazmasın), `publicURL=https://<host>` (TLS
 kapalıyken chart adresi `http://` diye türetir) ve `ingress.annotations`
 altında `networking.gke.io/managed-certificates: <ManagedCertificate adı>`.
-GCE Ingress sağlık kontrolünü kendi
+Sınıf `gce` iken bu iki annotation'dan biri varsa ve `ingress.tls.enabled`
+açıksa kurulum notu WARNING ile ilk ikisini önerir; TLS kapalı ve `publicURL`
+`https://` iken "Ingress'te TLS yok" uyarısını yazmaz. GCE Ingress sağlık kontrolünü kendi
 varsayılanıyla yapar; container-native modda pod'un hazırlık probe'unu
 (`/login`) kullanır. **GCE varyantı henüz gerçek bir GKE'de doğrulanmadı**
 (prova kullanıcıda, bkz. [yol haritası](docs/yol-haritasi.md#bilinen-sınırlar)).
+
+Kopyalanabilir reçete: [docs/gke.md](docs/gke.md) (`values-gke.yaml`: NEG'li
+GCE Ingress, ManagedCertificate, hop `2`, iki `ipBlock`'lu arayüz politikası).
+CI, values bloğunu belgeden olduğu gibi çıkarıp render eder ve kurulum
+notunda hop, TLS ya da politika uyarısı çıkmadığını sınar; gerçek bir GKE'de
+ölçülmedi.
 
 **GKE kontrol listesi: giriş throttle'ı.** Hangi yol seçilirse seçilsin
 (ayrıntılar "Hesaplar ve giriş"te; GKE satırlarının hiçbiri henüz ölçülmedi):
@@ -194,16 +203,81 @@ varsayılanıyla yapar; container-native modda pod'un hazırlık probe'unu
    `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` ve controller'ın
    Service'inde `externalTrafficPolicy: Local`; GCE Ingress'te ve GKE
    Gateway'de `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2`.
+   Kurulum notu sınıf `gce` iken değer `2` değilse, `nginx` iken `1` değilse
+   WARNING yazar (`0`'da değeri önerir). Önde L7 GCLB olan `ingress-nginx`'te
+   (`use-forwarded-headers` ve `compute-full-forwarded-for` açık) doğru değer
+   `3`'tür ("Hesaplar ve giriş" → "Vekil-hop rehberi"). Kurulum notu orada da
+   WARNING yazar ve "Kurulum notları görünmez"deki CI tarifi düşer.
+   Değeri değiştirmeyin: `1`'de bütün tarayıcılar yük dengeleyicinin adresine
+   sayılır, ad başına tek paylaşılan kilit kalır. CI'da yalnız saymak için
+   `&& [ "$n" -eq 0 ]`'ı silin ([backlog](docs/backlog.md), "Kurulum notunda
+   `frontend.networkPolicy.from` önerisini Ingress sınıfına göre vermek").
 2. Arayüz politikası. `--set frontend.networkPolicy.enabled=true` ve
    `frontend.networkPolicy.from`'da `ingress-nginx`'in namespace'i; GCE
-   Ingress'te (NEG) ve GKE Gateway'de yük dengeleyicinin aralıkları
-   (`35.191.0.0/16`, `130.211.0.0/22`). Politikayı cluster'ın gerçekten
-   uyguladığını "Arayüzün ağ politikası"ndaki denetim satırıyla görün
+   Ingress'te (NEG) ve GKE Gateway'de yük dengeleyicinin aralıkları:
+
+   ```yaml
+   frontend:
+     networkPolicy:
+       enabled: true
+       from:
+         - ipBlock:
+             cidr: 35.191.0.0/16
+         - ipBlock:
+             cidr: 130.211.0.0/22
+   ```
+
+   `NodePort` modunda kaynak node olabilir, node'ların aralığını da ekleyin.
+   Sınıf `gce` iken politika açık ve `from` iki aralığı birden içermiyorsa
+   kurulum notu WARNING yazar. Politikayı cluster'ın gerçekten uyguladığını
+   "Politikanın uygulandığını doğrulamak"taki denetim satırıyla görün
    (Dataplane V2 ya da ağ politikası eklentisi).
 3. Doğrulama. Bir yanlış parolanın `sign-in refused` satırında `source`
    sizin adresiniz, uydurma `X-Forwarded-For: 192.0.2.99`'lu isteğinkinde
    yine sizin adresiniz olmalı ("Görülen kaynağı doğrulamak"); başka bir
    namespace'ten arayüz Service'ine giden istek zaman aşımına düşmeli.
+4. Alarm. Kurallar açıkken (`metrics.prometheusRule.enabled=true`; CRD'siz
+   cluster için "Operator'süz cluster") yanlış değeri çalışma anında
+   `KubeatSignInSourceDegraded` söyler ("Hesaplar ve giriş" → "Sayaç ve kural"):
+   GCE Ingress ve GKE Gateway'de `1` `hops_too_low`, fazlası dürüst
+   istemcilerde `hops_too_high` sayılır. `ingress-nginx`'te node'un adresi
+   Kubeat'in genel adresi olmadığından sayılmaz:
+   `externalTrafficPolicy: Cluster`'da sinyal susar; `sign-in refused`
+   satırının `source`'una bakın.
+
+**Bağlantı yükü (GKE).** 0.52'den beri her HTTP kontrolü kendi bağlantısını
+açar ve hedefin adını yeniden çözer (ayrıntı:
+[docs/yuk-testi.md](docs/yuk-testi.md) "HTTP kontrolünün bağlantıları (0.52)").
+GKE'de bu iki yerde yük olur. İkisi de **ölçülmedi**; aşağıdakiler kaba
+hesaptır, kapasite hesabı sonraki sprintte (S99):
+
+- **Cloud NAT.** Node'larının dış adresi olmayan (özel cluster) ve internete
+  Cloud NAT'tan çıkan kurulumda geçerlidir; cluster ve VPC içindeki hedefler
+  NAT'tan geçmez.
+  - Backend tek pod'dur: bütün dış kontroller tek node'un NAT portlarından
+    çıkar. Kapanan bağlantının portu `tcp_time_wait_timeout_sec` (varsayılan
+    120 sn) boyunca aynı hedefe yeniden verilmez.
+  - Kaba hesap: aynı hedefe (adres ve port) `A` saniye aralıkla giden `N`
+    monitor yaklaşık `N × 120 / A` port tutar. Node başına varsayılan
+    `min_ports_per_vm` 64'tür: 30 sn aralıkla aynı adrese giden 16'dan çok
+    monitor (ör. aynı CDN adresine çözülen adlar) bunu aşar.
+  - `google_compute_router_nat`'ta `enable_dynamic_port_allocation = true` ve
+    daha büyük bir `min_ports_per_vm` (ör. `1024`) verin ya da
+    `tcp_time_wait_timeout_sec`'i kısaltın.
+  - Taşmayı `router.googleapis.com/nat/dropped_sent_packets_count`
+    (`reason="OUT_OF_RESOURCES"`) gösterir; o kontroller bağlantı zaman
+    aşımıyla DOWN olur.
+- **DNS.** Pod'un `ndots:5`'i yüzünden noktası beşten az bir dış ad önce
+  arama alanlarıyla denenir.
+  - Kontrol başına yaklaşık (arama alanı + 1) × 2 sorgu (A ve AAAA). GKE'de
+    pod'un `/etc/resolv.conf`'unda çoğunlukla altı arama alanı vardır: dış bir
+    ad için 14 sorgu. 30 sn aralıkla 1000 monitor dakikada ~28 000 sorgu
+    eder.
+  - kube-dns'te `kube-dns` pod'larının CPU'su ve sorgu metriği, Cloud DNS for
+    GKE'de Cloud DNS'in sorgu sayısı izlenir. NodeLocal DNSCache (GKE
+    eklentisi) sorguları node'da karşılar.
+  - `ndots`'u düşürmek önerilmez: kısa adlar (`servis.namespace`) ve hedef
+    politikasının çözümü bu davranışa göre sınandı ("Hedef politikası").
 
 **Yükseltme.** Sürümden sürüme yapılacaklar, davranış değişiklikleri, geri
 dönüş, alarm kurallarının değişip değişmediği, atlamalı yol ve yükseltmeden
@@ -251,9 +325,9 @@ bir `output` ile okunur). Notların uyarıları ve her birini kapatan değer:
 | Yedek | `backup.enabled: false` (varsayılan): veri volume'u giderse monitor'lar, kanallar ve geçmiş de gider | `backup.enabled: true`; Velero ya da OADP onun yerine ancak veri volume'unu CSI snapshot'la alıyorsa geçer (dosya düzeyindeki yedek, fs-backup, çalışan SQLite'ı ve WAL'ını tutarlı almaz) |
 | Thanos 9091 | `prometheus.url` 9091'de ve keşif cluster çapında: pod'ların CPU ve belleği boş kalır | `prometheus.openshiftMonitoringView: true` |
 | Prometheus sertifikası denetlenmiyor | `prometheus.tokenFile` ile birlikte `prometheus.insecureSkipVerify: true`: token'ı o adreste yanıt veren alır | `prometheus.insecureSkipVerify: false` ve `prometheus.caFile` |
-| Ingress TLS | TLS Secret'ı yok (düz HTTP'de kimse giriş yapamaz) ya da Ingress TLS'siz (parolalar düz metin gider) | Secret'ı oluşturun ya da cert-manager'a oluşturtun (`ingress.annotations`); TLS Ingress'in önünde bitiyorsa `ingress.tls.enabled: false` ve `https://` ile `publicURL` |
-| Giriş throttle'ı (hop) | Route ya da Ingress açık ve `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS` yok ya da `0` (varsayılan): her tarayıcı arayüz pod'una sayılır, ad başına tek paylaşılan kilit kalır. Route'ta ayrıca: değer router'ın `forwardedHeaderPolicy`'si `Append` ya da `Replace` iken geçerlidir | `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS: "1"` (düz Route; `ingress-nginx`, controller Service'i `externalTrafficPolicy: Local`) ya da `"2"` (GCE Ingress, GKE Gateway, önünde başlığı yazan bir WAF olan Route); router `IfNone`/`Never` ise ya da politikayı okuyamıyorsanız `route.annotations` altında `haproxy.router.openshift.io/set-forwarded-headers: append` (bkz. "Vekil-hop rehberi"). Notları görmeyen kurulumda yanlış değeri çalışma anında `KubeatSignInSourceDegraded` kuralı söyler (0.52; `metrics.prometheusRule.enabled: true`, bkz. "Yanlış ayar sessizce etkisiz kalmaz") |
-| Arayüz politikası | Route ya da Ingress açık ve `frontend.networkPolicy.enabled` kapalı: cluster'daki bir pod arayüz Service'ine uydurma bir `X-Forwarded-For` ile gelip giriş kaynağını seçebilir. Açıkken: notlar politikanın uygulandığını doğrulamanızı ister; `from` varsayılanda (OpenShift router'ı) ve render OpenShift'in API'sini görmüyorsa WARNING (OpenShift dışında arayüze kimse ulaşamaz); `networkPolicy.enabled` da açıksa push gönderen namespace'leri hatırlatır | `frontend.networkPolicy.enabled: true`; OpenShift dışında `frontend.networkPolicy.from` controller'ın namespace'i ya da GCE Ingress ve GKE Gateway'de yük dengeleyicinin aralıkları; push gönderen namespace'ler de `from`'a (bkz. "Arayüzün ağ politikası") |
+| Ingress TLS | TLS Secret'ı yok (düz HTTP'de kimse giriş yapamaz) ya da Ingress TLS'siz (parolalar düz metin gider). GCE Ingress'te (`gce`) ManagedCertificate ya da `pre-shared-cert` annotation'ı varken `ingress.tls.enabled` açık: TLS yük dengeleyicide biter, Secret'ı kimse oluşturmaz | Secret'ı oluşturun ya da cert-manager'a oluşturtun (`ingress.annotations`); TLS Ingress'in önünde bitiyorsa `ingress.tls.enabled: false` ve `https://` ile `publicURL` (GCE'de o annotation'larla TLS'siz uyarısı da çıkmaz; bkz. "Cluster'a kurulum", "GKE") |
+| Giriş throttle'ı (hop) | Route ya da Ingress açık ve `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS` yok ya da `0` (varsayılan): her tarayıcı arayüz pod'una sayılır, ad başına tek paylaşılan kilit kalır. Ingress sınıfı `gce` iken değer `2`, `nginx` iken `1` değilse WARNING. Route'ta ayrıca: değer router'ın `forwardedHeaderPolicy`'si `Append` ya da `Replace` iken geçerlidir | `backend.extraEnv.UPTIME_TRUST_PROXY_HOPS: "1"` (düz Route; `ingress-nginx`, controller Service'i `externalTrafficPolicy: Local`) ya da `"2"` (GCE Ingress, GKE Gateway, önünde başlığı yazan bir WAF olan Route); router `IfNone`/`Never` ise ya da politikayı okuyamıyorsanız `route.annotations` altında `haproxy.router.openshift.io/set-forwarded-headers: append` (bkz. "Vekil-hop rehberi"). Notları görmeyen kurulumda yanlış değeri çalışma anında `KubeatSignInSourceDegraded` kuralı söyler (0.52; `metrics.prometheusRule.enabled: true`, bkz. "Yanlış ayar sessizce etkisiz kalmaz") |
+| Arayüz politikası | Route ya da Ingress açık ve `frontend.networkPolicy.enabled` kapalı: cluster'daki bir pod arayüz Service'ine uydurma bir `X-Forwarded-For` ile gelip giriş kaynağını seçebilir. Açıkken: notlar politikanın uygulandığını doğrulamanızı ister; `from` varsayılanda (OpenShift router'ı) ve render OpenShift'in API'sini görmüyorsa WARNING (OpenShift dışında arayüze kimse ulaşamaz); Ingress sınıfı `gce` iken `from` `35.191.0.0/16` ile `130.211.0.0/22`'yi içermiyorsa GCE WARNING'i (yük dengeleyici arayüze ulaşamaz; varsayılan `from`'un uyarısı o zaman çıkmaz); `networkPolicy.enabled` da açıksa push gönderen namespace'leri hatırlatır | `frontend.networkPolicy.enabled: true`; OpenShift dışında `frontend.networkPolicy.from` controller'ın namespace'i ya da GCE Ingress ve GKE Gateway'de yük dengeleyicinin aralıkları (iki `ipBlock`, bkz. "Cluster'a kurulum", "GKE kontrol listesi"); push gönderen namespace'ler de `from`'a (bkz. "Arayüzün ağ politikası") |
 
 Notlar ayrıca LDAP ya da OIDC için lisansı (`license.existingSecret`),
 SSO'nun dönüş adresini (`publicURL` ya da `oidc.redirectURL`) ve elle
@@ -281,6 +355,39 @@ heartbeat:
 backup:
   enabled: true
 ```
+
+Notları CI'da okumak için values dosyanızla render edip `WARNING:`
+satırlarını sayın. `helm template` notları basmaz: tarif chart'ın bir
+kopyasında `NOTES.txt`'i bir ConfigMap'e sarar (`deploy/helm/test-chart.sh`
+de böyle yapar) ve cluster'a bağlanmaz:
+
+```sh
+helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 --untar --untardir ci
+t=ci/kubeat/templates; { echo '{{- define "ci.notes" -}}'; cat $t/NOTES.txt; echo '{{- end -}}'; } >$t/_ci_notes.tpl
+printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ci-notes\ndata:\n  notes: |\n{{ include "ci.notes" . | indent 4 }}\n' >$t/ci-notes.yaml
+helm template kubeat ci/kubeat -n kubeat -f values-<cluster>.yaml --show-only templates/ci-notes.yaml \
+  --api-versions security.openshift.io/v1 --api-versions monitoring.coreos.com/v1 >notes.txt; cat notes.txt
+n=$(grep -E '^ *WARNING:' notes.txt | grep -cv 'WARNING: the Secret "' || true); echo "WARNING: $n"; grep -q 'Kubeat is installed' notes.txt && [ "$n" -eq 0 ]
+```
+
+- `--api-versions` cluster'ınızın gösterdiği API'lerdir: `security.openshift.io/v1`
+  yalnız OpenShift'te, `monitoring.coreos.com/v1` PrometheusRule CRD'si olan
+  cluster'da; olmayanı silin. Verilmezse notlar OpenShift'i ve CRD'yi görmeyen
+  bir cluster'a göre yazılır (OpenShift'te fsGroup ve varsayılan `from`
+  uyarıları çıkar).
+- Sayım TLS Secret'ının satırını (`WARNING: the Secret "…" does not exist yet`)
+  dışarıda bırakır: notlar Secret'ı cluster'da `lookup` ile arar, cluster'sız
+  render onu hep yok görür.
+- Son komut uyarı varsa ya da notlar render edilemediyse (chart'ın reddettiği
+  bir değer) adımı düşürür; yalnız saymak için `&& [ "$n" -eq 0 ]`'ı silin
+  (ör. önde L7 GCLB olan `ingress-nginx`'te doğru hop `3` de uyarı alır, bkz.
+  "GKE kontrol listesi"). Release adını ve namespace'i kendinizinkilerle
+  yazın; notlardaki komutlara onlar girer.
+- `helm install --dry-run=client` bunun yerine geçmez: `--api-versions` almaz,
+  Helm 3'te de cluster'a bağlanır (3.22.1'de ölçüldü).
+- Tarif CI'da Helm 3 ve Helm 4 ile koşar ve [docs/gke.md](docs/gke.md)'nin
+  values'uyla sıfır uyarı verir (`deploy/helm/test-chart.sh`). Uyarıyı Argo
+  CD'de sync hatasına çevirmek ayrı bir karar ([backlog](docs/backlog.md)).
 
 Uygulamayı silmek, Argo CD 2.7 ve sonrasında cascade silme de, veri ve
 yedek PVC'lerini bırakır: chart onlara Helm'in `helm.sh/resource-policy: keep`
@@ -2245,7 +2352,8 @@ verirsiniz. `route.enabled` ya da `ingress.enabled` açıkken kurulum notu
   önerir:
   - Route: `1`, önünde başlığı yazan bir WAF ya da L7 yük dengeleyiciyle `2`.
   - Ingress, `ingress.className` `nginx`: `1` ve controller'ın Service'inde
-    `externalTrafficPolicy: Local` şartı.
+    `externalTrafficPolicy: Local` şartı (`ingress-nginx` chart'ında
+    `--set controller.service.externalTrafficPolicy=Local`).
   - Ingress, sınıf `gce` (`ingress.className` ya da GCE'nin okuduğu
     `kubernetes.io/ingress.class` annotation'ı): `2` ve
     `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=2`.
@@ -2256,6 +2364,15 @@ verirsiniz. `route.enabled` ya da `ingress.enabled` açıkken kurulum notu
   (fazla değer atlatılabilir, yukarıda; kaynak tavanı açıkken küçük değer de
   bütün girişleri tek kilide bağlar, "Kaynak tavanı" → "Önce hop değeri"); değeri
   `--set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1` gibi verirsiniz.
+- Verilen değer sınıfınkiyle çelişirse (0.53) WARNING yazar ve sınıfın değerini
+  önerir: sınıf `gce` iken `2` değilse, `nginx` iken `1` değilse. `nginx`'te
+  `use-forwarded-headers` ve `compute-full-forwarded-for` açıkken değer `1` artı
+  öndeki vekillerin yazdığı girdilerdir (önde L7 GCLB ile `3`); uyarı orada da
+  çıkar, değeri değiştirmeyin (CI tarifi için "Cluster'a kurulum" → "GKE kontrol
+  listesi"). Başka bir sınıfta ve Route'ta çelişki satırı yoktur.
+- Kurallar açıkken (`metrics.prometheusRule.enabled`) bu bölümde
+  `KubeatSignInSourceDegraded`'i de anar: notları görmeyen kurulumda yanlış
+  değeri o söyler (aşağıda "Sayaç ve kural").
 - Route'ta, değer ne olursa olsun, `IfNone`/`Never` notunu, politikayı okuyan
   `oc` komutunu ve yetkisi olmayana Route annotation'ını yazar (yukarıda
   "Dikkat edilecekler"). `route.annotations`'da
@@ -2271,7 +2388,10 @@ verirsiniz. `route.enabled` ya da `ingress.enabled` açıkken kurulum notu
 - Politika açıkken (Route ya da Ingress olmasa da) politikanın uygulandığını
   doğrulamanızı ister, `from` varsayılandayken OpenShift dışında WARNING yazar
   (yukarıda "Politikanın uygulandığını doğrulamak") ve iki politika birlikte
-  açıksa push gönderen namespace'leri hatırlatır.
+  açıksa push gönderen namespace'leri hatırlatır. Sınıf `gce` iken `from`
+  `35.191.0.0/16` ile `130.211.0.0/22`'yi birden içermiyorsa bunun yerine
+  aralıkları veren bir WARNING yazar ("Cluster'a kurulum", "GKE kontrol
+  listesi").
 
 **Görülen kaynağı doğrulamak.** Her başarısız giriş backend loguna bilgi
 satırı olarak yazılır; satırın `source` alanı throttle'ın anahtarladığı
