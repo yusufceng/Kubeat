@@ -85,7 +85,7 @@ func TestDownNotificationIsExplained(t *testing.T) {
 // the monitor page shows too.
 func TestCauseOfAScopeRefusal(t *testing.T) {
 	n := sampleDown()
-	n.Incident.Cause = "refused by the target scope: a connection of this check leads outside the namespaces of whoever set up the monitor"
+	n.Incident.Cause = "refused by the target scope: a connection of this check leads outside the scope its monitor is held to, or its name did not resolve"
 	for _, tc := range []struct {
 		code     string
 		language string
@@ -101,6 +101,19 @@ func TestCauseOfAScopeRefusal(t *testing.T) {
 		want := n.Incident.Cause + " — " + explain.Text(*n.Explanation, tc.language)
 		if got := lastFact(n).Value; got != want || !strings.Contains(got, tc.words) {
 			t.Errorf("%s in %s: cause = %q", tc.code, tc.language, got)
+		}
+		// An annotation monitor's notification offers no administrator
+		// anywhere: neither the error nor its explanation does.
+		if tc.code == explain.BlockedByScopeObject {
+			all := Text(n)
+			for _, f := range Facts(n) {
+				all += "\n" + f.Value
+			}
+			for _, not := range []string{"administrator", "set up by", "yönetici"} {
+				if strings.Contains(all, not) {
+					t.Errorf("%s in %s: the notification says %q: %s", tc.code, tc.language, not, all)
+				}
+			}
 		}
 	}
 }

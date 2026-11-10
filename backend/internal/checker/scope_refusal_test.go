@@ -231,3 +231,21 @@ func TestScopeEveryConnection_ToldOncePerReason(t *testing.T) {
 		t.Errorf("told %+v, want %+v", got, want)
 	}
 }
+
+// The error of a refused check is the same for every source and reason, so
+// it offers no remedy of its own: a remedy fit for a user's monitor is wrong
+// for an annotation monitor or a DNS outage, and the explanation a
+// notification adds after this error gives the one that fits. It says both
+// causes and names no address.
+func TestScopeRefusalErrorOffersNoRemedy(t *testing.T) {
+	for _, not := range []string{"administrator", "set up by", "service.namespace.svc"} {
+		if strings.Contains(scopeRefusalText, not) {
+			t.Errorf("the refusal error says %q: %s", not, scopeRefusalText)
+		}
+	}
+	for _, says := range []string{"refused by the target scope", "outside the scope", "did not resolve"} {
+		if !strings.Contains(scopeRefusalText, says) {
+			t.Errorf("the refusal error does not say %q: %s", says, scopeRefusalText)
+		}
+	}
+}

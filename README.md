@@ -1576,8 +1576,11 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   - **Reddedilince.** Kontrol DOWN olur. Ters (`inverted`) monitor bunu
     beklediği başarısızlık saymaz. Denetim, sayaç ve kural: yukarıda "Kapsam
     ihlali denetimi".
-    - **Hata.** Sonucun hatası tek genel bir metindir; adres ya da neden
-      söylemez.
+    - **Hata.** Sonucun hatası tek genel bir metindir; adres, neden ya da
+      çare söylemez (0.53). Çare açıklamadadır ve yalnız açıklamayı taşıyan
+      yüzeylerde (arayüz, bildirimin "Neden" alanı) görünür; hatırlatmalar, tek
+      satırlık metin kanalları ve webhook'un `incident.cause`'u yalnız hatayı
+      yazar.
     - **Açıklama (0.53'te kaynağa göre).** Arayüzde ve bildirimde, Türkçe ve
       İngilizce, aynı metindir. Metin nedenden bağımsızdır: iki olasılığı da
       söyler, bağlantı kapsamın dışına gidiyor ya da ad o an çözülemedi (DNS
