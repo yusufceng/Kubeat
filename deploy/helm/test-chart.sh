@@ -585,6 +585,10 @@ else
   if helm template kubeat "$CHART" --show-only templates/backend.yaml "${PILOT_VALUES[@]}" >"$WORK/pilot-backend" 2>"$WORK/err"; then
     grep -A1 -- "- name: UPTIME_TRUST_PROXY_HOPS\$" "$WORK/pilot-backend" | grep -qF 'value: "1"' ||
       failed "pilot values: the backend's UPTIME_TRUST_PROXY_HOPS is not \"1\""
+    # The bank's users sit behind NAT and VDI: the source ceiling is off on
+    # purpose, said out loud so that LDAP's start line is an INFO.
+    grep -A1 -- "- name: UPTIME_LOGIN_SOURCE_MAX_FAILURES\$" "$WORK/pilot-backend" | grep -qF 'value: "0"' ||
+      failed "pilot values: the backend's UPTIME_LOGIN_SOURCE_MAX_FAILURES is not \"0\""
     grep -qF "UPTIME_TARGET_SCOPE_TRUST_PROXY" "$WORK/pilot-backend" &&
       failed "pilot values: UPTIME_TARGET_SCOPE_TRUST_PROXY is set, not left commented out"
   else

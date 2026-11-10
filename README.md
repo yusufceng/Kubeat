@@ -75,7 +75,7 @@ Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum"
 
 ## Cluster'a kurulum
 
-**Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı, GKE provası kullanıcıda.
+**Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı, GKE provası kullanıcıda. Vekilli ve hava boşluklu OpenShift: ölçülmedi, prova kullanıcıda ([docs/openshift-dogrulama.md](docs/openshift-dogrulama.md#vekilli-ve-hava-boşluklu-openshift)).
 
 Her sürüm etiketi (`vX.Y.Z`) imajları `ghcr.io/yusufceng/kubeat-backend`
 ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
