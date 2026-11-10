@@ -301,3 +301,145 @@ The message names the value the address came from.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+The cluster's own networks declared in targetScope.clusterNetworks, as a JSON
+list of {kind, name, cidr}: kind is pods, services or nodes, name the value's
+path, cidr the entry trimmed. Read with dig and defaults: the value came
+after 0.52, and a release upgraded with --reuse-values from before has none.
+A value of the wrong shape fails the render, naming it, and so does a key
+no template reads (targetScope.clusterNetwork, targetScope.clusterNetworks.
+pod): a slip of the pen would otherwise turn the comparison off unsaid.
+*/}}
+{{- define "kubeat.clusterNetworks" -}}
+{{- $scope := .Values.targetScope | default dict -}}
+{{- if not (kindIs "map" $scope) -}}
+{{- fail (printf "targetScope is %v: give targetScope.clusterNetworks with pods, services and nodes, each a list of CIDRs" $scope) -}}
+{{- end -}}
+{{- $unread := list -}}
+{{- range $key := keys $scope | sortAlpha -}}
+{{- if ne $key "clusterNetworks" -}}
+{{- $unread = append $unread (printf "targetScope.%s" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- with $unread -}}
+{{- fail (printf "%s %s not read: give targetScope.clusterNetworks with pods, services and nodes, each a list of CIDRs" (join ", " .) (ternary "is" "are" (eq (len .) 1))) -}}
+{{- end -}}
+{{- $networks := get $scope "clusterNetworks" | default dict -}}
+{{- if not (kindIs "map" $networks) -}}
+{{- fail (printf "targetScope.clusterNetworks is %v: give pods, services and nodes, each a list of CIDRs" $networks) -}}
+{{- end -}}
+{{- $kinds := list "pods" "services" "nodes" -}}
+{{- range $key := keys $networks | sortAlpha -}}
+{{- if not (has $key $kinds) -}}
+{{- $unread = append $unread (printf "targetScope.clusterNetworks.%s" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- with $unread -}}
+{{- fail (printf "%s %s not read: give pods, services and nodes, each a list of CIDRs" (join ", " .) (ternary "is" "are" (eq (len .) 1))) -}}
+{{- end -}}
+{{- $out := list -}}
+{{- range $kind := $kinds -}}
+{{- $list := get $networks $kind | default list -}}
+{{- if not (kindIs "slice" $list) -}}
+{{- fail (printf "targetScope.clusterNetworks.%s is %v: give a list of CIDRs, such as [10.128.0.0/14]" $kind $list) -}}
+{{- end -}}
+{{- range $list -}}
+{{- $out = append $out (dict "kind" $kind "name" (printf "targetScope.clusterNetworks.%s" $kind) "cidr" (toString . | trim)) -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
+UPTIME_TARGET_SCOPE_CLUSTER_CIDRS: the declared cluster networks,
+comma-separated, pods first, then services and nodes; nothing while none is
+declared, so that the render is then the same as without the value.
+*/}}
+{{- define "kubeat.clusterCIDRs" -}}
+{{- $cidrs := list -}}
+{{- range include "kubeat.clusterNetworks" . | fromJsonArray -}}
+{{- $cidrs = append $cidrs .cidr -}}
+{{- end -}}
+{{- join "," $cidrs -}}
+{{- end -}}
+
+{{/*
+The addresses an IPv4 CIDR such as 10.128.0.0/14 spans, as "first last",
+32-bit numbers in decimal; nothing for anything else (an IPv6 CIDR, a bare
+address, a mistake). An address with host bits set spans its network, as
+the backend masks it. Sprig has no CIDR function: the CIDR is read with the
+pattern Go's netip takes, and its network is worked out on numbers.
+*/}}
+{{- define "kubeat.ipv4Span" -}}
+{{- $cidr := toString . | trim -}}
+{{- if regexMatch (printf "^%s/(3[0-2]|[12][0-9]|[0-9])$" (include "kubeat.ipv4Pattern" .)) $cidr -}}
+{{- $parts := splitList "/" $cidr -}}
+{{- $o := splitList "." (first $parts) -}}
+{{- $addr := add (mul (atoi (index $o 0)) 16777216) (mul (atoi (index $o 1)) 65536) (mul (atoi (index $o 2)) 256) (atoi (index $o 3)) -}}
+{{- $size := 1 -}}
+{{- range until (sub 32 (atoi (last $parts)) | int) }}{{ $size = mul $size 2 }}{{ end -}}
+{{- $first := mul (div $addr $size) $size -}}
+{{- printf "%d %d" $first (sub (add $first $size) 1) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Fails the render on a cluster network declared in targetScope.clusterNetworks
+that the backend would refuse at its start (not a CIDR, an IPv4 network
+written as IPv6), and when a company range of backend.extraEnv.
+UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS overlaps a declared network. The backend
+would set such a range aside at its start (S96), and a user limited to some
+namespaces would lose the targets in it; caught here, helm upgrade and an
+Argo CD sync fail instead and the install stays as it was. Only IPv4 is
+compared: an IPv6 network or range goes to the backend, whose start compares
+it. A single address (/32) is not compared, as the backend does not compare
+it either: README's "Şart" has the router's VIP written so when it sits in
+the node network. A company range the backend cannot read is left to its
+start, which refuses it. No company range is read while no network is
+declared. UPTIME_TARGET_SCOPE_CLUSTER_CIDRS in backend.extraEnv fails the
+render too: the render would not compare it, and the pod would get the
+variable twice, the last one, extraEnv's, in effect.
+*/}}
+{{- define "kubeat.checkClusterNetworks" -}}
+{{- if hasKey (.Values.backend.extraEnv | default dict) "UPTIME_TARGET_SCOPE_CLUSTER_CIDRS" -}}
+{{- fail "backend.extraEnv.UPTIME_TARGET_SCOPE_CLUSTER_CIDRS: the chart sets this variable itself, and the render would not compare this one; give the cluster's networks in targetScope.clusterNetworks (pods, services and nodes)" -}}
+{{- end -}}
+{{- $kinds := dict "pods" "pod network" "services" "Service network" "nodes" "node network" -}}
+{{- $declared := list -}}
+{{- range include "kubeat.clusterNetworks" . | fromJsonArray -}}
+{{- $span := include "kubeat.ipv4Span" .cidr -}}
+{{- if not $span -}}
+{{- $parts := splitList "/" .cidr -}}
+{{- $groups := include "kubeat.ipv6Groups" (first $parts) -}}
+{{- if not (and (eq (len $parts) 2) $groups (regexMatch "^(12[0-8]|1[01][0-9]|[1-9]?[0-9])$" (last $parts))) -}}
+{{- fail (printf "%s: %q is not a CIDR such as 10.128.0.0/14" .name .cidr) -}}
+{{- end -}}
+{{- if and (regexMatch "^0+:0+:0+:0+:0+:0*ffff:" $groups) (ge (atoi (last $parts)) 96) -}}
+{{- fail (printf "%s: %q is an IPv4 network written as IPv6: write it as IPv4, such as 10.128.0.0/14" .name .cidr) -}}
+{{- end -}}
+{{- else -}}
+{{- $declared = append $declared (dict "kind" .kind "name" .name "cidr" .cidr "span" $span) -}}
+{{- end -}}
+{{- end -}}
+{{- if $declared -}}
+{{- $external := get (.Values.backend.extraEnv | default dict) "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS" | toString -}}
+{{- $conflicts := list -}}
+{{- range $entry := splitList "," $external -}}
+{{- $range := trim $entry -}}
+{{- $span := include "kubeat.ipv4Span" $range -}}
+{{- if and $span (not (hasSuffix "/32" $range)) -}}
+{{- $r := splitList " " $span -}}
+{{- range $declared -}}
+{{- $n := splitList " " .span -}}
+{{- if and (le (atoi (first $r)) (atoi (last $n))) (le (atoi (first $n)) (atoi (last $r))) -}}
+{{- $conflicts = append $conflicts (printf "%s overlaps %s, the cluster's %s (%s)" $range .cidr (get $kinds .kind) .name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- with $conflicts -}}
+{{- fail (printf "backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: %s. A user limited to some namespaces would reach the pods, Services or nodes there by address, and the backend would ignore the range at its start: list only the company's ranges outside the cluster's networks, the router's VIP in the node network alone as a /32 (README, \"Hedef politikası\", \"Kurum ağı\")" (join "; " .)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

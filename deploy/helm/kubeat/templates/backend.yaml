@@ -1,4 +1,5 @@
 {{- include "kubeat.checkValues" . -}}
+{{- include "kubeat.checkClusterNetworks" . -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -276,6 +277,13 @@ spec:
                   key: {{ .passwordSecret.key }}
             {{- end }}
             {{- end }}
+            {{- end }}
+            {{- with include "kubeat.clusterCIDRs" . }}
+            # The cluster's networks of targetScope.clusterNetworks: the start
+            # sets aside a company range that overlaps one, as the render
+            # refuses it for IPv4 (README, "Hedef politikası", "Kurum ağı").
+            - name: UPTIME_TARGET_SCOPE_CLUSTER_CIDRS
+              value: {{ . | quote }}
             {{- end }}
             {{- range $name, $value := .Values.backend.extraEnv }}
             - name: {{ $name }}

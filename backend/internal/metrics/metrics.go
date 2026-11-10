@@ -224,7 +224,7 @@ func New(version string) *Metrics {
 	}
 	m.scopeExternalIgnored = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_target_scope_external_ranges_ignored",
-		Help: "Ranges of UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS the backend ignored at its start, the others staying in effect: those that hold the API server's address (KUBERNETES_SERVICE_HOST) or one of the backend's own pod, as after a drain moved it to a node whose pod network a range covers, and those it could not check because its own addresses could not be read. Written once at the start; 0 while none was ignored or the setting is empty. For a user limited to some namespaces an address in an ignored range is inside the cluster, as without the setting. The ranges and why are in the start's ERROR line (target scope external ranges ignored), never in a label.",
+		Help: "Ranges of UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS the backend ignored at its start, the others staying in effect: those that overlap a cluster network declared in UPTIME_TARGET_SCOPE_CLUSTER_CIDRS, those that hold the API server's address (KUBERNETES_SERVICE_HOST) or one of the backend's own pod, as after a drain moved it to a node whose pod network a range covers, and those it could not check because its own addresses could not be read. Written once at the start; 0 while none was ignored or the setting is empty. For a user limited to some namespaces an address in an ignored range is inside the cluster, as without the setting. The ranges and why are in the start's ERROR line (target scope external ranges ignored), never in a label.",
 	})
 	m.lastBackup = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubeat_backup_last_success_timestamp_seconds",

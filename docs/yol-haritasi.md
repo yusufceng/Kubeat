@@ -344,12 +344,19 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   (S96 [#157](https://github.com/yusufceng/Kubeat/issues/157); S80'in "backend
   başlamaz" kararı bu denetimler için değişti, biçim hataları yine başlatmaz). Yok
   sayılan aralığa giden kapsamı sınırlı monitor'ler `blocked_by_scope` ile DOWN
-  oluyor; drain'de ölçülmesi sprint 11'in zorunlu provası (a). Cluster ağlarının
-  chart'ta beyanı ve render anındaki çakışma hatası ayrı PR'da
-  ([#158](https://github.com/yusufceng/Kubeat/issues/158), sprint 11 planı); o
-  gelene kadar pod ve Service ağının geri kalanı, node ağı ve API VIP'iyle
-  çakışma operatörün sorumluluğunda; router VIP'i yalnız bilerek (node
-  ağındaysa `/32` ile) giriyor ve o VIP'teki her Route'u açıyor. Keşiften
+  oluyor; drain'de ölçülmesi sprint 11'in zorunlu provası (a). 0.53'te cluster
+  ağları opt-in `targetScope.clusterNetworks` ile chart'ta beyan ediliyor (pod,
+  Service, node; node ağı elle, `lookup` yok): beyan edilen bir ağla çakışan
+  kurum aralığı `helm template`/`helm upgrade`'de render hatası veriyor, Argo
+  CD'de sync hatası olarak görünüyor, kurulum değişmiyor. Render denetimi
+  yalnız IPv4; beyan backend'e `UPTIME_TARGET_SCOPE_CLUSTER_CIDRS` olarak da
+  gidiyor ve açılış IPv6 dahil ağların tamamına karşı denetleyip çakışan
+  girdiyi yok sayıyor (S96 [#158](https://github.com/yusufceng/Kubeat/issues/158)).
+  Tek adres (`/32`) beyanla karşılaştırılmıyor (node ağındaki router VIP'i).
+  Beyan yoksa pod ve Service ağının geri kalanı, node ağı ve API VIP'iyle,
+  beyan varsa API VIP'i ve tek adreslerle çakışma operatörün sorumluluğunda;
+  router VIP'i yalnız bilerek (node ağındaysa `/32` ile) giriyor ve o VIP'teki
+  her Route'u açıyor. Keşiften
   içe aktarma yalnız namespace'e baktığı için aralık Route'un VIP'ini
   içermiyorsa bu hedefi yine alıyor, klonu ve hedef
   değişikliği reddediliyor; minikube provası geçti (sprint 9, arayüz formu); (b) vekilli kurulumda yerelde NXDOMAIN alan dış ad 0.49'da

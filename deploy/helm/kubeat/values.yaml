@@ -155,7 +155,7 @@ backend:
     # UPTIME_TARGET_DENY_CIDRS: "10.0.0.0/8"          # checks only outside the cluster
     # UPTIME_TARGET_RESOLVE_TIMEOUT: 2s               # API only: timeout of the per-user scope check's name lookup at create and edit; a name not resolved in time is refused on the safe side and counted as resolve_error (needs CoreDNS egress, as the checks' own lookups do), slow resolver does not hold a create open to the write timeout; keep it below the frontend's BACKEND_TIMEOUT_MS (3s); a check's lookups are bounded by the monitor's timeout, not by this
     # UPTIME_TARGET_SCOPE_TRUST_PROXY: "true"         # only behind an HTTP(S)_PROXY outside the cluster: a scoped user's proxied HTTP/WebSocket monitor or webhook whose name is NXDOMAIN here is not refused (NO_PROXY decides what is proxied); a name resolving into the cluster, SERVFAIL and timeout still are; off by default, warned at start while a proxy is set
-    # UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: "10.50.0.0/16" # the company's own ranges: a scoped user's monitor or webhook at an address in them (bare or resolved from a name) counts as outside the cluster; empty by default; the target policy does not read them; never the cluster's pod, Service or node networks or its API VIP; the router's VIP only on purpose, for on-prem Routes, as a /32 when in the node network (every Route behind it, other teams' too, then opens to scoped users); an entry that is not a CIDR, or an IPv4 range written as IPv6, stops the start; a range holding the API server's or the backend pod's own address (as after a drain) is ignored and the others kept, said by an ERROR at start, kubeat_target_scope_external_ranges_ignored and KubeatScopeExternalRangesIgnored
+    # UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: "10.50.0.0/16" # the company's own ranges: a scoped user's monitor or webhook at an address in them (bare or resolved from a name) counts as outside the cluster; empty by default; the target policy does not read them; never the cluster's pod, Service or node networks or its API VIP (declare them in targetScope.clusterNetworks below, and an overlap fails the render); the router's VIP only on purpose, for on-prem Routes, as a /32 when in the node network (every Route behind it, other teams' too, then opens to scoped users); an entry that is not a CIDR, or an IPv4 range written as IPv6, stops the start; a range over a declared network (IPv6) or holding the API server's or the backend pod's own address (as after a drain) is ignored and the others kept, said by an ERROR at start, kubeat_target_scope_external_ranges_ignored and KubeatScopeExternalRangesIgnored
     # Guardrails against monitors putting load on other systems (README,
     # "Hedef yükü"); "0" turns a limit off. External: a target whose host is
     # not a private address, a *.svc/*.cluster.local name or a bare name.
@@ -209,6 +209,33 @@ backend:
     #   value: infra
     #   effect: NoSchedule
   priorityClassName: ""   # e.g. system-cluster-critical
+
+# The cluster's own networks, declared for the company ranges of
+# UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS (backend.extraEnv), which must stay
+# outside them (README, "Hedef politikası", "Kurum ağı"). Empty by default:
+# nothing is compared at render and UPTIME_TARGET_SCOPE_CLUSTER_CIDRS is not
+# set; the start guard is as without this value. Declared, a company
+# range that overlaps one fails the render (helm template, helm upgrade, an
+# Argo CD sync), naming the range and the network, and the install stays as
+# it was. The render compares IPv4 only; the backend gets every network as
+# UPTIME_TARGET_SCOPE_CLUSTER_CIDRS and compares IPv6 at its start, where an
+# overlapping range is ignored, said by an ERROR,
+# kubeat_target_scope_external_ranges_ignored and
+# KubeatScopeExternalRangesIgnored. A single address (/32) is not compared:
+# the router's VIP in the node network is written so, on purpose. Set the
+# networks here: UPTIME_TARGET_SCOPE_CLUSTER_CIDRS in backend.extraEnv, and a
+# key other than pods, services and nodes (such as pod), fail the render.
+# Nothing is read from the cluster (no lookup): give each cluster its own
+# values.
+targetScope:
+  clusterNetworks:
+    # OpenShift: oc get network.config/cluster -o jsonpath='{.status.clusterNetwork[*].cidr}'
+    pods: []       # [10.128.0.0/14]
+    # OpenShift: oc get network.config/cluster -o jsonpath='{.status.serviceNetwork[*]}'
+    services: []   # [172.30.0.0/16]
+    # The machines' network, from the platform team's IPAM record; Kubeat
+    # does not read it.
+    nodes: []      # [192.168.40.0/24]
 
 frontend:
   replicas: 1

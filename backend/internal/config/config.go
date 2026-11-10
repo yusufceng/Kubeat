@@ -226,12 +226,21 @@ type Config struct {
 	// webhook at an address in them, written bare or resolved from a name,
 	// as at a public one. Comma-separated CIDRs, empty by default; the
 	// target policy and the load guardrails do not read them. An entry that
-	// is not a CIDR stops the start. A range that holds the API server's
-	// address (KUBERNETES_SERVICE_HOST) or one of the backend's own, or that
-	// cannot be checked because those cannot be read, is set aside: Load
-	// drops it from here, which then holds the ranges in effect, and lists
-	// it in TargetScopeExternalIgnored (checkScopeExternal).
+	// is not a CIDR stops the start. A range that overlaps a cluster network
+	// of TargetScopeClusterCIDRs, holds the API server's address
+	// (KUBERNETES_SERVICE_HOST) or one of the backend's own, or cannot be
+	// checked because those cannot be read, is set aside: Load drops it from
+	// here, which then holds the ranges in effect, and lists it in
+	// TargetScopeExternalIgnored (checkScopeExternal).
 	TargetScopeExternalCIDRs string // UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS
+	// TargetScopeClusterCIDRs are the cluster's own networks as the operator
+	// declares them: its pod, Service and node networks, which the chart
+	// gives from targetScope.clusterNetworks. Comma-separated CIDRs, empty by
+	// default. Only the start reads them, to set aside the company ranges
+	// that overlap one (checkScopeExternal); the scope check does not. An
+	// entry that is not a CIDR, or an IPv4 network written as IPv6, stops
+	// the start (parseClusterCIDRs).
+	TargetScopeClusterCIDRs string // UPTIME_TARGET_SCOPE_CLUSTER_CIDRS
 	// TargetScopeExternalIgnored are the ranges of
 	// UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS Load set aside, each with why, for
 	// the start to log as an error and to count in
@@ -446,6 +455,7 @@ func Load() (Config, error) {
 		TargetDenyCIDRs:          envString("UPTIME_TARGET_DENY_CIDRS", ""),
 		TargetAllowCIDRs:         envString("UPTIME_TARGET_ALLOW_CIDRS", ""),
 		TargetScopeExternalCIDRs: envString("UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS", ""),
+		TargetScopeClusterCIDRs:  envString("UPTIME_TARGET_SCOPE_CLUSTER_CIDRS", ""),
 		UserAgent:                strings.TrimSpace(envString("UPTIME_USER_AGENT", "")),
 
 		HeartbeatURL: envString("UPTIME_HEARTBEAT_URL", ""),
@@ -694,7 +704,11 @@ func Load() (Config, error) {
 	if err := checkCIDRs("UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS", cfg.TargetScopeExternalCIDRs); err != nil {
 		return Config{}, err
 	}
-	if cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err = checkScopeExternal(cfg.TargetScopeExternalCIDRs); err != nil {
+	clusterNets, err := parseClusterCIDRs(cfg.TargetScopeClusterCIDRs)
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.TargetScopeExternalCIDRs, cfg.TargetScopeExternalIgnored, err = checkScopeExternal(cfg.TargetScopeExternalCIDRs, clusterNets); err != nil {
 		return Config{}, err
 	}
 	if cfg.AdminPasswordReset, err = envBool("UPTIME_ADMIN_PASSWORD_RESET", false); err != nil {
@@ -921,47 +935,108 @@ var ownAddrs = func() ([]netip.Addr, error) {
 type IgnoredRange struct {
 	// Range is the range as the scope check reads it (masked).
 	Range netip.Prefix
-	// Reason says why, after the range: "holds the API server's address
-	// ...", "holds 10.128.2.15, an address of the backend's own pod ..." or
-	// "cannot be checked: ...".
+	// Reason says why, after the range: "overlaps 10.128.0.0/14, a cluster
+	// network declared ...", "holds the API server's address ...", "holds
+	// 10.128.2.15, an address of the backend's own pod ..." or "cannot be
+	// checked: ...".
 	Reason string
+}
+
+// parseClusterCIDRs reads UPTIME_TARGET_SCOPE_CLUSTER_CIDRS, the cluster's
+// pod, Service and node networks as the operator declares them, masked as
+// the scope reads ranges. An entry that is not a CIDR is an error, as in
+// checkCIDRs, and so is an IPv4 network written as IPv6 (::ffff:10.128.0.0/110):
+// no company range, written as IPv4, would ever be found to overlap it, and
+// the operator would not see why. An empty setting declares nothing.
+func parseClusterCIDRs(list string) ([]netip.Prefix, error) {
+	const key = "UPTIME_TARGET_SCOPE_CLUSTER_CIDRS"
+	if err := checkCIDRs(key, list); err != nil {
+		return nil, err
+	}
+	var nets []netip.Prefix
+	for _, entry := range strings.Split(list, ",") {
+		if entry = strings.TrimSpace(entry); entry == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(entry)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %q is not a CIDR such as 10.128.0.0/14", key, entry)
+		}
+		prefix = prefix.Masked()
+		if prefix.Addr().Is4In6() && prefix.Bits() >= 96 {
+			return nil, fmt.Errorf("%s: %q is an IPv4 network written as IPv6; write it as %s",
+				key, entry, netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96))
+		}
+		nets = append(nets, prefix)
+	}
+	return nets, nil
+}
+
+// singleAddress says whether a range holds one address alone (an IPv4 /32,
+// an IPv6 /128): the way README's "Şart" has the router's VIP written when
+// it sits in the node network, on purpose. Such a range is not compared with
+// the declared cluster networks; the comparisons with the API server's and
+// the backend's own addresses still hold it.
+func singleAddress(prefix netip.Prefix) bool { return prefix.Bits() == prefix.Addr().BitLen() }
+
+// declaredOverlap returns the first declared cluster network that shares an
+// address with a company range, of the same family, unless the range is a
+// single address (singleAddress).
+func declaredOverlap(prefix netip.Prefix, clusterNets []netip.Prefix) (netip.Prefix, bool) {
+	if singleAddress(prefix) {
+		return netip.Prefix{}, false
+	}
+	for _, network := range clusterNets {
+		if prefix.Overlaps(network) {
+			return network, true
+		}
+	}
+	return netip.Prefix{}, false
 }
 
 // String is the range and why, as the start's log line names them.
 func (r IgnoredRange) String() string { return r.Range.String() + " " + r.Reason }
 
 // checkScopeExternal reads UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS, already
-// checked to be CIDRs, and sets aside each range that holds an address of the
+// checked to be CIDRs, and sets aside each range that overlaps one of the
+// cluster networks the operator declared (clusterNets, from
+// UPTIME_TARGET_SCOPE_CLUSTER_CIDRS), or that holds an address of the
 // cluster's own: the API server's, which Kubernetes gives every pod as
 // KUBERNETES_SERVICE_HOST and which is in the Service network, or one of the
 // backend's own, in the pod network. Counted as outside the cluster, such a
-// range would let a user limited to some namespaces reach the Services or
-// the pods in it by address, with no namespace to answer for. While the
+// range would let a user limited to some namespaces reach the pods, Services
+// or nodes in it by address, with no namespace to answer for. While the
 // backend's own addresses cannot be read, no range can be shown clear of
 // them, and every range is set aside. It returns the setting with the ranges
 // kept, as written, and the ranges set aside; the setting is returned as it
 // came when none is.
 //
-// These compare the ranges with the environment of this start, not with
+// The declared networks are compared whole, so a range over any part of the
+// pod network is caught at the first start, before a drain moves the pod
+// there (S96); the chart refuses the same overlap for IPv4 when it renders
+// (targetScope.clusterNetworks), and this catches the rest, IPv6 among it. A
+// single address (singleAddress) is not compared with them: README's "Şart"
+// has the router's VIP written so when it is in the node network. The other
+// comparisons are with the environment of this start, not with the ranges
 // themselves: a range clear of the pod's address on one node holds it on
-// the next, where a drain moves the pod. So they stop nothing (S96, PO
-// decision, after the drain of sprint 10's rehearsal (c) left the backend
-// in CrashLoopBackOff): a range set aside is read as if it were not listed,
-// the stricter side, its addresses inside the cluster for the scope as
-// without the setting, while the other ranges stay in effect and the start
-// says which went and why (an ERROR line, the gauge
-// kubeat_target_scope_external_ranges_ignored and its alert rule). Only an
-// entry that cannot be read stops the start: one that is not a CIDR
-// (checkCIDRs), and here an IPv4 range written as IPv6.
+// the next. None of them stops anything (S96, PO decision, after the drain
+// of sprint 10's rehearsal (c) left the backend in CrashLoopBackOff): a range
+// set aside is read as if it were not listed, the stricter side, its
+// addresses inside the cluster for the scope as without the setting, while
+// the other ranges stay in effect and the start says which went and why (an
+// ERROR line, the gauge kubeat_target_scope_external_ranges_ignored and its
+// alert rule). Only an entry that cannot be read stops the start: one that
+// is not a CIDR (checkCIDRs), and here an IPv4 range written as IPv6.
 //
-// It catches the plain mistake (10.0.0.0/8 over a cluster's networks), not
-// every overlap: the rest of the pod and Service networks, the node network
-// and the API VIP are the operator's to keep out (README, "Hedef
-// politikası"). The ranges are read by netguard.ParseExternalRanges and
-// compared by ExternalRanges.Contains, as the scope check reads and compares
-// them, so the guard and the check never part on a spelling (an IPv4 range
-// written as IPv6 is refused by both). An empty setting reads nothing.
-func checkScopeExternal(list string) (string, []IgnoredRange, error) {
+// Without a declaration it catches the plain mistake (10.0.0.0/8 over a
+// cluster's networks), not every overlap: the rest of the pod and Service
+// networks, the node network and, declared or not, the API VIP are the
+// operator's to keep out (README, "Hedef politikası"). The ranges are read
+// by netguard.ParseExternalRanges and compared by ExternalRanges.Contains,
+// as the scope check reads and compares them, so the guard and the check
+// never part on a spelling (an IPv4 range written as IPv6 is refused by
+// both). An empty setting reads nothing.
+func checkScopeExternal(list string, clusterNets []netip.Prefix) (string, []IgnoredRange, error) {
 	const key = "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS"
 	var entries []string
 	for _, entry := range strings.Split(list, ",") {
@@ -991,8 +1066,13 @@ func checkScopeExternal(list string) (string, []IgnoredRange, error) {
 		if err != nil {
 			return "", nil, fmt.Errorf("%s: %w", key, err)
 		}
+		prefix, _ := netip.ParsePrefix(entry)
+		prefix = prefix.Masked()
 		reason := ""
-		switch {
+		switch network, declared := declaredOverlap(prefix, clusterNets); {
+		case declared:
+			reason = fmt.Sprintf("overlaps %s, a cluster network declared in UPTIME_TARGET_SCOPE_CLUSTER_CIDRS: "+
+				"a user limited to some namespaces could reach the pods, Services or nodes in it by address", network)
 		case apiServer.IsValid() && one.Contains(apiServer):
 			reason = fmt.Sprintf("holds the API server's address %s (KUBERNETES_SERVICE_HOST), in the cluster's Service network: "+
 				"a user limited to some namespaces could reach every Service in it by its ClusterIP", apiServer)
@@ -1011,8 +1091,7 @@ func checkScopeExternal(list string) (string, []IgnoredRange, error) {
 			kept = append(kept, entry)
 			continue
 		}
-		prefix, _ := netip.ParsePrefix(entry)
-		ignored = append(ignored, IgnoredRange{Range: prefix.Masked(), Reason: reason})
+		ignored = append(ignored, IgnoredRange{Range: prefix, Reason: reason})
 	}
 	if len(ignored) == 0 {
 		return list, nil, nil

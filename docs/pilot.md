@@ -275,7 +275,25 @@ listedeyse on-prem Route adlarına da monitor ve kanal kurabilir:
   `oc get network.config/cluster -o jsonpath='{.status.clusterNetwork[*].cidr} {.status.serviceNetwork[*]}'`,
   node adresleri `oc get nodes -o wide`; bunlar ve API VIP'i listeye hiç
   girmez. Örnekteki `NO_PROXY` gibi `10.0.0.0/8` yazmayın: OpenShift'in pod
-  ağı (varsayılan `10.128.0.0/14`) onun içindedir.
+  ağı (varsayılan `10.128.0.0/14`) onun içindedir. 0.53'ten beri ağları
+  values'ta beyan edin; komutun çıktısı `10.128.0.0/14 172.30.0.0/16` ise
+  pod ve Service ağı aşağıdaki gibidir, node ağını platform ekibinin IPAM
+  kaydından elle yazın (Kubeat cluster'dan okumaz):
+
+  ```yaml
+  targetScope:
+    clusterNetworks:
+      pods: [10.128.0.0/14]
+      services: [172.30.0.0/16]
+      nodes: [192.168.40.0/24]
+  ```
+
+  Bir kurum aralığı bunlardan biriyle çakışırsa `helm template` ve
+  `helm upgrade` render hatası verir, Argo CD'de sync hatası olarak görünür
+  ve kurulum değişmez; hata aralığı ve ağı adlandırır. Router VIP'i node
+  ağındaysa `/32` ile yazıldığı için (aşağıda) karşılaştırılmaz. Render
+  yalnız IPv4'ü karşılaştırır; IPv6 ağları backend açılışta karşılaştırır
+  (README "Kurum ağı", "Cluster ağlarının beyanı").
 - **Router VIP'i yalnız bilerek.** On-prem Route'ları editöre açmak için
   router VIP'ini ekleyin: node ağındaysa node ağını değil, yalnız VIP'i `/32`
   ile (ör. `10.50.0.0/16,192.168.40.5/32`). O VIP'teki her Route, başka
@@ -297,7 +315,8 @@ listedeyse on-prem Route adlarına da monitor ve kanal kurabilir:
   parçasını içeren bir aralık (pod ağı `10.128.0.0/14` iken `10.130.0.0/16`)
   bugün geçer, pod aylık yükseltmenin drain'inde başka bir node'a taşınınca
   yok sayılır (0.52'de backend'i durduruyordu). Pod ağının tamamını yukarıdaki
-  `network.config/cluster` çıktısıyla dışarıda tutun.
+  `network.config/cluster` çıktısıyla dışarıda tutun; ağları yukarıdaki gibi
+  beyan ettiyseniz böyle bir aralık daha drain'den önce, render'da durur.
 - **Kurum adları backend'de çözülmeli.** `NO_PROXY`'deki `.sirket.local`
   adlarına vekil değil backend bağlanır ve `UPTIME_TARGET_SCOPE_TRUST_PROXY`
   onlara istisna vermez: cluster DNS'i kurum alanını kurumsal DNS'e iletmelidir
