@@ -3009,6 +3009,14 @@ Güncelleme (2026-11-08, S95 [#161](https://github.com/yusufceng/Kubeat/issues/1
 "GKE kontrol listesi"nin 4. maddesi cümleyi yazıyor; S101 gelince o madde güncellenir.
 Tetikleyici değişmedi.
 
+Güncelleme (2026-11-10, S98 [#162](https://github.com/yusufceng/Kubeat/issues/162)): ara
+önlem yazıldı. `docs/pilot.md` "Hop değeri" F5/WAF önlü Route'ta eksik değerin alarmı
+susturduğunu ve değerin başlıksız ve uydurma `X-Forwarded-For`'lu iki giriş satırıyla elle
+doğrulandığını söylüyor; `docs/openshift-dogrulama.md` "Vekilli ve hava boşluklu OpenShift"
+5. adım ve `docs/gke-dogrulama.md` 5. adım (`externalTrafficPolicy: Cluster`) aynı
+doğrulamayı komut ve beklenen çıktıyla veriyor. S101 gelince üçü güncellenir. Tetikleyici
+değişmedi.
+
 ## İki cluster'lı promtool senaryoları: `KubeatSignInSourceDegraded` ve `KubeatDiscoveryNamespaceSkipped`
 
 2026-11-08'de ertelendi (S85 dilim 1 [#146](https://github.com/yusufceng/Kubeat/issues/146)

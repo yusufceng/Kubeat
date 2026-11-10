@@ -2,8 +2,8 @@
 # Checks that the places a release's version is written by hand name
 # Chart.yaml's version: its appVersion (the images' default tag), the
 # Makefile's VERSION (the tag make release pushes) and the install and
-# mirroring commands in README.md, docs/pilot.md and the verification
-# runbook docs/openshift-dogrulama.md, the quick
+# mirroring commands in README.md, docs/pilot.md and the two verification
+# runbooks, docs/openshift-dogrulama.md and docs/gke-dogrulama.md, the quick
 # start's among them. In those files only commands count: helm's --version
 # X.Y.Z, the images kubeat-backend:X.Y.Z and kubeat-frontend:X.Y.Z, the chart
 # archive kubeat-X.Y.Z.tgz, the chart's OCI reference charts/kubeat:X.Y.Z
@@ -27,7 +27,7 @@ fi
 cd "$(dirname "$0")/.." || exit 1
 
 CHART=deploy/helm/kubeat/Chart.yaml
-DOCS=(README.md docs/pilot.md docs/openshift-dogrulama.md)
+DOCS=(README.md docs/pilot.md docs/openshift-dogrulama.md docs/gke-dogrulama.md)
 # The section whose install command is copied the most.
 QUICK_FILE=README.md
 QUICK_HEADING="Hızlı başlangıç"

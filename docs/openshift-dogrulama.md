@@ -14,7 +14,7 @@ hava boşluklu OpenShift"tedir. Hepsi bir öğleden sonraya sığar.
 
 ## Ön koşullar
 
-**Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı, GKE provası kullanıcıda. Vekilli ve hava boşluklu OpenShift: ölçülmedi, prova kullanıcıda (aşağıda "[Vekilli ve hava boşluklu OpenShift](#vekilli-ve-hava-boşluklu-openshift)").
+**Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı. GKE: ölçülmedi, prova kullanıcıda ([gke-dogrulama.md](gke-dogrulama.md)). Vekilli ve hava boşluklu OpenShift: ölçülmedi, prova kullanıcıda (aşağıda "[Vekilli ve hava boşluklu OpenShift](#vekilli-ve-hava-boşluklu-openshift)").
 
 - Bu sürümlerden biri: ROSA, ARO, AWS üzerinde OpenShift ya da kurumun kendi
   veri merkezinde (on-prem); vekilli ve hava boşluklu kurulum da olur, ek

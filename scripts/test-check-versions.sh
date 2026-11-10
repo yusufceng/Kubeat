@@ -24,8 +24,8 @@ fresh() {
   cp "$ROOT/scripts/check-versions.sh" "$COPY/scripts/"
   cp "$ROOT/deploy/helm/kubeat/Chart.yaml" "$COPY/deploy/helm/kubeat/"
   cp "$ROOT/Makefile" "$ROOT/README.md" "$COPY/"
-  cp "$ROOT/docs/pilot.md" "$ROOT/docs/openshift-dogrulama.md" "$ROOT/docs/yukseltme.md" \
-    "$COPY/docs/"
+  cp "$ROOT/docs/pilot.md" "$ROOT/docs/openshift-dogrulama.md" "$ROOT/docs/gke-dogrulama.md" \
+    "$ROOT/docs/yukseltme.md" "$COPY/docs/"
 }
 
 # change FILE OLD NEW: replaces the first OLD in the copy of FILE with NEW
@@ -124,7 +124,7 @@ fails "the verified copy" "docs/pilot.md:$line: kubeat-frontend:$OTHER, not $V"
 # changed alone, fails naming that line (the install commands; in the OpenShift
 # one also the mirror of the proxied, air-gapped section and its cosign
 # verify).
-for file in docs/openshift-dogrulama.md; do
+for file in docs/openshift-dogrulama.md docs/gke-dogrulama.md; do
   doc_lines="$(grep -n -E -- "--version $V|kubeat-(backend|frontend):$V|charts/kubeat:$V|refs/tags/v$V" "$ROOT/$file" | cut -d: -f1)"
   [ -n "$doc_lines" ] || failed "$file: no command names $V"
   for line in $doc_lines; do
@@ -208,7 +208,7 @@ fails "a command under an upgrade heading in the README" "README.md:$line: --ver
 fresh
 printf '# Pilot\n' >"$COPY/docs/pilot.md"
 fails "no command" "docs/pilot.md: no command names a version"
-for file in docs/openshift-dogrulama.md; do
+for file in docs/openshift-dogrulama.md docs/gke-dogrulama.md; do
   fresh
   printf '# Doğrulama\n\n`--version <sürüm>`\n' >"$COPY/$file"
   fails "no command in $file" "$file: no command names a version"

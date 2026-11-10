@@ -89,6 +89,7 @@ Sürüm PR'ı sürümü şu yerlerin hepsinde birlikte yükseltir:
 - `docs/openshift-dogrulama.md`: "Kurulum" komutu ve "Vekilli ve hava boşluklu
   OpenShift"in kurulum komutu, aynalama doğrulaması (`cosign verify`
   kimliği, iki imaj ve chart etiketi) ve beklenen imaj etiketleri.
+- `docs/gke-dogrulama.md`: "Kurulum" ve 4. adımın `helm upgrade` komutu.
 
 Yükseltme notları [docs/yukseltme.md](docs/yukseltme.md)'dedir; README'de
 yalnızca ona bağlantı vardır. Sürüm PR'ı sprint dosyasının "Yükseltme
