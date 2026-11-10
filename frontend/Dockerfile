@@ -11,7 +11,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM registry.access.redhat.com/ubi9/nodejs-24-minimal:1793614965@sha256:da724df0db4baceb0b89ebdc160dfe330fe3b215925742ee9e65efdfc6038850
+FROM registry.access.redhat.com/ubi9/nodejs-24-minimal:1794242715@sha256:46f0f5e0cb61db71896f74feefe752ac8420eab8eab5e74eb3c35969f65c2550
 WORKDIR /app
 # The standalone bundle does not include static assets; copy them next to it.
 COPY --from=build /src/.next/standalone ./
