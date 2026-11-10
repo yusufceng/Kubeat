@@ -48,14 +48,14 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.52'ye
+### 0.42'den 0.53'e
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
    başarısız kanalları düzeltin ya da kapatın; aynı PagerDuty servisine
    bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
    0.46'dan beri uyarıya döner: 1 dakikadan ya da bir denemenin
-   süresinden kısa bir değer 0.46–0.52'de backend'i durdurmaz, alt
+   süresinden kısa bir değer 0.46–0.53'te backend'i durdurmaz, alt
    sınıra yükseltilir ve her açılışta `WARN` yazılır; değeri yine de
    düzeltin: 0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu
    ayarı tanımaz).
@@ -114,33 +114,39 @@ geri dönüş başladığınız sürüme olur.
     `metrics.prometheusRule.clusterLabel` `reason` ya da `surface` ise
     değiştirin; namespace sınırlı keşifte yükseltmeden önce keşif durumuna
     bakın.
-12. Alarm kuralları 0.43, 0.44, 0.45 ve 0.52'de değişti, 0.46–0.51'de
+12. 0.53'ün adımları ("0.53'e yükseltme", Yapılacak): kapsam reddinin ham
+    hata metnine ya da `explanation.code == "blocked_by_scope"`'a göre süzen
+    betik ve alarmları `explanation.code`'un iki değerine çevirin; kurum
+    aralıkları verdiyseniz cluster ağlarını `targetScope.clusterNetworks`'te
+    beyan etmeyi değerlendirin.
+13. Alarm kuralları 0.43, 0.44, 0.45, 0.52 ve 0.53'te değişti, 0.46–0.51'de
     değişmedi: yeni `kubeat.self` alarmlarını, `KubeatUnhealthy`'yi,
-    `KubeatSignInSourceDegraded`'i ve `KubeatDiscoveryNamespaceSkipped`'i
+    `KubeatSignInSourceDegraded`'i, `KubeatDiscoveryNamespaceSkipped`'i,
+    `KubeatScopeExternalRangesIgnored`'ı ve `KubeatScopeResolveErrors`'ı
     Alertmanager yönlendirmesine ekleyin; kuralları kopyalıyorsanız
-    0.52'ninkileri kopyalayın.
-13. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
+    0.53'ünkileri kopyalayın.
+14. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
     yerine `--reset-then-reuse-values`, Helm 3.14+):
 
     ```sh
-    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 -f values.yaml
+    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 -f values.yaml
     ```
 
-14. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
-    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.52'nin yeniden denemesi,
+15. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
+    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.53'ün yeniden denemesi,
     kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
     PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.52'ye
+### 0.41'den 0.53'e
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.52'ye"deki adımlar.
+2. Sonra "0.42'den 0.53'e"deki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
-0.43–0.51'den gelirken başladığınız sürümden sonraki bölümleri
+0.43–0.52'den gelirken başladığınız sürümden sonraki bölümleri
 eskiden yeniye okuyun. 0.40 ya da öncesinden gelirken de öyle; şemayı
 yükselten 0.38, 0.39 ve 0.40'tan dönüş yalnızca yedekle olur.
 
@@ -320,6 +326,173 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 0.53'e yükseltme
+
+0.53 bir güvenilirlik sürümüdür; güvenlik sürümü değildir. Kurum aralığı
+artık pod başka bir node'a taşınınca backend'i durdurmaz: çakışan girdi yok
+sayılır, izleme sürer. Cluster ağları chart'ta beyan edilebilir; çakışma render
+anında yakalanır. Kapanışta yarıda kalan bir kontrol, ters monitor'ün açık
+kesintisini kapatmaz. Kapsam reddi monitor'ün kaynağına uygun çareyle okunur;
+DNS kaynaklı ret bir chart kuralıyla duyurulur. GKE yolu CI'da render edilen bir
+reçeteye bağlanır ve GKE ile vekilli, hava boşluklu OpenShift için iki doğrulama
+runbook'u gelir. Kurum CA'sıyla imzalı hedefler için bir reçete eklenir. Şema
+değişmez (26), migration yok; chart kurulumunda yeni zorunlu ayar yok.
+
+İki node'lu minikube'da ölçüldü (2026-11-10):
+
+- Kurum aralığı öteki node'un pod ağını içerirken pod oraya taşındı. Backend
+  açıldı, `ERROR` satırı ve gauge göründü, `KubeatScopeExternalRangesIgnored`
+  gerçek bir Prometheus'ta yandı. 0.52'de aynı senaryo CrashLoopBackOff'tu.
+- Beyanla çakışan aralık `helm template`'i durdurdu.
+- Açık kesintili bir ters monitor'ün pod'u kontrol sürerken silindi. Olay
+  açık kaldı, bildirim gitmedi.
+- Kendi CA'sıyla imzalı bir hedef reçeteyle UP oldu, sistem demetine güvenen
+  hedef UP kaldı.
+- Kapsam reddinin metni Slack biçimli bildirimde Türkçe ve İngilizce okundu,
+  neden yalnız yöneticiye göründü, `KubeatScopeResolveErrors` yandı ve çözüldü.
+
+GKE ile vekilli, hava boşluklu OpenShift ölçülmedi; runbook'ları kullanıcıda
+koşulacak ([gke-dogrulama.md](gke-dogrulama.md),
+[openshift-dogrulama.md](openshift-dogrulama.md)).
+
+### Yapılacak
+
+- **Kapsam reddine göre süzen betik ve alarmlar.**
+  - Annotation monitor'lerinin reddi artık `blocked_by_scope_object` kodunu
+    alır. `explanation.code == "blocked_by_scope"` ile süzen bir betik bu
+    monitor'leri kaçırır; iki kodu birden alın (ör.
+    `startswith("blocked_by_scope")`).
+  - Reddedilen kontrolün hatası (`last_result.error`, olayın `cause`'u,
+    bildirimdeki "Son hata", webhook'un `incident.cause`'u) artık her kaynakta
+    aynı, çaresiz ve adressiz bir metindir. Eski metne (`…anything else is set
+    up by an administrator`) göre süzen bir şey varsa
+    `last_result.diagnostics.explanation.code`'a çevirin.
+- **Kurum aralıkları verdiyseniz cluster ağlarını beyan edin** (isteğe bağlı,
+  önerilir): `targetScope.clusterNetworks` (`pods`, `services`, `nodes`).
+  Beyanla çakışan bir aralık `helm upgrade`'i render hatasıyla durdurur, Argo
+  CD'de sync hatası olarak görünür, kurulum değişmez. OpenShift'te değerler
+  `oc get network.config/cluster` ile okunur; node ağı elle yazılır. Kurum
+  aralığındaki tek adres (`/32`) beyanla karşılaştırılmaz; router VIP'i
+  bilerek yazılabilir. `targetScope` altında okunmayan bir anahtar (ör.
+  `clusterNetworks.pod`) ve `backend.extraEnv.UPTIME_TARGET_SCOPE_CLUSTER_CIDRS`
+  render'ı durdurur.
+- **GKE'de kurulum notunun yeni uyarıları.** Hop değeri GCE'de `2`'den,
+  `ingress-nginx`'te `1`'den farklıysa `WARNING` çıkar. Önde L7 GCLB olan
+  `ingress-nginx`'te doğru değer `3` iken de çıkar; değeri değiştirmeyin.
+  Kurulum notunu CI'da sayıyorsanız bu satırı bekleyin (README "GKE kontrol
+  listesi").
+- **Vekilli kurulumda yeni kural.** `UPTIME_TARGET_SCOPE_TRUST_PROXY` kapalıyken
+  backend'in çözemediği dış adlara giden annotation monitor'leri
+  `KubeatScopeResolveErrors`'ı sürekli yakabilir. Önce `server resolve` ile
+  nedeni okuyun (README "Vekilli kurulum").
+- **Kuralları kopyalıyorsanız yeniden kopyalayın** (aşağıda "Alarm kuralları:
+  değişti").
+- **Yedeği doğrulamalı blokla alın** (yukarıda "Yükseltmeden önce yedek").
+  "yedek doğrulandı" demiyorsa yükseltmeyin.
+
+### Davranış değişikliği
+
+- **Kurum aralığı açılışı durdurmaz
+  ([#157](https://github.com/yusufceng/Kubeat/issues/157)).**
+  `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'te API sunucusunun ya da backend
+  pod'unun adresini içeren girdi, ya da backend kendi adreslerini okuyamadığı
+  için denetlenemeyen girdi artık backend'i durdurmaz.
+  - Yalnız o girdi yok sayılır; öteki aralıklar geçerli kalır. Yok sayılan
+    aralık ayarda hiç yokmuş gibi okunur, kapsam genişlemez.
+  - Açılışta `target scope external ranges ignored` `ERROR` satırı aralığı ve
+    nedeni yazar. Etiketsiz `kubeat_target_scope_external_ranges_ignored`
+    gauge'u ve `KubeatScopeExternalRangesIgnored` kuralı yanar. Açılış
+    satırının loglardan düştüğü bir pod'da `server resolve <ad>` aynı
+    aralıkları ve nedenleri stderr'e yazar.
+  - Bütün aralıklar yok sayılırsa `target scope external ranges in effect`
+    satırı gelmez; `ERROR` satırındaki `in_effect` boştur.
+  - Yok sayılan aralıktaki adrese giden kapsamı sınırlı monitor'ler
+    `blocked_by_scope` ile DOWN olur, oraya oluşturma 403 alır. Var olan bir
+    webhook kanalı etkilenmez; kanal hedefi kayıt anında denetlenir.
+  - Biçim hataları (geçersiz CIDR, IPv6 biçiminde yazılmış IPv4 aralığı)
+    backend'i yine başlatmaz.
+- **Cluster ağlarının beyanı
+  ([#158](https://github.com/yusufceng/Kubeat/issues/158)).** Yukarıda
+  "Yapılacak". Beyan backend'e `UPTIME_TARGET_SCOPE_CLUSTER_CIDRS` olarak da
+  gider. Açılış her kurum aralığını bu ağların tamamına karşı, IPv6 dahil,
+  denetler ve çakışanı yok sayar. Beyan yoksa render ve davranış değişmez.
+- **Kapanışta yarıda kalan kontrol
+  ([#159](https://github.com/yusufceng/Kubeat/issues/159)).** Kapanışta
+  (yükseltme, drain, pod taşıma) iptal edilen bir kontrolün sonucu artık hiçbir
+  monitor'de yazılmaz ve sayılmaz (`kubeat_checks_total` ve süre histogramı
+  dahil); ters monitor'de de. Açık kesinti kapanmaz, sahte "düzeldi" bildirimi
+  gitmez. Kapanıştan önce biten ya da monitor'ün kendi zaman aşımına uğrayan
+  kontrol ise yazılır.
+- **Kapsam reddinin metni
+  ([#160](https://github.com/yusufceng/Kubeat/issues/160)).**
+  - Açıklama monitor'ün kaynağına göre verilir. Kullanıcının ve kaydı olmayan
+    monitor `blocked_by_scope` alır: "DNS arızası değilse yönetici kurabilir".
+    Annotation monitor'ü yeni `blocked_by_scope_object` kodunu alır:
+    kontrolü uygulamanın kendi host'unda, oturum istemeyen bir sağlık yolunda
+    tutmayı önerir.
+  - İki metin de nedenden bağımsızdır ve iki olasılığı söyler: bağlantı
+    kapsamın dışına gidiyor ya da ad o an çözülemedi.
+  - Reddedilen kontrolün hatası tek, çaresiz ve adressiz bir metindir
+    (yukarıda "Yapılacak"). Çare yalnız açıklamayı taşıyan yüzeylerde
+    görünür: arayüz ve bildirimin "Neden" alanı. Hatırlatmalar, tek satırlık
+    metin kanalları ve webhook'un `incident.cause`'u yalnız hatayı yazar.
+    Yükseltmeden önce açılmış bir kapsam reddi olayı kapanana dek
+    hatırlatmalarda eski metni taşır.
+  - Yönetici (ve API token'ı) reddin nedenini (`connection` ya da
+    `resolve_error`) `diagnostics.scope_reason` alanında ve monitor sayfasında
+    görür; öteki kullanıcıların yanıtında bu alan yoktur.
+- **Kurulum notu (GKE)
+  ([#161](https://github.com/yusufceng/Kubeat/issues/161)).** Yukarıda
+  "Yapılacak". ManagedCertificate ya da pre-shared-cert'li GCE Ingress'te
+  `ingress.tls.enabled` açıkken ve GCE'de arayüz politikasının `from`'u iki
+  yük dengeleyici aralığını içermiyorken de `WARNING` çıkar. Kubeat'in çalışma
+  davranışı değişmez.
+
+Ayrıca (davranış değiştirmez):
+
+- **Doğrulama runbook'ları
+  ([#162](https://github.com/yusufceng/Kubeat/issues/162)):**
+  [gke-dogrulama.md](gke-dogrulama.md) ve
+  [openshift-dogrulama.md](openshift-dogrulama.md) "Vekilli ve hava boşluklu
+  OpenShift". `docs/pilot.md` 0.52'ye göre güncellendi; pilot values örneğinde
+  kaynak tavanı açıkça `"0"`.
+- **Kurum CA'sı reçetesi
+  ([#163](https://github.com/yusufceng/Kubeat/issues/163)):** README
+  "OpenShift" → "Kurum CA'sı". `tls_skip_verify` yerine kullanılır. ConfigMap
+  sonradan oluşturulursa backend'i yeniden başlatın: Go kökleri ilk TLS
+  doğrulamasında bir kez okur.
+- **Okuma yolları ve denetim kaydı çekme tarifi
+  ([#164](https://github.com/yusufceng/Kubeat/issues/164)):** README hızlı
+  başlangıçta tek kiracılı kısa yol, "Güvenlik"te çok kiracılı ve internete
+  açık kurulum listesi, "Kayıt"ta denetim kaydını API'den SIEM'e çekme tarifi.
+  README'deki negatif adımın `curl` imajı digest'e sabitlendi.
+
+### Geri dönüş
+
+Şema aynı (26), `helm rollback` ile 0.52.0'a. Dönüşte:
+
+- Kurum aralığı yine ortama bağlı çakışmada backend'i durdurur. Pod başka bir
+  node'a taşınmadan önce aralığı düzeltin ya da boşaltın.
+- `targetScope.clusterNetworks` 0.52'nin chart'ında tanınmaz; render hatası ve
+  beyan kalkar.
+- Kapanışta yarıda kalan ters kontrol yine açık kesintiyi kapatabilir.
+- `blocked_by_scope_object` kodlu sonuçlar 0.52'nin arayüzünde genel hata
+  metni ve "Kubeat bu hatayı tanımıyor" notuyla görünür; neden alanı ve iki
+  kural kalkar. Kuralları kopyaladıysanız 0.52'ninkileri geri koyun.
+
+### Alarm kuralları: değişti
+
+- `kubeat.self` grubunda, `KubeatUnhealthy`'nin ardında:
+  `KubeatScopeExternalRangesIgnored`. Gauge sıfırdan büyükken yanar; `for`
+  yoktur, ciddiyeti `warning`'dir ve `KubeatUnhealthy`'nin parçası değildir.
+- Yeni grup `kubeat.scope` (sonda): `KubeatScopeResolveErrors`. Annotation
+  monitor'lerinin `resolve_error` redleri 10 dakikadır sürerken yanar;
+  ciddiyeti `warning`'dir. Kullanıcı monitor'lerinin redleri buna girmez.
+- Yedek açıkken kural sayısı 17'dir.
+
+Kuralları başka bir depoya kopyalıyorsanız 0.53'ünkileri kopyalayın ve iki
+alarmı Alertmanager yönlendirmesine ekleyin.
 
 ## 0.52'ye yükseltme
 

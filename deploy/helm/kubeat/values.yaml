@@ -660,8 +660,8 @@ metrics:
     # rendered with it, or copy them there (README, "Operator'süz cluster").
     # KubeatDown, KubeatUnhealthy, KubeatBackupFailing, the outage,
     # certificate and channel alerts (KubeatNotificationsFailing),
-    # KubeatSignInSourceDegraded, KubeatDiscoveryNamespaceSkipped and
-    # KubeatScopeResolveErrors then group by it beside namespace and job
+    # KubeatSignInSourceDegraded, KubeatDiscoveryNamespaceSkipped,
+    # KubeatScopeExternalRangesIgnored and KubeatScopeResolveErrors then group by it beside namespace and job
     # (and the monitor, the channel or the reason), so that one cluster's
     # Kubeat is not hidden by another's, and keep no other label the store
     # adds (the replica label of an HA pair it does not deduplicate).

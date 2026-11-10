@@ -28,7 +28,7 @@ tamamlayıcıdır. Ingress controller'ı ve cert-manager'ı olan bir cluster'a
 kurulum (OpenShift'te "OpenShift" bölümündeki komut):
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 \
   -n kubeat --create-namespace \
   --set podSecurityContext.fsGroup=1001 \
   --set ingress.enabled=true --set ingress.className=<kümenin sınıfı> \
@@ -68,7 +68,7 @@ Kubeat'in kendisi düşerse cluster dışındaki bir heartbeat alıcısı haber 
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum".
@@ -100,7 +100,7 @@ beri imajlar ve chart imzalıdır; sürümün GitHub Release'i digest'leri ve
 SBOM'ları taşır (bkz. "Tedarik zinciri"). 0.44.0 ve öncesi imzasızdır. Herhangi bir cluster'a kurulum:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 \
   --set podSecurityContext.fsGroup=1001 \
   -n kubeat --create-namespace
 ```
@@ -209,7 +209,9 @@ Kopyalanabilir reçete: [docs/gke.md](docs/gke.md) (`values-gke.yaml`: NEG'li
 GCE Ingress, ManagedCertificate, hop `2`, iki `ipBlock`'lu arayüz politikası).
 CI, values bloğunu belgeden olduğu gibi çıkarıp render eder ve kurulum
 notunda hop, TLS ya da politika uyarısı çıkmadığını sınar; gerçek bir GKE'de
-ölçülmedi. Gerçek bir GKE'de doğrulamanın on adımı (ManagedCertificate, arayüz
+ölçülmedi. GCE Ingress 80'de düz HTTP de sunar ve Kubeat `https://`'e
+yönlendirmez: giriş formu düz HTTP'de açılır. Kapatmanın iki yolu
+[docs/gke.md](docs/gke.md) "4. Kurulumdan sonra" 5. maddede (ölçülmedi). Gerçek bir GKE'de doğrulamanın on adımı (ManagedCertificate, arayüz
 politikası, hop `2` ve `1`, Cloud NAT, DNS sorgu hızı, worker'lar, yükseltmede
 rozetin 502 süresi, `resolve_error`), her birinin komutu, beklenen çıktısı ve
 geri bildirim şablonu: [docs/gke-dogrulama.md](docs/gke-dogrulama.md). Bu
@@ -382,7 +384,7 @@ kopyasında `NOTES.txt`'i bir ConfigMap'e sarar (`deploy/helm/test-chart.sh`
 de böyle yapar) ve cluster'a bağlanmaz:
 
 ```sh
-helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 --untar --untardir ci
+helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 --untar --untardir ci
 t=ci/kubeat/templates; { echo '{{- define "ci.notes" -}}'; cat $t/NOTES.txt; echo '{{- end -}}'; } >$t/_ci_notes.tpl
 printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ci-notes\ndata:\n  notes: |\n{{ include "ci.notes" . | indent 4 }}\n' >$t/ci-notes.yaml
 helm template kubeat ci/kubeat -n kubeat -f values-<cluster>.yaml --show-only templates/ci-notes.yaml \
@@ -436,7 +438,7 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
@@ -533,7 +535,8 @@ bağlı kalmaz:
 - ConfigMap yoksa (henüz oluşturulmadı, başka bir namespace'te ya da sonradan
   silindi) pod yine açılır. Dizin boş kalır, sistem demeti yerinde durur ve
   yalnız kurum CA'lı monitor'ler `tls_unknown_authority` verir; öteki kontroller
-  sürer.
+  sürer. ConfigMap sonradan oluşturulursa backend'i yeniden başlatın ("Kurum
+  CA'sı değişince"): Go kökleri ilk TLS doğrulamasında bir kez okur.
 - `optional` olmadan kubelet pod'u başlatmaz (`configmap ... not found`, pod
   `ContainerCreating`'de kalır). Backend tek replika ve `Recreate` olduğu için
   eski pod çoktan durmuştur: bütün izleme durur. Silinen bir ConfigMap'te bu
@@ -2726,7 +2729,9 @@ curl -sSf -H "Authorization: Bearer $TOKEN" "$KUBEAT/api/v1/audit?limit=1000" -o
 iki çekme arasında yazılan satırlar `limit`'i (en çok `UPTIME_MAX_RESULTS`, 1000)
 aşmayacak kadar kısa olmalı, yoksa aradakiler kaçar. Çekme hatasında (ör. `402`) ve `id`
 geri gidince zincir hata koduyla durur. Yedekten geri yüklemeden sonra `audit-last-id`'ye
-geri yüklenen kaydın en büyük `id`'sini (`limit=1`), kayıt `UPTIME_AUDIT_RETENTION`
+geri yüklenen kaydın en büyük `id`'sini (`limit=1`) ancak dosyadaki değerden küçükse
+yazın (ikisinin küçüğü; yedek son çekmeden sonra alınmışsa büyüğü yazmak aradaki
+satırları atlatır), kayıt `UPTIME_AUDIT_RETENTION`
 boyunca yeni satır almadan boşaldıysa (`id` 1'den başlar) `0` yazın. Kayıt bugün yalnız
 böyle çekilir; kaydın tamamını stdout'a yazmak backlog'da (S83).
 
@@ -4698,7 +4703,7 @@ satır:
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 ### Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`
@@ -4785,7 +4790,7 @@ bu değerle render edilen kurallar taşınır.
   `KubeatMonitorDown`, `KubeatCertificateExpiring`,
   `KubeatNotificationsFailing`'in kanal ifadeleri, (0.52)
   `KubeatSignInSourceDegraded` ve `KubeatDiscoveryNamespaceSkipped` ve (0.53)
-  `KubeatScopeResolveErrors` bu etiketle, `namespace` ve `job`'un yanında
+  `KubeatScopeExternalRangesIgnored` ve `KubeatScopeResolveErrors` bu etiketle, `namespace` ve `job`'un yanında
   (ve monitor, kanal ya da `reason` etiketleriyle), cluster başına toplanır ve
   dış etiketlerden yalnızca onu taşır. Depo bir HA çiftinin
   kopyalarını tekilleştirmiyorsa kopyanın etiketi (ör. `prometheus_replica`)
@@ -4860,7 +4865,9 @@ reddedilir. Kubeat'in kendi alarmları orada üç yoldan birine gider; ilki
   kural sayısı 0.42'de 5, 0.43'te 12, 0.45'te 13'tü; 0.44'te kopyalayan
   0.45'te `KubeatUnhealthy` olmadan sessizce sürer. 0.52 `kubeat.signin`
   (`KubeatSignInSourceDegraded`) ve `kubeat.discovery`
-  (`KubeatDiscoveryNamespaceSkipped`) gruplarını ekler (yedek açıkken 15 kural):
+  (`KubeatDiscoveryNamespaceSkipped`) gruplarını ekler (yedek açıkken 15
+  kural); 0.53 `kubeat.self`'e `KubeatScopeExternalRangesIgnored`'ı ve
+  `kubeat.scope` grubunu (`KubeatScopeResolveErrors`) ekler (17 kural):
   0.51'in kopyasıyla kalan bir kurulum yanlış hop ayarını, kurulum notu da
   görünmediği için, alarmsız sürdürür (bkz. "Hesaplar ve giriş" → "Yanlış
   ayar sessizce etkisiz kalmaz"). Bu yüzden eşitleme komutu her yükseltmede
