@@ -217,6 +217,50 @@ for file in docs/openshift-dogrulama.md docs/gke-dogrulama.md; do
   fails "$file missing" "$file: missing"
 done
 
+# The README's negative step runs curl by the digest the check pins, next to
+# its tag. A new tag without a new digest, a lost or changed digest and a
+# README with no such command each fail naming the place; so does a doc
+# that names the image another way, a mirror's copy among them. Prose that
+# names the image with neither tag nor digest, or by CURL_REF at the end of a
+# sentence, passes.
+CURL_REF="$(awk -F'"' '/^CURL_REF=/ { print $2; exit }' "$ROOT/scripts/check-versions.sh")"
+CURL_TAG="${CURL_REF%@*}"
+CURL_DIGEST="${CURL_REF#*@}"
+[ -n "$CURL_REF" ] || failed "scripts/check-versions.sh: no CURL_REF"
+grep -qF -- "--image=$CURL_REF " "$ROOT/README.md" || failed "README.md: the negative step does not run $CURL_REF"
+for spec in "$CURL_REF|$CURL_TAG-other@$CURL_DIGEST" \
+  "$CURL_REF|$CURL_TAG" \
+  "$CURL_REF|$CURL_TAG@sha256:0000000000000000000000000000000000000000000000000000000000000000"; do
+  IFS='|' read -r old new <<<"$spec"
+  fresh
+  line="$(change README.md "$old" "$new")"
+  fails "README.md, $new" "README.md:$line: $new, not $CURL_REF"
+done
+fresh
+change README.md "--image=$CURL_REF " "--image=busybox:1.36 " >/dev/null
+fails "a README without the image" "README.md: no command runs ${CURL_REF%%:*}"
+fresh
+cat >>"$COPY/docs/pilot.md" <<EOF
+
+    oras cp docker.io/$CURL_TAG registry.sirket.local/$CURL_TAG
+EOF
+line="$(awk 'END { print NR }' "$COPY/docs/pilot.md")"
+fails "a mirror's copy by its tag alone" "docs/pilot.md:$line: $CURL_TAG, not $CURL_REF"
+fresh
+cat >>"$COPY/docs/pilot.md" <<EOF
+
+    oras cp docker.io/$CURL_REF registry.sirket.local/$CURL_REF
+\`${CURL_REF%%:*}\` imajının aynalanacak referansı $CURL_REF.
+EOF
+passes "a mirror's copy by the digest, and prose"
+# A failed version and an unpinned image are counted apart, each with its
+# own summary.
+fresh
+change Makefile "VERSION ?= $V" "VERSION ?= $OTHER" >/dev/null
+change README.md "$CURL_REF" "$CURL_TAG" >/dev/null
+fails "a version and the image" "1 place(s) do not name Chart.yaml's version $V"
+fails "a version and the image" "1 place(s) do not run $CURL_REF"
+
 if [ "$FAILED" -gt 0 ]; then
   echo "$FAILED version check test(s) failed"
   exit 1

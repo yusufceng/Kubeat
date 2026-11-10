@@ -73,6 +73,21 @@ helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 -n ku
 
 Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum".
 
+> **Küçük ekip, tek kiracılı kurulum.** Kubeat'i yalnız kendi ekibiniz
+> kullanıyorsa (kapsamı sınırlı kullanıcı yoksa) şu bölümler yeter:
+>
+> - ["Cluster'a kurulum" → "GKE"](#clustera-kurulum) ve hop değerinin GKE satırları
+>   (["Hesaplar ve giriş" → "Vekil-hop rehberi"](#hesaplar-ve-giriş));
+> - ["Operator'süz cluster"](#operatorsüz-cluster-alloy-grafana-cloud-ve-mimir),
+>   ["Durum sayfaları"](#durum-sayfaları), ["Bildirim kanalları"](#bildirim-kanalları)
+>   ve ["Yedekleme ve geri yükleme"](#yedekleme-ve-geri-yükleme).
+>
+> Atlanabilir: kapsam ve kurum aralığı (["Hedef politikası"](#hedef-politikası)),
+> ["LDAP"](#ldap), ["OpenShift"](#openshift) ve denetim
+> (["Hedef politikası" → "Kapsam ihlali denetimi"](#hedef-politikası)). Annotation
+> monitor'ü her kurulumda nesnesinin namespace'ine bağlıdır; kapsam reddiyle DOWN
+> olursa: ["Hedef politikası" → "Her bağlantıda"](#hedef-politikası).
+
 ## Cluster'a kurulum
 
 **Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı. GKE: ölçülmedi, prova kullanıcıda ([docs/gke-dogrulama.md](docs/gke-dogrulama.md)). Vekilli ve hava boşluklu OpenShift: ölçülmedi, prova kullanıcıda ([docs/openshift-dogrulama.md](docs/openshift-dogrulama.md#vekilli-ve-hava-boşluklu-openshift)).
@@ -641,6 +656,26 @@ PATH'teyse ya da `PROMTOOL=/yol/promtool` verilirse alarm kurallarını
 uyarıyla atlar, CI'da ise atlamaz.
 
 ## Güvenlik
+
+**Çok kiracılı ve internete açık kurulum.** Kubeat'i birden çok ekip paylaşıyorsa
+ya da arayüzü internete açıksa kontrol listesi; her satırın ayrıntısı bağlantıdaki
+bölümdedir:
+
+- `UPTIME_CHECK_SHOW_VALUE=false`: ["Yapılandırma"](#yapılandırma).
+- Ekiplere namespace'le sınırlı kapsam; kurum ağı için `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`,
+  0.53'ten beri cluster ağlarının beyanı (`targetScope.clusterNetworks`):
+  ["Hedef politikası" → "Kullanıcı başına kapsam", "Kurum ağı"](#hedef-politikası).
+- Kapsam kontrolün açtığı her bağlantıda (0.51 ve üstü):
+  ["Hedef politikası" → "Her bağlantıda"](#hedef-politikası).
+- Doğru `UPTIME_TRUST_PROXY_HOPS` ve uydurma `X-Forwarded-For` ile negatif adım:
+  ["Hesaplar ve giriş" → "Vekil-hop rehberi", "Uydurma başlıkla negatif adım"](#hesaplar-ve-giriş).
+- `frontend.networkPolicy.enabled=true` ve uygulandığının doğrulanması:
+  ["Hesaplar ve giriş" → "Arayüzün ağ politikası"](#hesaplar-ve-giriş).
+- Dizinle girişte `UPTIME_LOGIN_MAX_FAILURES` dizinin kilit eşiğinin altında ve kaynak
+  tavanı `UPTIME_LOGIN_SOURCE_MAX_FAILURES=20`: ["LDAP" → "Dizin hesap kilidi (LDAP/AD)"](#ldap).
+- Kapsam reddinin denetimi ve `kubeat_target_scope_denied_total` üzerine alarm kuralı:
+  ["Hedef politikası" → "Kapsam ihlali denetimi"](#hedef-politikası); kaydı SIEM'e
+  almak: ["Hesaplar ve giriş" → "Denetim kaydını SIEM'e almak"](#hesaplar-ve-giriş).
 
 Backend API'si her istekte ya giriş yapmış bir kullanıcının oturumunu ya da
 `UPTIME_API_TOKEN` anahtarını (`Authorization: Bearer ...`) ister; arayüz
@@ -1264,8 +1299,9 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   token'ıyla korunan yüzeyde kalır ve bir enum sızdırmaz. Böylece cross-tenant
   bir erişim girişimi (başka ekibin Service'ine ya da API sunucusuna
   monitor/kanal) iz bırakır. Kayıtlar API ve arayüzden, log satırı merkezi
-  logdan okunur; SIEM'e kendiliğinden akmaz (denetim kaydının tamamını
-  stdout'a yazmak backlog'da). Yönetici ve kapsamı `*` olan
+  logdan okunur; SIEM'e kendiliğinden akmaz (API'den çekme tarifi:
+  ["Hesaplar ve giriş" → "Denetim kaydını SIEM'e almak"](#hesaplar-ve-giriş);
+  denetim kaydının tamamını stdout'a yazmak backlog'da). Yönetici ve kapsamı `*` olan
   kullanıcı kendi isteğiyle sayaca ya da denetim kaydına düşmez (onlar için red
   oluşmaz); istisnalar annotation'la kurulan monitor'ler (her kurulumda,
   `source="annotation"`) ve kaydı olmayan, kendi namespace'ine bağlanan bir
@@ -2220,7 +2256,7 @@ Service'i yine herkese açıktır. Açtıktan sonra:
 
   ```
   kubectl create namespace kubeat-np-check
-  kubectl -n kubeat-np-check run np-check --rm -i --restart=Never --image=curlimages/curl:8.10.1 -- \
+  kubectl -n kubeat-np-check run np-check --rm -i --restart=Never --image=curlimages/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b -- \
     curl -sS -m 5 -o /dev/null -w '%{http_code}\n' http://kubeat-frontend.kubeat.svc:3000/login
   kubectl delete namespace kubeat-np-check
   ```
@@ -2667,6 +2703,29 @@ kayıtta "hesabın burada parolası yok" yazar. Her başarısız deneme ayrıca
 bilgi olarak loglanır. Böylece uydurma adlarla bir deneme seli diski
 dolduramaz ve Kubeat'in tanıdığı hesaplara yönelik denemeleri kayıttan
 gizleyemez.
+
+**Denetim kaydını SIEM'e almak.** Kayıt SIEM'e kendiliğinden akmaz; cron ya da bir
+CronJob onu API anahtarıyla düzenli çeker (adres, anahtar ve NetworkPolicy:
+["API"](#api)). Lisansta `audit` gerekir, yoksa yanıt `402`'dir
+([ADR-0002](docs/adr/0002-open-core-lisans.md)). Yanıt yeniden eskiye sıralıdır, `since`
+yoktur: her çekme son `limit` satırı alır, gönderilmiş olanlar `id`'ye göre ayıklanır:
+
+```
+last=$(cat audit-last-id 2>/dev/null || echo 0)
+curl -sSf -H "Authorization: Bearer $TOKEN" "$KUBEAT/api/v1/audit?limit=1000" -o audit.json &&
+  jq -c --argjson last "$last" 'if (map(.id) | max // $last) < $last then error("audit id went back")
+    else map(select(.id > $last)) | sort_by(.id) | .[] end' audit.json >audit-new.jsonl &&
+  cat audit-new.jsonl >>kubeat-audit.jsonl &&
+  jq -s --argjson last "$last" 'map(.id) + [$last] | max' audit-new.jsonl >audit-last-id
+```
+
+`$KUBEAT` backend'in adresi, `kubeat-audit.jsonl` SIEM ajanının okuduğu dosyadır. Aralık,
+iki çekme arasında yazılan satırlar `limit`'i (en çok `UPTIME_MAX_RESULTS`, 1000)
+aşmayacak kadar kısa olmalı, yoksa aradakiler kaçar. Çekme hatasında (ör. `402`) ve `id`
+geri gidince zincir hata koduyla durur. Yedekten geri yüklemeden sonra `audit-last-id`'ye
+geri yüklenen kaydın en büyük `id`'sini (`limit=1`), kayıt `UPTIME_AUDIT_RETENTION`
+boyunca yeni satır almadan boşaldıysa (`id` 1'den başlar) `0` yazın. Kayıt bugün yalnız
+böyle çekilir; kaydın tamamını stdout'a yazmak backlog'da (S83).
 
 **API anahtarı.** `UPTIME_API_TOKEN` betikler ve otomasyon içindir: onu
 `Authorization: Bearer ...` ile sunan istek yönetici yetkisiyle çalışır ve
@@ -3682,6 +3741,7 @@ eklenmelidir.
 | --- | --- | --- |
 | `GET` | `/api/v1/health` | Backend sağlık durumu |
 | `GET` | `/api/v1/license` | Lisansın durumu (`community`, `active`, `expiring`, `expired`, `invalid`), şu an açık özellikler ve bitiş tarihi. Müşteri adını, lisans numarasını ve sorunu yalnızca yöneticiler görür |
+| `GET` | `/api/v1/audit?limit=100` | Denetim kaydı, yeniden eskiye; `limit` en çok ve verilmezse `UPTIME_MAX_RESULTS`. Yalnızca yönetici; lisansta `audit` yoksa `402` (bkz. "Hesaplar ve giriş" → "Denetim kaydını SIEM'e almak") |
 | `GET` | `/metrics` | Prometheus metrikleri |
 | `GET` | `/api/v1/monitors?window=24h` | Monitor'lar; son durum ve uptime ile. İsteğe bağlı: `namespace=x`, `ids=1,2`, `history=40` (her monitor'un son kontrolleri) |
 | `POST` | `/api/v1/monitors` | Monitor ekler |
