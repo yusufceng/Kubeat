@@ -177,6 +177,10 @@ backend:
   extraEnv:
     # Giriş throttle'ının kaynağı: düz Route'ta 1 (aşağıda "Hop değeri")
     UPTIME_TRUST_PROXY_HOPS: "1"
+    # Kaynak tavanı bilerek kapalı: kullanıcılar NAT ve VDI arkasında tek
+    # kaynak sayılır. İnternete açık dizinli kurulumda "20" (aşağıda
+    # "Kaynak tavanı"; README "Hesaplar ve giriş" -> "Kaynak tavanı").
+    UPTIME_LOGIN_SOURCE_MAX_FAILURES: "0"
     HTTPS_PROXY: http://proxy.sirket.local:3128
     NO_PROXY: .svc,.cluster.local,.sirket.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
     # Kapalı kalır; açmadan önce aşağıdaki "Vekilli kapsam"daki iki onay
@@ -209,6 +213,15 @@ prometheus:
 çıkışı (Slack, Teams) vekil üzerindense `NO_PROXY`'de cluster içi adlar ve
 aralıklar olmalıdır, yoksa kontroller de vekile gider.
 
+**Kaynak tavanı.** `UPTIME_LOGIN_SOURCE_MAX_FAILURES` (0.52) bir kaynağın
+bütün adlardaki hatalı girişlerini sınırlar. Örnekte açıkça `"0"`dır: pilot
+bankasının kullanıcıları NAT ve VDI arkasındadır, hepsi tek kaynak sayılır
+ve tavan dolunca o ağın arkasındaki herkesin girişi kilit süresince kapanır.
+Açık `0` tavanı bilerek kapalı tutar ve LDAP'ın açılış `WARN`'ını `INFO`'ya
+indirir; satırı silmek `WARN`'ı geri getirir. Dizinli ve internete açık bir
+kurulumda öneri `"20"`dir ([README](../README.md#hesaplar-ve-giriş)
+"Hesaplar ve giriş" → "Kaynak tavanı" ve "LDAP" → "Dizin hesap kilidi").
+
 **Hop değeri.** `UPTIME_TRUST_PROXY_HOPS`, giriş throttle'ının (CWE-307,
 0.50) tarayıcının adresini okuması içindir; chart'ın varsayılanı `0`'dır ve
 `0`'da her tarayıcı arayüz pod'una sayılır, ad başına tek paylaşılan kilit
@@ -222,6 +235,15 @@ kalır (README "Hesaplar ve giriş", "Vekil-hop rehberi"):
   `1` kalır. Emin değilseniz `1` bırakın: eksik değerin maliyeti paylaşılan
   kilit, fazla değerinki bypass'tır. İki durumu da "Kurulum sonrası
   kontrol"deki iki giriş satırı ayırır.
+- F5 ya da WAF önlü Route'ta eksik değer alarmı susturur: `2` gereken yerde
+  `1` verilirse throttle F5'in ya da WAF'ın router'a bağlandığı çıkış
+  adresine anahtarlanır. Bu adres Kubeat'in genel adresi olmadığından
+  `hops_too_low` sayılmaz; `WARN` ve `KubeatSignInSourceDegraded` susar
+  (0.52; README "Yanlış ayar sessizce etkisiz kalmaz"). Bu yolda değer elle
+  doğrulanır: "Kurulum sonrası kontrol"deki "Giriş kaynağı" ve "Uydurma
+  başlık" satırları, yani başlıksız ve uydurma `X-Forwarded-For`'lu iki giriş
+  satırının `source`'u. Sinyalin bu katmanların çıkış aralıklarına
+  genişlemesi S101 ile sonraki sprintte ([backlog](backlog.md)).
 - Router'ın politikası `IfNone` ya da `Never` ise istemcinin yazdığı başlık
   olduğu gibi geçer: `route.annotations` altına
   `haproxy.router.openshift.io/set-forwarded-headers: append` ekleyin (README
@@ -252,19 +274,26 @@ alın, üçüncüsünü kurulumdan sonra, ayar kapalıyken siz sınayın:
   Komut backend'in kendi binary'siyle, kapsam denetiminin çözdüğü gibi çözer;
   sunucu başlatmaz, bir şey değiştirmez. Beklenen satır
   `NXDOMAIN, no such name for this pod's resolver`'dır: ayar bu adları vekile
-  giden HTTP(S) istekte kabul eder. `did not resolve (… server misbehaving)`
-  ya da `no answer within 2s` görürseniz cluster DNS'i dış adlara SERVFAIL ya
-  da zaman aşımı veriyordur: ayar yardım etmez, ad `resolve_error` ile
-  reddedilmeye devam eder. Satırı açmayın; önce cluster DNS'inin bu adlara
-  yanıt vermesini (`dns.operator/default`, `servers`) ya da NXDOMAIN
-  döndürmesini ağ ekibiyle ayarlayın, o zamana kadar bu hedefleri yönetici
-  kurar. `resolves to …, outside the cluster` görülen bir ad için ayar
-  gerekmez.
+  giden HTTP(S) istekte kabul eder. `NO_PROXY`'deki adlarda bu satır geçmez:
+  istek vekile gitmez, backend doğrudan bağlanır ve ayar istisna vermez. Komut
+  `NO_PROXY`'yi okumaz ve NXDOMAIN'de aynı satırı yazar ([backlog](backlog.md),
+  "`server resolve`'un vekil istisnasını da değerlendirmesi"); böyle bir ad
+  için aşağıdaki "Kurum adları backend'de çözülmeli". `did not resolve (…
+  server misbehaving)` ya da `no answer within 2s` görürseniz cluster DNS'i
+  dış adlara SERVFAIL ya da zaman aşımı veriyordur: ayar yardım etmez, ad
+  `resolve_error` ile reddedilmeye devam eder. Satırı açmayın; önce cluster
+  DNS'inin bu adlara yanıt vermesini (`dns.operator/default`, `servers`) ya
+  da NXDOMAIN döndürmesini ağ ekibiyle ayarlayın, o zamana kadar bu hedefleri
+  yönetici kurar. `resolves to …, outside the cluster` görülen bir ad için
+  ayar gerekmez.
 
 Ayar kapalıyken ve vekil verilmişken backend açılışta bir `WARN` yazar
 (`HTTP_PROXY/HTTPS_PROXY is set and UPTIME_TARGET_SCOPE_TRUST_PROXY is off`);
-aşağıdaki "Uyarı ve hata" kontrolünde yalnız bu satır beklenir. 0.49 bu ayarı
-tanımaz ve yok sayar.
+0.49 bu ayarı tanımaz ve yok sayar. 0.52'den beri LDAP tanımlıyken
+`UPTIME_LOGIN_SOURCE_MAX_FAILURES` hiç verilmemişse ikinci bir açılış `WARN`'ı
+gelir (`LDAP is on and UPTIME_LOGIN_SOURCE_MAX_FAILURES is not set`); örnekteki
+açık `"0"` onu `INFO`'ya indirir (yukarıda "Kaynak tavanı"). Aşağıdaki "Uyarı
+ve hata" kontrolünde bu values'la yalnız vekil satırı beklenir.
 
 `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` (0.51'den beri, varsayılan boş) kurumun
 cluster dışındaki aralıklarını verir. Açınca namespace'le sınırlı editör bu
@@ -348,11 +377,14 @@ eksik olduğunu yazar; saklayın.
 | Route | Tarayıcıda `https://kubeat.apps.<cluster-domain>` | Giriş sayfası; HTTP'den HTTPS'e yönlendirme |
 | Giriş kaynağı | Masaüstünüzdeki tarayıcıdan bir kez `admin`'e yanlış parola, sonra `oc -n kubeat logs deploy/kubeat-backend \| grep 'sign-in refused'` | Satırın `source`'u masaüstünüzün adresi (kurumun ağında görünen adresiniz); router, WAF ya da arayüz pod'unun adresi değil (README "Görülen kaynağı doğrulamak") |
 | Uydurma başlık | Aynı yanlış parolalı isteği tarayıcının geliştirici araçlarından (Network) "Copy as cURL" ile alın, `-H 'X-Forwarded-For: 192.0.2.99'` ekleyip masaüstünden çalıştırın; sonra aynı log | Yeni satırın `source`'u `192.0.2.99` **değil**, yine masaüstünüzün adresi. `192.0.2.99` ise istemci kaynağını seçebiliyor: hop değeri fazla ya da router `IfNone`/`Never` (yukarıda "Hop değeri") |
-| Uyarı ve hata | `oc -n kubeat logs deploy/kubeat-backend \| grep -E '"level":"(WARN\|ERROR)"'` | Vekil verildiyse yalnız kapsam ayarının açılış satırı (`HTTP_PROXY/HTTPS_PROXY is set and UPTIME_TARGET_SCOPE_TRUST_PROXY is off`, yukarıda "Vekilli kapsam"); vekilsiz kurulumda boş. Hop ya da arayüz sırrıyla ilgili bir satır (`UPTIME_TRUST_PROXY_HOPS`, `X-Frontend-Token`) görünüyorsa README "Yanlış ayar sessizce etkisiz kalmaz" |
+| Uyarı ve hata | `oc -n kubeat logs deploy/kubeat-backend \| grep -E '"level":"(WARN\|ERROR)"'` | Vekil verildiyse kapsam ayarının açılış satırı (`HTTP_PROXY/HTTPS_PROXY is set and UPTIME_TARGET_SCOPE_TRUST_PROXY is off`, yukarıda "Vekilli kapsam"). LDAP'ın tavan satırı values'taki açık `"0"`la `INFO`'dur ve bu süzgeçte görünmez (`grep 'UPTIME_LOGIN_SOURCE_MAX_FAILURES is 0'` ile görülür); `"0"` satırı silinmişse ikinci bir `WARN` gelir (`LDAP is on and UPTIME_LOGIN_SOURCE_MAX_FAILURES is not set`), `"20"` verilmişse satır yoktur. Vekilsiz ve açık `"0"`lı kurulumda boş. Hop ya da arayüz sırrıyla ilgili bir satır (`UPTIME_TRUST_PROXY_HOPS`, `X-Frontend-Token`) görünüyorsa README "Yanlış ayar sessizce etkisiz kalmaz" |
 | Ekip namespace'inde politika | Ekibin bir Service'ine monitor ekleyin (keşif ya da `kubeat.io/monitor` annotation'ı) | İlk kontrol yeşil; ekip namespace'indeki bir Service monitor'ü `connect_timeout` vermiyor. Veriyorsa namespace'in varsayılan-ret politikası Kubeat'i engelliyor: ön koşullardaki `allow-from-kubeat` (README "Ağ erişimi", İzlenen namespace'ler) |
+| SSO'lu uygulama | Girişi SSO'ya yönlendiren (ör. bir OAuth vekili arkasındaki) bir uygulamanın Service'ine annotation: `oc -n <ns> annotate svc/<ad> kubeat.io/monitor=true kubeat.io/port=<port> kubeat.io/path=/healthz`. Port, Service'in uygulamaya giden portudur (OAuth vekilininki değil), yol uygulamanın oturum istemeyen sağlık yolu | Monitor `annotation` rozetiyle UP; kontrol uygulamanın kendi host'unda kalır, giriş sayfasına yönlendirilmez. Annotation Route'taysa kontrol host'un köküne gider ve SSO'nun giriş sayfasına yönlendirilebilir: sonuç uygulamanın değil giriş sayfasının durumudur. `kubeat.io/path` Route ve Ingress'te S94 ile (sonraki sprint); o zamana kadar annotation'ı Service'e koyun |
 
-Bir şey eksikse `helm upgrade` aynı komutla tekrarlanır; backend 10–20
-saniye içinde yeniden kalkar.
+Bir şey eksikse `helm upgrade` aynı komutla tekrarlanır. Backend tek replica
+ve `Recreate`'tir: yeniden kalkana kadar kontroller durur, rozetler `502`
+verir, durum sayfası "okunamıyor" der. Sandbox Route'unda bir yükseltmede ~25 saniye ölçüldü
+(2026-11-08; README "Durum sayfaları" → "Sınırlar").
 
 ## İlk gün: yönetici kurulumu
 

@@ -72,8 +72,8 @@ test:
 	scripts/test-release-notes.sh
 	scripts/test-release-gate.sh
 
-# check-versions.sh: Chart.yaml, VERSION, README ve docs/pilot.md'deki
-# sürümler aynı mı (CONTRIBUTING.md, "Sürümler").
+# check-versions.sh: Chart.yaml, VERSION, README, docs/pilot.md ve
+# doğrulama runbook'larındaki sürümler aynı mı (CONTRIBUTING.md, "Sürümler").
 lint:
 	cd backend && go vet ./...
 	cd frontend && npm run lint

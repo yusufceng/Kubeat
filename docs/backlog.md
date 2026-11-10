@@ -2360,6 +2360,12 @@ Seçenek: komutun URL de alıp isteğin vekile gidip gitmediğini ve ayar açık
 kapsamın kararını yazması. Tetikleyici: vekilli bir kurulumda `NO_PROXY` listesinde
 olan dış bir adın ön sınamada yanlış okunması.
 
+Güncelleme (2026-11-10, S98 [#162](https://github.com/yusufceng/Kubeat/issues/162)):
+`docs/pilot.md` "Vekilli kapsam"ın üçüncü onay kutusu ve `docs/openshift-dogrulama.md`
+"Vekilli ve hava boşluklu OpenShift" 4. adım, NXDOMAIN satırının `NO_PROXY`'deki adlarda
+geçmediğini ve komutun `NO_PROXY`'yi okumadığını yazıyor. Kod değişmedi; tetikleyici
+değişmedi.
+
 ## Chart'ta Route/Ingress açıkken `UPTIME_TRUST_PROXY_HOPS` varsayılanını 1 yapmak
 
 2026-11-06'da ertelendi (sprint 8 planı; [sprints/2026-11-06-sprint-08.md](sprints/2026-11-06-sprint-08.md)).
@@ -3002,6 +3008,14 @@ kuyruğunda 4. sırada. Ara önlemler sprint 11'de:
 Güncelleme (2026-11-08, S95 [#161](https://github.com/yusufceng/Kubeat/issues/161)): README
 "GKE kontrol listesi"nin 4. maddesi cümleyi yazıyor; S101 gelince o madde güncellenir.
 Tetikleyici değişmedi.
+
+Güncelleme (2026-11-10, S98 [#162](https://github.com/yusufceng/Kubeat/issues/162)): ara
+önlem yazıldı. `docs/pilot.md` "Hop değeri" F5/WAF önlü Route'ta eksik değerin alarmı
+susturduğunu ve değerin başlıksız ve uydurma `X-Forwarded-For`'lu iki giriş satırıyla elle
+doğrulandığını söylüyor; `docs/openshift-dogrulama.md` "Vekilli ve hava boşluklu OpenShift"
+5. adım ve `docs/gke-dogrulama.md` 5. adım (`externalTrafficPolicy: Cluster`) aynı
+doğrulamayı komut ve beklenen çıktıyla veriyor. S101 gelince üçü güncellenir. Tetikleyici
+değişmedi.
 
 ## İki cluster'lı promtool senaryoları: `KubeatSignInSourceDegraded` ve `KubeatDiscoveryNamespaceSkipped`
 

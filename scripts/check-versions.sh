@@ -2,13 +2,14 @@
 # Checks that the places a release's version is written by hand name
 # Chart.yaml's version: its appVersion (the images' default tag), the
 # Makefile's VERSION (the tag make release pushes) and the install and
-# mirroring commands in README.md and docs/pilot.md, the quick start's among
-# them. In those two files only commands count: helm's --version X.Y.Z, the
-# images kubeat-backend:X.Y.Z and kubeat-frontend:X.Y.Z, the chart archive
-# kubeat-X.Y.Z.tgz, the chart's OCI reference charts/kubeat:X.Y.Z (oras cp)
-# and the signing identity release.yml@refs/tags/vX.Y.Z (cosign verify);
-# versions in prose, placeholders such as <sürüm> and a Service's host:port
-# are not commands of a release and pass. The upgrade notes,
+# mirroring commands in README.md, docs/pilot.md and the two verification
+# runbooks, docs/openshift-dogrulama.md and docs/gke-dogrulama.md, the quick
+# start's among them. In those files only commands count: helm's --version
+# X.Y.Z, the images kubeat-backend:X.Y.Z and kubeat-frontend:X.Y.Z, the chart
+# archive kubeat-X.Y.Z.tgz, the chart's OCI reference charts/kubeat:X.Y.Z
+# (oras cp) and the signing identity release.yml@refs/tags/vX.Y.Z (cosign
+# verify); versions in prose, placeholders such as <sürüm> and a Service's
+# host:port are not commands of a release and pass. The upgrade notes,
 # docs/yukseltme.md, are not read: they name the versions they were written
 # for. The README's quick start must hold a command that names a version,
 # as each file must: the check would otherwise pass there while checking
@@ -26,7 +27,7 @@ fi
 cd "$(dirname "$0")/.." || exit 1
 
 CHART=deploy/helm/kubeat/Chart.yaml
-DOCS=(README.md docs/pilot.md)
+DOCS=(README.md docs/pilot.md docs/openshift-dogrulama.md docs/gke-dogrulama.md)
 # The section whose install command is copied the most.
 QUICK_FILE=README.md
 QUICK_HEADING="Hızlı başlangıç"
@@ -121,4 +122,4 @@ if [ "$FAILED" -gt 0 ]; then
   echo "$FAILED place(s) do not name Chart.yaml's version $version; CONTRIBUTING.md (\"Sürümler\") lists what a release raises"
   exit 1
 fi
-echo "versions: Chart.yaml, Makefile, README.md and docs/pilot.md name $version"
+echo "versions: Chart.yaml, Makefile, ${DOCS[*]} name $version"

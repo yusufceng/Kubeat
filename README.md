@@ -75,7 +75,7 @@ Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum"
 
 ## Cluster'a kurulum
 
-**Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı, GKE provası kullanıcıda.
+**Desteklenen sürümler:** OpenShift 4.14 ve üstü (gerçek cluster'da doğrulanan OpenShift 4.21, Kubernetes 1.34) ve Kubernetes 1.3x+; minikube'da doğrulandı. GKE: ölçülmedi, prova kullanıcıda ([docs/gke-dogrulama.md](docs/gke-dogrulama.md)). Vekilli ve hava boşluklu OpenShift: ölçülmedi, prova kullanıcıda ([docs/openshift-dogrulama.md](docs/openshift-dogrulama.md#vekilli-ve-hava-boşluklu-openshift)).
 
 Her sürüm etiketi (`vX.Y.Z`) imajları `ghcr.io/yusufceng/kubeat-backend`
 ve `ghcr.io/yusufceng/kubeat-frontend` adlarıyla (amd64 ve arm64), chart'ı da
@@ -194,7 +194,12 @@ Kopyalanabilir reçete: [docs/gke.md](docs/gke.md) (`values-gke.yaml`: NEG'li
 GCE Ingress, ManagedCertificate, hop `2`, iki `ipBlock`'lu arayüz politikası).
 CI, values bloğunu belgeden olduğu gibi çıkarıp render eder ve kurulum
 notunda hop, TLS ya da politika uyarısı çıkmadığını sınar; gerçek bir GKE'de
-ölçülmedi.
+ölçülmedi. Gerçek bir GKE'de doğrulamanın on adımı (ManagedCertificate, arayüz
+politikası, hop `2` ve `1`, Cloud NAT, DNS sorgu hızı, worker'lar, yükseltmede
+rozetin 502 süresi, `resolve_error`), her birinin komutu, beklenen çıktısı ve
+geri bildirim şablonu: [docs/gke-dogrulama.md](docs/gke-dogrulama.md). Bu
+runbook koşulup geri bildirimi gelmeden GKE "ölçülmedi, prova kullanıcıda"
+kalır.
 
 **GKE kontrol listesi: giriş throttle'ı.** Hangi yol seçilirse seçilsin
 (ayrıntılar "Hesaplar ve giriş"te; GKE satırlarının hiçbiri henüz ölçülmedi):

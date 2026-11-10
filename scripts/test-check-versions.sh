@@ -24,7 +24,8 @@ fresh() {
   cp "$ROOT/scripts/check-versions.sh" "$COPY/scripts/"
   cp "$ROOT/deploy/helm/kubeat/Chart.yaml" "$COPY/deploy/helm/kubeat/"
   cp "$ROOT/Makefile" "$ROOT/README.md" "$COPY/"
-  cp "$ROOT/docs/pilot.md" "$ROOT/docs/yukseltme.md" "$COPY/docs/"
+  cp "$ROOT/docs/pilot.md" "$ROOT/docs/openshift-dogrulama.md" "$ROOT/docs/gke-dogrulama.md" \
+    "$ROOT/docs/yukseltme.md" "$COPY/docs/"
 }
 
 # change FILE OLD NEW: replaces the first OLD in the copy of FILE with NEW
@@ -119,6 +120,28 @@ fresh
 line="$(change docs/pilot.md "\$R/kubeat-frontend:$V registry" "\$R/kubeat-frontend:$OTHER registry")"
 fails "the verified copy" "docs/pilot.md:$line: kubeat-frontend:$OTHER, not $V"
 
+# The verification runbooks: every line in them that names the version,
+# changed alone, fails naming that line (the install commands; in the OpenShift
+# one also the mirror of the proxied, air-gapped section and its cosign
+# verify).
+for file in docs/openshift-dogrulama.md docs/gke-dogrulama.md; do
+  doc_lines="$(grep -n -E -- "--version $V|kubeat-(backend|frontend):$V|charts/kubeat:$V|refs/tags/v$V" "$ROOT/$file" | cut -d: -f1)"
+  [ -n "$doc_lines" ] || failed "$file: no command names $V"
+  for line in $doc_lines; do
+    for spec in "--version $V|--version $OTHER|--version $OTHER" \
+      "kubeat-backend:$V|kubeat-backend:$OTHER|kubeat-backend:$OTHER" \
+      "kubeat-frontend:$V|kubeat-frontend:$OTHER|kubeat-frontend:$OTHER" \
+      "charts/kubeat:$V|charts/kubeat:$OTHER|charts/kubeat:$OTHER" \
+      "refs/tags/v$V|refs/tags/v$OTHER|release.yml@refs/tags/v$OTHER"; do
+      IFS='|' read -r old new said <<<"$spec"
+      sed -n "${line}p" "$ROOT/$file" | grep -qF -- "$old" || continue
+      fresh
+      change_line "$file" "$line" "$old" "$new"
+      fails "$file:$line, $new" "$file:$line: $said, not $V"
+    done
+  done
+done
+
 # Every command in the README is checked, the quick start's install and
 # heartbeat lines among them: each line that names the version, changed
 # alone, fails naming that line.
@@ -185,6 +208,14 @@ fails "a command under an upgrade heading in the README" "README.md:$line: --ver
 fresh
 printf '# Pilot\n' >"$COPY/docs/pilot.md"
 fails "no command" "docs/pilot.md: no command names a version"
+for file in docs/openshift-dogrulama.md docs/gke-dogrulama.md; do
+  fresh
+  printf '# Doğrulama\n\n`--version <sürüm>`\n' >"$COPY/$file"
+  fails "no command in $file" "$file: no command names a version"
+  fresh
+  rm "$COPY/$file"
+  fails "$file missing" "$file: missing"
+done
 
 if [ "$FAILED" -gt 0 ]; then
   echo "$FAILED version check test(s) failed"
