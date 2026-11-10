@@ -1426,8 +1426,9 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
       kullanıcının ve kaydı olmayan monitor'ler) `blocked_by_scope` ile DOWN
       olur; oraya yeni monitor ya da kanal 403 alır. Yönetici, kapsamı `*`
       olan kullanıcı ve annotation monitor'ünün kendi host'u etkilenmez; tek
-      kiracılı kurulumda yalnız annotation monitor'ünün yönlendirmeyle gittiği
-      başka bir host bu aralıktaysa reddedilir, ayar hiç verilmemiş gibi.
+      kiracılı kurulumda yalnız annotation monitor'ünün kontrolünün kendi host'u
+      dışında açtığı bir bağlantı bu aralığa giderse reddedilir, ayar hiç
+      verilmemiş gibi.
       Kontrol sonucunun metni aralığı söylemez, çünkü kapsamı sınırlı
       kullanıcıya aralık söylenmez; nedeni `ERROR` satırı ve kural verir.
     - **Drain.** Koruma yalnız bu adreslere ve pod'un bu açılıştaki adresine

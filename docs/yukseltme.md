@@ -118,7 +118,11 @@ geri dönüş başladığınız sürüme olur.
     hata metnine ya da `explanation.code == "blocked_by_scope"`'a göre süzen
     betik ve alarmları `explanation.code`'un iki değerine çevirin; kurum
     aralıkları verdiyseniz cluster ağlarını `targetScope.clusterNetworks`'te
-    beyan etmeyi değerlendirin.
+    beyan etmeyi değerlendirin; GKE'de kurulum notunun yeni hop, TLS ve `from`
+    uyarılarını bekleyin (L7 GCLB önlü `ingress-nginx`'te `3`'ü değiştirmeyin);
+    vekilli kurulumda `UPTIME_TARGET_SCOPE_TRUST_PROXY` kapalıysa
+    `KubeatScopeResolveErrors` sürekli yanabilir, önce `server resolve` ile
+    okuyun.
 13. Alarm kuralları 0.43, 0.44, 0.45, 0.52 ve 0.53'te değişti, 0.46–0.51'de
     değişmedi: yeni `kubeat.self` alarmlarını, `KubeatUnhealthy`'yi,
     `KubeatSignInSourceDegraded`'i, `KubeatDiscoveryNamespaceSkipped`'i,
@@ -334,7 +338,7 @@ artık pod başka bir node'a taşınınca backend'i durdurmaz: çakışan girdi 
 sayılır, izleme sürer. Cluster ağları chart'ta beyan edilebilir; çakışma render
 anında yakalanır. Kapanışta yarıda kalan bir kontrol, ters monitor'ün açık
 kesintisini kapatmaz. Kapsam reddi monitor'ün kaynağına uygun çareyle okunur;
-DNS kaynaklı ret bir chart kuralıyla duyurulur. GKE yolu CI'da render edilen bir
+annotation monitor'lerinin DNS kaynaklı reddi bir chart kuralıyla duyurulur. GKE yolu CI'da render edilen bir
 reçeteye bağlanır ve GKE ile vekilli, hava boşluklu OpenShift için iki doğrulama
 runbook'u gelir. Kurum CA'sıyla imzalı hedefler için bir reçete eklenir. Şema
 değişmez (26), migration yok; chart kurulumunda yeni zorunlu ayar yok.
@@ -345,12 +349,15 @@ değişmez (26), migration yok; chart kurulumunda yeni zorunlu ayar yok.
   açıldı, `ERROR` satırı ve gauge göründü, `KubeatScopeExternalRangesIgnored`
   gerçek bir Prometheus'ta yandı. 0.52'de aynı senaryo CrashLoopBackOff'tu.
 - Beyanla çakışan aralık `helm template`'i durdurdu.
-- Açık kesintili bir ters monitor'ün pod'u kontrol sürerken silindi. Olay
-  açık kaldı, bildirim gitmedi.
+- Açık kesintili bir ters monitor'ün pod'u, kontrolü 8 sn süren bir hedefte
+  üç kez silindi (en az biri, zamanlamaya göre, kontrol sürerken). Olay açık
+  kaldı, bildirim gitmedi.
 - Kendi CA'sıyla imzalı bir hedef reçeteyle UP oldu, sistem demetine güvenen
   hedef UP kaldı.
-- Kapsam reddinin metni Slack biçimli bildirimde Türkçe ve İngilizce okundu,
-  neden yalnız yöneticiye göründü, `KubeatScopeResolveErrors` yandı ve çözüldü.
+- Kapsam reddinin metni Slack biçimli bildirimde Türkçe ve İngilizce okundu
+  (#181'den sonra İngilizce yeniden tarandı); neden yöneticinin yanıtında
+  göründü, kapsamı sınırlı editörünkünde görünmedi; `KubeatScopeResolveErrors`
+  yandı ve çözüldü.
 
 GKE ile vekilli, hava boşluklu OpenShift ölçülmedi; runbook'ları kullanıcıda
 koşulacak ([gke-dogrulama.md](gke-dogrulama.md),
@@ -370,15 +377,16 @@ koşulacak ([gke-dogrulama.md](gke-dogrulama.md),
     `last_result.diagnostics.explanation.code`'a çevirin.
 - **Kurum aralıkları verdiyseniz cluster ağlarını beyan edin** (isteğe bağlı,
   önerilir): `targetScope.clusterNetworks` (`pods`, `services`, `nodes`).
-  Beyanla çakışan bir aralık `helm upgrade`'i render hatasıyla durdurur, Argo
+  Beyanla çakışan bir IPv4 aralığı `helm upgrade`'i render hatasıyla durdurur
+  (IPv6 çakışmasını açılış yok sayar), Argo
   CD'de sync hatası olarak görünür, kurulum değişmez. OpenShift'te değerler
   `oc get network.config/cluster` ile okunur; node ağı elle yazılır. Kurum
   aralığındaki tek adres (`/32`) beyanla karşılaştırılmaz; router VIP'i
   bilerek yazılabilir. `targetScope` altında okunmayan bir anahtar (ör.
   `clusterNetworks.pod`) ve `backend.extraEnv.UPTIME_TARGET_SCOPE_CLUSTER_CIDRS`
   render'ı durdurur.
-- **GKE'de kurulum notunun yeni uyarıları.** Hop değeri GCE'de `2`'den,
-  `ingress-nginx`'te `1`'den farklıysa `WARNING` çıkar. Önde L7 GCLB olan
+- **GKE'de kurulum notunun yeni uyarıları.** Ingress sınıfı `gce` iken hop
+  değeri `2`'den, `nginx` iken `1`'den farklıysa (`0` dışında) `WARNING` çıkar. Önde L7 GCLB olan
   `ingress-nginx`'te doğru değer `3` iken de çıkar; değeri değiştirmeyin.
   Kurulum notunu CI'da sayıyorsanız bu satırı bekleyin (README "GKE kontrol
   listesi").
@@ -408,7 +416,8 @@ koşulacak ([gke-dogrulama.md](gke-dogrulama.md),
   - Bütün aralıklar yok sayılırsa `target scope external ranges in effect`
     satırı gelmez; `ERROR` satırındaki `in_effect` boştur.
   - Yok sayılan aralıktaki adrese giden kapsamı sınırlı monitor'ler
-    `blocked_by_scope` ile DOWN olur, oraya oluşturma 403 alır. Var olan bir
+    `blocked_by_scope` (annotation monitor'ünün kendi host'u dışındaki
+    bağlantısında `blocked_by_scope_object`) ile DOWN olur, oraya oluşturma 403 alır. Var olan bir
     webhook kanalı etkilenmez; kanal hedefi kayıt anında denetlenir.
   - Biçim hataları (geçersiz CIDR, IPv6 biçiminde yazılmış IPv4 aralığı)
     backend'i yine başlatmaz.
@@ -472,8 +481,15 @@ Ayrıca (davranış değiştirmez):
 
 Şema aynı (26), `helm rollback` ile 0.52.0'a. Dönüşte:
 
-- Kurum aralığı yine ortama bağlı çakışmada backend'i durdurur. Pod başka bir
-  node'a taşınmadan önce aralığı düzeltin ya da boşaltın.
+- **Dönmeden önce kurum aralıklarına bakın.**
+  `kubeat_target_scope_external_ranges_ignored` 0 değilse
+  (`KubeatScopeExternalRangesIgnored` yanıyorsa) açılıştaki `ERROR` satırının
+  `ignored` alanındaki aralıkları `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'ten
+  çıkarın. 0.52, API sunucusunun ya da pod'un adresini içeren aralıkla açılmaz
+  (`helm rollback` pod'u yeniden yaratır: CrashLoopBackOff, izleme durur);
+  beyanla çakıştığı için yok sayılan aralığı ise geçerli sayar ve kapsam
+  genişler. Dönüşten sonra da pod başka bir node'a taşınınca kurum aralığı
+  backend'i durdurabilir.
 - `targetScope.clusterNetworks` 0.52'nin chart'ında tanınmaz; render hatası ve
   beyan kalkar.
 - Kapanışta yarıda kalan ters kontrol yine açık kesintiyi kapatabilir.
@@ -486,6 +502,8 @@ Ayrıca (davranış değiştirmez):
 - `kubeat.self` grubunda, `KubeatUnhealthy`'nin ardında:
   `KubeatScopeExternalRangesIgnored`. Gauge sıfırdan büyükken yanar; `for`
   yoktur, ciddiyeti `warning`'dir ve `KubeatUnhealthy`'nin parçası değildir.
+  Recreate'in scrape boşluğunda çözülür; yeni pod da aralığı yok saydıysa
+  yeniden yanar.
 - Yeni grup `kubeat.scope` (sonda): `KubeatScopeResolveErrors`. Annotation
   monitor'lerinin `resolve_error` redleri 10 dakikadır sürerken yanar;
   ciddiyeti `warning`'dir. Kullanıcı monitor'lerinin redleri buna girmez.
@@ -832,7 +850,7 @@ sayfası kilidi ve parola değiştirmenin iki kaynaklı provası ve uydurma
   tanımlı değilse özel adresli bir kurum host'una, vekilli kurulumda da
   backend'in çözemediği başka bir dış host'a ulaşan annotation monitor'ü
   `blocked_by_scope` ile DOWN olur (ör. SSO arkasındaki bir uygulamanın kimlik
-  sağlayıcısına yönlenen kontrolü). Önce kapsamı açmayan çare: kontrolü
+  sağlayıcısına bağlanan kontrolü). Önce kapsamı açmayan çare: kontrolü
   uygulamanın kendi host'unda, kimlik doğrulaması istemeyen bir sağlık yolunda
   tutun; Service'i annotation'la izleyip `kubeat.io/path` verin (README "Keşif"
   → "Annotation ile sürekli keşif"). Route ve Ingress'te `kubeat.io/path` henüz
