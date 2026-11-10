@@ -12,8 +12,11 @@ adım 6 ve 7'nin ölçümü onar dakika bekler.
 ## Ön koşullar
 
 - Bir GKE cluster'ı (Standard ya da Autopilot), `kubectl`, `gcloud` ve Helm
-  3.14+ ya da Helm 4. Cluster'da namespace, NetworkPolicy ve
-  `kube-system`'deki pod'ları okuma yetkisi (adım 7).
+  3.14+ ya da Helm 4. Cluster'da namespace ve NetworkPolicy oluşturma yetkisi;
+  adım 7 için `kube-system`'de pod'ları okuma ve `pods/proxy` (`get`) izni:
+  sayaç `kubectl get --raw …/pods/<pod>:10054/proxy/metrics` ile API sunucusu
+  üzerinden okunur. Bu izin yoksa adım 7'yi Cloud Monitoring'den yapın ya da
+  "koşulmadı" yazın.
 - NetworkPolicy'yi uygulayan bir ağ: Dataplane V2 ya da ağ politikası eklentisi
   ([gke.md](gke.md) "1. Önce", 4. madde). Uygulamıyorsa adım 2 geçmez.
 - [gke.md](gke.md) "1. Önce"nin üç adımı: global statik IP ve DNS'te A kaydı
@@ -34,8 +37,10 @@ adım 6 ve 7'nin ölçümü onar dakika bekler.
   değil"dir.
 - Adım 6–8 için yoklamanıza izin verilen bir dış HTTPS adresi (`<dış-hedef>`,
   ör. kendi servisinizin sağlık yolu). Yirmi monitor ona 30 sn aralıkla dakikada
-  40 istek gönderir; Kubeat'in host başına tavanı dakikada 60'tır (README
-  "Hedef yükü").
+  40 istek gönderir. Kubeat'in host başına iki sınırı vardır (README "Hedef
+  yükü"): kontrol tavanı dakikada 60 ve bir dış host'u kontrol edebilen monitor
+  sayısı `UPTIME_MAX_MONITORS_PER_HOST` (varsayılan 5; API anahtarına da
+  uygulanır). Adım 6 ikincisini adım 8'in sonuna kadar geçici olarak 20 yapar.
 
 **Bağlam.** Bu belgedeki `kubectl` ve `helm` komutları `--context` olmadan
 yazıldı ve geçerli bağlamda çalışır. Kubeconfig'inizde başka cluster'lar da
@@ -200,6 +205,16 @@ gcloud compute routers nats describe <nat> --router <router> --region <bölge> \
   --format='value(minPortsPerVm,enableDynamicPortAllocation,tcpTimeWaitTimeoutSec)'
 ```
 
+Bir dış host'u en çok 5 monitor kontrol edebilir (`UPTIME_MAX_MONITORS_PER_HOST`).
+Sınırı adım 6–8 boyunca geçici olarak 20 yapın; değerlerin geri kalanı
+`values-gke.yaml`'dan gelir:
+
+```
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
+  -n kubeat -f values-gke.yaml --set-string backend.extraEnv.UPTIME_MAX_MONITORS_PER_HOST=20
+kubectl -n kubeat rollout status deploy/kubeat-backend
+```
+
 Sonra aynı dış adrese giden 20 HTTPS monitor'ü API ile kurun (README "API";
 anahtar `kubeat-api-token` Secret'ındadır, yazdırmayın):
 
@@ -219,15 +234,19 @@ node'u için `router.googleapis.com/nat/port_usage` ve
 
 Beklenen:
 
-- API her monitor için `201`.
+- API her monitor için `201`. Sınır verilmediyse ilk beşi `201`, sonrakiler
+  `400` alır ve yanıt `at most 5 monitors may check the host <dış-hedef-host>
+  (UPTIME_MAX_MONITORS_PER_HOST); it has 5 already` der: yukarıdaki
+  `helm upgrade`'i yapıp eksikleri yeniden kurun.
 - `port_usage` yaklaşık `20 × 120 / 30 = 80` ve node'un öteki iş yüklerinin
   aynı hedefe kullandığı portlar (kaba hesap; ölçülmedi).
 - Hesaba göre varsayılan NAT'ta (`minPortsPerVm` 64, dinamik ayırma kapalı) bu
   sayı 64'ü aşar: `dropped_sent_packets_count` `reason="OUT_OF_RESOURCES"` ile 0'dan
   büyük ve bazı monitor'ler bağlantı zaman aşımıyla DOWN. Dinamik ayırma açıkken
   ya da `minPortsPerVm` 1024 iken düşme 0, monitor'lerin hepsi UP.
-- Hangisini gördüğünüzü, `port_usage`'ın en yüksek değeriyle yazın. Ölçümden
-  sonra 20 monitor'ü silebilirsiniz; adım 7 ve 8 onları kullanır.
+- Hangisini gördüğünüzü, `port_usage`'ın en yüksek değeriyle yazın. 20
+  monitor'ü ve sınırı silmeyin: adım 7 ve 8 onları kullanır, adım 8'in sonunda
+  kaldırılırlar.
 
 ### 7. Kube-dns ya da Cloud DNS sorgu hızı: önce ve sonra
 
@@ -293,6 +312,22 @@ Beklenen:
   sırası gelen kontroller boş worker bulamazsa yanar; çare `UPTIME_WORKERS` ya
   da NAT'ın portlarıdır.
 
+**Temizlik.** Adım 10 da bu yük altında koşulur: önce onu koşun. Sonra adım 6'nın
+monitor'lerini silin ve host başına sınırı values'taki değere (varsayılan 5)
+döndürün; adım 9 bundan sonra koşulur:
+
+```
+for id in $(curl -sS -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors |
+    jq -r '.[] | select(.name | startswith("nat-")) | .id'); do
+  curl -sS -o /dev/null -w '%{http_code}\n' -X DELETE -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors/$id
+done
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 -n kubeat -f values-gke.yaml
+```
+
+Her silme `204` döner; `helm upgrade`'den sonra
+`kubectl -n kubeat get deploy kubeat-backend -o yaml | grep -c UPTIME_MAX_MONITORS_PER_HOST`
+`0` verir.
+
 ### 9. `helm upgrade` sırasında rozetin 502 süresi
 
 Backend tek replica ve `Recreate`'tir; arayüzde `preStop` yoktur ve GCE NEG
@@ -328,11 +363,18 @@ Beklenen:
 
 ### 10. Kube-dns'te `resolve_error`
 
-Kapsama bağlı kontrollerde (kapsamı sınırlı kullanıcının ve annotation
-monitor'lerinin) kapsam, kontrolün açtığı bağlantıların adını backend'in
-çözücüsüyle çözer; çözülemeyen ad güvenli tarafta reddedilir ve `reason="resolve_error"` ile sayılır (README
-"Hedef politikası" → "Egress ve DNS"). Kube-dns yük altında SERVFAIL ya da zaman
-aşımı verirse bu sayaç artar. Adım 6–8 sürerken:
+Sayaç yalnız kapsama bağlı bağlantılarda artar: kapsamı sınırlı bir kullanıcının
+monitor'lerinde ve annotation monitor'lerinin kontrolünde, kapsam kontrolün
+açtığı bağlantıların adını backend'in çözücüsüyle çözer; çözülemeyen ad güvenli
+tarafta reddedilir ve `reason="resolve_error"` ile sayılır (README "Hedef
+politikası" → "Egress ve DNS"). Adım 6'nın monitor'leri API anahtarıyla
+(yönetici) kuruldu, kapsama bağlı değildir: onların yazılı hedefi çözülemezse
+kontrol sıradan bir DNS hatasıyla biter ve sayılmaz. Annotation monitor'ünün
+kendi host'u da çözülmez. Bu yüzden sayacın 0 olması ancak kapsama bağlı
+monitor'ler dış adlara bağlanırken bir kanıttır: cluster'da böyle monitor
+yoksa adım "geçerli değil"dir.
+
+Adım 6'nın yükü sürerken (adım 8'in temizliğinden önce):
 
 ```
 kubectl -n kubeat exec deploy/kubeat-backend -- server resolve <dış-hedef-host> yok.example.invalid
@@ -351,10 +393,14 @@ Beklenen:
 - `did not resolve (… server misbehaving)` ya da `no answer within 2s`
   görürseniz kube-dns dış adlara SERVFAIL ya da zaman aşımı veriyor: komutu
   birkaç kez yineleyin, adım 7'deki CPU'yla birlikte yazın.
-- Sorguda `reason="resolve_error"` satırı yok ya da 0. Varsa monitor'leri
-  `blocked_by_scope` ile DOWN olmuştur; hangi `source`'ta olduğunu yazın.
+- Kapsama bağlı monitor'ler varken sorguda `reason="resolve_error"` satırı yok
+  ya da 0. Varsa o monitor'ler kapsam reddiyle DOWN olmuştur: kapsamı sınırlı
+  kullanıcınınki `blocked_by_scope`, 0.53'te annotation monitor'leri
+  `blocked_by_scope_object` sonuç koduyla; hangi `source`'ta olduğunu yazın.
   0.53'te kurallar açıksa annotation monitor'lerinde bu durum
   `KubeatScopeResolveErrors` ile de duyurulur.
+- Kapsama bağlı monitor yoksa satırı "geçerli değil" diye yazın; yalnız
+  `server resolve` satırları yine bilgidir.
 
 ## Geri bildirim
 
