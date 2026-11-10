@@ -3624,9 +3624,9 @@ okunamaz hâle gelir:
 - Backend tek replica çalışır ve `Recreate` ile güncellenir: Kubeat
   yükseltilirken ve backend pod'u başka bir node'a taşınırken (node drain,
   eviction) sayfa bir süre "Durum şu anda okunamıyor" gösterir ve rozetler
-  502 verir. Süre yeni pod'un açılmasına bağlıdır: sandbox Route'unda bir
-  yükseltmede yaklaşık 25 sn ölçüldü (2026-11-08); drain'de pod'un yeniden
-  zamanlanması ve imajın çekilmesi buna eklenir. Bir olay sürerken Kubeat'i yükseltmeyin; bakımı
+  502 verir. Süre yeni pod'un açılmasına bağlıdır: sandbox Route'unda iki
+  yükseltmede yaklaşık 25 sn (2026-11-08) ve 4 sn (2026-11-10) ölçüldü;
+  drain'de pod'un yeniden zamanlanması ve imajın çekilmesi buna eklenir. Bir olay sürerken Kubeat'i yükseltmeyin; bakımı
   sakin bir zamana planlayın.
 - Tam cluster kesintisi için dışarıdan bakan bir tamamlayıcı kullanın
   (ör. UptimeRobot ya da Grafana Cloud Synthetic Monitoring): sayfanın
