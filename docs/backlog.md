@@ -3255,3 +3255,36 @@ ilkesine karşı tartılması gereken ayrı bir karar. Ara yol, S97'nin kuralı 
 Alertmanager `inhibit_rules` ile `KubeatMonitorDown`'ı bastırmak; bu yalnız chart
 kurallarını alan kurulumda işe yarar. Tetikleyici: S97 geldiğinde onun ölçütüne kesin
 bağlanır, ya da DNS kesintisinde kanal fırtınası yaşayan bir kurulum.
+
+## Sprint 11 kapanış bulguları: 1.0 metin turu (altı belge maddesi)
+
+2026-11-11'de eklendi (sprint 11 kapanışı, PMO;
+[sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md) "Sprint sonu" → "Yeni
+müşteri bulguları"). Altısı da belge, kod yok; ayrıntı ve kanıt satırları sprint dosyasında.
+
+- README "Güvenlik" → "Çok kiracılı ve internete açık kurulum" listesine aynı biçimde dört
+  satır: backend `networkPolicy.enabled`, `UPTIME_TARGET_DENY_CIDRS` (derinlemesine savunma),
+  imza doğrulamalı aynalama, `backup.enabled`. Müşteri A; S66'nın 60 satır sınırını ~8 satır
+  aşar, PO kararı.
+- `docs/openshift-dogrulama.md` "Vekilli ve hava boşluklu OpenShift" 6(b) adımı koştuğu
+  cluster'da kapsamı geçici genişletiyor: "yalnız üretim dışı cluster'da ya da ayrı bir test
+  release'inde" diye işaretlenir; üretim için 6(a) ve beyan çakışmasının lokal `helm
+  template`'te durması; geri bildirim şablonunda "6 Drain" (a)/(b) ayrılır. Müşteri A.
+- S75'in yükseltme penceresi README "Durum sayfaları" → "Sınırlar"da ve runbook madde 16'da
+  nedene bağlı yazılır (imaj node'da hazırsa ~4 sn; çekiliyorsa ya da pod node değiştiriyorsa
+  ~25 sn); madde 16 ölçümle kaydedilecek yan verileri sayar (`oc get events` Pulled süresi,
+  eski ve yeni pod'un node'u, PVC bağlanma süresi). Müşteri A.
+- README "Küçük ekip, tek kiracılı kurulum" kutusuna lisans satırı (ücretsiz katman yeter: bir
+  durum sayfası; LDAP/OIDC, namespace sınırı, denetim kaydı ve çoklu sayfa lisanslı) ve
+  betikler için "API" bağlantısı; "OpenShift" satırına "Kurum CA'sı reçetesi hariç, OpenShift
+  dışında da geçer" notu. Müşteri B.
+- README "Cluster ağlarının beyanı", `values.yaml` `targetScope.clusterNetworks` yorumu ve
+  `docs/gke.md` "Değerlerin gerekçesi"ne GKE okuma komutları (`gcloud container clusters
+  describe … --format='value(clusterIpv4Cidr,servicesIpv4Cidr)'`; node ağı için subnet'in
+  `ipCidrRange`'i). Müşteri B.
+- `docs/gke-dogrulama.md` adım 2'nin negatif testi curl imajının sabit referansını kendisi
+  yazar; `scripts/check-versions.sh` (#180) onu da denetler. Müşteri B.
+
+Tetikleyici: 1.0 kararı. Seçenek 1'de (1.0'ı 0.53.0'dan çıkarmak) metin turunun PR'ı; seçenek
+2'de sprint 12 keşfinin girdisi. İki durumda da altı madde o turla kapanır ve bu bölüm kapanış
+notu alır.
