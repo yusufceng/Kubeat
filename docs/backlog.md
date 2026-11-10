@@ -2995,6 +2995,22 @@ A: "kod gerekmiyor"). #163 merge'de ertelediği öteki parçaları buraya ekler.
 reçeteyi yetersiz bulan bir kurulum, örneğin aynı cluster'da farklı CA'lara güvenmesi
 gereken monitor'ler.
 
+Güncelleme (2026-11-08, #163): reçete README "OpenShift" → "Kurum CA'sı"nda; Go davranışı
+`backend/internal/checker/trustedca_test.go` alt süreç testinde, values'u
+`deploy/helm/test-chart.sh`'ta. #163'ün ertelediği parçalar, tetikleyicileriyle:
+
+- **Demetin yeniden başlatmadan okunması.** Go kökleri süreçte bir kez okur; ConfigMap
+  değişince (CA eklenir ya da döner, OpenShift demeti yeniler) backend
+  `rollout restart` ister. README bunu bilinen bir adım olarak yazar. Seçenekler: checker
+  `SSL_CERT_DIR`'i kendisi izleyip havuzu yeniler, ya da ConfigMap'in özetini pod
+  şablonuna annotation olarak koyan bir chart değeri (yalnız chart'ın ürettiği nesnede
+  çalışır, bu yüzden "chart'ın ConfigMap'i üretmesi"yle birlikte düşünülür). Tetikleyici:
+  yeniden başlatma unutulduğu için `tls_unknown_authority` ile düşen monitor'ler ya da
+  CA'sı sık dönen bir kurulum.
+- **mTLS istemci sertifikası** (#163'te kapsam dışı). Kontroller istemci sertifikası
+  sunamaz; böyle bir hedef `tls_handshake_failed` verir. Tetikleyici: istemci
+  sertifikası isteyen bir hedefi izlemek isteyen bir kurulum.
+
 ## Sprint 6 kuyruğundan backlog'a girmeden kalan maddeler: S23, S40, S44, S57, S61
 
 2026-11-08'de eklendi (sprint 11 planı;

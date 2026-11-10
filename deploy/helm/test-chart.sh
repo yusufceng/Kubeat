@@ -526,6 +526,65 @@ notes "SSO with a license" omits "$NEEDS_LICENSE" "${SSO[@]}" "${ROUTE[@]}" --se
 notes "LDAP without a license" says "$NEEDS_LICENSE" --set ldap.url=ldap://ldap.example.com --set ldap.baseDN=dc=example,dc=com
 notes "no SSO" omits "$NEEDS_LICENSE"
 
+# The internal CA recipe (README, "OpenShift", "Kurum CA'sı"): its values,
+# taken from the README, mount the ConfigMap whole, read-only and optional
+# (a ConfigMap not there leaves the directory empty), and point
+# SSL_CERT_DIR, which adds to the system bundle file where SSL_CERT_FILE
+# replaces it, at the mount; the defaults have none of it. The README gives
+# OpenShift's injection label and the restart the bundle needs in both
+# CLIs, and values.yaml's example mounts where the README's does.
+awk '/^\*\*Kurum CA.sı\.\*\*/ { section = 1; next }
+  section && /^\*\*Benzetim\.\*\*/ { exit }
+  section && /^```yaml$/ { inblock = 1; block = ""; next }
+  inblock && /^```$/ { inblock = 0; if (block ~ /^backend:/) { printf "%s", block; exit }; next }
+  inblock { block = block $0 "\n" }' "$README" >"$WORK/values-trusted-ca.yaml"
+if [ ! -s "$WORK/values-trusted-ca.yaml" ]; then
+  failed "internal CA: no backend values block under \"Kurum CA'sı\" in the README"
+elif ! helm template kubeat "$CHART" --show-only templates/backend.yaml -f "$WORK/values-trusted-ca.yaml" \
+  >"$WORK/trusted-ca.yaml" 2>"$WORK/err"; then
+  failed "internal CA: refused: $(cat "$WORK/err")"
+else
+  # list_item FILE TEXT: the item of a YAML list, one without lists of its
+  # own, that has a line with TEXT; toYaml writes a value's keys sorted.
+  list_item() {
+    awk -v want="$2" '
+      /^ *- / { if (found) exit; item = ""; match($0, /^ */); indent = RLENGTH }
+      found && match($0, /^ */) && RLENGTH <= indent { exit }
+      { item = item $0 "\n" }
+      index($0, want) { found = 1 }
+      END { if (found) printf "%s", item }' "$1"
+  }
+  CA_DIR="$(awk '/^ *- name: SSL_CERT_DIR$/ { getline; sub(/^ *value: /, ""); gsub(/"/, ""); print }' "$WORK/trusted-ca.yaml")"
+  if [ -z "$CA_DIR" ]; then
+    failed "internal CA: SSL_CERT_DIR is not set"
+  else
+    MOUNT="$(list_item "$WORK/trusted-ca.yaml" "mountPath: $CA_DIR")"
+    grep -qx " *readOnly: true" <<<"$MOUNT" && grep -qE "^ *(- )?name: trusted-ca\$" <<<"$MOUNT" ||
+      failed "internal CA: SSL_CERT_DIR $CA_DIR is not where the trusted-ca volume is mounted read-only: ${MOUNT:-no mount}"
+    grep -q "subPath:" <<<"$MOUNT" && failed "internal CA: mounted with subPath, a file where SSL_CERT_DIR wants the directory"
+    grep -qF "#   mountPath: $CA_DIR" "$CHART/values.yaml" ||
+      failed "internal CA: values.yaml's example does not mount at $CA_DIR"
+  fi
+  VOLUME="$(list_item "$WORK/trusted-ca.yaml" "name: kubeat-trusted-ca")"
+  grep -qE "^ *(- )?configMap:\$" <<<"$VOLUME" && grep -qE "^ *(- )?name: trusted-ca\$" <<<"$VOLUME" ||
+    failed "internal CA: the ConfigMap kubeat-trusted-ca is not the trusted-ca volume: ${VOLUME:-no volume}"
+  # A ConfigMap not there must not keep the pod from starting: with the
+  # Recreate strategy the old pod is already gone, and every check stops.
+  grep -qx " *optional: true" <<<"$VOLUME" ||
+    failed "internal CA: the trusted-ca volume is not optional, so a missing ConfigMap stops all monitoring: ${VOLUME:-no volume}"
+  grep -qF "#     optional: true" "$CHART/values.yaml" ||
+    failed "internal CA: values.yaml's example volume is not optional"
+  grep -qF "SSL_CERT_FILE" "$WORK/trusted-ca.yaml" && failed "internal CA: SSL_CERT_FILE is set, which replaces the system bundle file"
+fi
+helm template kubeat "$CHART" --show-only templates/backend.yaml | grep -qE "SSL_CERT_DIR|trusted-ca" &&
+  failed "internal CA: the defaults mount a CA bundle"
+for text in "**Kurum CA'sı.**" "config.openshift.io/inject-trusted-cabundle: \"true\"" \
+  "oc -n kubeat rollout restart deploy/kubeat-backend" "kubectl -n kubeat rollout restart deploy/kubeat-backend" \
+  "**Sıra ve eksik ConfigMap.**" "**Kurum CA'sının kapsamı.**" "**Kurum CA'sı değişince.**" \
+  "[\"OpenShift\" → \"Kurum CA'sı\"](#openshift)"; do
+  grep -qF -- "$text" "$README" || failed "README lacks \"$text\" of the internal CA recipe"
+done
+
 # The backend's grace period, which must outlast UPTIME_SHUTDOWN_TIMEOUT:
 # 30 seconds by default, as given, and the default for values without the
 # key, as an upgrade with --reuse-values from before it renders.

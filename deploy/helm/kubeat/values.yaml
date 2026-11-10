@@ -170,8 +170,30 @@ backend:
     # UPTIME_USER_AGENT: "kubeat (ops@example.com)"  # replaces the default User-Agent of checks
   # Extra volumes for the backend, e.g. a CA bundle for the metrics server or
   # for checks of targets signed by an internal CA.
+  # The internal CA recipe (README, "OpenShift", "Kurum CA'sı"): a ConfigMap
+  # of yours holding the CA (on OpenShift an empty one labelled
+  # config.openshift.io/inject-trusted-cabundle: "true", which the cluster
+  # fills with its trusted bundle under ca-bundle.crt), mounted whole, and
+  # under extraEnv above SSL_CERT_DIR: /etc/kubeat/trusted-ca, which adds it
+  # to the image's system bundle (SSL_CERT_FILE replaces the bundle file;
+  # not recommended). Every TLS check and notification then trusts the CA;
+  # LDAP, OIDC and Prometheus with a *_CA_FILE of their own trust that file
+  # instead. Go reads the bundle once: restart the backend when the
+  # ConfigMap changes. The volume is optional, so that a ConfigMap not there
+  # (not yet created, in another namespace, deleted) never stops the
+  # monitoring: the pod starts with an empty directory and only the checks
+  # of internally signed targets fail; without it the pod never starts.
+  # These two lists replace, not merge with, the same lists in another
+  # values file: keep every entry in one list.
   extraVolumes: []
+    # - name: trusted-ca
+    #   configMap:
+    #     name: kubeat-trusted-ca
+    #     optional: true
   extraVolumeMounts: []
+    # - name: trusted-ca
+    #   mountPath: /etc/kubeat/trusted-ca
+    #   readOnly: true
   # Where the backend pod runs, for a cluster that keeps Kubeat off the nodes
   # that run the applications (a dedicated infra node pool). All empty by
   # default: the pod runs wherever the scheduler puts it, as up to 0.47.
