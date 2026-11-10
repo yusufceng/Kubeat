@@ -3397,7 +3397,11 @@ Her monitor'da ortak alanlar: `name`, `type`, `target`, `interval_seconds`,
   engellemediğini bilemez, bu yüzden kontrol politikanın hatasıyla başarısız
   olur. Yasak bir aralıktaki adresin (metadata servisi gibi) ağda kapalı
   olduğunu doğrulayacak bir monitor için o adrese istisna gerekir (bkz.
-  "Hedef politikası").
+  "Hedef politikası"). Kontrolün kendi zaman aşımı (`timeout_seconds`)
+  beklenen başarısızlıktır; backend'in kapanışının (sürüm yükseltme, pod'un
+  taşınması) yarıda kestiği kontrol ise değildir: sonucu yazılmaz ve
+  sayılmaz, açık kesinti kapanmaz ve "düzeldi" bildirimi gitmez (bkz.
+  "Alarm", **Kapanış**).
 
 ## Monitor tipleri
 
@@ -5053,6 +5057,13 @@ gider; kapanmış bir kesintinin gönderilemeyen düzelmesi ise kaybolur.
 Chart'ın `backend.terminationGracePeriodSeconds` değeri (varsayılan 30) bu
 süreden en az 5 sn uzun tutulmalıdır; kısa kalırsa Kubernetes backend'i
 kapanış bitmeden durdurur.
+
+Kapanış o an süren kontrolleri keser. Kesilen bir kontrolün sonucu ters
+(`inverted`) monitor'de de yazılmaz ve sayılmaz (`kubeat_checks_total`
+dahil): kapanış ne kesinti açar ne açık bir kesintiyi kapatır. Kapanıştan
+önce biten ya da kendi zaman aşımına uğrayan kontrolün sonucu her zamanki
+gibi yazılır. 0.52 ve öncesinde kesilen ters kontrol açık kesintiyi kapatıp
+sahte bir "düzeldi" gönderebiliyordu.
 
 ### Sertifika bitişi
 

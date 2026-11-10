@@ -9,12 +9,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/alert"
+	"github.com/yusufceng/Kubeat/backend/internal/checker"
 	"github.com/yusufceng/Kubeat/backend/internal/heartbeat"
 	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
@@ -90,13 +94,20 @@ func (f *fakeChecker) Check(ctx context.Context, m store.Monitor) store.CheckRes
 	select {
 	case <-time.After(f.delay):
 	case <-ctx.Done():
-		return store.CheckResult{MonitorID: m.ID, Error: ctx.Err().Error()}
+		return endedBy(ctx, m)
 	}
 	hops := f.hops
 	if len(hops) == 0 {
 		hops = []store.Hop{{Host: m.Host()}}
 	}
 	return store.CheckResult{MonitorID: m.ID, Up: true, Hops: hops}
+}
+
+// endedBy is the result of a check of m that ctx ended, as the checker
+// reports it: interrupted when the scheduler's shutdown cancelled it,
+// failed when the monitor's timeout passed.
+func endedBy(ctx context.Context, m store.Monitor) store.CheckResult {
+	return store.CheckResult{MonitorID: m.ID, Error: ctx.Err().Error(), Interrupted: errors.Is(ctx.Err(), context.Canceled)}
 }
 
 func monitor(id int64, interval time.Duration) store.Monitor {
@@ -231,14 +242,18 @@ func TestSlowCheckDoesNotOverlapItself(t *testing.T) {
 
 func TestShutdownFlushesResultsAndDropsInterruptedChecks(t *testing.T) {
 	st := &fakeStore{}
-	st.setMonitors(monitor(1, 5*time.Millisecond), monitor(2, 5*time.Millisecond))
+	slow := monitor(2, 5*time.Millisecond)
+	slow.Timeout = time.Hour // only the shutdown ends its check
+	st.setMonitors(monitor(1, 5*time.Millisecond), slow)
 	opts := testOptions()
 	opts.FlushInterval = time.Hour // only the shutdown flush can write
 	opts.BatchSize = 1000
-	checker := &slowFor{slowID: 2, fakeChecker: fakeChecker{}}
-	stop := start(st, checker, opts)
+	checks := newSlowFor(2, 3)
+	stop := start(st, checks, opts)
 
-	waitFor(t, "checks of monitor 1 to run", func() bool { return checker.completed() >= 3 })
+	// Monitor 1 was checked three times, and monitor 2's check is under way.
+	<-checks.reached
+	<-checks.blocked
 	if got := st.countFor(1); got != 0 {
 		t.Fatalf("results written before flush: %d", got)
 	}
@@ -252,30 +267,41 @@ func TestShutdownFlushesResultsAndDropsInterruptedChecks(t *testing.T) {
 	}
 }
 
-// slowFor blocks until cancelled for one monitor and answers at once for the rest.
+// slowFor blocks until cancelled for one monitor and answers at once for the
+// rest. blocked is closed once a check of the slow monitor is under way,
+// reached once the others have been checked the given number of times.
 type slowFor struct {
-	fakeChecker
-	slowID int64
+	slowID  int64
+	blocked chan struct{}
+	reached chan struct{}
 
-	mu   sync.Mutex
-	done int
+	mu      sync.Mutex
+	done    int
+	want    int
+	started bool
+}
+
+func newSlowFor(slowID int64, want int) *slowFor {
+	return &slowFor{slowID: slowID, want: want, blocked: make(chan struct{}), reached: make(chan struct{})}
 }
 
 func (s *slowFor) Check(ctx context.Context, m store.Monitor) store.CheckResult {
-	if m.ID == s.slowID {
-		<-ctx.Done()
-		return store.CheckResult{MonitorID: m.ID, Error: ctx.Err().Error()}
-	}
 	s.mu.Lock()
+	if m.ID == s.slowID {
+		if !s.started {
+			s.started = true
+			close(s.blocked)
+		}
+		s.mu.Unlock()
+		<-ctx.Done()
+		return endedBy(ctx, m)
+	}
 	s.done++
+	if s.done == s.want {
+		close(s.reached)
+	}
 	s.mu.Unlock()
 	return store.CheckResult{MonitorID: m.ID, Up: true}
-}
-
-func (s *slowFor) completed() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.done
 }
 
 func TestBadRowDoesNotLoseTheBatch(t *testing.T) {
@@ -1172,5 +1198,211 @@ func TestFailedBatchIsOneLogLine(t *testing.T) {
 				t.Errorf("log of a batch of 5 that failed:\n%s\nwant one WARN line with rows=5 and %s", logs.String(), tt.dropped)
 			}
 		})
+	}
+}
+
+// scripted answers the check of each monitor with the result it holds for
+// it.
+type scripted map[int64]store.CheckResult
+
+func (s scripted) Check(_ context.Context, m store.Monitor) store.CheckResult { return s[m.ID] }
+
+// runChecks runs a check of each monitor on one worker of s under ctx, in
+// order, and returns the results the worker handed on to be written.
+func runChecks(ctx context.Context, s *Scheduler, ms ...store.Monitor) []store.CheckResult {
+	jobs := make(chan store.Monitor, len(ms))
+	results := make(chan store.CheckResult, len(ms))
+	for _, m := range ms {
+		s.start(m.ID)
+		jobs <- m
+	}
+	close(jobs)
+	s.work(ctx, jobs, results)
+	close(results)
+	var handed []store.CheckResult
+	for r := range results {
+		handed = append(handed, r)
+	}
+	return handed
+}
+
+// During a shutdown a worker hands on every result but an interrupted one:
+// a check that failed before the cancel, an inverted one whose own timeout
+// passed (the failure it expects) and one that succeeded are results as
+// good as any. The interrupted one is not counted either, among the checks
+// run or the monitor's failures in a row, and is no longer running.
+func TestShutdownDropsOnlyInterruptedChecks(t *testing.T) {
+	checks := scripted{
+		1: {MonitorID: 1, Error: "Get \"http://169.254.169.254/\": context canceled", Interrupted: true},
+		2: {MonitorID: 2, Error: "dial tcp: connection refused"},
+		3: {MonitorID: 3, Up: true, Detail: "failed as expected: Get \"http://169.254.169.254/\": context deadline exceeded"},
+		4: {MonitorID: 4, Up: true},
+	}
+	opts := testOptions()
+	opts.Metrics = metrics.New("test")
+	s := New(&fakeStore{}, checks, opts)
+	s.failures[1] = 2 // failing already, short of an outage
+	shutdown, stop := context.WithCancel(context.Background())
+	stop()
+
+	var ms []store.Monitor
+	for id := int64(1); id <= 4; id++ {
+		ms = append(ms, monitor(id, time.Minute))
+	}
+	handed := runChecks(shutdown, s, ms...)
+
+	var ids []int64
+	for _, r := range handed {
+		ids = append(ids, r.MonitorID)
+	}
+	if !slices.Equal(ids, []int64{2, 3, 4}) {
+		t.Errorf("handed on the results of %v, want [2 3 4]: all but the interrupted check", ids)
+	}
+	got, err := opts.Metrics.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up, down := got["kubeat_checks_total{result=up}{type=http}"], got["kubeat_checks_total{result=down}{type=http}"]; up != 2 || down != 1 {
+		t.Errorf("checks_total up=%v down=%v, want 2 and 1: the interrupted check is not counted", up, down)
+	}
+	if n := got["kubeat_check_duration_seconds{type=http}_count"]; n != 3 {
+		t.Errorf("check_duration_seconds count = %v, want 3", n)
+	}
+	if n := got["kubeat_checks_in_flight"]; n != 0 {
+		t.Errorf("checks_in_flight = %v, want 0", n)
+	}
+	if s.failures[1] != 2 || s.failures[2] != 1 {
+		t.Errorf("failures in a row = %v, want monitor 1's left at 2 and monitor 2's at 1", s.failures)
+	}
+	if len(s.inFlight) != 0 {
+		t.Errorf("still marked running: %v", s.inFlight)
+	}
+}
+
+// sentEvents is an alert.Sender that keeps the events it was asked to send.
+type sentEvents struct {
+	mu     sync.Mutex
+	events []alert.Event
+}
+
+func (s *sentEvents) Send(_ context.Context, _ store.Channel, n alert.Notification) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, n.Event)
+	return nil
+}
+
+func (s *sentEvents) take() []alert.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events := s.events
+	s.events = nil
+	return events
+}
+
+// An inverted monitor whose target answers has an outage open, and a
+// shutdown cuts its next check short while the target hangs. The check is
+// the checker's own, run by a worker as at shutdown, and what the worker
+// hands on goes through the store and the alert engine as the writer hands
+// it on: the interrupted check writes nothing, so the outage stays open and
+// no recovery is sent. Every step waits for an event, none for a clock.
+func TestShutdownLeavesAnInvertedMonitorsOutageOpen(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.OpenSQLite(ctx, filepath.Join(t.TempDir(), "test.db"), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	hang := make(chan struct{})       // closed: the target hangs from then on
+	hanging := make(chan struct{}, 1) // a request is hanging
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-hang:
+		default:
+			return // it answers, which the monitor expects it not to
+		}
+		select {
+		case hanging <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	m, err := db.CreateMonitor(ctx, store.Monitor{
+		Name: "metadata", Type: store.MonitorHTTP, Target: srv.URL,
+		// Only the shutdown ends the check that hangs, never its timeout.
+		Interval: time.Hour, Timeout: time.Hour, FailureThreshold: 1, Inverted: true, Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateChannel(ctx, store.Channel{Name: "ops", Type: store.ChannelWebhook, Target: "http://unused", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	sender := &sentEvents{}
+	alerts := alert.New(db, sender, alert.Options{
+		RecoveryThreshold: 1, QueueSize: 10, Attempts: 1, SendTimeout: time.Second,
+		Language: alert.LanguageEnglish, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	// deliver runs the engine's delivery loop until its queue is empty, and
+	// returns what it sent.
+	deliver := func() []alert.Event {
+		done, cancel := context.WithCancel(ctx)
+		cancel()
+		alerts.Run(done)
+		return sender.take()
+	}
+	opts := testOptions()
+	opts.OnResults = alerts.Evaluate
+	s := New(db, checker.New(checker.Options{}), opts)
+	// check runs one check of the monitor under ctx and writes what the
+	// worker hands on, as the writer does: stored, then evaluated.
+	check := func(ctx context.Context) []store.CheckResult {
+		handed := runChecks(ctx, s, m)
+		if len(handed) > 0 {
+			s.flush(context.WithoutCancel(ctx), handed)
+		}
+		return handed
+	}
+
+	// The target answers: the inverted monitor fails and the outage opens.
+	if got := check(ctx); len(got) != 1 || got[0].Up {
+		t.Fatalf("check of a target that answers = %+v, want one failed result", got)
+	}
+	outage, err := db.GetOpenIncident(ctx, m.ID, store.IncidentDown)
+	if err != nil {
+		t.Fatalf("no outage open: %v", err)
+	}
+	if events := deliver(); !slices.Equal(events, []alert.Event{alert.EventDown}) {
+		t.Fatalf("sent %v, want [down]", events)
+	}
+
+	// The target hangs, and a shutdown cuts the check short.
+	close(hang)
+	shutdown, stop := context.WithCancel(ctx)
+	defer stop()
+	done := make(chan []store.CheckResult)
+	go func() { done <- check(shutdown) }()
+	<-hanging
+	stop()
+	if got := <-done; len(got) != 0 {
+		t.Errorf("the interrupted check was handed on to be written: %+v", got)
+	}
+
+	if open, err := db.GetOpenIncident(ctx, m.ID, store.IncidentDown); err != nil || open.ID != outage.ID {
+		t.Errorf("open outage after the shutdown = %+v, %v; want incident %d still open", open, err, outage.ID)
+	}
+	if events := deliver(); len(events) != 0 {
+		t.Errorf("sent %v after the shutdown, want nothing", events)
+	}
+	if results, err := db.ListCheckResults(ctx, m.ID, 10); err != nil || len(results) != 1 {
+		t.Errorf("stored results = %+v, %v; want only the one from before the shutdown", results, err)
 	}
 }

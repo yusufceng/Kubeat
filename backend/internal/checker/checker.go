@@ -239,6 +239,7 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	result.StatusCode = out.statusCode
 	result.CertExpiresAt = out.certExpiry
 	result.Up = out.err == nil
+	result.Interrupted = interrupted(ctx, out.err)
 	if m.Outbound() {
 		// Every outbound check made at least one request, to its host.
 		result.Hops = out.hops
@@ -255,8 +256,10 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 	// A connection the target policy or the target scope refused never left
 	// Kubeat: whether the network would have let it through is unknown, so
 	// it is not the failure an inverted monitor expects, and the refusal
-	// stands.
-	if m.Inverted && !errors.Is(out.err, netguard.ErrBlocked) && !errors.Is(out.err, netguard.ErrScope) {
+	// stands. Nor is a check its caller interrupted: the failure is the
+	// shutdown's, and turned around it would close an open outage with a
+	// recovery nobody saw.
+	if m.Inverted && !result.Interrupted && !errors.Is(out.err, netguard.ErrBlocked) && !errors.Is(out.err, netguard.ErrScope) {
 		invert(&result)
 	}
 	// A successful check keeps nothing more; a failed one what it found out
@@ -265,6 +268,21 @@ func (c *Checker) Check(ctx context.Context, m store.Monitor) store.CheckResult 
 		result.Diagnostics = diagnose(m.Type, out)
 	}
 	return result
+}
+
+// interrupted reports whether a check under way in ctx that came to err was
+// cut short by its caller, as the scheduler's shutdown cuts the checks
+// running (store.CheckResult.Interrupted). It is the context rule a scope's
+// refusal follows (a lookup the context ended is no refusal), narrowed to
+// the caller: the context is asked, not the error, whose words are the
+// engine's, and only a cancellation is the caller's. The monitor's own
+// timeout ends the context with its deadline (context.DeadlineExceeded),
+// a failure like any other, which an inverted monitor expects; a shutdown
+// cancels the scheduler's context, and with it the check's
+// (context.Canceled). A check that succeeded was not interrupted, however
+// late it finished.
+func interrupted(ctx context.Context, err error) bool {
+	return err != nil && errors.Is(ctx.Err(), context.Canceled)
 }
 
 // invert turns the outcome around for a monitor that expects its target to

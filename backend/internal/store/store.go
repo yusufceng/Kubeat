@@ -325,6 +325,13 @@ type CheckResult struct {
 	// for a check that makes no request. They are for the scheduler's
 	// ceilings on checks per host and per address, and are not stored.
 	Hops []Hop
+	// Interrupted is set on a failed check that its caller cut short, as a
+	// shutdown cuts the checks running: the failure came of the shutdown
+	// and says nothing about the target. It is not inverted (Up stays
+	// false, whatever the monitor expects), and the scheduler neither
+	// writes nor counts it. A check that ran into its own timeout is not
+	// interrupted. Not stored.
+	Interrupted bool
 }
 
 // Hop is one request of a check: the host it was addressed to, as the

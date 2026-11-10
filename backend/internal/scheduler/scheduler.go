@@ -22,7 +22,9 @@ type Store interface {
 	InsertCheckResults(ctx context.Context, results []store.CheckResult) error
 }
 
-// Checker runs a single check. The context carries the monitor's timeout.
+// Checker runs a single check. The context carries the monitor's timeout,
+// and is cancelled at shutdown: a check that failed because of that
+// reports Interrupted.
 type Checker interface {
 	Check(ctx context.Context, m store.Monitor) store.CheckResult
 }
@@ -387,7 +389,8 @@ func (s *Scheduler) start(id int64) time.Time {
 	return retry
 }
 
-// abandon undoes start for a check that was not handed to a worker.
+// abandon undoes start for a check that was not handed to a worker, or that
+// a shutdown interrupted: either is as if it had not run.
 func (s *Scheduler) abandon(id int64, retry time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -442,21 +445,26 @@ func (s *Scheduler) work(ctx context.Context, jobs <-chan store.Monitor, results
 		checkCtx, cancel := context.WithTimeout(ctx, m.Timeout)
 		s.opts.Metrics.CheckStarted()
 		result := s.checker.Check(checkCtx, m)
-		s.opts.Metrics.CheckDone(string(m.Type), result.Up, result.Latency)
 		cancel()
 		now := time.Now()
-		s.finish(m, result.Up, now)
 		// The check took its tokens when it was dispatched; the requests
 		// it made beyond that (redirects, every pod) and the addresses it
-		// reached are owed now.
+		// reached are owed now, whatever came of it.
 		s.settle(m, result.Hops, now)
 
-		// A check interrupted by shutdown says nothing about the target. One
-		// that still succeeded was not interrupted: it finished just before
-		// the cancel and its result is as good as any.
-		if ctx.Err() != nil && !result.Up {
+		// A check a shutdown interrupted says nothing about its target,
+		// inverted or not: it is no result, neither written nor counted,
+		// and leaves the failures in a row as they were. The checker tells
+		// it (store.CheckResult.Interrupted); a check that finished before
+		// the cancel, or ran into its own timeout, is a result as good as
+		// any. The scheduler is stopping, so its retry is not put back.
+		if result.Interrupted {
+			s.opts.Metrics.CheckInterrupted()
+			s.abandon(m.ID, time.Time{})
 			continue
 		}
+		s.opts.Metrics.CheckDone(string(m.Type), result.Up, result.Latency)
+		s.finish(m, result.Up, now)
 		results <- result
 	}
 }

@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -465,6 +467,130 @@ func TestShortDuration(t *testing.T) {
 	} {
 		if got := shortDuration(d); got != want {
 			t.Errorf("shortDuration(%s) = %q, want %q", d, got, want)
+		}
+	}
+}
+
+// endings are the ways a check's context ends under a test, as the
+// scheduler runs a check: under its context, which a shutdown cancels, with
+// the monitor's timeout. "shutdown" cancels the scheduler's context while
+// the timeout is far off; "timeout" passes the check's deadline, on no
+// clock (expiring). Each returns the check's context and what ends it.
+func endings(t *testing.T) map[string]func() (context.Context, func()) {
+	return map[string]func() (context.Context, func()){
+		"shutdown": func() (context.Context, func()) {
+			scheduler, shutdown := context.WithCancel(context.Background())
+			t.Cleanup(shutdown)
+			ctx, cancel := context.WithTimeout(scheduler, time.Hour)
+			t.Cleanup(cancel)
+			return ctx, shutdown
+		},
+		"timeout": func() (context.Context, func()) {
+			deadline := newExpiring()
+			return deadline, deadline.expire
+		},
+	}
+}
+
+// A check that a shutdown cuts short while its target hangs failed because
+// of the shutdown: it is interrupted, and an inverted monitor does not take
+// it for the failure it expects, which would close an open outage with a
+// recovery. The monitor's own timeout is that failure, as it always was.
+// The target ends the check's context the moment the request arrives: no
+// clock is waited for.
+func TestCheckInterruptedByAShutdown(t *testing.T) {
+	for name, ending := range endings(t) {
+		for _, inverted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/inverted=%v", name, inverted), func(t *testing.T) {
+				ctx, end := ending()
+				release := make(chan struct{})
+				srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+					end()
+					select {
+					case <-r.Context().Done():
+					case <-release:
+					}
+				}))
+				defer srv.Close()
+				defer close(release)
+				m := httpMonitor(srv.URL + "/hang")
+				m.Inverted = inverted
+
+				got := New(Options{}).Check(ctx, m)
+				switch {
+				case name == "shutdown":
+					if got.Up || !got.Interrupted || !strings.Contains(got.Error, "context canceled") || got.Detail != "" {
+						t.Errorf("result = %+v, want interrupted, down with the cancellation, not inverted", got)
+					}
+				case inverted:
+					if !got.Up || got.Interrupted || got.Error != "" || !strings.HasPrefix(got.Detail, "failed as expected: ") ||
+						!strings.Contains(got.Detail, "context deadline exceeded") {
+						t.Errorf("result = %+v, want up: the timeout is the failure the monitor expects", got)
+					}
+				default:
+					if got.Up || got.Interrupted || !strings.Contains(got.Error, "context deadline exceeded") {
+						t.Errorf("result = %+v, want down with the timeout, not interrupted", got)
+					}
+				}
+			})
+		}
+	}
+}
+
+// The same rule holds where the context rule of the scope's refusals (S82)
+// ends a check: a lookup of a scoped monitor's name that a shutdown cuts
+// short is no refusal, and an interrupted check that an inverted monitor
+// does not turn around; one its timeout cuts short is no refusal either,
+// and the failure an inverted monitor expects.
+func TestScopeLookupInterruptedByAShutdown(t *testing.T) {
+	dns := scopeDNS(t)
+	proxyURL, _ := url.Parse("http://127.0.0.1:1") // never reached
+	toProxy := func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	for name, ending := range endings(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx, end := ending()
+			r := &refusals{}
+			c := scopedChecker(t, dns, true, r, Options{Proxy: toProxy})
+			c.opts.Scope.Rules.Resolver = endingResolver{end}
+			m := held(httpMonitor("http://public.example.test/ok"))
+			m.Inverted = true
+
+			got := c.Check(ctx, m)
+			if seen := r.take(); len(seen) != 0 {
+				t.Errorf("told %+v, want no refusal", seen)
+			}
+			if shutdown := name == "shutdown"; got.Interrupted != shutdown || got.Up == shutdown {
+				t.Errorf("result = %+v, want interrupted and down for the shutdown, up for the timeout", got)
+			}
+		})
+	}
+}
+
+// Only the caller's cancellation interrupts a check, and only one that
+// failed: the rule asks the context, not the error, whose words are the
+// engine's.
+func TestInterruptedAsksTheContext(t *testing.T) {
+	live := context.Background()
+	cancelled, cancel := context.WithCancel(live)
+	cancel()
+	expired := newExpiring()
+	expired.expire()
+	failure := errors.New("dial tcp: connection refused")
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{"failed under a live context", live, failure, false},
+		{"failed in the words of a cancellation under a live context", live, context.Canceled, false},
+		{"failed after the caller cancelled", cancelled, failure, true},
+		{"succeeded after the caller cancelled", cancelled, nil, false},
+		{"failed past its deadline", expired, context.DeadlineExceeded, false},
+	} {
+		if got := interrupted(tc.ctx, tc.err); got != tc.want {
+			t.Errorf("%s: interrupted = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

@@ -425,7 +425,7 @@ func resultLabel(ok bool, yes, no string) string {
 	return no
 }
 
-// CheckStarted and CheckDone bracket one check.
+// CheckStarted and CheckDone, or CheckInterrupted, bracket one check.
 func (m *Metrics) CheckStarted() {
 	if m != nil {
 		m.checksInFlight.Inc()
@@ -439,6 +439,15 @@ func (m *Metrics) CheckDone(monitorType string, up bool, took time.Duration) {
 	m.checksInFlight.Dec()
 	m.checks.WithLabelValues(monitorType, resultLabel(up, "up", "down")).Inc()
 	m.checkDuration.WithLabelValues(monitorType).Observe(took.Seconds())
+}
+
+// CheckInterrupted ends a check a shutdown cut short, which counts as no
+// check: it is no longer running, and neither its outcome nor its time is
+// recorded.
+func (m *Metrics) CheckInterrupted() {
+	if m != nil {
+		m.checksInFlight.Dec()
+	}
 }
 
 // SchedulerTick records a completed scheduler tick.
