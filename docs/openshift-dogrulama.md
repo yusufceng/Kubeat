@@ -49,7 +49,7 @@ varsa her komuta doğrulanacak cluster'ın bağlamını verin (`oc --context
 Komut README "OpenShift"tekiyle aynıdır:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.52.0 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
@@ -146,7 +146,7 @@ sizin değerlerinizdir.
 parola istiyorsa `imagePullSecrets`); chart iç registry'den kurulur:
 
 ```
-helm upgrade --install kubeat oci://<iç-registry>/charts/kubeat --version 0.52.0 \
+helm upgrade --install kubeat oci://<iç-registry>/charts/kubeat --version 0.53.0 \
   -n kubeat -f values-pilot.yaml
 ```
 
@@ -160,9 +160,9 @@ pod'ların onları çektiğini görün:
 ```
 R=<iç-registry>/kubeat
 cosign verify --trusted-root trusted_root.json \
-  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v0.52.0 \
+  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v0.53.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  $R/kubeat-backend:0.52.0 $R/kubeat-frontend:0.52.0 <iç-registry>/charts/kubeat:0.52.0
+  $R/kubeat-backend:0.53.0 $R/kubeat-frontend:0.53.0 <iç-registry>/charts/kubeat:0.53.0
 oc -n kubeat get pods -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}'
 ```
 
@@ -171,8 +171,8 @@ Beklenen:
 - Her referans için `Verification for <referans> --` ve imzanın hangi
   denetimlerden geçtiğini sayan satırlar; çıkış kodu 0. cosign Sigstore'a
   bağlanmaz.
-- Pod'ların imajları `<iç-registry>/kubeat/kubeat-backend:0.52.0` ve
-  `<iç-registry>/kubeat/kubeat-frontend:0.52.0`; `ImagePullBackOff` yok.
+- Pod'ların imajları `<iç-registry>/kubeat/kubeat-backend:0.53.0` ve
+  `<iç-registry>/kubeat/kubeat-frontend:0.53.0`; `ImagePullBackOff` yok.
 
 ### 2. Açılış satırları
 

@@ -272,7 +272,11 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
   - **Red.** Kapsamın reddettiği bağlantı kontrolü DOWN yapar. Sonucun hatası
     tek genel bir metindir, adresi ve nedeni söylemez ((d) maskesi; ayrıntı
     yalnız backend log'unda); açıklaması `blocked_by_scope`, arayüzde ve
-    bildirimde iki dilde. Ters monitor bunu, hedef politikasının reddi
+    bildirimde iki dilde. 0.53'ten beri (#160, #181) hata çare de söylemez;
+    çare açıklamanın kaynağa göre seçtiğidir: annotation monitor'ü
+    `blocked_by_scope_object` alır. Neden (`connection` ya da
+    `resolve_error`) yalnız yöneticiye, API'de `diagnostics.scope_reason`
+    alanında görünür; (d) maskesi kapsamı sınırlı kullanıcı için sürer. Ters monitor bunu, hedef politikasının reddi
     (`ErrBlocked`) gibi, beklediği başarısızlık saymaz. Her ret
     `kubeat_target_scope_denied_total{reason="connection"}`'ı artırır; denetim
     kaydına (`deny`/`target-scope`, kullanıcı `checker`) monitor başına bir kez
