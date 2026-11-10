@@ -51,9 +51,12 @@ type ScopeOptions struct {
 const ScopeActor = "checker"
 
 // scopeRefusalText is the error of a check the scope refused: the same for
-// every refusal, naming neither the host nor the reason, so that the
-// monitor's readers do not learn where a name leads (ADR-0003 d).
-const scopeRefusalText = "refused by the target scope: a connection of this check leads outside the namespaces of whoever set up the monitor; a Service in one of them is reached as service.namespace.svc, anything else is set up by an administrator"
+// every refusal and every source, naming neither the host nor the reason, so
+// that the monitor's readers do not learn where a name leads (ADR-0003 d).
+// It offers no remedy either: the remedy depends on whose record holds the
+// monitor and is the explanation's (explain.BlockedByScope,
+// BlockedByScopeObject), which a notification adds after this error.
+const scopeRefusalText = "refused by the target scope: a connection of this check leads outside the scope its monitor is held to, or its name did not resolve"
 
 // errScopeRefusal is the error of such a check; errors.Is finds
 // netguard.ErrScope in it.
