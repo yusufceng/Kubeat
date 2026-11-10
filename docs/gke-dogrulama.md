@@ -27,9 +27,13 @@ adım 6 ve 7'nin ölçümü onar dakika bekler.
     "Operator'süz cluster" → "Elle scrape"); job `kubeat-backend`, `namespace`
     etiketi `kubeat`.
   - Kubeat'in kuralları depodadır: ya PrometheusRule CRD'si ve Alloy
-    `mimir.rules.kubernetes` (kurulum komutuna
-    `--set metrics.prometheusRule.enabled=true` eklenir) ya da `mimirtool`
-    kopyası (README "Operator'süz cluster" → "Kopyalamak").
+    `mimir.rules.kubernetes` (`values-gke.yaml`'a
+    `metrics: {prometheusRule: {enabled: true}}` yazılır) ya da `mimirtool`
+    kopyası (README "Operator'süz cluster" → "Kopyalamak"). Bu runbook'taki
+    her `helm upgrade` yalnız `-f values-gke.yaml` ile koşar: komut satırında
+    verilen bir `--set` sonraki yükseltmede varsayılana döner, kurallar da
+    öyle olursa PrometheusRule silinir ve alarmlar adım adım "kaldı" görünür.
+    Kalıcı her ayarı values dosyasına yazın.
   - Alarmlar bir alıcıya düşer (Grafana Cloud Alerting ya da Alertmanager).
 - Adım 6 için: node'larının dış adresi olmayan (özel) ve internete Cloud NAT'tan
   çıkan bir cluster. Değilse adım 6 "geçerli değil"dir.
