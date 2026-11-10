@@ -65,7 +65,8 @@ func cutShort(t *testing.T, what string, c *Checker, got store.CheckResult, r *r
 	if got.Up || got.Error == scopeRefusalText || !strings.Contains(got.Error, want.Error()) {
 		t.Errorf("%s: up = %v, error %q; want the context's error %q", what, got.Up, got.Error, want)
 	}
-	if d := got.Diagnostics; d != nil && d.Explanation != nil && d.Explanation.Code == explain.BlockedByScope {
+	if d := got.Diagnostics; d != nil && (d.ScopeReason != "" ||
+		d.Explanation != nil && (d.Explanation.Code == explain.BlockedByScope || d.Explanation.Code == explain.BlockedByScopeObject)) {
 		t.Errorf("%s: explained as the scope's refusal: %+v", what, d)
 	}
 	if seen := r.take(); len(seen) != 0 {

@@ -536,7 +536,7 @@ func (h *handler) incidentChecks(r *http.Request, incident store.Incident, end, 
 			items = append(items, timelineItem{At: failures[i-1].CheckedAt, Kind: itemChecksOmitted,
 				Omitted: &omittedResponse{Count: total - len(failures), From: failures[i-1].CheckedAt, To: f.CheckedAt}})
 		}
-		check := toResultResponse(f)
+		check := toResultResponse(principal(r), f)
 		items = append(items, timelineItem{At: f.CheckedAt, Kind: itemCheckFailed, Check: &check})
 	}
 	return items, summary, nil

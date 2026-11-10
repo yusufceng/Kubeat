@@ -568,6 +568,11 @@ metrics:
   # namespace it cannot read (its Role taken away, or deleted with its
   # RoleBinding) and left its monitors as they were; the discovery status
   # and the backend's log name it, the alert does not.
+  # KubeatScopeResolveErrors (kubeat.scope group, warning, 0.53): for 10
+  # minutes the target scope has kept refusing annotation monitors'
+  # connections to names that do not resolve, more often a fault of the
+  # cluster's DNS than anything their owners did; a user's refusals are left
+  # to the README's query ("Kapsam ihlali denetimi").
   # KubeatDown reads the up series of job <release>-backend in the release's
   # namespace, as the ServiceMonitor above scrapes it: another scrape needs
   # the same labels, or KubeatDown keeps firing. They reach the Alertmanager
@@ -603,8 +608,9 @@ metrics:
     # Mimir, a global Thanos Ruler): let Grafana Alloy load the rules
     # rendered with it, or copy them there (README, "Operator'süz cluster").
     # KubeatDown, KubeatUnhealthy, KubeatBackupFailing, the outage,
-    # certificate and channel alerts (KubeatNotificationsFailing) and
-    # KubeatSignInSourceDegraded then group by it beside namespace and job
+    # certificate and channel alerts (KubeatNotificationsFailing),
+    # KubeatSignInSourceDegraded, KubeatDiscoveryNamespaceSkipped and
+    # KubeatScopeResolveErrors then group by it beside namespace and job
     # (and the monitor, the channel or the reason), so that one cluster's
     # Kubeat is not hidden by another's, and keep no other label the store
     # adds (the replica label of an HA pair it does not deduplicate).

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +108,92 @@ func TestResultsCarryDiagnostics(t *testing.T) {
 		var body json.RawMessage
 		if code := doAs(t, outside, "GET", base+"/"+id+path, "", &body); code != http.StatusNotFound {
 			t.Errorf("viewer of another namespace, %q: status %d, %s", path, code, body)
+		}
+	}
+}
+
+// Why the target scope refused a check, a connection outside it or a name
+// that did not resolve, goes to administrators alone, wherever a result goes
+// out: the monitor and the list, its results and window, and an outage's
+// timeline. Everyone else, a user held to the scope as one who sees every
+// namespace, reads the one explanation of either reason, and no such field
+// (ADR-0003 d).
+func TestScopeRefusalReasonOnlyForAdministrators(t *testing.T) {
+	srv, db := newTestAPI(t)
+	base := srv.URL + "/api/v1/monitors"
+	var created monitorResponse
+	if code := do(t, "POST", base, monitorJSON("api", "http", "https://api.shop.svc/healthz", `"namespace":"shop"`), &created); code != http.StatusCreated {
+		t.Fatalf("create: status = %d", code)
+	}
+	id := itoa(created.ID)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	refused := func(at time.Time, reason string) store.CheckResult {
+		return store.CheckResult{MonitorID: created.ID, CheckedAt: at, Up: false, Error: "refused by the target scope",
+			Diagnostics: &store.Diagnostics{Explanation: &store.Explanation{Code: explain.BlockedByScope}, ScopeReason: reason}}
+	}
+	if err := db.InsertCheckResults(ctx, []store.CheckResult{
+		refused(now.Add(-2*time.Minute), store.ScopeReasonConnection),
+		refused(now.Add(-time.Minute), store.ScopeReasonResolveError),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	incident, err := db.OpenIncident(ctx, store.Incident{MonitorID: created.ID, StartedAt: now.Add(-2 * time.Minute), OpenedAt: now.Add(-time.Minute), Cause: "refused by the target scope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := now.Add(-time.Hour).Format(time.RFC3339)
+	paths := []string{
+		base + "/" + id,
+		base,
+		base + "/" + id + "/results",
+		base + "/" + id + "/window?from=" + from,
+		srv.URL + "/api/v1/incidents/" + itoa(incident.ID),
+	}
+
+	// The administrators: the API token and a signed-in administrator.
+	var monitor monitorResponse
+	if code := do(t, "GET", base+"/"+id, "", &monitor); code != http.StatusOK || monitor.Last == nil || monitor.Last.Diagnostics == nil ||
+		monitor.Last.Diagnostics.ScopeReason != store.ScopeReasonResolveError {
+		t.Errorf("an administrator's monitor: status %d, last result %+v", code, monitor.Last)
+	}
+	var results []resultResponse
+	if code := do(t, "GET", base+"/"+id+"/results", "", &results); code != http.StatusOK || len(results) != 2 ||
+		results[0].Diagnostics.ScopeReason != store.ScopeReasonResolveError || results[1].Diagnostics.ScopeReason != store.ScopeReasonConnection {
+		t.Errorf("an administrator's results: status %d, %+v", code, results)
+	}
+	addUser(t, srv.URL, "boss", store.RoleAdmin, "*")
+	boss, _ := signIn(t, srv.URL, "boss", "parola-123")
+	for _, path := range paths {
+		var body json.RawMessage
+		if code := doAs(t, boss, "GET", path, "", &body); code != http.StatusOK || !strings.Contains(string(body), `"scope_reason":"resolve_error"`) {
+			t.Errorf("an administrator, %s: status %d, no reason: %s", path, code, body)
+		}
+	}
+
+	// Everyone else: editors and viewers of the namespace, and of every
+	// namespace, read the explanation without the reason.
+	for _, u := range []struct {
+		name       string
+		role       store.Role
+		namespaces string
+	}{
+		{"shop-editor", store.RoleEditor, "shop"},
+		{"shop-viewer", store.RoleViewer, "shop"},
+		{"all-editor", store.RoleEditor, "*"},
+		{"all-viewer", store.RoleViewer, "*"},
+	} {
+		addUser(t, srv.URL, u.name, u.role, u.namespaces)
+		token, _ := signIn(t, srv.URL, u.name, "parola-123")
+		for _, path := range paths {
+			var body json.RawMessage
+			code := doAs(t, token, "GET", path, "", &body)
+			if code != http.StatusOK || !strings.Contains(string(body), explain.BlockedByScope) {
+				t.Errorf("%s, %s: status %d, without the explanation: %s", u.name, path, code, body)
+			}
+			if strings.Contains(string(body), "scope_reason") {
+				t.Errorf("%s, %s: the reason is there: %s", u.name, path, body)
+			}
 		}
 	}
 }

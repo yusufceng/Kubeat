@@ -256,6 +256,10 @@ export const monitorPage = defineMessages(
     "monitorPage.why.redirects.count.other": "{count} yönlendirmeden sonra",
     "monitorPage.why.pod": "Pod",
     "monitorPage.why.podHint": "başarısız olan ilk pod",
+    "monitorPage.why.scopeReason": "Reddin nedeni",
+    "monitorPage.why.scopeReason.hint": "yalnız yöneticiler görür",
+    "monitorPage.why.scopeReason.connection": "Bağlantı kapsamın dışına gidiyor",
+    "monitorPage.why.scopeReason.resolve_error": "Ad çözülemedi; çoğu zaman cluster DNS'inin arızası",
     "monitorPage.why.timing": "Zamanlama",
     "monitorPage.why.phase.dns": "DNS",
     "monitorPage.why.phase.connect": "Bağlantı",
@@ -313,7 +317,9 @@ export const monitorPage = defineMessages(
     "monitorPage.why.code.blocked_by_policy":
       "Kubeat'in hedef politikası bu adrese izin vermiyor (loopback, link-local ya da yöneticinin yasakladığı bir aralık); UPTIME_TARGET_ALLOW_CIDRS izin verebilir.",
     "monitorPage.why.code.blocked_by_scope":
-      "Kubeat'in hedef kapsamı bu kontrolün bir bağlantısını reddetti: bağlantı monitor'ü kuranın namespace'lerinin dışına gidiyor; monitor'ü bir yönetici kurabilir.",
+      "Hedef kapsamı kontrolün bir bağlantısını reddetti: bağlantı monitor'ü kuranın namespace'lerinin dışına gidiyor ya da adı o an çözülemedi; DNS arızası değilse monitor'ü bir yönetici kurabilir.",
+    "monitorPage.why.code.blocked_by_scope_object":
+      "Hedef kapsamı kontrolün bir bağlantısını reddetti: nesnenin namespace'i dışına gidiyor ya da adı DNS'te çözülemedi; kontrolü uygulamanın kendi host'unda, oturum istemeyen bir sağlık yolunda tutun.",
     "monitorPage.why.code.dns_service_not_found":
       "{namespace} namespace'inde {service} adında bir Service yok: adresteki iki adı da kontrol edin.",
     "monitorPage.why.code.dns_not_found": "{host} adı çözülmüyor: yazımını ve gösterdiği şeyin var olduğunu kontrol edin.",
@@ -629,6 +635,10 @@ export const monitorPage = defineMessages(
     "monitorPage.why.redirects.count.other": "after {count} redirects",
     "monitorPage.why.pod": "Pod",
     "monitorPage.why.podHint": "the first pod that failed",
+    "monitorPage.why.scopeReason": "Why refused",
+    "monitorPage.why.scopeReason.hint": "only administrators see this",
+    "monitorPage.why.scopeReason.connection": "The connection leads outside the scope",
+    "monitorPage.why.scopeReason.resolve_error": "The name did not resolve; more often a fault of the cluster's DNS",
     "monitorPage.why.timing": "Timing",
     "monitorPage.why.phase.dns": "DNS",
     "monitorPage.why.phase.connect": "Connect",
@@ -688,7 +698,9 @@ export const monitorPage = defineMessages(
     "monitorPage.why.code.blocked_by_policy":
       "Kubeat's target policy does not allow this address (loopback, link-local or a range the operator denied); UPTIME_TARGET_ALLOW_CIDRS can allow it.",
     "monitorPage.why.code.blocked_by_scope":
-      "Kubeat's target scope refused a connection of this check: it leads outside the namespaces of whoever set up the monitor; an administrator can set it up.",
+      "The target scope refused a connection of this check: it leads outside the namespaces of whoever set up the monitor, or DNS failed to resolve its name; if DNS works, an administrator can set it up.",
+    "monitorPage.why.code.blocked_by_scope_object":
+      "The target scope refused a connection of this check: it leads outside the annotated object's namespace, or DNS failed to resolve its name; check the app's own host at a health path needing no sign-in.",
     "monitorPage.why.code.dns_service_not_found":
       "There is no Service {service} in the namespace {namespace}: check both names in the address.",
     "monitorPage.why.code.dns_not_found": "The name {host} does not resolve: check its spelling, and that what it names exists.",

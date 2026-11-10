@@ -310,4 +310,29 @@ spec:
           annotations:
             summary: {{ `"Kubeat's annotation discovery is skipping {{ $value }} of its namespaces"` }}
             description: "For 10 minutes the annotation sync could not read some of the namespaces discovery is limited to (forbidden: a Role taken away, or a namespace deleted with its RoleBinding; kubeat_discovery_sync_errors_total says why), and left their monitors as they were: new annotations there are not monitored and removed ones keep their monitors. GET /api/v1/discovery and the backend's log (discovery sync skipped a namespace) name them; restore the Role, or take a deleted namespace off discovery.namespaces."
+    - name: kubeat.scope
+      rules:
+        # The target scope refuses a connection of a check to a name the
+        # backend's resolver could not answer for, as it refuses what it
+        # cannot place, and the monitor is down meanwhile. An annotation
+        # monitor is held to its object's namespace in every install, single-
+        # tenant ones included, so its refusals of this kind are more often a
+        # fault of the cluster's DNS than anything its owner did: an operating
+        # alert for the platform team, not a scope refusal for the
+        # application's. Refusals that keep coming for 10 minutes fire it,
+        # one monitor's passing SERVFAIL does not. A user's monitor and one
+        # set up before the scope was recorded are left to the README's
+        # query ("Kapsam ihlali denetimi"). One alert per installation, as
+        # KubeatUnhealthy, and no part of it.
+        - alert: KubeatScopeResolveErrors
+          expr: |-
+            sum {{ $byInstallation }} (
+              increase(kubeat_target_scope_denied_total{reason="resolve_error", source="annotation"}[5m])
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kubeat's target scope keeps refusing annotation monitors' connections to names it cannot resolve"
+            description: "For 10 minutes checks of annotation monitors have been refused connections to names the backend's resolver could not answer for, as the target scope refuses a name it cannot place, and those monitors are down meanwhile. This is more often a fault of the cluster's DNS, or of the backend's way to it, than anything their owners did: 'server resolve <name>' in the backend pod shows how a name resolves, and behind a proxy that alone resolves external names UPTIME_TARGET_SCOPE_TRUST_PROXY may be what is missing. The backend's log names each monitor (a check was refused a connection to a name that did not resolve), and the monitor page shows the reason to administrators (README, \"Kapsam ihlali denetimi\")."
 {{- end }}

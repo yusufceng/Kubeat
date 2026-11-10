@@ -372,3 +372,98 @@ tests:
       - eval_time: 18m
         alertname: KubeatNotificationsFailing
         exp_alerts: []
+
+  - name: KubeatSignInSourceDegraded fires for the cluster whose sign-ins cannot be keyed, once for an HA pair
+    interval: 1m
+    input_series:
+      # Both Prometheus replicas of cluster a send its backend's series:
+      # sign-ins come with X-Forwarded-For from 2m while the hops are 0. b's
+      # backend sees only a script's sign-ins, which are counted apart.
+      - series: 'kubeat_signin_source_degraded_total{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-0", reason="hops_zero", surface="sign_in"}'
+        values: '0 0 1 3x20'
+      - series: 'kubeat_signin_source_degraded_total{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-1", reason="hops_zero", surface="sign_in"}'
+        values: '0 0 1 3x20'
+      - series: 'kubeat_signin_source_degraded_total{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", reason="hops_zero", surface="sign_in"}'
+        values: '0x22'
+      - series: 'kubeat_signin_source_degraded_total{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", reason="untrusted_peer", surface="sign_in"}'
+        values: '0+1x22'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: KubeatSignInSourceDegraded
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: KubeatSignInSourceDegraded
+        exp_alerts:
+          - exp_labels: &source-degraded-a-labels
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              cluster: a
+              reason: hops_zero
+            exp_annotations: &source-degraded-hops-zero-annotations
+              summary: "Kubeat's sign-in throttle cannot tell clients apart (hops_zero)"
+              description: "In the last 15 minutes sign-ins, password changes or status-page unlocks reached Kubeat while its throttle could not key them on their clients: X-Forwarded-For came, but UPTIME_TRUST_PROXY_HOPS is 0 (where the UI's own Service is exposed with no proxy in front, 0 is right and 1 lets a client pick its source: silence this reason). Every browser then shares one address, and the throttle one lock per name, page and account, which anyone who knows a name can close for everyone. The backend's log has the warning with the value to set (README, \"Hesaplar ve giriş\", \"Sayaç ve kural\")."
+      - eval_time: 16m
+        alertname: KubeatSignInSourceDegraded
+        exp_alerts:
+          - exp_labels: *source-degraded-a-labels
+            exp_annotations: *source-degraded-hops-zero-annotations
+      - eval_time: 18m
+        alertname: KubeatSignInSourceDegraded
+        exp_alerts: []
+
+  - name: KubeatDiscoveryNamespaceSkipped fires for the cluster whose sync skips a namespace, not for the one that reads them all
+    interval: 1m
+    input_series:
+      # From 2m a's annotation sync cannot read one of its namespaces; b's
+      # reads every one, under the same release, namespace and pod name.
+      - series: 'kubeat_discovery_namespaces_skipped{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0 0 1x15'
+      - series: 'kubeat_discovery_namespaces_skipped{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0x17'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: KubeatDiscoveryNamespaceSkipped
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: KubeatDiscoveryNamespaceSkipped
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              cluster: a
+            exp_annotations:
+              summary: "Kubeat's annotation discovery is skipping 1 of its namespaces"
+              description: "For 10 minutes the annotation sync could not read some of the namespaces discovery is limited to (forbidden: a Role taken away, or a namespace deleted with its RoleBinding; kubeat_discovery_sync_errors_total says why), and left their monitors as they were: new annotations there are not monitored and removed ones keep their monitors. GET /api/v1/discovery and the backend's log (discovery sync skipped a namespace) name them; restore the Role, or take a deleted namespace off discovery.namespaces."
+
+  - name: KubeatScopeResolveErrors fires for the cluster whose DNS fails, once for an HA pair
+    interval: 1m
+    input_series:
+      # Both Prometheus replicas of cluster a send its backend's series: from
+      # 2m its annotation monitors are refused names that do not resolve,
+      # every minute. b's annotation monitors are not; its users' checks
+      # are, which the README's query is for.
+      - series: 'kubeat_target_scope_denied_total{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-0", reason="resolve_error", source="annotation"}'
+        values: '0 0 1+1x15'
+      - series: 'kubeat_target_scope_denied_total{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-1", reason="resolve_error", source="annotation"}'
+        values: '0 0 1+1x15'
+      - series: 'kubeat_target_scope_denied_total{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", reason="resolve_error", source="annotation"}'
+        values: '0x17'
+      - series: 'kubeat_target_scope_denied_total{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", reason="resolve_error", source="user"}'
+        values: '0+1x17'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: KubeatScopeResolveErrors
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: KubeatScopeResolveErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              cluster: a
+            exp_annotations:
+              summary: "Kubeat's target scope keeps refusing annotation monitors' connections to names it cannot resolve"
+              description: "For 10 minutes checks of annotation monitors have been refused connections to names the backend's resolver could not answer for, as the target scope refuses a name it cannot place, and those monitors are down meanwhile. This is more often a fault of the cluster's DNS, or of the backend's way to it, than anything their owners did: 'server resolve <name>' in the backend pod shows how a name resolves, and behind a proxy that alone resolves external names UPTIME_TARGET_SCOPE_TRUST_PROXY may be what is missing. The backend's log names each monitor (a check was refused a connection to a name that did not resolve), and the monitor page shows the reason to administrators (README, \"Kapsam ihlali denetimi\")."

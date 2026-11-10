@@ -374,7 +374,23 @@ type Diagnostics struct {
 	// Pod is the pod these details are about, for a monitor that checks
 	// each pod behind its service: the first of those that failed.
 	Pod string `json:"pod,omitempty"`
+	// ScopeReason is why the target scope refused a connection of the
+	// check, for a check it refused: ScopeReasonConnection or
+	// ScopeReasonResolveError. Only administrators are told it (the API
+	// leaves it out for everyone else): a user held to the scope must not
+	// learn from a result whether a name resolved (ADR-0003 d).
+	ScopeReason string `json:"scope_reason,omitempty"`
 }
+
+// The reasons a target scope refuses a connection of a check
+// (Diagnostics.ScopeReason), as kubeat_target_scope_denied_total names them.
+const (
+	// ScopeReasonConnection: the connection leads outside the scope.
+	ScopeReasonConnection = "connection"
+	// ScopeReasonResolveError: a name the resolver could not answer for,
+	// more often a fault of the cluster's DNS than an attempt.
+	ScopeReasonResolveError = "resolve_error"
+)
 
 // Explanation is what a failure most likely means: a stable code (see the
 // explain package) with the few values its wording needs, so that each

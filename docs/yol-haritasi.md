@@ -374,7 +374,16 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   kalanı backlog'da); vekilli kurulumun NXDOMAIN ön şartı ayarı açmadan
   `server resolve` ile sınanıyor (S82, sprint 10,
   [#143](https://github.com/yusufceng/Kubeat/issues/143)); CoreDNS kesintisi
-  provası kullanıcıda (minikube), GKE ve kurumsal DNS ölçülmedi; (d)
+  provası kullanıcıda (minikube), GKE ve kurumsal DNS ölçülmedi; 0.53'te kontrol
+  sonucunun açıklaması ve bildirim nedenden bağımsız olarak iki olasılığı (kapsam dışı
+  bağlantı ya da o an çözülemeyen ad) söylüyor ve monitor'ün kaynağına göre çare veriyor
+  (`blocked_by_scope`: "DNS arızası değilse yönetici kurabilir"; annotation monitor'ünde
+  `blocked_by_scope_object`: uygulamanın kendi host'unda sağlık yolu), nedeni
+  (`resolve_error` ya da `connection`) yalnız yönetici görüyor, annotation monitor'lerinin
+  çözüm hatası redleri `KubeatScopeResolveErrors` ile duyuruluyor (S93, sprint 11,
+  [#160](https://github.com/yusufceng/Kubeat/issues/160)); kalan: CoreDNS kesintisinde bu
+  monitor'ler yine DOWN, başarısız kontrolleri nedene göre saymak ve cluster DNS'i kuralı
+  sonraki sprintte (S97), gerçek Prometheus'ta prova kullanıcıda; (d)
   0.51'de kapsam yalnız hedef belirlenirken değil, monitor'ün her bağlantısında
   uygulanıyor (S86, sprint 9, [#131](https://github.com/yusufceng/Kubeat/issues/131);
   ADR-0003 c "Her bağlantıda kapsam"): kayıt monitor'ün ayarlarında (şema 26),
@@ -384,7 +393,9 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   daha geniş bir kapsama yalnız kontrolün bağlandığı yeri adlandıran bir ayar
   değişince geçiyor, kaydın namespace'lerinin hepsini tutmayan biri kontrolün
   herhangi bir ayarını değiştirince onu daraltıyor, reddedilen kontrol
-  DOWN ve `reason=connection` ile sayılıyor. Kalan: kayıt
+  DOWN ve `reason=connection` ile sayılıyor, 0.53'ten beri açıklaması kaydın
+  sahibine göre (kullanıcının ve kaydı olmayan monitor `blocked_by_scope`,
+  annotation monitor'ü `blocked_by_scope_object`; yukarıda (c)). Kalan: kayıt
   yazıldığı anın görüntüsü, kapsam daralınca var olan monitor'ler eski kapsamla
   çalışıyor (S73, sonraki sprint); kanallar yalnız oluşturma ve
   değiştirmede denetleniyor (backlog); kaydı olmayan monitor'ün

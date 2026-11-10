@@ -80,16 +80,27 @@ func TestDownNotificationIsExplained(t *testing.T) {
 }
 
 // An outage the target scope caused says so in the notification, in either
-// language, after the check's own generic error.
+// language, after the check's own generic error, with the remedy that fits
+// whose record holds the monitor: the very text of its explanation, which
+// the monitor page shows too.
 func TestCauseOfAScopeRefusal(t *testing.T) {
 	n := sampleDown()
 	n.Incident.Cause = "refused by the target scope: a connection of this check leads outside the namespaces of whoever set up the monitor"
-	n.Explanation = &store.Explanation{Code: explain.BlockedByScope}
-	for language, words := range map[string]string{LanguageTurkish: "hedef kapsamı", LanguageEnglish: "target scope refused"} {
-		n.Language = language
-		got := lastFact(n).Value
-		if !strings.HasPrefix(got, n.Incident.Cause+" — ") || !strings.Contains(got, words) {
-			t.Errorf("%s: cause = %q", language, got)
+	for _, tc := range []struct {
+		code     string
+		language string
+		words    string
+	}{
+		{explain.BlockedByScope, LanguageTurkish, "DNS arızası değilse monitor'ü bir yönetici kurabilir"},
+		{explain.BlockedByScope, LanguageEnglish, "if DNS works, an administrator can set it up"},
+		{explain.BlockedByScopeObject, LanguageTurkish, "oturum istemeyen bir sağlık yolunda"},
+		{explain.BlockedByScopeObject, LanguageEnglish, "health path needing no sign-in"},
+	} {
+		n.Explanation = &store.Explanation{Code: tc.code}
+		n.Language = tc.language
+		want := n.Incident.Cause + " — " + explain.Text(*n.Explanation, tc.language)
+		if got := lastFact(n).Value; got != want || !strings.Contains(got, tc.words) {
+			t.Errorf("%s in %s: cause = %q", tc.code, tc.language, got)
 		}
 	}
 }

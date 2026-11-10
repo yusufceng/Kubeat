@@ -12,12 +12,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/yusufceng/Kubeat/backend/internal/explain"
+	"github.com/yusufceng/Kubeat/backend/internal/netguard"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
 )
 
@@ -591,6 +594,57 @@ func TestInterruptedAsksTheContext(t *testing.T) {
 	} {
 		if got := interrupted(tc.ctx, tc.err); got != tc.want {
 			t.Errorf("%s: interrupted = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A check the target scope refused a connection of is explained by whose
+// record holds its monitor, the same for either reason: the monitor of a
+// user, and one with no record (held to its namespace), are blocked_by_scope,
+// whose remedy an administrator may give; an annotation monitor, held to its
+// object's namespace in every install, is blocked_by_scope_object. The error
+// stays the one generic text, and the reason, a connection that leads
+// outside the scope or a name that did not resolve, is kept beside the
+// explanation for the administrators alone.
+func TestScopeRefusalExplainedBySource(t *testing.T) {
+	dns := scopeDNS(t)
+	_, port := scopeServer(t)
+	r := &refusals{}
+	c := scopedChecker(t, dns, true, r, Options{})
+	at := func(host, path string) string { return "http://" + net.JoinHostPort(host, port) + path }
+
+	for _, source := range []struct {
+		name string
+		of   func(store.Monitor) store.Monitor
+		code string
+	}{
+		{"a user's monitor", held, explain.BlockedByScope},
+		{"an annotation monitor", func(m store.Monitor) store.Monitor {
+			m.Namespace, m.Source, m.Managed, m.Scope = "shop", "ingress/web", true, store.ObjectScope("shop")
+			return m
+		}, explain.BlockedByScopeObject},
+		{"a monitor without a record", func(m store.Monitor) store.Monitor {
+			m.Namespace, m.Scope = "shop", nil
+			return m
+		}, explain.BlockedByScope},
+	} {
+		for _, reason := range []struct {
+			name, host string
+			why        netguard.Refusal
+			want       string
+		}{
+			{"leads outside the scope", "api.payments.svc", netguard.RefusedOutside, store.ScopeReasonConnection},
+			{"does not resolve", "gone.example.test", netguard.RefusedUnresolved, store.ScopeReasonResolveError},
+		} {
+			what := source.name + ", a connection that " + reason.name
+			got := check(c, source.of(httpMonitor(at("public.example.test", "/to?host="+reason.host))))
+			want := &store.Diagnostics{Explanation: &store.Explanation{Code: source.code}, ScopeReason: reason.want}
+			if got.Up || got.Error != scopeRefusalText || !reflect.DeepEqual(got.Diagnostics, want) {
+				t.Errorf("%s: up = %v, error %q, diagnostics %+v; want the scope's refusal with %+v", what, got.Up, got.Error, got.Diagnostics, want)
+			}
+			if seen := r.take(); len(seen) != 1 || seen[0].host != reason.host || seen[0].why != reason.why {
+				t.Errorf("%s: told %+v", what, seen)
+			}
 		}
 	}
 }
