@@ -132,6 +132,34 @@
   --ease-signal: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* The rhythm and the clock, the same in both themes. Gaps, paddings and
+   margins fall on a 4px grid, numbered as Tailwind numbers its spacing
+   (--space-3 is what p-3 comes to, 12px); the three half steps are named
+   too, since 6, 10 and 14px are as common in the stylesheets as the whole
+   ones. Durations: fast for a hover, a color or a chevron; base for a menu,
+   a bar or a tooltip that appears; slow for a line that draws itself in or
+   a surface that fades. A loop (the pulse, the flash) keeps its own length. */
+:root {
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-2-5: 10px;
+  --space-3: 12px;
+  --space-3-5: 14px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --duration-fast: 120ms;
+  --duration-base: 160ms;
+  --duration-slow: 400ms;
+}
+
 @theme inline {
   --color-canvas: var(--canvas);
   --color-panel: var(--panel);
@@ -177,6 +205,40 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --ease-signal: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* The type scale, for the text-* utilities and for stylesheets that set a
+   size by hand. Tailwind's steps are pinned to the pixels they come to at
+   the browser's default size, as the body and the type-* utilities are, so
+   a utility and a stylesheet agree to the pixel; the leading is unitless,
+   as Tailwind's is, written as the pair it makes at that size. Two steps
+   of the house join them under the names of their type styles: micro
+   (type-micro, type-mono-s, kbd) and dense (type-dense, fields, buttons,
+   menu items, list rows). xl and 2xl take the leading of type-title and
+   type-display-s, whose sizes they are; the larger display and KPI sizes
+   stay with their type-* utilities, which also set stretch and weight.
+   Static, so every step is on :root before any rule uses it. */
+@theme static {
+  --text-micro: 11px;
+  --text-micro--line-height: calc(14 / 11);
+  --text-xs: 12px;
+  --text-xs--line-height: calc(16 / 12);
+  --text-dense: 13px;
+  --text-dense--line-height: calc(18 / 13);
+  --text-sm: 14px;
+  --text-sm--line-height: calc(20 / 14);
+  --text-base: 16px;
+  --text-base--line-height: calc(24 / 16);
+  --text-lg: 18px;
+  --text-lg--line-height: calc(24 / 18);
+  --text-xl: 20px;
+  --text-xl--line-height: calc(26 / 20);
+  --text-2xl: 24px;
+  --text-2xl--line-height: calc(28 / 24);
+
+  /* The app's one curve under the name Tailwind's ease-out utility reads,
+     so a utility and a stylesheet move the same way. */
+  --ease-out: var(--ease-signal);
 }
 
 body {
