@@ -4,7 +4,7 @@
 # exactly what it was built from; Dependabot proposes the updates, moving the
 # digest and the tag together. The Go version is the toolchain line of
 # go.mod, which CI tests with: raise both together.
-FROM --platform=$BUILDPLATFORM golang:1.26.10@sha256:670bb5aa5349ae03b8516764718486f4f16399134bdc9acd0c46a23f043ab05c AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10@sha256:cfa27959837144bf4649802ba38e59daffd0dd2a7994aa83daaf113285b0f551 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
