@@ -35,6 +35,7 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 	m.SignInThrottled(ThrottleSource)
 	m.TargetThrottled("example.com")
 	m.TargetScopeDenied(ScopeDeniedTarget, ScopeSourceUser)
+	m.ScopeExternalRangesIgnored(2)
 	m.Backup(true, time.Now())
 	m.Backup(false, time.Now())
 	m.LastBackup(time.Now())
@@ -297,6 +298,39 @@ func TestTargetScopeDeniedCounter(t *testing.T) {
 	}
 	if series := scopeSeries(got); !maps.Equal(series, want) {
 		t.Errorf("series = %v, want %v", series, want)
+	}
+}
+
+// kubeat_target_scope_external_ranges_ignored is there from the start at 0,
+// without labels, as with the setting empty, and holds what the start
+// recorded: how many company ranges it set aside.
+func TestScopeExternalRangesIgnored(t *testing.T) {
+	m := New("test")
+	const name = "kubeat_target_scope_external_ranges_ignored"
+	for _, tt := range []struct {
+		record bool
+		n      int
+	}{{false, 0}, {true, 2}, {true, 0}} {
+		if tt.record {
+			m.ScopeExternalRangesIgnored(tt.n)
+		}
+		got, err := m.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value, ok := got[name]; !ok || value != float64(tt.n) {
+			t.Errorf("after recording %d (recorded: %v): %s = %v (present: %v), want %d", tt.n, tt.record, name, value, ok, tt.n)
+		}
+		for key := range got {
+			if strings.HasPrefix(key, name+"{") {
+				t.Errorf("unexpected labelled series %s", key)
+			}
+		}
+	}
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if body := rec.Body.String(); !strings.Contains(body, "# TYPE "+name+" gauge") {
+		t.Errorf("the exposition lacks the gauge:\n%s", body)
 	}
 }
 

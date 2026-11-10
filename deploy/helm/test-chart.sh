@@ -751,6 +751,22 @@ rules "KubeatBackupFailing until a backup succeeds" has 'max_over_time(kubeat_ba
 # KubeatUnhealthy reads what the heartbeat judges, one alert across a
 # Recreate; a loss of some results stays KubeatResultsDropped's warning.
 rules "KubeatUnhealthy reads the self-health gauge" has 'expr: max without (instance, pod, endpoint, container, service) (kubeat_self_healthy) == 0'
+# KubeatScopeExternalRangesIgnored, in kubeat.self beside KubeatUnhealthy
+# but no part of it: one warning per installation from the gauge of the
+# company ranges the start ignored, with no "for" (the gauge is written once
+# at the start). promtool below shows it fire and stay silent.
+rules "KubeatScopeExternalRangesIgnored with backups" has "alert: KubeatScopeExternalRangesIgnored" --set backup.enabled=true
+rules "KubeatScopeExternalRangesIgnored without backups" has "alert: KubeatScopeExternalRangesIgnored"
+rules "KubeatScopeExternalRangesIgnored reads the ignored ranges" has 'expr: max without (instance, pod, endpoint, container, service) (kubeat_target_scope_external_ranges_ignored) > 0'
+if helm template kubeat "$CHART" --show-only templates/prometheusrule.yaml "${RULES[@]}" >"$WORK/rules" 2>"$WORK/err"; then
+  awk '/^        - alert: KubeatScopeExternalRangesIgnored$/ { found = 1; next } found && /^        - alert: / { exit } found' "$WORK/rules" >"$WORK/rule"
+  grep -qF 'severity: warning' "$WORK/rule" || failed "KubeatScopeExternalRangesIgnored is not a warning"
+  ! grep -qE '^ +for: ' "$WORK/rule" || failed "KubeatScopeExternalRangesIgnored waits: $(grep -E '^ +for: ' "$WORK/rule")"
+  awk '/^        - alert: KubeatUnhealthy$/ { found = 1; next } found && /^        - alert: / { exit } found' "$WORK/rules" |
+    grep -qF 'kubeat_target_scope_external_ranges_ignored' && failed "KubeatUnhealthy reads the ignored ranges"
+else
+  failed "KubeatScopeExternalRangesIgnored: refused: $(cat "$WORK/err")"
+fi
 # KubeatSignInSourceDegraded, in a group of its own between the monitors'
 # and Kubeat's own: one alert per installation and reason, across the
 # surfaces and a Recreate, on the four reasons that leave every browser on
@@ -778,14 +794,15 @@ rules "KubeatDiscoveryNamespaceSkipped reads the skipped namespaces" has 'expr: 
 # metrics.prometheusRule.clusterLabel, for rules evaluated over the series of
 # several clusters in one store. Empty, the rules it changes render as 0.44
 # rendered them, and KubeatUnhealthy and KubeatNotificationsFailing, whose
-# expressions came with 0.45, and KubeatSignInSourceDegraded and
-# KubeatDiscoveryNamespaceSkipped, which came with 0.52, without the scrape
+# expressions came with 0.45, KubeatSignInSourceDegraded and
+# KubeatDiscoveryNamespaceSkipped, which came with 0.52, and
+# KubeatScopeExternalRangesIgnored, which came with 0.53, without the scrape
 # labels as those do; given,
 # they group by it beside namespace and job and keep no other label a store
 # adds, and every other rule renders the same either way. promtool below
 # shows how they behave over two clusters' series.
 CLUSTER=(--set metrics.prometheusRule.clusterLabel=cluster)
-BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped): '
+BY_CLUSTER='^(KubeatMonitorDown|KubeatCertificateExpiring|KubeatDown|KubeatUnhealthy|KubeatBackupFailing|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped|KubeatScopeExternalRangesIgnored): '
 # exprs FILE: the expression of every rule in a rendered PrometheusRule, each
 # of its lines after the rule's alert name.
 exprs() {
@@ -855,7 +872,7 @@ if helm template kubeat "$CHART" --namespace kubeat --show-only templates/promet
   --set backup.enabled=true >"$WORK/rules-plain" 2>"$WORK/err" &&
   helm template kubeat "$CHART" --namespace kubeat --show-only templates/prometheusrule.yaml "${RULES[@]}" \
     --set backup.enabled=true "${CLUSTER[@]}" >"$WORK/rules-cluster" 2>"$WORK/err"; then
-  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped): ' |
+  exprs "$WORK/rules-plain" | grep -E "$BY_CLUSTER" | grep -vE '^(KubeatUnhealthy|KubeatNotificationsFailing|KubeatSignInSourceDegraded|KubeatDiscoveryNamespaceSkipped|KubeatScopeExternalRangesIgnored): ' |
     diff "$WORK/exprs-0.44" - >"$WORK/diff" ||
     failed "clusterLabel empty: the rules differ from 0.44's: $(cat "$WORK/diff")"
   exprs "$WORK/rules-plain" | grep '^KubeatNotificationsFailing: ' | diff "$WORK/channels-plain" - >"$WORK/diff" ||
@@ -880,6 +897,7 @@ rules "outages per cluster and monitor" has 'max by (namespace, job, cluster, mo
 rules "KubeatUnhealthy per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_self_healthy) == 0' "${CLUSTER[@]}"
 rules "KubeatSignInSourceDegraded per cluster and reason" has 'sum by (namespace, job, cluster, reason) (' "${CLUSTER[@]}"
 rules "KubeatDiscoveryNamespaceSkipped per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_discovery_namespaces_skipped) > 0' "${CLUSTER[@]}"
+rules "KubeatScopeExternalRangesIgnored per cluster" has 'expr: max by (namespace, job, cluster) (kubeat_target_scope_external_ranges_ignored) > 0' "${CLUSTER[@]}"
 rules "no store label kept but the cluster's" lacks 'without (' "${CLUSTER[@]}"
 for label in k8s-cluster 1cluster __cluster cluster.name namespace job pod monitor_namespace channel channel_type reason surface severity; do
   refuses "clusterLabel $label" "metrics.prometheusRule.clusterLabel is \"$label\"" "${RULES[@]}" --set-string metrics.prometheusRule.clusterLabel="$label"

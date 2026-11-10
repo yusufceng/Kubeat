@@ -283,14 +283,20 @@ listedeyse on-prem Route adlarına da monitor ve kanal kurabilir:
   üstündeyse (bare metal'de keepalived) o node'un host ağında dinleyen
   portları da (ör. kubelet). Bunu istemiyorsanız VIP'i eklemeyin, on-prem
   Route'ları yönetici kursun (README "Kurum ağı", "Şart").
-- **Açılış koruması.** API sunucusunun ya da backend pod'unun adresini içeren
-  bir aralık ve IPv6 biçiminde yazılmış bir IPv4 aralığı
-  (`::ffff:10.50.0.0/112`) backend'i başlatmaz;
+- **Açılış koruması.** IPv6 biçiminde yazılmış bir IPv4 aralığı
+  (`::ffff:10.50.0.0/112`) ve CIDR olmayan bir girdi backend'i başlatmaz;
   `oc -n kubeat logs deploy/kubeat-backend` `invalid configuration` satırında
-  nedenini yazar. Aralığı daraltın ya da satırı silin. Koruma pod'un o anki
-  adresine bakar: pod ağının başka bir parçasını içeren bir aralık (pod ağı
-  `10.128.0.0/14` iken `10.130.0.0/16`) bugün geçer, pod başka bir node'a
-  taşınınca backend'i durdurur. Pod ağının tamamını yukarıdaki
+  nedenini yazar. API sunucusunun ya da backend pod'unun adresini içeren bir
+  aralık 0.53'ten beri backend'i durdurmaz: yalnız o girdi yok sayılır,
+  izleme sürer. Açılıştaki `target scope external ranges ignored` `ERROR`
+  satırı aralığı ve nedenini yazar,
+  `kubeat_target_scope_external_ranges_ignored` sayıyı verir, kurallar
+  açıksa `KubeatScopeExternalRangesIgnored` yanar. Yok sayılan aralığa giden
+  editör monitor'leri `blocked_by_scope` ile DOWN olur; aralığı daraltın ya
+  da satırı silin. Koruma pod'un o anki adresine bakar: pod ağının başka bir
+  parçasını içeren bir aralık (pod ağı `10.128.0.0/14` iken `10.130.0.0/16`)
+  bugün geçer, pod aylık yükseltmenin drain'inde başka bir node'a taşınınca
+  yok sayılır (0.52'de backend'i durduruyordu). Pod ağının tamamını yukarıdaki
   `network.config/cluster` çıktısıyla dışarıda tutun.
 - **Kurum adları backend'de çözülmeli.** `NO_PROXY`'deki `.sirket.local`
   adlarına vekil değil backend bağlanır ve `UPTIME_TARGET_SCOPE_TRUST_PROXY`

@@ -25,7 +25,8 @@ domains answer:
   kubectl -n kubeat exec deploy/kubeat-backend -- server resolve status.vendor.example
 
 It reads UPTIME_TARGET_RESOLVE_TIMEOUT and UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS,
-ignores UPTIME_TARGET_SCOPE_TRUST_PROXY, changes nothing and starts no server.`
+without the ranges the backend ignores, which it names first; it ignores
+UPTIME_TARGET_SCOPE_TRUST_PROXY, changes nothing and starts no server.`
 
 // resolveCommand is the backend binary's resolve command (resolveUsage): it
 // shows, before UPTIME_TARGET_SCOPE_TRUST_PROXY is turned on, which answer
@@ -46,6 +47,11 @@ func resolveCommand(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "invalid configuration:", err)
 		return 2
+	}
+	// The ranges the backend's start sets aside are left out here too, so
+	// that the verdict stays the API's; said, so that it does not surprise.
+	for _, r := range cfg.TargetScopeExternalIgnored {
+		fmt.Fprintf(stderr, "UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: %s; ignored, as the backend ignores it\n", r)
 	}
 	external, err := netguard.ParseExternalRanges(splitList(cfg.TargetScopeExternalCIDRs))
 	if err != nil {

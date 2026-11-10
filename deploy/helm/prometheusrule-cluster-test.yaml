@@ -20,6 +20,31 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  - name: KubeatScopeExternalRangesIgnored fires for the cluster whose start ignored a company range, once for an HA pair, not for the other cluster
+    interval: 1m
+    input_series:
+      # a's backend ignored a range at its start, and two replicas of a's
+      # Prometheus send its series under a replica label the store does not
+      # deduplicate; b's backend, with the same release, ignored none.
+      - series: 'kubeat_target_scope_external_ranges_ignored{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-0"}'
+        values: '1x10'
+      - series: 'kubeat_target_scope_external_ranges_ignored{job="kubeat-backend", namespace="kubeat", cluster="a", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080", prometheus="monitoring/k8s", prometheus_replica="prometheus-k8s-1"}'
+        values: '1x10'
+      - series: 'kubeat_target_scope_external_ranges_ignored{job="kubeat-backend", namespace="kubeat", cluster="b", service="kubeat-backend", endpoint="http", container="backend", pod="kubeat-backend-6c9d7f5b8-a1b2c", instance="10.128.2.15:8080"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: KubeatScopeExternalRangesIgnored
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: kubeat-backend
+              namespace: kubeat
+              cluster: a
+            exp_annotations:
+              summary: "Kubeat ignores 1 of its company ranges (UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS)"
+              description: "At its start the backend found ranges of UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS that hold an address of the cluster's own (the API server's, or one of the backend's pod, as after a drain moved it to a node whose pod network a range covers), or that it could not check, and ignored them; the other ranges stay in effect and monitoring goes on. For a user limited to some namespaces an address in an ignored range is inside the cluster, as without the setting: their monitors aimed there are down (blocked_by_scope) and new ones are refused; administrators, users who see every namespace and an annotation monitor's own host are not affected. The backend's log (target scope external ranges ignored, at the start) names each range and why; list only the company's ranges outside the cluster's pod, Service and node networks (README, \"Hedef politikası\", \"Açılış koruması\")."
+
   - name: KubeatDown fires for the cluster whose backend fails, not for the one whose backend answers
     interval: 1m
     input_series:

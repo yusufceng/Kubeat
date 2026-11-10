@@ -1102,27 +1102,49 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     - kaynak adrese güvenen bir kurum servisi (yalnız cluster'ın çıkış
       adresine izin veren bir güvenlik duvarı) bu kullanıcıyı Kubeat'ten
       ayıramaz; böyle bir servisin aralığı listeye girmemeli.
-  - **Açılış koruması.** Ayar açılışta denetlenir; ayarı daraltmak ya da
-    boşaltmak hatayı kaldırır:
-    - aralıklardan biri API sunucusunun adresini (`KUBERNETES_SERVICE_HOST`,
-      Service ağında) ya da backend'in kendi adresini (pod IP'si ya da
-      loopback) içeriyorsa backend başlamaz ve nedenini yazar
-      (`UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS: 10.0.0.0/8 holds the API server's
-      address 10.96.0.1 (KUBERNETES_SERVICE_HOST), ...`);
-    - geçersiz bir girdi de backend'i başlatmaz: CIDR olmayan değer, `/`
-      olmadan tek adres ya da IPv6 biçiminde yazılmış bir IPv4 aralığı
-      (`::ffff:10.50.0.0/112`; hata `10.50.0.0/16` yazımını önerir);
-    - koruma yalnız bu adreslere ve pod'un bu açılıştaki adresine bakar, ilk
-      açılışın geçmesi güvence değildir: pod ağının başka bir parçasını içeren
-      bir aralık (ör. pod ağı `10.128.0.0/14` iken `10.130.0.0/16`) bugün
-      geçer; pod başka bir node'a taşınıp o parçadan adres alınca (drain,
-      yeniden zamanlama) backend başlamaz. Backend tek kopya olduğu için
-      izleme o an durur; `ERROR` satırı ve CrashLoop görünür;
-    - pod ve Service ağının tamamını yukarıdaki `network.config/cluster`
-      çıktısıyla, node ağını ve API VIP'ini de "Şart"taki kurala göre siz
-      dışarıda tutarsınız;
-    - ayar verilmişse açılışta `target scope external ranges in effect` log
-      satırı aralıkları yazar.
+  - **Açılış koruması.** Ayar açılışta denetlenir. Biçim hatası backend'i
+    başlatmaz; cluster'ın kendi adresiyle çakışan aralık ise 0.53'ten beri
+    başlatmayı durdurmaz, yalnız o girdi yok sayılır:
+    - **Biçim hatası.** CIDR olmayan değer, `/` olmadan tek adres ya da IPv6
+      biçiminde yazılmış bir IPv4 aralığı (`::ffff:10.50.0.0/112`; hata
+      `10.50.0.0/16` yazımını önerir) backend'i başlatmaz; neden
+      `invalid configuration` satırındadır. Girdiyi düzeltmek ya da ayarı
+      boşaltmak hatayı kaldırır.
+    - **Cluster'ın kendi adresi.** Aralıklardan biri API sunucusunun adresini
+      (`KUBERNETES_SERVICE_HOST`, Service ağında) ya da backend'in kendi
+      adresini (pod IP'si ya da loopback) içeriyorsa, ya da backend kendi
+      adreslerini okuyamadığı için aralık denetlenemiyorsa backend başlar ve
+      izleme sürer. Yalnız o girdi yok sayılır, listenin geri kalanı
+      geçerlidir. Yok sayılan aralık ayarda hiç yokmuş gibi okunur: içindeki
+      adresler kapsamı sınırlı kullanıcı için yine cluster içidir (daha sıkı
+      taraf). 0.52'ye kadar backend bu durumda başlamıyordu.
+    - **Görünürlük.** Açılışta tek bir `ERROR` satırı her yok sayılan aralığı
+      nedeniyle yazar (`target scope external ranges ignored: ...`,
+      `ignored="10.0.0.0/8 holds the API server's address 10.96.0.1 (KUBERNETES_SERVICE_HOST), ..."`).
+      `kubeat_target_scope_external_ranges_ignored` yok sayılan girdi sayısını
+      verir; kurallar açıksa `KubeatScopeExternalRangesIgnored` yanar (bkz.
+      "Aracın kendi sağlığı"). Aralığı daraltmak ya da satırı silmek, sonraki
+      açılışta üçünü de kaldırır.
+    - **Etkisi.** Yok sayılan aralığa giden kapsamı sınırlı monitor'ler (bir
+      kullanıcının ve kaydı olmayan monitor'ler) `blocked_by_scope` ile DOWN
+      olur; oraya yeni monitor ya da kanal 403 alır. Yönetici, kapsamı `*`
+      olan kullanıcı ve annotation monitor'ünün kendi host'u etkilenmez; tek
+      kiracılı kurulumda yalnız annotation monitor'ünün yönlendirmeyle gittiği
+      başka bir host bu aralıktaysa reddedilir, ayar hiç verilmemiş gibi.
+      Kontrol sonucunun metni aralığı söylemez, çünkü kapsamı sınırlı
+      kullanıcıya aralık söylenmez; nedeni `ERROR` satırı ve kural verir.
+    - **Drain.** Koruma yalnız bu adreslere ve pod'un bu açılıştaki adresine
+      bakar, ilk açılışın geçmesi güvence değildir: pod ağının başka bir
+      parçasını içeren bir aralık (ör. pod ağı `10.128.0.0/14` iken
+      `10.130.0.0/16`) bugün geçer; pod başka bir node'a taşınıp o parçadan
+      adres alınca (drain, yeniden zamanlama) o aralık yok sayılır ve yukarıdaki
+      sinyaller görünür. 0.52'ye kadar backend o an başlamıyor, izleme
+      duruyordu (CrashLoopBackOff).
+    - **Sizde kalan.** Pod ve Service ağının tamamını yukarıdaki
+      `network.config/cluster` çıktısıyla, node ağını ve API VIP'ini de
+      "Şart"taki kurala göre siz dışarıda tutarsınız.
+    - Ayar verilmişse açılışta `target scope external ranges in effect` log
+      satırı geçerli kalan aralıkları yazar.
   - **Ad çözümü ve vekil.** Kurum adı backend'in kendi çözücüsünde çözülmelidir:
     cluster DNS'i kurum alanını kurumsal DNS'e iletir (OpenShift'te
     `dns.operator/default`'un `servers` alanı). Kurum aralıkları vekilli
@@ -4018,6 +4040,7 @@ yayınlar. Başlıcaları:
 | `kubeat_monitor_cert_expiry_timestamp_seconds` | Sertifikanın bitiş zamanı |
 | `kubeat_scheduler_last_tick_timestamp_seconds` | Scheduler'ın son çalıştığı an; ilerlemiyorsa kontrol yapılmıyordur |
 | `kubeat_self_healthy` | Kubeat işini yapıyorsa 1, yapmıyorsa 0: heartbeat'in kararı, her scrape'te ve heartbeat kapalıyken de hesaplanır. Son `UPTIME_HEARTBEAT_INTERVAL` içinde scheduler hiç tick tamamlamadıysa, o sürede gelen kontrol sonuçlarının hiçbiri yazılamadıysa ya da bir yazım aralıktan uzun sürdüyse 0; hiç sonuç gelmeyen aralık da, bazı sonuçların düşmesi de sağlıklıdır (bkz. aşağıda "Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`") |
+| `kubeat_target_scope_external_ranges_ignored` | 0.53: backend'in açılışta `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'ten yok saydığı girdi sayısı: API sunucusunun ya da backend pod'unun adresini içeren, ya da backend kendi adreslerini okuyamadığı için denetlenemeyen aralıklar. Açılışta bir kez yazılır, sonraki açılışa kadar değişmez; ayar boşken ve hiçbir girdi yok sayılmadığında 0. Aralıklar ve nedenleri etiket değildir, açılıştaki `ERROR` satırındadır (bkz. "Hedef politikası" → "Kurum ağı" → "Açılış koruması") |
 | `kubeat_scheduler_dispatch_skipped_total` | Boş worker olmadığı için bekleyen kontroller; artıyorsa `UPTIME_WORKERS` düşüktür |
 | `kubeat_target_throttled_total{host}` | Hedef host, son kontrolün yönlendirildiği bir host ya da ulaştığı bir adres dakikalık kontrol tavanına (`UPTIME_TARGET_MAX_RATE`, `UPTIME_CLUSTER_TARGET_MAX_RATE`, `UPTIME_TARGET_ADDRESS_MAX_RATE`) takıldığı için beklemeye başlayan kontroller, monitor'un kendi host'u etiketiyle; her bekleme kaç tick sürerse sürsün bir kez sayılır; ilk 100 host kendi etiketiyle, sonrakiler `other` olarak sayılır (bkz. "Hedef yükü") |
 | `kubeat_results_dropped_total` | Veritabanına yazılamayan sonuçlar |
@@ -4063,6 +4086,7 @@ yapılır. Kurallar:
 | `KubeatDown` | Backend 5 dakikadır scrape edilemiyor ya da hiç backend pod'u yok: pod bekliyor, silindi ya da uyutuldu (`critical`). `up{job="<release>-backend", namespace="<namespace>"}` serisine bakar; ServiceMonitor kapalıyken bu etiketlerle toplayan başka bir scrape yoksa sürekli yanar. Bu sırada kesinti, sertifika ve yedek alarmları 10 dakika açık kalır, sonra çözülür (bkz. aşağıda susturma kuralları) |
 | `KubeatSchedulerStalled` | Scheduler 5 dakikadır ilerlemiyor (`critical`) |
 | `KubeatUnhealthy` | `kubeat_self_healthy` 5 dakikadır 0: kontroller zamanlanmıyor ya da sonuçlarının hiçbiri yazılamıyor (dolu ya da salt okunur veri volume'u, takılı bir yazım) (`critical`). Heartbeat olmadan da yanar; yalnızca bazı sonuçların düşmesi `KubeatResultsDropped`'ın uyarısıdır. Backend pod'u yokken yanmaz, o `KubeatDown`'ın işidir; scheduler durunca `KubeatSchedulerStalled` ile birlikte yanar |
+| `KubeatScopeExternalRangesIgnored` | 0.53, `kubeat.self` grubunda, `warning`: backend açılışta kurum aralıklarından en az birini yok saydı (`kubeat_target_scope_external_ranges_ignored > 0`): aralık API sunucusunun ya da pod'un adresini içeriyor (ör. drain'den sonra) ya da denetlenemedi. İzleme sürer; `KubeatUnhealthy`'ye bağlı değildir. Beklemeden yanar, çünkü gauge açılışta bir kez yazılır; aralık düzeltilip backend yeniden başlayınca çözülür. Kuruluma göre tektir ve aralığı taşımaz; aralık ve neden backend log'undaki `ERROR` satırındadır. Recreate'in scrape boşluğunda çözülür, yeni pod da yok saydıysa yeniden yanar. Yok sayılan aralığa giden kapsamı sınırlı monitor'ler o arada `blocked_by_scope` ile DOWN'dır (bkz. "Hedef politikası" → "Kurum ağı" → "Açılış koruması") |
 | `KubeatMetricsIncomplete` | Monitor ya da kanal metrikleri veritabanından okunamıyor |
 | `KubeatResultsDropped` | Son 10 dakikada veritabanına yazılamayan kontrol sonucu var; uptime geçmişinde boşluk oluşur |
 | `KubeatNotificationsFailing` | Kanal başına: kanalın son teslimat denemesi başarısız (`kubeat_channel_last_delivery_ok == 0`) ya da kanalın almadığı bir kesinti yeniden gönderilmeyi bekliyor (`kubeat_channel_undelivered_outages > 0`), 5 dakikadır (`for: 5m`); bir kesinti o kanalda duyurulmamış olabilir. Etiketlerinde `channel`, `channel_type`, `namespace`, `job` ve `severity` (`warning`); açıklama kanalın adını söyler. 30 sn'lik bir hıçkırıkta yanmaz; `UPTIME_NOTIFY_RETRY_MAX` aralığıyla seyrek denenen kanalda denemeler arasında sönmez; tek monitor'u reddedip ötekileri alan kanalda da yanar (bkz. aşağıda "Kanal başına bildirim alarmı"). Scrape boşluğunda açık kalır, Kubeat çalışırken kapatılan ya da silinen kanalınki hemen çözülür. Kuyruk dolu olduğu için düşen bildirim aynı kuralın ayrı ve kanalsız ifadesidir (`increase(kubeat_notifications_dropped_total[15m]) > 0`); `for: 5m` ona da uygulanır, ilk düşüşten 5 dakika sonra yanar |
@@ -5642,7 +5666,7 @@ Ayarlar koda gömülmez; hepsi ortam değişkeniyle verilir. Örnek değerler
 | `UPTIME_TARGET_ALLOW_CIDRS` | – | Yasaklardan istisna tutulan aralıklar; virgülle ayrılmış CIDR, her yasağın önüne geçer |
 | `UPTIME_TARGET_RESOLVE_TIMEOUT` | `2s` | Yalnız API'de: kapsamı sınırlı bir kullanıcı dış görünen bir hedef belirlediğinde (oluşturma/değiştirme) kapsam denetiminin yaptığı ad çözümünün zaman aşımı; bu sürede çözülemeyen ad güvenli tarafta reddedilir ve `reason="resolve_error"` ile sayılır, yavaş çözücü `UPTIME_HTTP_WRITE_TIMEOUT`'a kadar bekletmez. Arayüzün `BACKEND_TIMEOUT_MS`'inden (3 sn) küçük tutun. 0.52'den beri kontrol anındaki çözüm bu ayara bağlı değildir, monitor'ün kendi zaman aşımıyla sınırlıdır (0.51'de varsayılan 5 sn; vekile giden kontrol de bunu kullanıyordu). Bkz. "Hedef politikası" → "Zaman aşımı". Yönetici ve kapsamı `*` olan kullanıcı bir ad çözmez |
 | `UPTIME_TARGET_SCOPE_TRUST_PROXY` | `false` | `true` iken kapsamı sınırlı kullanıcının hedefi backend'in çözücüsünde yalnız NXDOMAIN alıyor ve istek vekile gidiyorsa (`HTTP_PROXY`/`HTTPS_PROXY`, `NO_PROXY` dışında; HTTP, anahtar kelime, JSON, WebSocket monitor'leri ve webhook türü kanallar) reddedilmez. Yalnız vekil cluster dışındaysa açın. Cluster içine çözülen ad, SERVFAIL ve zaman aşımı yine reddedilir. Vekil verilmiş ve ayar kapalıysa açılışta bir `WARN` gelir. Bkz. "Hedef politikası" → "Vekilli kurulum" |
-| `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` | – | Kapsam denetiminin özel olsa da cluster dışı saydığı kurum aralıkları; virgülle ayrılmış CIDR. Bu aralıktaki bir adres (çıplak yazılmış ya da bir addan çözülmüş) kapsamı sınırlı kullanıcı için genel bir adres gibi kabul edilir. Hedef politikası ve yük korumaları bu ayarı okumaz. Cluster'ın pod, Service ve node ağları ile API VIP'i listeye girmez; router VIP'i yalnız on-prem Route'lar için bilerek (node ağındaysa `/32` ile) girer ve o VIP'teki her Route kapsamı sınırlı kullanıcıya açılır. API sunucusunun adresini ya da backend'in kendi adresini içeren aralık ve IPv6 biçiminde yazılmış IPv4 aralığı backend'i başlatmaz. Bkz. "Hedef politikası" → "Kurum ağı" |
+| `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS` | – | Kapsam denetiminin özel olsa da cluster dışı saydığı kurum aralıkları; virgülle ayrılmış CIDR. Bu aralıktaki bir adres (çıplak yazılmış ya da bir addan çözülmüş) kapsamı sınırlı kullanıcı için genel bir adres gibi kabul edilir. Hedef politikası ve yük korumaları bu ayarı okumaz. Cluster'ın pod, Service ve node ağları ile API VIP'i listeye girmez; router VIP'i yalnız on-prem Route'lar için bilerek (node ağındaysa `/32` ile) girer ve o VIP'teki her Route kapsamı sınırlı kullanıcıya açılır. CIDR olmayan girdi ve IPv6 biçiminde yazılmış IPv4 aralığı backend'i başlatmaz. API sunucusunun adresini ya da backend'in kendi adresini içeren aralık 0.53'ten beri backend'i durdurmaz: yalnız o girdi yok sayılır, öteki aralıklar geçerli kalır; açılışta `ERROR` satırı, `kubeat_target_scope_external_ranges_ignored` ve `KubeatScopeExternalRangesIgnored`. Bkz. "Hedef politikası" → "Kurum ağı" → "Açılış koruması" |
 | `UPTIME_MIN_CHECK_INTERVAL` | `5s` | Bir monitor için izin verilen en kısa kontrol aralığı |
 | `UPTIME_MIN_CHECK_INTERVAL_EXTERNAL` | `30s` | Hedefi cluster dışında olan bir monitor'un en kısa kontrol (ve tekrar) aralığı; `UPTIME_MIN_CHECK_INTERVAL`'dan kısa olamaz, `0` ayrı kural yok demektir. Bkz. "Hedef yükü" |
 | `UPTIME_TARGET_MAX_RATE` | `60` | Cluster dışındaki bir host'a tüm monitor'ların birlikte dakikada yapabileceği en fazla kontrol; fazlası sonraki tick'i bekler. `0` sınırsız |

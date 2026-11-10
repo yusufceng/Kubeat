@@ -143,8 +143,10 @@ func main() {
 	guard = guard.Trust(netguard.EnvironmentProxies()...)
 	logger.Info("target policy in effect", "target_policy", guard)
 	// The company's ranges the per-user scope check counts as outside the
-	// cluster. Load has checked them, and that none holds the API server's
-	// address or the backend's own; the target policy does not read them.
+	// cluster. Load has checked them, and set aside those that hold the API
+	// server's address or the backend's own, which the start says once;
+	// the target policy does not read them.
+	reportScopeExternal(cfg, meter, logger)
 	scopeExternal, err := netguard.ParseExternalRanges(splitList(cfg.TargetScopeExternalCIDRs))
 	if err != nil {
 		logger.Error("invalid target scope ranges", "error", err)
@@ -1025,6 +1027,34 @@ func reportSourceCeiling(cfg config.Config, logger *slog.Logger) {
 	logger.Info("UPTIME_LOGIN_SOURCE_MAX_FAILURES is 0: the ceiling on one source's failed sign-ins across names is off, " +
 		"so a single source may try a password at many directory names, a bind each " +
 		`(README, "LDAP", "Dizin hesap kilidi")`)
+}
+
+// scopeExternalIgnored is how the start's error about the company ranges it
+// set aside begins.
+const scopeExternalIgnored = "target scope external ranges ignored"
+
+// reportScopeExternal sets kubeat_target_scope_external_ranges_ignored to
+// how many ranges of UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS Load set aside, and
+// names them, each with why, in one error line. The backend starts all the
+// same (S96): an ignored range is read as if it were not listed, the
+// stricter side, so a scoped user's monitor aimed at an address in it is
+// down and a new one refused, while the rest stay in effect.
+func reportScopeExternal(cfg config.Config, meter *metrics.Metrics, logger *slog.Logger) {
+	ignored := cfg.TargetScopeExternalIgnored
+	meter.ScopeExternalRangesIgnored(len(ignored))
+	if len(ignored) == 0 {
+		return
+	}
+	names := make([]string, len(ignored))
+	for i, r := range ignored {
+		names[i] = r.String()
+	}
+	logger.Error(scopeExternalIgnored+": UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS holds ranges over an address of the cluster's own, "+
+		"or ranges that could not be checked; monitoring goes on with the others. For a user limited to some namespaces "+
+		"an address in an ignored range is inside the cluster, as without the setting: their monitors aimed there are down "+
+		"(blocked_by_scope) and new ones are refused. List only the company's ranges outside the cluster's pod, Service and "+
+		`node networks (README, "Hedef politikası", "Açılış koruması")`,
+		"ignored", strings.Join(names, "; "), "in_effect", cfg.TargetScopeExternalCIDRs)
 }
 
 // sweepThrottle forgets, every lockout period, the sign-in names whose

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/yusufceng/Kubeat/backend/internal/auth"
 	"github.com/yusufceng/Kubeat/backend/internal/config"
+	"github.com/yusufceng/Kubeat/backend/internal/metrics"
 	"github.com/yusufceng/Kubeat/backend/internal/scheduler"
 	"github.com/yusufceng/Kubeat/backend/internal/secretbox"
 	"github.com/yusufceng/Kubeat/backend/internal/store"
@@ -475,6 +477,84 @@ func TestReportSourceCeiling(t *testing.T) {
 			}
 			if strings.Contains(lines[0], "ui-token") {
 				t.Errorf("the line names the UI token: %q", lines[0])
+			}
+		})
+	}
+}
+
+// A company range over an address of the cluster's own no longer keeps the
+// backend from starting (S96): Load sets it aside and keeps the others, and
+// the start says so once, in one ERROR line naming each range with why, and
+// in kubeat_target_scope_external_ranges_ignored. With the setting empty, or
+// every range clear of the cluster, it logs nothing and the gauge is 0.
+func TestReportScopeExternal(t *testing.T) {
+	// The settings of the environment the tests run in are not the test's.
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "UPTIME_") {
+			t.Setenv(name, "")
+		}
+	}
+	t.Setenv("KUBERNETES_SERVICE_HOST", "172.30.0.1")
+	// The loopback is one of the backend's own addresses, in a pod as on the
+	// machine the test runs on, which has one as a rule.
+	loopback := false
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			if ipNet, ok := a.(*net.IPNet); ok && ipNet.IP.Equal(net.IPv4(127, 0, 0, 1)) {
+				loopback = true
+			}
+		}
+	}
+	const apiServer = "172.16.0.0/12 holds the API server's address 172.30.0.1 (KUBERNETES_SERVICE_HOST)"
+	const ownPod = "127.0.0.0/8 holds 127.0.0.1, an address of the backend's own pod"
+	for _, tt := range []struct {
+		name, value, inEffect string
+		ignored               []string
+		needsLoopback         bool
+	}{
+		{"empty", "", "", nil, false},
+		// 198.51.100.0/24 is for documentation: no machine has an address in it.
+		{"clear of the cluster", "198.51.100.0/24", "198.51.100.0/24", nil, false},
+		{"over the API server's address", "198.51.100.0/24, 172.16.0.0/12", "198.51.100.0/24", []string{apiServer}, false},
+		{"over the pod's own address", "127.0.0.0/8,198.51.100.0/24", "198.51.100.0/24", []string{ownPod}, true},
+		{"both, nothing left", "172.16.0.0/12,127.0.0.0/8", "", []string{apiServer, ownPod}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.needsLoopback && !loopback {
+				t.Skip("this machine has no loopback address 127.0.0.1")
+			}
+			t.Setenv("UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS", tt.value)
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatalf("Load: %v, want the backend to start", err)
+			}
+			if cfg.TargetScopeExternalCIDRs != tt.inEffect {
+				t.Errorf("ranges in effect %q, want %q", cfg.TargetScopeExternalCIDRs, tt.inEffect)
+			}
+			var logs bytes.Buffer
+			meter := metrics.New("test")
+			reportScopeExternal(cfg, meter, slog.New(slog.NewTextHandler(&logs, nil)))
+			got, err := meter.Gather()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value, ok := got["kubeat_target_scope_external_ranges_ignored"]; !ok || value != float64(len(tt.ignored)) {
+				t.Errorf("kubeat_target_scope_external_ranges_ignored = %v (present: %v), want %d", value, ok, len(tt.ignored))
+			}
+			if len(tt.ignored) == 0 {
+				if logs.Len() != 0 {
+					t.Errorf("logged %q, want nothing", logs.String())
+				}
+				return
+			}
+			lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+			if len(lines) != 1 || !strings.Contains(lines[0], ` level=ERROR msg="`+scopeExternalIgnored+": ") {
+				t.Fatalf("logged %q, want one ERROR line", lines)
+			}
+			for _, want := range tt.ignored {
+				if !strings.Contains(lines[0], want) {
+					t.Errorf("the line %q does not name %q", lines[0], want)
+				}
 			}
 		})
 	}

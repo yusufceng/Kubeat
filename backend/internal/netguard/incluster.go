@@ -120,8 +120,9 @@ type Resolver interface {
 // the node network, or within the company range that holds a load balancer
 // outside the cluster in front of the router. Either way every Route behind
 // that VIP then opens to scoped users. config.Load
-// refuses ranges that hold the API server's address or one of the backend's
-// own; the rest is the operator's to keep out (README, "Hedef politikası").
+// sets aside the ranges that hold the API server's address or one of the
+// backend's own, and the start says so; the rest is the operator's to keep
+// out (README, "Hedef politikası").
 type ExternalRanges struct{ prefixes []netip.Prefix }
 
 // mappedIPv4 is where IPv6 writes IPv4 addresses (::ffff:10.50.0.1).
@@ -177,7 +178,7 @@ func (e ExternalRanges) Contains(addr netip.Addr) bool {
 }
 
 // Holding returns the first range that holds addr, read as Contains reads
-// it, for config.Load to name the range its start guard refuses.
+// it.
 func (e ExternalRanges) Holding(addr netip.Addr) (netip.Prefix, bool) {
 	plain := addr.Unmap().WithZone("")
 	if !plain.IsValid() {

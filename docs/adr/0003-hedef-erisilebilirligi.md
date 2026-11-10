@@ -198,13 +198,24 @@ bağlantısında uygulanması sprint 9'da (0.51, #132, #131).**
   - hedef politikası ve yük korumaları ayarı okumaz; bunlar kiracı sınırı
     değildir;
   - aralıklardan biri API sunucusunun adresini (`KUBERNETES_SERVICE_HOST`) ya da
-    backend'in kendi adresini içeriyorsa backend başlamaz (PO kararı: WARN
-    değil hata, çünkü çakışma Service ya da pod ağını namespace'siz açar).
-    Koruma yalnız bu iki örneğe, bu açılıştaki hâlleriyle bakar: pod ağının
-    başka bir parçasını içeren aralık bugün geçer ve pod oraya taşınınca
-    backend'i durdurur. Aynı okuyucu (`netguard.ParseExternalRanges`) IPv6
-    biçiminde yazılmış IPv4 aralığını da reddeder; koruma ve kapsam denetimi
-    bir yazımda ayrışmaz;
+    backend'in kendi adresini içeriyorsa 0.51 ve 0.52'de backend başlamıyordu
+    (S80 PO kararı: WARN değil hata, çünkü çakışma Service ya da pod ağını
+    namespace'siz açar). Koruma yalnız bu iki örneğe, bu açılıştaki hâlleriyle
+    bakar: pod ağının başka bir parçasını içeren aralık bugün geçer ve pod
+    oraya taşınınca backend'i durduruyordu (sprint 10 prova (c): drain'de
+    CrashLoopBackOff, izleme durdu). 0.53'te (S96,
+    [#157](https://github.com/yusufceng/Kubeat/issues/157)) bu ortama bağlı
+    denetimler için karar değişti ("İzleme asla durmaz"): backend başlar,
+    yalnız çakışan girdi yok sayılır; backend kendi adreslerini okuyamazsa
+    denetlenemeyen her girdi de. Listenin geri kalanı geçerlidir. Yok sayılan
+    aralık ayarda hiç yokmuş gibi okunur, daha sıkı taraf: kapsam zayıflamaz,
+    yalnız o aralığa giden kapsamı sınırlı monitor'ler `blocked_by_scope` ile
+    DOWN olur. Açılışta `ERROR` satırı, `kubeat_target_scope_external_ranges_ignored`
+    ve `KubeatScopeExternalRangesIgnored` verilir; bütün listeyi yok saymak
+    seçilmedi, çünkü kurum hedefli bütün kapsamı sınırlı monitor'leri düşürürdü
+    (SRE). Biçim hataları backend'i yine başlatmaz: aynı okuyucu
+    (`netguard.ParseExternalRanges`) IPv6 biçiminde yazılmış IPv4 aralığını
+    reddeder; koruma ve kapsam denetimi bir yazımda ayrışmaz;
   - listeye ne girer (README "Kurum ağı", "Şart"): pod, Service ve node ağı
     ile API VIP'i hiç girmez; korumanın yakalamadığı çakışmayı dışarıda tutmak
     operatörün sorumluluğundadır. Router VIP'i

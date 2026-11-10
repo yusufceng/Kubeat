@@ -2689,6 +2689,14 @@ iki sıralı PR olarak geliyor:
 - router VIP'ini kendiliğinden bulmak ve dışlama sözdizimi. Bunların tetikleyicisi
   değişmedi.
 
+Güncelleme (sprint 11, [#157](https://github.com/yusufceng/Kubeat/issues/157) dalı): çalışma
+anı kısmı yapıldı (0.53). Ortama bağlı denetimler (API sunucusunun adresi, pod'un kendi
+adresleri, adreslerin okunamaması) backend'i durdurmuyor; yalnız çakışan girdi yok
+sayılıyor, `ERROR` satırı, `kubeat_target_scope_external_ranges_ignored` ve
+`KubeatScopeExternalRangesIgnored` veriliyor. Biçim hataları yine başlatmıyor. Madde
+[#158](https://github.com/yusufceng/Kubeat/issues/158) (beyan ve render hatası) merge
+edilince kapanır.
+
 ## Kurulum notunda `frontend.networkPolicy.from` önerisini Ingress sınıfına göre vermek
 
 2026-11-07'de ertelendi (S87 [#133](https://github.com/yusufceng/Kubeat/issues/133); [sprints/2026-11-07-sprint-09.md](sprints/2026-11-07-sprint-09.md)).
