@@ -48,7 +48,7 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.53'e
+### 0.42'den 1.0'a
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
@@ -141,17 +141,17 @@ geri dönüş başladığınız sürüme olur.
     kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
     PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.53'e
+### 0.41'den 1.0'a
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.53'e"deki adımlar.
+2. Sonra "0.42'den 1.0'a"daki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
-0.43–0.52'den gelirken başladığınız sürümden sonraki bölümleri
-eskiden yeniye okuyun. 0.40 ya da öncesinden gelirken de öyle; şemayı
+0.43–0.53'ten gelirken başladığınız sürümden sonraki bölümleri
+eskiden yeniye okuyun; 0.53.1 ve 1.0 yeni adım eklemez. 0.40 ya da öncesinden gelirken de öyle; şemayı
 yükselten 0.38, 0.39 ve 0.40'tan dönüş yalnızca yedekle olur.
 
 ## Ön kontrolleri betiklemek
@@ -330,6 +330,50 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 1.0'a yükseltme
+
+1.0.0 kararlı sürümdür ve 0.53.1'in kodudur: davranış, şema (26), chart
+değerleri ve kurallar değişmedi; değişen sürüm numarası ve belgelerdir.
+Karar 2026-11-11'de verildi ([yol haritası](yol-haritasi.md) 32. adım);
+anlamı:
+
+- **Uyumluluk.** 1.x boyunca `/api/v1`, chart değerleri, `UPTIME_*` ayar
+  adları, veritabanı şeması ve yükseltme yolu geriye uyumlu kalır: bir alan,
+  değer ya da ayar kaldırılacaksa en az bir minor boyunca uyarılır, davranış
+  değişikliği yükseltme notunda yazılır, kıran değişiklik yalnız 2.0'da. Her
+  minor `helm rollback` ile bir öncekine döner.
+- **Güvenlik ve destek.** [SECURITY.md](../SECURITY.md): düzeltme yalnız son
+  minor'a; dışarıdan bildirilen açığa duyuru, kendi bulunana "güvenlik
+  sürümü" ve "Güvenlik sürümleri" tablosu.
+- **Ölçülenler.** OpenShift'te (ROSA, tek namespace'li pilot) ve iki node'lu
+  minikube'da ölçüldü. GKE, vekilli ve hava boşluklu OpenShift, WAF ya da F5
+  önlü Route, gerçek Active Directory ve OADP ile geri yükleme ölçülmedi;
+  runbook'ları var ([gke-dogrulama.md](gke-dogrulama.md),
+  [openshift-dogrulama.md](openshift-dogrulama.md)) ve 1.0 kararı onlar
+  koşulmadan verildi. Belgeler bu yolları "ölçülmedi, prova kullanıcıda" diye
+  yazar; "destekleniyor" yalnız ölçülenler için denir.
+- **Bilinen sınırlar** ve 1.0'a girmeyen maddeler
+  [yol-haritasi.md](yol-haritasi.md) "Bilinen sınırlar"da.
+
+### Yapılacak
+
+- **Yedeği doğrulamalı blokla alın** (yukarıda "Yükseltmeden önce yedek").
+- `helm upgrade … --version 1.0.0` (README "Hızlı başlangıç"); 0.53.1'den
+  gelirken yeni adım yok, 0.53 ve öncesinden gelirken aradaki sürümlerin
+  "Yapılacak" adımları (yukarıda "Atlamalı yol"). Aynalı kurulumda iki imajı
+  ve chart'ı yeniden aynalayın; `cosign verify` kimliği
+  `release.yml@refs/tags/v1.0.0`.
+
+### Davranış değişikliği
+
+Yok.
+
+### Geri dönüş
+
+`helm rollback` ile 0.53.1'e ya da başladığınız sürüme; şema aynı.
+
+### Alarm kuralları: değişmedi
 
 ## 0.53.1'e yükseltme
 

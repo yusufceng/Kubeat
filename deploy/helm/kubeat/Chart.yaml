@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubeat
 description: Uptime monitoring for services running on Kubernetes and OpenShift
 type: application
-version: 0.53.1
-appVersion: "0.53.1"
+version: 1.0.0
+appVersion: "1.0.0"
 home: https://github.com/yusufceng/Kubeat
 sources:
   - https://github.com/yusufceng/Kubeat
