@@ -56,7 +56,13 @@ sonunda bakar ve yön verir.
    çare ve yükseltme notu cümlesi bulunur. Bir sinyali ayıran maddenin kabul
    ölçütü ayrımın göründüğü her yüzeyi sayar (sayaç, log satırı, denetim satırı,
    kontrol sonucu ya da bildirim metni); metni değişmeyen yüzey etki tablosunda
-   gerekçesiyle yazılır ve sonraki bir maddeye kesin bağlanır.
+   gerekçesiyle yazılır ve sonraki bir maddeye kesin bağlanır. Bir ölçüt bir
+   metni "değişmez" diye sabitliyorsa o metni gösteren her yüzey (bildirim üst
+   satırı, hatırlatma, webhook alanı, arayüz) listelenir; çare cümlesi taşıyan
+   bir metin "değişmez" diye sabitlenemez, çare yalnız açıklamada
+   (`explanation`) olur. Prova bir ölçüt kaçağı bulunca kayıt #181'deki
+   gibidir: reviewer kabulü, yükseltme notu ve sprint dosyasında "ölçütten
+   sapma".
 3. **Öncelik**: PO sprint hedefini, en çok dört maddelik sıralı listeyi ve
    gerekçeli "yapılmayacaklar"ı verir. Bir hikâyenin bilinen yan etkisi
    sonraki bir hikâyeye bırakılıyorsa o hikâye yedekte değil, kesin madde
@@ -98,7 +104,11 @@ sonunda bakar ve yön verir.
    developer raporunun "ertelendi" listesini PR'ın `docs/backlog.md` diff'iyle
    karşılaştırır; eksik madde bir inceleme bulgusudur. README'de ya da yol
    haritasında "bilinen sınır" diye yazılan bir parça backlog'a da
-   tetikleyicisiyle girer.
+   tetikleyicisiyle girer. Release manager'ın bir inceleme bulgusuna yaptığı
+   içerik düzeltmesi, büyüklüğü ne olursa olsun, reviewer'dan "yalnız bu diff"
+   onayı alır (rebase turunun patch-id deseni: bir inceleme ajanına diff ve
+   bulgu listesi verilir); onay alınmadıysa sürüm PR'ının yorumunda
+   "incelenmedi" diye yazılır ve madde müşteri puanına o notla gider.
 7. **Sprint sonu**: release manager sürümü çıkarır. Sandbox'ı yükseltmeden
    önce en yeni yedeği ve şifreleme anahtarını dışarı alıp kopyayı pod'daki
    dosyayla karşılaştırır ([pilot.md](../pilot.md) "Yükseltmeden önce
@@ -135,6 +145,18 @@ sonunda bakar ve yön verir.
    Route/Ingress → arayüz → backend); backend'e port-forward ile elle yazılmış
    bir başlık yeterli sayılmaz. NetworkPolicy iddiası taşıyan bir prova,
    politika uygulayan bir CNI (ör. Calico) ile başlatılmış minikube'da koşar.
+   Platforma bağlı bir komut veren belge satırı iki müşterinin platformu için
+   de (`oc` ve `gcloud`/`kubectl`) komut verir ya da "GKE'de karşılığı yok"
+   der; "atlanabilir" denen bir başlığın altında her platformda geçerli bir
+   reçete varsa o reçete başlıktan ayrı bağlanır. Tekrarlanan bir ölçüm
+   öncekinden belirgin farklıysa (iki kat ve üstü) belge nedeni ya da "neden
+   ölçülmedi"yi yazar ve runbook'un ölçüm adımı kaydedilecek yan verileri
+   sayar (pod'ların node'u, imaj çekme süresi, volume'un bağlanması). Bir
+   runbook adımı koştuğu cluster'ın güvenlik ayarını gevşetiyorsa "yalnız
+   üretim dışı ya da ayrı test release'i" diye işaretlenir ve üretim için
+   cluster'a dokunmayan yol (`helm template`) verilir; runbook'un sabit
+   referansları (imaj digest'i) belgeye yazılır ve `scripts/check-versions.sh`
+   onları da denetler.
 
 Ret alan bir madde en çok üç düzeltme turu görür. Dördüncü inceleme
 sondur: yine ret gelirse madde sürümden çıkar ve sonraki sprinte kalır.
@@ -233,6 +255,12 @@ Etiketler: `ready-for-agent` ve `bug` / `enhancement` / `documentation`.
   belge kabul ölçütü kullanıcının okuduğu yüzeyi (README) de sayar, yalnız
   CONTRIBUTING ya da iç belgeyi değil.
 - Ertelenen parçalar backlog'da, yol haritası satırı güncel.
+- Platforma bağlı belge satırı iki platform için de komut verir ya da
+  karşılığının olmadığını söyler; önceki ölçümden iki kat ve üstü farklı bir
+  ölçüm nedeniyle ya da "neden ölçülmedi" ile yazılır; güvenlik ayarını
+  gevşeten runbook adımı "yalnız üretim dışı" işaretlidir ve üretim için
+  cluster'a dokunmayan yol verir; sabit referanslar belgede ve
+  `scripts/check-versions.sh` denetiminde (sprint 11 retrosu).
 - Davranış değiştiren madde, developer raporunda sprint dosyasının
   "Yükseltme notu" başlığına bir cümle verir. Sürüm PR'ı yükseltme
   bölümünü taşır; 0.46'dan itibaren bölüm `docs/yukseltme.md`'dedir
