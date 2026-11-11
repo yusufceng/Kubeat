@@ -355,6 +355,14 @@ penceresinde; internete açık arayüzü ya da SBOM tabanlı tarama zorunluluğu
 olan kurulumlar önce. Şema 26, migration yok; imaj dışında her şey 0.53.0'la
 aynı.
 
+Sandbox'ta (ROSA, tek namespace) 2026-11-11'de yükseltildi: `helm upgrade`
+51 sn, backend açıldı, yükseltmeye bağlı hata satırı yok (loga yalnız o
+kurulumun bilinen eski bir kanalının bildirim hataları düştü), 11 monitor
+yerinde. Durum sayfası ve rozet 25,4 sn
+okunamadı: yeni pod başka bir node'a düştü ve veri volume'u 17 saniyede
+yeniden bağlandı; pod aynı node'da kalsaydı pencere ~4 sn olurdu (README
+"Durum sayfaları" → "Sınırlar").
+
 ### Yapılacak
 
 - **Yedeği doğrulamalı blokla alın** (yukarıda "Yükseltmeden önce yedek").

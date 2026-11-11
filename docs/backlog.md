@@ -3309,3 +3309,11 @@ verileriyle kaydedilen ilk yükseltme (sandbox'ta bir sonraki sürüm ya da bir 
 bildirimi); o zaman README "Durum sayfaları" → "Sınırlar" ve yol haritası "Bilinen sınırlar" ilk
 girdisi nedene bağlı yazılır. Aynı PR'ın yol haritası "Bilinen sınırlar"a eklediği "ölçüm yok"
 girdisinin tetikleyicisi yol haritası satır 32'dir (iki runbook'un koşulması).
+
+Kapanış 2 (2026-11-11, sandbox'ın 0.53.1 yükseltmesi): tetikleyici aynı gün geldi, neden ölçüldü
+ve yazıldı. Pencere 25,4 sn; yeni pod başka bir node'a düştü, veri ve yedek volume'ları 17 ve 21
+sn'de bağlandı (`FailedAttachVolume … Multi-Attach error` beklemesi), imaj 1,1 sn'de çekildi
+(yalnız değişen katmanlar), backend 4 sn'de hazır. Müşterinin cümlesi düzeltilmiş biçimiyle
+yazıldı: fark imajın çekilmesinden değil pod'un node değiştirmesinden (volume'un yeniden
+bağlanması) geliyor; aynı node ~4 sn, başka node ~25 sn. README "Durum sayfaları" → "Sınırlar",
+runbook madde 16, yol haritası "Bilinen sınırlar" ve pilot satırı güncellendi; 3 tamamen kapandı.
