@@ -29,7 +29,7 @@ yazar.
 ## Desteklenen sürümler
 
 Güvenlik düzeltmesini yalnızca son minor sürüm alır. Düzeltme en son
-yayımlanan `0.Y` hattında bir yama sürümüyle ya da bir sonraki minor sürümle
+yayımlanan minor hattında (`X.Y`) bir yama sürümüyle ya da bir sonraki minor sürümle
 çıkar; eski minor'lara geri taşınmaz. Daha eski bir minor'daysanız
 düzeltmeyi almak için son minor'a yükseltin
 ([docs/yukseltme.md](docs/yukseltme.md)'deki yükseltme notları). Bu kural

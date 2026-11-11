@@ -3319,3 +3319,29 @@ cümlesi düzeltilmiş biçimiyle
 yazıldı: fark imajın çekilmesinden değil pod'un node değiştirmesinden (volume'un yeniden
 bağlanması) geliyor; aynı node ~4 sn, başka node ~25 sn. README "Durum sayfaları" → "Sınırlar",
 runbook madde 16, yol haritası "Bilinen sınırlar" ve pilot satırı güncellendi; 3 tamamen kapandı.
+
+## Annotation monitor'ünün geçmişi için silme öncesi bekleme süresi (S102)
+
+2026-11-11'de eklendi (1.0 kararı; sprint 11 "Yapılmayacaklar" 6. sıra,
+[sprints/2026-11-08-sprint-11.md](sprints/2026-11-08-sprint-11.md)). Annotation kaldırılınca ya da
+nesne silinince monitor geçmişiyle birlikte hemen silinir (README "Keşif"); GitOps kazasında SLA
+geçmişi gider. İş L: "annotation kalkınca monitor de kalkar" tasarım kararını değiştirir, yeni bir
+durum (bekleyen silme), ayar ve arayüz ister. Yol haritası "Bilinen sınırlar" → "1.0'da
+yapılmayanlar". Tetikleyici: GitOps kazasında geçmişi silinen bir kurulum ya da SLA geçmişinin
+korunmasını isteyen ilk müşteri.
+
+## Kontrol başına bağlantının kapasite hesabı belgesi (S99)
+
+2026-11-11'de eklendi (1.0 kararı; sprint 11 "Yapılmayacaklar" 8. sıra). 0.52'den beri her HTTP
+kontrolü kendi bağlantısını açar; CPU, DNS sorgu hızı ve vekil (`CONNECT`) yükünün monitor sayısı ve
+aralığa göre hesabı tek belgede yok. GKE'nin Cloud NAT ve DNS notu README "Bağlantı yükü (GKE)"de,
+ölçüm adımları iki runbook'ta, 0.51–0.52 ölçümü [yuk-testi.md](yuk-testi.md)'de. Tetikleyici:
+worker doluluğu (`KubeatWorkersSaturated`), DNS ya da vekil yükü soran ilk kurulum.
+
+## Port-forward girişinde kaynak ayrımı kuralının çaresi (S104)
+
+2026-11-11'de eklendi (1.0 kararı; sprint 11 "Yapılmayacaklar" 10. sıra). Yalnız `port-forward` ile
+erişilen bir kurulumda `KubeatSignInSourceDegraded` kuralı hop değerini düzeltmeye iter; doğru değer
+README "Sayaç ve kural" → "Port-forward"ta. Kurulum notu ve kural metni bu durumu ayırmaz.
+Tetikleyici: `NOTES.txt`'ye dokunan bir sonraki madde ya da yalnız port-forward'la erişilen bir
+kurulumun bulgusu.
