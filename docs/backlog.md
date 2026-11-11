@@ -935,6 +935,16 @@ sürümü" adlandırmalarının etkilenen sürüm aralığını makine okunur bi
 GHSA/CVE okuyan tarayıcı advisory'siz bir düzeltmeden önceki sürümü açıklı göstermez.
 Tetikleyici değişmedi (1.0 kararı, sprint 11 sonu); bu üçü kararın girdisi.
 
+Karar (2026-11-11; kullanıcı release manager'ın önerisini onayladı; SECURITY.md güncellendi):
+**destek penceresi yok, 1.0'dan sonra da.** Güvenlik düzeltmesi yalnız son minor'a (yama ya da
+sonraki minor), önceki minor'a geri taşıma yok; daha uzun bir pencere ancak sözleşmeyle ve onun
+kapsamında. Duyuru: dışarıdan bildirilen açığa GHSA (+CVE); kendi bulunan açığa yükseltme notunda
+"güvenlik sürümü" + SECURITY.md "Güvenlik sürümleri" tablosunda etkilenen aralık. Müşteri A'nın
+üç şartından ikincisi (makine okunur tablo) karşılandı; birincisi (kendi bulunanlara GHSA/CVE) ve
+üçüncüsü (bir önceki minor'a yama) kabul edilmedi: satılmış sürüm ve ekip yok, geri taşımanın
+maliyeti tek bakımcıda; gerekirse sözleşmeyle verilir. Bölüm kapandı; 1.0 etiketinin kalan
+ön koşulu [yol-haritasi.md](yol-haritasi.md) satır 32'de.
+
 ## containers/image'ın okuduğu biçimde ikinci imza
 
 2026-10-29'da ertelendi (S1'in geliştirmesinde çıktı, #48). 0.45'ten beri
