@@ -3648,15 +3648,16 @@ okunamaz hâle gelir:
   yükseltilirken ve backend pod'u başka bir node'a taşınırken (node drain,
   eviction) sayfa bir süre "Durum şu anda okunamıyor" gösterir ve rozetler
   502 verir. Süre yeni pod'un nereye düştüğüne bağlıdır: sandbox Route'unda
-  üç yükseltmede yaklaşık 25 sn (2026-11-08, 0.52.0'a), 4 sn (2026-11-10,
-  0.53.0'a) ve 25 sn (2026-11-11, 0.53.1'e) ölçüldü (rozet ~2 sn'de bir
-  yoklandı; sonuncusunda eski pod'un durdurulmasından yeni pod'un hazır
-  olmasına 28 sn geçti). Sonuncusu yan verileriyle kaydedildi ve farkı
-  açıklar: yeni pod başka bir node'a düştü; veri ve yedek volume'ları (RWO
-  blok depolama) eski node'dan ayrılıp yenisine 17 ve 21 saniyede bağlandı
-  (o sürede pod'un olaylarında `FailedAttachVolume … Multi-Attach error`;
+  dört yükseltmede yaklaşık 25 sn (2026-11-08, 0.52.0'a), 4 sn (2026-11-10,
+  0.53.0'a), 25 sn (2026-11-11, 0.53.1'e) ve 25 sn (2026-11-11, 1.0.0'a)
+  ölçüldü (rozet ~2 sn'de bir yoklandı; 0.53.1'de eski pod'un
+  durdurulmasından yeni pod'un hazır olmasına 28 sn geçti). Son ikisi yan
+  verileriyle kaydedildi ve farkı açıklar: ikisinde de yeni pod başka bir
+  node'a düştü; veri ve yedek volume'ları (RWO blok depolama) eski node'dan
+  ayrılıp yenisine 15–21 saniyede bağlandı (o sürede pod'un olaylarında
+  `FailedAttachVolume`: `Multi-Attach error` ya da `Waiting for detach`;
   container ikincisini de bekler), imaj 1,1 saniyede çekildi (170 MB),
-  backend açılıp 4 saniyede hazır oldu. Önceki iki ölçümün node'u
+  backend açılıp 3–4 saniyede hazır oldu. Önceki iki ölçümün node'u
   kaydedilmedi; 4 sn, volume adımı olmayan toplamla (çekme ~1 sn + açılıştan
   hazıra 4 sn) tutarlıdır ve aynı node'da kalma diye okunur; 2026-11-08'in
   penceresi arayüz pod'unun değişimini de içeriyordu. Yani pod aynı node'da
