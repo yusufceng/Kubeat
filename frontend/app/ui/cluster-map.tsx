@@ -83,7 +83,7 @@ export function ClusterMap({ groups }: { groups: MapGroup[] }) {
   return (
     <section ref={root} className="panel fl-map-panel" aria-labelledby="fl-map-title" onKeyDown={onKeyDown}>
       <header className="fl-panel-head">
-        <h2 id="fl-map-title" className="type-heading">
+        <h2 id="fl-map-title" className="type-label text-ink-3">
           {t("monitorsList.map.title")}
         </h2>
         <span className="text-xs text-ink-3">{t("monitorsList.map.caption")}</span>

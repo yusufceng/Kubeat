@@ -22,9 +22,12 @@ import {
   UsersIcon,
 } from "@/app/ui/icons";
 import { LanguageToggle } from "@/app/ui/language-toggle";
-import { LogoMark } from "@/app/ui/logo";
+import { Logo, LogoMark } from "@/app/ui/logo";
 import { type Crumb, usePageCrumbs } from "@/app/ui/shell-state";
 import { ThemeToggle } from "@/app/ui/theme-toggle";
+
+/** The groups of the navigation, in the order they are shown. */
+export type NavGroup = "monitoring" | "response" | "reporting" | "admin";
 
 export type Section = {
   href: string;
@@ -33,7 +36,17 @@ export type Section = {
   short?: string;
   icon: (p: React.SVGProps<SVGSVGElement>) => React.ReactNode;
   match: (pathname: string) => boolean;
+  /** The group the wide navigation lists it under. */
+  group: NavGroup;
 };
+
+/** The groups and the message keys of their names. */
+const navGroups: { key: NavGroup; label: string }[] = [
+  { key: "monitoring", label: "nav.group.monitoring" },
+  { key: "response", label: "nav.group.response" },
+  { key: "reporting", label: "nav.group.reporting" },
+  { key: "admin", label: "nav.group.admin" },
+];
 
 /** Whether a path is in the workspace: the overview, a monitor or a namespace. */
 export function inWorkspace(pathname: string): boolean {
@@ -42,25 +55,26 @@ export function inWorkspace(pathname: string): boolean {
 
 /** The sections of the app, in the order of the rail; the command palette lists them too. */
 export const sections: Section[] = [
-  { href: "/", label: "nav.overview", icon: OverviewIcon, match: inWorkspace },
-  { href: "/incidents", label: "nav.incidents", icon: IncidentsIcon, match: (p) => p.startsWith("/incidents") },
-  { href: "/maintenance", label: "nav.maintenance", icon: MaintenanceIcon, match: (p) => p.startsWith("/maintenance") },
+  { href: "/", label: "nav.overview", icon: OverviewIcon, match: inWorkspace, group: "monitoring" },
+  { href: "/incidents", label: "nav.incidents", icon: IncidentsIcon, match: (p) => p.startsWith("/incidents"), group: "response" },
+  { href: "/maintenance", label: "nav.maintenance", icon: MaintenanceIcon, match: (p) => p.startsWith("/maintenance"), group: "response" },
   {
     href: "/status-pages",
     label: "nav.statusPages",
     short: "nav.statusPagesShort",
     icon: StatusPagesIcon,
     match: (p) => p.startsWith("/status-pages"),
+    group: "reporting",
   },
-  { href: "/reports", label: "nav.reports", icon: ReportsIcon, match: (p) => p.startsWith("/reports") },
-  { href: "/discovery", label: "nav.discovery", icon: DiscoveryIcon, match: (p) => p.startsWith("/discovery") },
-  { href: "/channels", label: "nav.channels", icon: BellIcon, match: (p) => p.startsWith("/channels") },
+  { href: "/reports", label: "nav.reports", icon: ReportsIcon, match: (p) => p.startsWith("/reports"), group: "reporting" },
+  { href: "/discovery", label: "nav.discovery", icon: DiscoveryIcon, match: (p) => p.startsWith("/discovery"), group: "monitoring" },
+  { href: "/channels", label: "nav.channels", icon: BellIcon, match: (p) => p.startsWith("/channels"), group: "response" },
 ];
 
 /** What only administrators have. */
 export const adminSections: Section[] = [
-  { href: "/users", label: "nav.users", icon: UsersIcon, match: (p) => p.startsWith("/users") },
-  { href: "/audit", label: "nav.audit", icon: AuditIcon, match: (p) => p.startsWith("/audit") },
+  { href: "/users", label: "nav.users", icon: UsersIcon, match: (p) => p.startsWith("/users"), group: "admin" },
+  { href: "/audit", label: "nav.audit", icon: AuditIcon, match: (p) => p.startsWith("/audit"), group: "admin" },
 ];
 
 /** The sections the phone's tab bar has room for; the rest are under More. */
@@ -103,12 +117,15 @@ function NavView({ pathname, user }: { pathname: string | null; user: ShellUser 
 }
 
 /**
- * A column of icons, --shell-rail wide; each names itself in a tooltip. Its
- * foot is the account menu, which also holds the theme and the language;
- * without a user (the backend cannot answer) those two stand in the rail
- * themselves, so that the frame never loses them. Sticky, the rail is a
- * stacking context of its own: z-40 puts it, and so its tooltips, over the
- * page beside it, which comes later and would otherwise paint on top.
+ * The navigation of a wide screen. From 1280px it is --shell-nav wide, the
+ * sections in their groups under small capital names, each an icon and its
+ * name; below that it is a --shell-rail column of icons, each naming itself
+ * in a tooltip, the groups told apart by a gap. Its foot is the account
+ * menu, which also holds the theme and the language; without a user (the
+ * backend cannot answer) those two stand in the rail themselves, so that
+ * the frame never loses them. Sticky, the rail is a stacking context of its
+ * own: z-40 puts it, and so its tooltips, over the page beside it, which
+ * comes later and would otherwise paint on top.
  */
 function Rail({ pathname, user }: { pathname: string | null; user: ShellUser | null }) {
   const t = useT();
@@ -123,21 +140,24 @@ function Rail({ pathname, user }: { pathname: string | null; user: ShellUser | n
       <span className="rail-tip">{t(s.label)}</span>
     </Link>
   );
+  const all = [...sections, ...(user?.admin ? adminSections : [])];
+  const groups = navGroups.map((g) => ({ ...g, items: all.filter((s) => s.group === g.key) })).filter((g) => g.items.length > 0);
   return (
     <nav
       aria-label={t("shell.nav")}
-      className="sticky top-0 z-40 hidden h-dvh w-(--shell-rail) flex-none flex-col items-center gap-1 border-r border-line bg-panel py-2 lg:flex dark:bg-canvas"
+      className="sticky top-0 z-40 hidden h-dvh w-(--shell-rail) flex-none flex-col items-center gap-1 border-r border-line bg-panel py-2 lg:flex xl:w-(--shell-nav) xl:items-stretch xl:px-2 dark:bg-canvas"
     >
-      <Link href="/" aria-label={t("shell.home")} className="mb-3 rounded-md">
-        <LogoMark size={28} />
+      <Link href="/" aria-label={t("shell.home")} className="mb-2 rounded-md xl:mx-2.5 xl:mb-1 xl:flex xl:h-8 xl:items-center">
+        <LogoMark size={28} className="xl:hidden" />
+        <Logo size={17} className="hidden text-ink xl:block" />
       </Link>
-      {sections.map(link)}
-      {user?.admin && (
-        <>
-          <span className="h-2" aria-hidden />
-          {adminSections.map(link)}
-        </>
-      )}
+      {groups.map((g, i) => (
+        <div key={g.key} className="contents">
+          <span className="rail-group type-label hidden xl:block">{t(g.label)}</span>
+          {i > 0 && <span className="h-2 xl:hidden" aria-hidden />}
+          {g.items.map(link)}
+        </div>
+      ))}
       <span className="flex-1" aria-hidden />
       {user ? (
         <AccountMenu user={user} />
@@ -164,11 +184,23 @@ function AccountMenu({ user }: { user: ShellUser }) {
         type="button"
         popoverTarget={id}
         aria-label={t("shell.accountMenu", { name: user.name })}
-        className="grid size-7 place-items-center rounded-full border border-line-strong bg-raised text-micro font-semibold text-ink-2 hover:border-ink-3 hover:text-ink"
+        className="group flex items-center gap-2.5 rounded-full xl:w-full xl:rounded-md xl:px-2 xl:py-1.5 xl:hover:bg-hover"
       >
-        {initials(user.name, t.intl)}
+        <span className="grid size-7 flex-none place-items-center rounded-full border border-line-strong bg-raised text-micro font-semibold text-ink-2 group-hover:border-ink-3 group-hover:text-ink">
+          {initials(user.name, t.intl)}
+        </span>
+        {/* From 1280px the name and the role stand beside the initials. */}
+        <span className="hidden min-w-0 flex-col text-left xl:flex">
+          <span className="truncate text-dense font-medium text-ink">{user.name}</span>
+          <span className="truncate text-micro text-ink-3">{user.role}</span>
+        </span>
       </button>
-      <div id={id} ref={menu} popover="auto" className="menu inset-auto bottom-2 left-[calc(var(--shell-rail)+8px)] w-60">
+      <div
+        id={id}
+        ref={menu}
+        popover="auto"
+        className="menu inset-auto bottom-2 left-[calc(var(--shell-rail)+8px)] w-60 xl:left-[calc(var(--shell-nav)+8px)]"
+      >
         <p className="px-2.5 pt-1.5 pb-2">
           <span className="block truncate font-semibold">{user.name}</span>
           <span className="block truncate text-xs text-ink-3">

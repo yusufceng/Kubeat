@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Mona_Sans } from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
 import { config } from "@/lib/config";
@@ -7,20 +6,9 @@ import { I18nProvider } from "@/lib/i18n/client";
 import { getLocale, getT } from "@/lib/i18n/server";
 import { themeScript } from "@/app/ui/theme-toggle";
 
-// Mona Sans with its width axis, which the display sizes and the readouts
-// use; IBM Plex Mono for what is typed into a cluster. Both have the
-// letters Turkish needs (İ ı ş ğ), and both are served from here.
-const sans = Mona_Sans({
-  variable: "--font-mona",
-  subsets: ["latin", "latin-ext"],
-  axes: ["wdth"],
-});
-
-const mono = IBM_Plex_Mono({
-  variable: "--font-plex",
-  subsets: ["latin", "latin-ext"],
-  weight: ["400", "500", "600"],
-});
+// The faces (IBM Plex Sans for words, JetBrains Mono for figures and code)
+// are served from public/fonts and declared in globals.css, so a build
+// needs no network and a page no third party.
 
 /** The name of the product and what it does, in the visitor's language. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -46,7 +34,7 @@ async function Localized({ children }: { children: React.ReactNode }) {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     // The theme script changes data-theme before React hydrates.
-    <html lang={config.defaultLocale} className={`${sans.variable} ${mono.variable} h-full`} suppressHydrationWarning>
+    <html lang={config.defaultLocale} className="h-full" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

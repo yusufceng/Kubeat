@@ -10,54 +10,101 @@
    the script in the root layout: the viewer's choice, or the system's. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* Kubeat Signal. Surfaces are cool graphite and carry no meaning; the
-   saturated hues are kept for a monitor's health; one blue accent marks
-   what can be acted on and never stands for a state. Every state color has
-   an -ink step for text, which reads on panel and canvas alike. */
+/* The two faces, served from public/fonts under the OFL: IBM Plex Sans for
+   words, JetBrains Mono for figures and code. Both carry the letters
+   Turkish needs, and a build needs no network for them. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/IBMPlexSans-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/IBMPlexSans-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/IBMPlexSans-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+
+/* The names the stylesheets read the faces by. They date from the faces
+   they first held (Mona Sans, IBM Plex Mono) and stay, since every
+   stylesheet reads them. */
 :root {
-  --canvas: #f2f4f7;
+  --font-mona: "IBM Plex Sans";
+  --font-plex: "JetBrains Mono";
+}
+
+/* Kubeat Teal. Surfaces are navy-black in the dark and warm grey in the
+   light, and carry no meaning; the saturated hues are kept for a
+   monitor's health; one teal accent marks what can be acted on and never
+   stands for a state. Every state color has an -ink step for text, which
+   reads on panel and canvas alike (4.5:1 and up); the state colors
+   themselves clear 3:1 as marks (WCAG 1.4.11). */
+:root {
+  --canvas: #f4f3ef;
   --panel: #ffffff;
   /* Menus, tooltips and dialogs, which float with --shadow-pop. */
   --raised: #ffffff;
   /* Inputs and sunken areas. */
-  --well: #f0f3f6;
-  --hover: #edeff3;
-  --line: #dfe2e7;
-  --line-strong: #cdd1d8;
+  --well: #f7f6f2;
+  --hover: #efede8;
+  --line: #e4e1d9;
+  --line-strong: #d1cdc3;
 
-  --ink: #151b23;
-  --ink-2: #474e57;
-  --ink-3: #666c75;
+  --ink: #191c20;
+  --ink-2: #4a5058;
+  --ink-3: #656b74;
 
-  --accent: #2f65db;
-  --accent-hover: #1e52c6;
+  /* Teal: 5.2:1 under white text, so the primary button's 13px label holds. */
+  --accent: #0b7a6f;
+  --accent-hover: #09685f;
   --accent-ink: #ffffff;
-  /* Links and accent words on panel or canvas. */
-  --accent-text: #2358cd;
+  /* Links and accent words on panel or canvas: 6.4:1 on white. */
+  --accent-text: #0a6b61;
 
-  --up: #0c994f;
-  --up-ink: #05773b;
+  --up: #148f52;
+  --up-ink: #0b6e3d;
   /* Degraded: verifying, recovering, a partial day. */
-  /* Deep enough for 3:1 against the light surfaces (WCAG 1.4.11): the
-     degraded glyph and bars are read, not decoration. */
-  --warn: #c67600;
-  --warn-ink: #a45e00;
-  --down: #e4312f;
-  --down-ink: #c51e21;
+  --warn: #bf7200;
+  --warn-ink: #9a5b00;
+  --down: #d93a36;
+  --down-ink: #b9241f;
   /* Text on a solid down fill, such as the button that deletes. */
   --on-down: #ffffff;
-  /* A solid danger button: white on --down is 4.4:1, under the 4.5:1 that
-     its 13px label needs (WCAG 1.4.3). */
-  --down-solid: #d42a28;
-  --maint: #7487a5;
-  --maint-ink: #4c5f7a;
-  --idle: #bbbec3;
+  /* A solid danger button, deep enough for its white 13px label (5.2:1). */
+  --down-solid: #cc2f2b;
+  --maint: #6f86a6;
+  --maint-ink: #4a5f7c;
+  --idle: #bcbdb8;
 
-  --series: #2f65db;
+  --series: #0b7a6f;
   /* Healthy slots of strips and grids: a calm green, so that failures stand out. */
   --ok-bar: color-mix(in oklab, var(--up) 62%, var(--panel));
 
-  --shadow-pop: 0 1px 0 rgba(16, 24, 40, 0.04), 0 12px 32px -12px rgba(16, 24, 40, 0.22);
+  --shadow-pop: 0 1px 0 rgba(25, 28, 32, 0.04), 0 12px 32px -12px rgba(25, 28, 32, 0.22);
 
   /* How light the text of a tag is; its hue comes from the tag's name. */
   --tag-ink: 0.48;
@@ -66,36 +113,36 @@
 }
 
 :root[data-theme="dark"] {
-  --canvas: #0a0c10;
-  --panel: #101317;
-  --raised: #191c21;
-  --well: #0c0e12;
-  --hover: #161a1f;
-  --line: #24282e;
-  --line-strong: #34383f;
+  --canvas: #0b0f17;
+  --panel: #111722;
+  --raised: #171e2b;
+  --well: #0d121a;
+  --hover: #161d2a;
+  --line: #1f2733;
+  --line-strong: #2a3442;
 
-  --ink: #eaedf1;
-  --ink-2: #b6bbc2;
-  --ink-3: #878d95;
+  --ink: #e6ebf2;
+  --ink-2: #aab4c3;
+  --ink-3: #7a8696;
 
-  --accent: #6294fa;
-  --accent-hover: #7ba9ff;
-  --accent-ink: #070d1a;
-  --accent-text: #85b0ff;
+  --accent: #2fd4c1;
+  --accent-hover: #55e0d0;
+  --accent-ink: #06211d;
+  --accent-text: #5fe3d3;
 
-  --up: #41d686;
-  --up-ink: #56db8f;
-  --warn: #fabb41;
-  --warn-ink: #fbc456;
-  --down: #ff5b58;
-  --down-ink: #ff7a73;
+  --up: #3dd68c;
+  --up-ink: #62e2a4;
+  --warn: #f5b942;
+  --warn-ink: #ffc95e;
+  --down: #ff5c5c;
+  --down-ink: #ff8585;
   --on-down: #1c0707;
   --down-solid: var(--down);
-  --maint: #7c94b7;
-  --maint-ink: #98accb;
-  --idle: #44484e;
+  --maint: #8aa0bf;
+  --maint-ink: #a8bad3;
+  --idle: #3a4454;
 
-  --series: #72a2ff;
+  --series: #2fd4c1;
   --ok-bar: color-mix(in oklab, var(--up) 58%, var(--panel));
 
   --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 16px 40px -12px rgba(0, 0, 0, 0.7);
@@ -164,6 +211,8 @@
      which the list's drawer begins. */
   --shell-bar: 44px;
   --shell-rail: 48px;
+  /* From 1280px the rail widens to a navigation with names. */
+  --shell-nav: 208px;
 }
 
 @theme inline {
@@ -237,10 +286,10 @@
   --text-base--line-height: calc(24 / 16);
   --text-lg: 18px;
   --text-lg--line-height: calc(24 / 18);
-  --text-xl: 20px;
-  --text-xl--line-height: calc(26 / 20);
-  --text-2xl: 24px;
-  --text-2xl--line-height: calc(28 / 24);
+  --text-xl: 22px;
+  --text-xl--line-height: calc(28 / 22);
+  --text-2xl: 28px;
+  --text-2xl--line-height: calc(32 / 28);
 
   /* The app's one curve under the name Tailwind's ease-out utility reads,
      so a utility and a stylesheet move the same way. */
@@ -253,11 +302,10 @@ body {
   font-family: var(--font-mona), ui-sans-serif, system-ui, sans-serif;
   font-size: 14px;
   line-height: 20px;
-  font-weight: 430;
-  /* Figures are proportional in running text. Mona Sans's tabular figures
-     are a set of their own, with a slashed zero and a footed one, so
-     tabular-nums is kept for figures that must line up or tick: readouts
-     (type-kpi), table columns, counters and timers. */
+  font-weight: 400;
+  /* Figures are proportional in running text; the figures that must line
+     up or tick (readouts, table columns, counters, timers) are set in the
+     mono face, tabular. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -278,34 +326,33 @@ body {
   outline-offset: 2px;
 }
 
-/* The type scale. Mona Sans is a variable font: the display sizes widen it,
-   the figures of the readouts narrow it. Nothing is set in capitals. */
+/* The type scale, in IBM Plex Sans at 400, 500 and 600; the figures of the
+   readouts in JetBrains Mono, tabular. Nothing is set in capitals but the
+   labels (type-label). */
 @utility type-display-l {
-  font-size: 32px;
-  line-height: 36px;
-  font-weight: 660;
-  font-stretch: 112.5%;
+  font-size: 36px;
+  line-height: 40px;
+  font-weight: 600;
   letter-spacing: -0.02em;
 }
 @utility type-display {
-  font-size: 28px;
-  line-height: 34px;
-  font-weight: 660;
-  font-stretch: 112.5%;
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: 600;
   letter-spacing: -0.02em;
 }
 /* The display style at phone size, and for a hero inside a page. */
 @utility type-display-s {
-  font-size: 24px;
-  line-height: 28px;
-  font-weight: 660;
-  font-stretch: 112.5%;
-  letter-spacing: -0.02em;
+  font-size: 28px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 @utility type-title {
-  font-size: 20px;
-  line-height: 26px;
-  font-weight: 620;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 @utility type-heading {
   font-size: 14px;
@@ -315,12 +362,12 @@ body {
 @utility type-body {
   font-size: 14px;
   line-height: 20px;
-  font-weight: 430;
+  font-weight: 400;
 }
 @utility type-dense {
   font-size: 13px;
   line-height: 18px;
-  font-weight: 450;
+  font-weight: 400;
 }
 @utility type-caption {
   font-size: 12px;
@@ -332,20 +379,29 @@ body {
   line-height: 14px;
   font-weight: 600;
 }
+/* A label in small capitals: a panel's title, a column's head, a group of
+   the navigation, the name over a readout. Cased by the page's language. */
+@utility type-label {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 @utility type-kpi {
+  font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 26px;
   line-height: 30px;
-  font-weight: 700;
-  font-stretch: 88%;
-  letter-spacing: -0.01em;
+  font-weight: 500;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 @utility type-kpi-l {
+  font-family: var(--font-plex), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 34px;
   line-height: 38px;
-  font-weight: 700;
-  font-stretch: 88%;
-  letter-spacing: -0.01em;
+  font-weight: 500;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 /* Targets, errors, kinds and namespaces. */
@@ -549,6 +605,45 @@ body {
   .rail-item:focus-visible .rail-tip {
     opacity: 1;
     translate: 0 -50%;
+  }
+  /* From 1280px the rail is --shell-nav wide and each item a row: the icon,
+     then its name where the tooltip was. */
+  @media (width >= 80rem) {
+    .rail-item {
+      grid-template-columns: 18px minmax(0, 1fr);
+      justify-items: start;
+      column-gap: var(--space-2-5);
+      width: 100%;
+      height: var(--space-7);
+      padding: 0 var(--space-2-5);
+      border-radius: var(--radius-sm);
+    }
+    .rail-tip,
+    .rail-item:hover .rail-tip,
+    .rail-item:focus-visible .rail-tip {
+      position: static;
+      z-index: auto;
+      translate: none;
+      opacity: 1;
+      overflow: hidden;
+      max-width: 100%;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: none;
+      box-shadow: none;
+      color: inherit;
+      font-size: var(--text-dense);
+      font-weight: 500;
+      line-height: var(--text-dense--line-height);
+      text-overflow: ellipsis;
+      transition: none;
+    }
+  }
+  /* The name of a group of the navigation, over its items, from 1280px. */
+  .rail-group {
+    padding: var(--space-3) var(--space-2-5) var(--space-1);
+    color: var(--ink-3);
   }
 
   /* A menu that floats (a popover): fades in and rises 4px. Where it sits

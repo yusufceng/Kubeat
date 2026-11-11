@@ -19,14 +19,14 @@ export type SlowMonitor = SlowRow & { name: string };
 /** The outage that ended last among the strip's. */
 export type LastOutage = StripOutage & { end: number };
 
-/** The state of a fleet in one sentence, and its glyph. */
-function fleetState(counts: StateCounts, t: Awaited<ReturnType<typeof getT>>): { sentence: string; glyph: GlyphKind } {
+/** The state of a fleet: a figure, the words that follow it, and its glyph. */
+function fleetState(counts: StateCounts, t: Awaited<ReturnType<typeof getT>>): { figure: number; words: string; glyph: GlyphKind } {
   const degraded = counts.verifying + counts.recovering + counts.degraded;
-  if (counts.down > 0) return { sentence: t.n("monitorsList.hero.down", counts.down), glyph: "down" };
-  if (degraded > 0) return { sentence: t.n("monitorsList.hero.degraded", degraded), glyph: "warn" };
-  if (counts.up === 0) return { sentence: t("monitorsList.hero.noneActive"), glyph: "paused" };
-  if (counts.up === counts.total) return { sentence: t.n("monitorsList.hero.allUp", counts.total), glyph: "up" };
-  return { sentence: t.n("monitorsList.hero.upNoneFailing", counts.up), glyph: "up" };
+  if (counts.down > 0) return { figure: counts.down, words: t.n("monitorsList.band.down", counts.down), glyph: "down" };
+  if (degraded > 0) return { figure: degraded, words: t.n("monitorsList.band.degraded", degraded), glyph: "warn" };
+  if (counts.up === 0) return { figure: 0, words: t.n("monitorsList.band.noneActive", 0), glyph: "paused" };
+  if (counts.up === counts.total) return { figure: counts.total, words: t.n("monitorsList.band.allUp", counts.total), glyph: "up" };
+  return { figure: counts.up, words: t.n("monitorsList.band.upNoneFailing", counts.up), glyph: "up" };
 }
 
 /**
@@ -104,15 +104,15 @@ export async function FleetHero({
   );
 
   return (
-    <section className="panel fl-hero" aria-labelledby={id}>
+    <section className="fl-hero" aria-labelledby={id}>
       <div className="fl-hero-top">
         <div className="fl-hero-text">
-          <div className="fl-state">
+          {/* The glyph, the figure in the large tabular style, the words: read as one sentence. */}
+          <Heading id={id} className="fl-band-title">
             <StatusGlyph kind={state.glyph} size={12} live={state.glyph === "down"} />
-            <Heading id={id} className={level === 1 ? "type-title" : "type-heading"}>
-              {state.sentence}
-            </Heading>
-          </div>
+            <span className={level === 1 ? "type-kpi-l" : "type-kpi"}>{state.figure.toLocaleString(t.intl)}</span>
+            <span className="fl-band-words">{state.words}</span>
+          </Heading>
           <div role="group" aria-label={t("monitorsList.hero.counts")} className="fl-counts">
             {count("up", "up", counts.up, t("monitorsList.filter.up"))}
             {count("down", "down", counts.down, t("monitorsList.filter.down"), "fl-count-down")}

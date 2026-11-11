@@ -47,9 +47,8 @@ export function MonitorHeader({
   const last = monitor.last_result;
   const failing = monitor.enabled && last !== null && !last.up;
   // Degraded: up, but slower than the threshold; the chip counts since the
-  // first slow check and says what the answers are slower than.
+  // first slow check, and the slow line under it says the threshold.
   const slow = state === "degraded";
-  const thresholdMs = monitor.slow_above_ms.toLocaleString(t.intl);
   return (
     <header className="mon-head">
       <div className="mon-head-main">
@@ -62,8 +61,9 @@ export function MonitorHeader({
             { label: monitor.namespace || t(MANUAL_LABEL), href: namespaceHref(monitor.namespace), mono: monitor.namespace !== "" },
           ]}
         />
+        {/* One line: the name, what it is, how it stands. */}
         <div className="mon-title-row">
-          <h1 className="mon-title type-display-s @min-[42rem]:type-display">{name}</h1>
+          <h1 className="mon-title type-title">{name}</h1>
           <span className="mon-kind" title={`${t("monitorPage.kind.title")}: ${object ? `${object} · ` : ""}${typeWords[monitor.type]}`}>
             {object && (
               <>
@@ -73,18 +73,15 @@ export function MonitorHeader({
             )}
             <span>{typeWords[monitor.type]}</span>
           </span>
+          {/* The chip keeps to the state and its length; the slow line under it says what the answers are slower than. */}
+          <StatusPill state={state} t={t} since={slow ? (monitor.slow_since ?? undefined) : since} incident={monitor.open_incident?.id} />
         </div>
         {monitor.description && <p className="mon-desc">{monitor.description}</p>}
-        <div className="mon-stline">
-          <StatusPill
-            state={state}
-            t={t}
-            since={slow ? (monitor.slow_since ?? undefined) : since}
-            incident={monitor.open_incident?.id}
-            note={slow ? t("monitorPage.slow.note", { ms: thresholdMs }) : undefined}
-          />
-          {failing && <ErrorLine last={last} />}
-        </div>
+        {failing && (
+          <div className="mon-stline">
+            <ErrorLine last={last} />
+          </div>
+        )}
         {slow && <SlowLine monitor={monitor} recent={recent ?? []} t={t} />}
         <div className="mon-meta">
           {monitor.target && (

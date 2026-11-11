@@ -201,6 +201,24 @@
     color: var(--ink);
   }
 
+  /* The columns' names over the list, on the rows' grid; the kind sits with the name. */
+  .fl-cols-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--fl-beats-w, 72px) var(--space-12);
+    column-gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-3) var(--space-1) var(--fl-lead-w);
+    border-bottom: 1px solid var(--line);
+    color: var(--ink-3);
+  }
+  .fl-cols-head > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fl-cols-head > span:last-child {
+    text-align: right;
+  }
+
   .fl-groups {
     flex: 1;
     min-height: 0;
@@ -254,12 +272,14 @@
     color: var(--ink-3);
     transition: rotate var(--duration-fast) var(--ease-signal);
   }
+  /* A namespace's name is an identifier, so it keeps its case; the label's size and tracking say "group". */
   .fl-ns-name {
     overflow: hidden;
     font-family: var(--font-plex), ui-monospace, monospace;
-    font-size: var(--text-xs);
+    font-size: var(--text-micro);
     font-weight: 500;
-    line-height: var(--text-xs--line-height);
+    line-height: var(--text-micro--line-height);
+    letter-spacing: 0.04em;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -284,8 +304,9 @@
     min-width: var(--space-7);
     padding: 2px;
     border-radius: var(--radius-xs);
+    font-family: var(--font-plex), ui-monospace, monospace;
     font-size: var(--text-micro);
-    font-weight: 600;
+    font-weight: 500;
     line-height: var(--text-micro--line-height);
     font-variant-numeric: tabular-nums;
     text-align: right;
@@ -322,7 +343,7 @@
   }
   .fl-row-link {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto var(--space-10);
+    grid-template-columns: minmax(0, 1fr) auto var(--space-12);
     align-items: center;
     column-gap: var(--space-2);
     height: 100%;
@@ -412,10 +433,10 @@
     line-height: var(--text-micro--line-height);
   }
   .fl-uptime {
+    font-family: var(--font-plex), ui-monospace, monospace;
     font-size: var(--text-xs);
     font-weight: 500;
     line-height: var(--text-xs--line-height);
-    font-stretch: 92%;
     font-variant-numeric: tabular-nums;
     text-align: right;
   }
@@ -540,7 +561,8 @@
      every line is a figure, a state or a way somewhere. */
   .fl-hero {
     position: relative;
-    padding: var(--space-4) var(--space-5);
+    padding: var(--space-1) 0 var(--space-4);
+    border-bottom: 1px solid var(--line);
   }
   .fl-hero-top {
     display: flex;
@@ -555,13 +577,23 @@
     gap: var(--space-2);
     min-width: 0;
   }
-  .fl-state {
+  /* The title of the band: the glyph, the figure in the large tabular face, the words after it. */
+  .fl-band-title {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: var(--space-2);
+    min-width: 0;
   }
-  .fl-state > .glyph {
+  .fl-band-title > .glyph {
     flex: none;
+    align-self: center;
+  }
+  .fl-band-words {
+    min-width: 0;
+    font-size: var(--text-xl);
+    font-weight: 600;
+    line-height: var(--text-xl--line-height);
+    letter-spacing: -0.01em;
   }
   /* The counts: a chip each, its glyph, its figure and its word; a zero is quiet. */
   .fl-counts {
@@ -593,7 +625,8 @@
   }
   .fl-count b {
     color: var(--ink);
-    font-weight: 650;
+    font-family: var(--font-plex), ui-monospace, monospace;
+    font-weight: 500;
   }
   .fl-count-down b {
     color: var(--down-ink);
@@ -644,7 +677,8 @@
     gap: var(--space-1);
     min-width: 0;
   }
-  .fl-fact + .fl-fact::before {
+  /* The dot ends a part, so a line that wraps does not begin with one. */
+  .fl-fact:not(:last-child)::after {
     content: "·";
     margin: 0 var(--space-1-5);
     color: var(--ink-3);
@@ -660,10 +694,14 @@
     text-decoration: underline;
     text-underline-offset: 2px;
   }
+  .fl-fact-ms {
+    font-family: var(--font-plex), ui-monospace, monospace;
+    font-size: var(--text-xs);
+  }
   /* On a phone the summary is tighter still. */
   @container (width < 560px) {
     .fl-hero {
-      padding: var(--space-3) var(--space-4);
+      padding: 0 0 var(--space-3);
     }
   }
   .fl-strip {

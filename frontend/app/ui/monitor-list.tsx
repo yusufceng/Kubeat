@@ -14,7 +14,7 @@ import { ConfirmDialog } from "@/app/ui/confirm";
 import { CheckIcon, CloseIcon, FilterIcon } from "@/app/ui/fleet-icons";
 import { SearchIcon } from "@/app/ui/icons";
 import type { UptimeTones } from "@/lib/uptime-tone";
-import { Chevron, groupCount, HealthBar, HoverCard, Row } from "@/app/ui/monitor-row";
+import { beatWidth, Chevron, groupCount, HealthBar, HoverCard, Row } from "@/app/ui/monitor-row";
 import { type ListFilter, useListFilter } from "@/app/ui/shell-state";
 import type { DisplayState } from "@/app/ui/status";
 import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
@@ -329,6 +329,18 @@ export function MonitorList({
         )}
       </div>
 
+      {/* The columns' names, for the eye; the rows name their parts to the screen reader. */}
+      {items.length > 0 && (
+        <div
+          className="fl-cols-head type-label"
+          aria-hidden
+          style={{ "--fl-beats-w": `${beatWidth(beats) * beats + beats - 1}px` } as React.CSSProperties}
+        >
+          <span>{t("monitorsList.list.head.name")}</span>
+          <span>{t("monitorsList.list.head.checks", { count: beats })}</span>
+          <span>{t("monitorsList.list.head.uptime")}</span>
+        </div>
+      )}
       <p id={hintId} className="sr-only">
         {canEdit ? t("monitorsList.list.keys.edit") : t("monitorsList.list.keys.view")}
       </p>

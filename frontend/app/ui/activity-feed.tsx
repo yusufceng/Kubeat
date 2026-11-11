@@ -118,7 +118,7 @@ export function ActivityFeed({ ongoing, events, asOf }: { ongoing: ActivityEvent
   return (
     <section className="panel fl-activity" aria-labelledby="fl-activity-title">
       <header className="fl-panel-head">
-        <h2 id="fl-activity-title" className="type-heading">
+        <h2 id="fl-activity-title" className="type-label text-ink-3">
           {t("monitorsList.activity.title")}
         </h2>
         <Link href="/incidents" className="btn btn-ghost btn-sm ml-auto">

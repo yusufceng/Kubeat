@@ -1593,6 +1593,56 @@
     line-height: 16px;
   }
 
+  /* ---------- Readouts ---------- */
+  /* Figures in one row split by hairlines, in no box: a label in small
+     capitals, the figure in the large tabular face, a hint. */
+  .rd {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) 0;
+  }
+  /* Each figure is as wide as it needs and shares what is left; a row
+     too narrow for them all wraps rather than cutting a figure short. */
+  .rd-item {
+    flex: 1 1 auto;
+    padding: 0 var(--space-3);
+    border-left: 1px solid var(--line);
+  }
+  .rd-item:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .rd-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    overflow: hidden;
+    color: var(--ink-3);
+    white-space: nowrap;
+  }
+  .rd-value {
+    margin-top: var(--space-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rd-unit {
+    margin-left: 2px;
+    color: var(--ink-3);
+    font-size: var(--text-dense);
+    font-weight: 500;
+    line-height: 1;
+  }
+  .rd-hint {
+    margin-top: 2px;
+    overflow: hidden;
+    color: var(--ink-3);
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* ---------- Signing in and the first account ---------- */
   /* The warning bar when there is one, the column in the middle, the foot
      at the bottom: each in its row, whether the bar is there or not. */
@@ -1616,14 +1666,15 @@
   }
   .auth-logo {
     flex: none;
+    align-self: center;
     margin-bottom: 10px;
   }
   .auth-title {
-    font-size: 26px;
-    line-height: 30px;
-    font-weight: 660;
-    font-stretch: 112.5%;
-    letter-spacing: -0.02em;
+    font-size: 28px;
+    line-height: 32px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    text-align: center;
     text-wrap: balance;
   }
   .auth-intro {

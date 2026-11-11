@@ -24,7 +24,7 @@ function uptimeFigure(item: FleetItem, t: T): string {
 }
 
 /** How wide each beat of a row is: as many as fit in about 72px, 2 to 4px each. */
-function beatWidth(slots: number): number {
+export function beatWidth(slots: number): number {
   return Math.min(4, Math.max(2, Math.floor(72 / slots) - 1));
 }
 
