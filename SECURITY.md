@@ -15,12 +15,16 @@ Bildirimde şunlar işe yarar:
 - Açığı yeniden üretme adımları.
 - Etkisi: ne okunabiliyor, ne değiştirilebiliyor, kimin yetkisiyle.
 
-Düzeltme yayımlanınca bildirilen açık, depoda bir GitHub güvenlik
-duyurusuyla (Security Advisory) duyurulur. Kararlı sürüme (1.0) kadar kendi
-incelememizde ya da taramamızda bulduğumuz bir açığın düzeltmesi duyuru
-açılmadan çıkabilir: o zaman [docs/yukseltme.md](docs/yukseltme.md)'deki
-yükseltme notu sürümü "güvenlik sürümü" diye adlandırır ve hangi kurulumların
-yükseltmesi gerektiğini yazar, açığın ayrıntısını yazmaz.
+Düzeltme yayımlanınca dışarıdan bildirilen açık, depoda bir GitHub güvenlik
+duyurusuyla (Security Advisory; CVE kimliği GitHub'dan istenir) duyurulur;
+duyuru etkilenen ve düzelten sürümleri yazar. Kendi incelememizde ya da
+taramamızda bulduğumuz bir açığın düzeltmesi duyuru açılmadan çıkar, 1.0'dan
+sonra da: [docs/yukseltme.md](docs/yukseltme.md)'deki yükseltme notu sürümü
+"güvenlik sürümü" diye adlandırır, hangi kurulumların yükseltmesi gerektiğini
+yazar ve açığın ayrıntısını yazmaz; sürüm aşağıdaki "Güvenlik sürümleri"
+tablosuna etkilenen sürüm aralığıyla girer. Bir bağımlılığın kendi duyurusu
+olan açığında (Go, npm paketi, taban imaj) duyuru o kimliktir; tablo onu
+yazar.
 
 ## Desteklenen sürümler
 
@@ -28,7 +32,28 @@ Güvenlik düzeltmesini yalnızca son minor sürüm alır. Düzeltme en son
 yayımlanan `0.Y` hattında bir yama sürümüyle ya da bir sonraki minor sürümle
 çıkar; eski minor'lara geri taşınmaz. Daha eski bir minor'daysanız
 düzeltmeyi almak için son minor'a yükseltin
-([docs/yukseltme.md](docs/yukseltme.md)'deki yükseltme notları).
+([docs/yukseltme.md](docs/yukseltme.md)'deki yükseltme notları). Bu kural
+1.0'dan sonra da geçerlidir (karar 2026-11-11): bir önceki minor'a yama veren
+bir destek penceresi yoktur; daha uzun bir pencere ancak bir sözleşmeyle ve o
+sözleşmenin kapsamında verilir.
+
+## Güvenlik sürümleri
+
+Yükseltme notunda "güvenlik sürümü" diye adlandırılan sürümler ve bir
+bağımlılığın açığı için çıkan yamalar; "etkilenen sürümler" yükseltmesi gereken
+sürümlerdir. Duyurusu olmayan satırlar GHSA ve CVE'de görünmez: tarayıcı ve
+envanter araçları için kaynak bu tablodur.
+
+| Sürüm | Tarih | Etkilenen sürümler | Ne | Kimlik | Duyuru |
+| --- | --- | --- | --- | --- | --- |
+| 0.53.1 | 2026-11-11 | 0.53.0 ve öncesi (hepsi go1.26.10 ya da daha eski Go ile derlendi) | Go `net/http`: `MaxBytesReader` sınırı aşılırken başlık yarışı, HTTP/1 sunucu çökmesi; Kubeat kodu değişmedi, Go 1.26.11 ile yeniden derlendi | [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859), CVE-2026-97054 | Go'nun duyurusu; yükseltme notu "0.53.1'e yükseltme" |
+| 0.51.0 | 2026-11-07 | 0.47.0–0.50.0 (namespace'le sınırlı kullanıcısı olan kurulumlar) | Kapsamı sınırlı kullanıcının monitor'ünde kapsam yalnız hedef belirlenirken denetleniyordu; 0.51'den beri kontrolün açtığı her bağlantıda | — (kendi bulgumuz) | Yükseltme notu "0.51'e yükseltme" |
+| 0.50.0 | 2026-11-07 | 0.48.0–0.49.0 (Route ya da Ingress arkasındaki kurulumlar) | Kaynak-başına giriş throttle'ı (CWE-307 düzeltmesi) arayüz yolunda etkisizdi: arayüz istemci adresini backend'e taşımıyordu | — (kendi bulgumuz) | Yükseltme notu "0.50'ye yükseltme" |
+
+Tablo 0.50.0'dan beri tutulur. 0.47.0–0.49.0'daki güvenlik iyileştirmeleri (iç
+adreslerin hata metninden maskelenmesi, kullanıcı başına hedef kapsamı, hesap
+kilidinin kaynak adrese göre throttle'a dönmesi) yükseltme notlarında
+anlatılır; o sürümler "güvenlik sürümü" diye adlandırılmadı.
 
 ## Hedef süre
 
