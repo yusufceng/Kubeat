@@ -3647,17 +3647,31 @@ okunamaz hâle gelir:
 - Backend tek replica çalışır ve `Recreate` ile güncellenir: Kubeat
   yükseltilirken ve backend pod'u başka bir node'a taşınırken (node drain,
   eviction) sayfa bir süre "Durum şu anda okunamıyor" gösterir ve rozetler
-  502 verir. Süre yeni pod'un açılmasına bağlıdır: sandbox Route'unda iki
-  yükseltmede yaklaşık 25 sn (2026-11-08, 0.52.0'a; pencere iki parçaydı,
-  backend'in `Recreate`'i ve arayüz pod'unun değişimi) ve 4 sn (2026-11-10,
-  0.53.0'a) ölçüldü. Altı katlık farkın nedeni ölçülmedi: imajın çekilme
-  süresi, pod'ların node'u ve volume'un bağlanma süresi iki ölçümde de
-  kaydedilmedi. Pencereyi uzatan bilinen etkenler: yeni sürümün imajının
-  node'a çekilmesi (node'da hazırsa saniyeler; değilse imajın boyutuna ve
-  registry'ye bağlı), pod'un başka bir node'a düşmesi (veri volume'unun
-  eski node'dan ayrılıp yenisine bağlanması; drain'de yeniden zamanlama da
-  eklenir) ve açılış ile hazırlık yoklamalarının aralığı (5 ve 10 sn).
-  Ölçerken bunları da kaydedin
+  502 verir. Süre yeni pod'un nereye düştüğüne bağlıdır: sandbox Route'unda
+  üç yükseltmede yaklaşık 25 sn (2026-11-08, 0.52.0'a), 4 sn (2026-11-10,
+  0.53.0'a) ve 25 sn (2026-11-11, 0.53.1'e) ölçüldü (rozet ~2 sn'de bir
+  yoklandı; sonuncusunda eski pod'un durdurulmasından yeni pod'un hazır
+  olmasına 28 sn geçti). Sonuncusu yan verileriyle kaydedildi ve farkı
+  açıklar: yeni pod başka bir node'a düştü; veri ve yedek volume'ları (RWO
+  blok depolama) eski node'dan ayrılıp yenisine 17 ve 21 saniyede bağlandı
+  (o sürede pod'un olaylarında `FailedAttachVolume … Multi-Attach error`;
+  container ikincisini de bekler), imaj 1,1 saniyede çekildi (170 MB),
+  backend açılıp 4 saniyede hazır oldu. Önceki iki ölçümün node'u
+  kaydedilmedi; 4 sn, volume adımı olmayan toplamla (çekme ~1 sn + açılıştan
+  hazıra 4 sn) tutarlıdır ve aynı node'da kalma diye okunur; 2026-11-08'in
+  penceresi arayüz pod'unun değişimini de içeriyordu. Yani pod aynı node'da
+  kalırsa pencere ~4 sn'dir; başka bir node'a düşerse volume'ların taşınması
+  ~20 sn ekler. Çok node'lu bir cluster'da `Recreate` yeni pod'u volume'un
+  bölgesindeki (zone) herhangi bir node'a koyar: uzun pencere olağan
+  durumdur. `backend.nodeSelector` ile pod'u tek node'a sabitlemek pencereyi
+  kısaltır, ama o node veri volume'unun bölgesinde olmalıdır (bölgeye bağlı
+  RWO depolamada volume başka bölgedeki node'a bağlanamaz, pod `Pending`
+  kalır; [docs/openshift-dogrulama.md](docs/openshift-dogrulama.md) "Vekilli
+  ve hava boşluklu OpenShift" adım 6(b))
+  ve node drain edilince drain bitene dek, node silinip yenisi gelince (node
+  havuzu yükseltmesi, otomatik ölçekleme) değer değiştirilene dek pod
+  `Pending` kalır ve izleme durur; drain'de yeniden zamanlama ve imajın ilk
+  kez çekilmesi de eklenir. Ölçerken yan verileri kaydedin
   ([docs/openshift-dogrulama.md](docs/openshift-dogrulama.md) madde 16).
   Bir olay sürerken Kubeat'i yükseltmeyin; bakımı sakin bir zamana
   planlayın.
