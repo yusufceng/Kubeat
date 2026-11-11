@@ -20,7 +20,7 @@ import { ListButton } from "@/app/ui/sidebar-frame";
 export async function ContextBar() {
   const t = await getT();
   return (
-    <header className="fixed inset-x-0 top-0 z-30 flex h-[52px] items-center gap-3 border-b border-line bg-panel px-4 lg:static lg:z-auto lg:flex-none lg:bg-canvas lg:px-6">
+    <header className="fixed inset-x-0 top-0 z-30 flex h-(--shell-bar) items-center gap-2.5 border-b border-line bg-panel px-4 lg:static lg:z-auto lg:flex-none lg:bg-canvas lg:px-7">
       <Link href="/" aria-label={t("shell.home")} className="flex-none rounded-md lg:hidden">
         <Logo size={18} className="block" />
       </Link>
@@ -30,7 +30,7 @@ export async function ContextBar() {
       <div className="hidden min-w-0 lg:block">
         <Breadcrumb />
       </div>
-      <div className="ml-auto flex flex-none items-center gap-2.5">
+      <div className="ml-auto flex flex-none items-center gap-2">
         {/* Until the session is known the palette offers the pages alone. */}
         <Suspense fallback={<CommandPalette canEdit={false} admin={false} />}>
           <Palette />

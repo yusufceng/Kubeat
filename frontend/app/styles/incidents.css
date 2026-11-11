@@ -690,10 +690,10 @@
   }
   @media (width < 64rem) {
     .inc-tl-date {
-      top: 52px;
+      top: var(--shell-bar);
     }
     .inc-tl :is(a, button, summary, textarea, input) {
-      scroll-margin-top: 100px;
+      scroll-margin-top: calc(var(--shell-bar) + 48px);
     }
   }
   .inc-tl-list {

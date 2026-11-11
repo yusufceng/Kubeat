@@ -158,6 +158,12 @@
   --duration-fast: 120ms;
   --duration-base: 160ms;
   --duration-slow: 400ms;
+
+  /* The frame: the context bar's height, which the layout's top padding
+     and the heads that stick under the bar read, and the rail's width, at
+     which the list's drawer begins. */
+  --shell-bar: 44px;
+  --shell-rail: 48px;
 }
 
 @theme inline {
@@ -482,20 +488,21 @@ body {
     font-size: 12px;
   }
 
-  /* A section of the rail: an icon in a 40px tile. The current one is an
-     accent tile with a bar at the rail's edge. */
+  /* A section of the rail: an icon in a 32px tile, --space-2 in from the
+     edge of a --shell-rail column. The current one is an accent tile with
+     a bar at the rail's edge. */
   .rail-item {
     position: relative;
     display: grid;
     flex: none;
     place-items: center;
-    width: 40px;
-    height: 40px;
+    width: var(--space-8);
+    height: var(--space-8);
     border-radius: var(--radius-md);
     color: var(--ink-3);
     transition:
-      background-color 120ms var(--ease-signal),
-      color 120ms var(--ease-signal);
+      background-color var(--duration-fast) var(--ease-signal),
+      color var(--duration-fast) var(--ease-signal);
   }
   .rail-item:hover {
     background: var(--hover);
@@ -508,9 +515,9 @@ body {
   .rail-item[aria-current="page"]::before {
     content: "";
     position: absolute;
-    left: -10px;
-    top: 10px;
-    bottom: 10px;
+    left: calc(-1 * var(--space-2));
+    top: var(--space-2);
+    bottom: var(--space-2);
     width: 2px;
     border-radius: 2px;
     background: var(--accent);

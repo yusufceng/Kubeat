@@ -55,7 +55,7 @@ export function SidebarFrame({ children }: { children: React.ReactNode }) {
           // Escape while monitors are being selected stops selecting first.
           if (e.key === "Escape" && open && !(e.target as HTMLElement).closest("[data-selecting]")) close();
         }}
-        className={`order-2 shrink-0 scroll-mt-[52px] border-line bg-panel ${onOverview ? "flex flex-col border-t" : "hidden"} lg:fixed lg:inset-y-0 lg:left-[60px] lg:z-[35] lg:w-[340px] lg:flex-col lg:border-t-0 lg:border-r lg:shadow-[var(--shadow-pop)] ${
+        className={`order-2 shrink-0 scroll-mt-(--shell-bar) border-line bg-panel ${onOverview ? "flex flex-col border-t" : "hidden"} lg:fixed lg:inset-y-0 lg:left-(--shell-rail) lg:z-[35] lg:w-[340px] lg:flex-col lg:border-t-0 lg:border-r lg:shadow-[var(--shadow-pop)] ${
           open ? "lg:flex" : "lg:hidden"
         } min-[75rem]:static min-[75rem]:z-auto min-[75rem]:order-1 min-[75rem]:flex min-[75rem]:h-dvh min-[75rem]:shadow-none`}
       >

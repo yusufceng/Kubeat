@@ -17,6 +17,7 @@ import type { UptimeTones } from "@/lib/uptime-tone";
 import { Chevron, groupCount, HealthBar, HoverCard, Row } from "@/app/ui/monitor-row";
 import { type ListFilter, useListFilter } from "@/app/ui/shell-state";
 import type { DisplayState } from "@/app/ui/status";
+import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
 
 const degradedStates: DisplayState[] = ["verifying", "recovering", "degraded"];
 const idleStates: DisplayState[] = ["paused", "pending", "maintenance"];
@@ -244,12 +245,14 @@ export function MonitorList({
     }
   }
 
-  const filters: { key: ListFilter; label: string }[] = [
+  // Each state stands as its glyph (the word is the tooltip and the name
+  // for screen readers); "all" has no glyph and keeps its word.
+  const filters: { key: ListFilter; label: string; glyph?: GlyphKind }[] = [
     { key: "all", label: t("monitorsList.filter.all") },
-    { key: "up", label: t("monitorsList.filter.up") },
-    { key: "down", label: t("monitorsList.filter.down") },
-    { key: "degraded", label: t("monitorsList.filter.degraded") },
-    { key: "idle", label: t("monitorsList.filter.idle") },
+    { key: "up", label: t("monitorsList.filter.up"), glyph: "up" },
+    { key: "down", label: t("monitorsList.filter.down"), glyph: "down" },
+    { key: "degraded", label: t("monitorsList.filter.degraded"), glyph: "warn" },
+    { key: "idle", label: t("monitorsList.filter.idle"), glyph: "paused" },
   ];
 
   return (
@@ -284,11 +287,18 @@ export function MonitorList({
             />
           )}
         </div>
-        {/* A segmented control; narrow widths and long Turkish names may wrap it. */}
+        {/* A segmented control of glyphs and counts, one line in either language. */}
         <div role="group" aria-label={t("monitorsList.filter.label")} className="fl-seg">
           {filters.map((f) => (
-            <button key={f.key} type="button" onClick={() => setStateFilter(f.key)} aria-pressed={stateFilter === f.key}>
-              {f.label}
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setStateFilter(f.key)}
+              aria-pressed={stateFilter === f.key}
+              aria-label={`${f.label}: ${counts[f.key]}`}
+              title={f.label}
+            >
+              {f.glyph ? <StatusGlyph kind={f.glyph} /> : f.label}
               <span
                 className={`font-semibold tabular-nums ${
                   f.key === "down" && counts.down > 0
@@ -350,7 +360,10 @@ export function MonitorList({
               key={namespace}
               aria-label={label}
               className="fl-group"
-              style={{ containIntrinsicSize: `auto ${30 + (open ? group.length * 34 : 0)}px` }}
+              // The header with its margin, then the rows: the heights fleet.css lays them out at.
+              style={{
+                containIntrinsicSize: `auto calc(var(--fl-ns-h) + var(--space-1) + ${open ? group.length : 0} * var(--fl-row-h))`,
+              }}
             >
               <div className="fl-ns">
                 {selectMode && (

@@ -10,7 +10,7 @@ import { SessionNav } from "@/app/ui/session-controls";
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-dvh pt-[52px] pb-[calc(62px+env(safe-area-inset-bottom))] lg:h-dvh lg:min-h-0 lg:overflow-hidden lg:p-0">
+    <div className="flex min-h-dvh pt-(--shell-bar) pb-[calc(62px+env(safe-area-inset-bottom))] lg:h-dvh lg:min-h-0 lg:overflow-hidden lg:p-0">
       <SkipLink />
       <SessionNav />
       <div className="flex min-w-0 flex-1 flex-col lg:flex-row">{children}</div>

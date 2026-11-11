@@ -56,9 +56,10 @@ export function CertChip({ days }: { days: number }) {
 }
 
 /**
- * One monitor of the list, 34px tall: its state, its name with the kind,
- * its recent checks and its uptime. The glyph's place holds a checkbox for
- * editors, shown on hover and while monitors are being selected.
+ * One monitor of the list, --fl-row-h tall (28px; 36px for a finger): its
+ * state, its name with the kind, its recent checks and its uptime. The
+ * glyph's place holds a checkbox for editors, shown on hover and while
+ * monitors are being selected.
  */
 export const Row = memo(function Row({
   item,
@@ -156,7 +157,7 @@ export const Row = memo(function Row({
           // A paused monitor's last checks are history, not its state: they are idle grey.
           beats={[...shown].map((beat) => ({ state: item.state === "paused" ? "idle" : beat === "1" ? "ok" : "down" }))}
           slots={beats}
-          height={14}
+          height={12}
           slotWidth={beatWidth(beats)}
           gap={1}
           label={t("monitorsList.list.beats.label", { count: shown.length, failed })}

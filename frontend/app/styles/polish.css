@@ -93,7 +93,7 @@
   }
   .pg-table th {
     position: sticky;
-    top: 52px; /* under the context bar, while the window scrolls */
+    top: var(--shell-bar); /* under the context bar, while the window scrolls */
     z-index: 2;
     height: 32px;
     padding: 0 12px;
