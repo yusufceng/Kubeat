@@ -3666,7 +3666,8 @@ okunamaz hâle gelir:
   durumdur. `backend.nodeSelector` ile pod'u tek node'a sabitlemek pencereyi
   kısaltır, ama o node veri volume'unun bölgesinde olmalıdır (bölgeye bağlı
   RWO depolamada volume başka bölgedeki node'a bağlanamaz, pod `Pending`
-  kalır; [docs/openshift-dogrulama.md](docs/openshift-dogrulama.md) adım 6)
+  kalır; [docs/openshift-dogrulama.md](docs/openshift-dogrulama.md) "Vekilli
+  ve hava boşluklu OpenShift" adım 6(b))
   ve node drain edilince drain bitene dek, node silinip yenisi gelince (node
   havuzu yükseltmesi, otomatik ölçekleme) değer değiştirilene dek pod
   `Pending` kalır ve izleme durur; drain'de yeniden zamanlama ve imajın ilk
