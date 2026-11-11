@@ -345,8 +345,10 @@ anlamı:
   yükseltme notunun "Yapılacak" maddesinde ve kurulum notunda; kaldırılacak
   bir `UPTIME_*` adı bir minor boyunca eski adla da okunur ve açılışta `WARN`
   yazar). Davranış değişikliği yükseltme notunda yazılır; bir güvenlik
-  düzeltmesi davranışı aynı minor'da değiştirebilir (0.51'deki gibi), o zaman
-  not sürümü "güvenlik sürümü" diye adlandırır. Veritabanı yalnız ileri göçer
+  düzeltmesi davranışı uyarı minor'unu beklemeden, gerekirse bir yama
+  sürümünde (1.0.x) de değiştirebilir (0.51'de kapsamın her bağlantıda
+  uygulanması gibi), o zaman not sürümü "güvenlik sürümü" diye adlandırır.
+  Veritabanı yalnız ileri göçer
   (1.0'da şema 26, geri göç yok): şemayı yükseltmeyen her minor
   `helm rollback` ile bir öncekine döner; şemayı yükselten bir minor ilk
   cümlesinde "şema yükselir" der ve dönüşü yalnız yükseltmeden önce alınan

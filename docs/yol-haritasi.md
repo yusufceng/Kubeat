@@ -140,7 +140,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
   ([sprints/](sprints/)). Bir runbook koşulup geri bildirimi gelince bu girdi
   o yol için daralır (yukarıda 32. adım).
 - **1.0'da yapılmayanlar** (sprint 11'in "Yapılmayacaklar" kuyruğu ve retro'nun
-  sığmayanları; 1.x'te ele alınır, tetikleyicileri [backlog](backlog.md)'da):
+  sığmayanları; kuyruğun S97'si yukarıdaki cluster DNS kesintisi maddesinde;
+  1.x'te ele alınır, tetikleyicileri [backlog](backlog.md)'da):
   - Kapsamı sonradan daralan kullanıcının monitor'leri kaydedilen (eski)
     kapsamla çalışmayı sürdürür; kayıtlar bugünkü kapsamla karşılaştırılıp
     işaretlenmez (ADR-0003 (c); aşağıda (d); README "Hedef politikası" → "Her
@@ -175,7 +176,8 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
     değer README "Sayaç ve kural" → "Port-forward"ta (S104).
   - Kaynak başına giriş tavanının (`UPTIME_LOGIN_SOURCE_MAX_FAILURES`) ve
     dizine ulaşılamamasının chart alarmı ve kurulum notu satırı yok; sayaçlar
-    var, örnek kurallar README "Hesaplar ve giriş"te (S85 dilim 2).
+    var: dizin için örnek kural README "Hesaplar ve giriş"te, tavan için yalnız
+    sayaç (`kind="source_total"`) (S85 dilim 2).
   - Denetim kaydı stdout'a yazılmaz ve API'de `since` süzgeci yok; kayıt son
     `id`'den çekilir (README "Denetim kaydını SIEM'e almak") (S83).
 - 0.52'den beri her HTTP kontrolü bağlantısını kendisi açtığı için adı her kontrolde
