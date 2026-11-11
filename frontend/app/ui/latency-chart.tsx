@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Series, SeriesPoint } from "@/lib/api";
 import { duration } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
@@ -20,8 +20,15 @@ const STRIP_TOP = TOP + PLOT_HEIGHT + 8;
 const STRIP_HEIGHT = 8;
 const HEIGHT = STRIP_TOP + STRIP_HEIGHT + 24;
 const TOOLTIP_WIDTH = 224;
-/** How long the line takes to draw itself in, the first time the chart appears. */
-const INTRO_MS = 450;
+
+/** The viewer's wish for less motion, read as an external store: the chart then skips its drawing-in. */
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+function subscribeReducedMotion(onChange: () => void) {
+  const query = matchMedia(REDUCED_MOTION);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+const readReducedMotion = () => matchMedia(REDUCED_MOTION).matches;
 
 type State = "ok" | "partial" | "down";
 
@@ -48,6 +55,16 @@ function axis(max: number): { top: number; step: number } {
 
 const ms = (n: number, intl: string) => `${n.toLocaleString(intl, { maximumFractionDigits: n < 10 ? 1 : 0 })} ms`;
 
+/** A bucket over the slow-response threshold: the warn glyph, a half-filled circle, on the line. */
+function SlowMark({ cx, cy }: { cx: number; cy: number }) {
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={3} fill="var(--panel)" stroke="var(--warn)" strokeWidth={1.5} />
+      <path d={`M${cx},${cy - 3} A3,3 0 0 0 ${cx},${cy + 3} Z`} fill="var(--warn)" />
+    </g>
+  );
+}
+
 /** A span of time in milliseconds since the epoch; `to` is null while it is still going on. */
 export type Span = { from: number; to: number | null };
 
@@ -67,6 +84,7 @@ export function LatencyChart({
   incidents,
   maintenance = [],
   readOnly = false,
+  slowAboveMs = 0,
 }: {
   series: Series;
   /** The page's address with its query; a timeframe's from and to are added to it. */
@@ -79,6 +97,12 @@ export function LatencyChart({
   maintenance?: { from: number; to: number }[];
   /** Hover and read only: no span to mark, nothing to zoom into (a public status page). */
   readOnly?: boolean;
+  /**
+   * The monitor's slow-response threshold (slow_above_ms, README "Yavaş
+   * yanıt"), in milliseconds: a dashed line where it falls within the
+   * axis, a mark on each bucket over it. 0 or left out when there is none.
+   */
+  slowAboveMs?: number;
 }) {
   const t = useT();
   const router = useRouter();
@@ -88,8 +112,12 @@ export function LatencyChart({
   // Measured on the client; until then a placeholder of the same height is
   // rendered, which also keeps times in the viewer's zone, not the server's.
   const [width, setWidth] = useState<number | null>(null);
-  // The line draws itself in once, when the chart first gets its width.
-  const [intro, setIntro] = useState(true);
+  // The line draws itself in when the chart first gets its width, and again
+  // whenever the series changes under it (a zoom): this is the key of the
+  // series whose drawing finished. Viewers who ask for less motion get the
+  // finished chart at once.
+  const [drawn, setDrawn] = useState<string | null>(null);
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, readReducedMotion, () => false);
   const [hovered, setActive] = useState<number | null>(null);
   // What the pointer is doing: drawing a new span (pixels from the
   // wrapper's left edge) or dragging one edge of the drawn one.
@@ -110,11 +138,8 @@ export function LatencyChart({
   }, []);
 
   const measured = width !== null;
-  useEffect(() => {
-    if (!measured) return;
-    const id = setTimeout(() => setIntro(false), INTRO_MS + 100);
-    return () => clearTimeout(id);
-  }, [measured]);
+  const seriesKey = `${series.from}|${series.to}|${series.bucket_seconds}`;
+  const intro = measured && !reducedMotion && drawn !== seriesKey;
 
   const { points } = series;
   // The point in hand; a series that changed under it (a zoom) lets go.
@@ -158,9 +183,12 @@ export function LatencyChart({
     for (let v = 0; v <= top + step / 2; v += step) yTicks.push(v);
     const xTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => from + f * (to - from));
     const barWidth = Math.max((plotWidth * bucket) / (to - from), 1);
+    // The threshold, where it falls within the axis the data set; far above
+    // the data, the legend alone says what it is.
+    const thresholdY = slowAboveMs > 0 && slowAboveMs <= top ? y(slowAboveMs) : null;
 
-    return { plotWidth, x, y, centers, segments, yTicks, xTicks, barWidth };
-  }, [width, points, from, to, bucket]);
+    return { plotWidth, x, y, centers, segments, yTicks, xTicks, barWidth, thresholdY };
+  }, [width, points, from, to, bucket, slowAboveMs]);
 
   const clock = (at: number, seconds = false) =>
     new Date(at).toLocaleTimeString(t.intl, {
@@ -176,6 +204,8 @@ export function LatencyChart({
     const end = Math.min(start + bucket, to);
     return `${day(start)} ${clock(start)} – ${clock(end)}`;
   };
+  // A bucket whose average answered slower than the monitor's threshold.
+  const slow = (p: SeriesPoint) => slowAboveMs > 0 && p.avg_latency_ms !== null && p.avg_latency_ms > slowAboveMs;
 
   if (points.length === 0) {
     return (
@@ -442,6 +472,32 @@ export function LatencyChart({
               </g>
             )}
 
+            {/* The slow-response threshold: a dashed line with its figure, under the series. */}
+            {geometry.thresholdY !== null && (
+              <g>
+                <line
+                  x1={LEFT}
+                  x2={LEFT + geometry.plotWidth}
+                  y1={geometry.thresholdY}
+                  y2={geometry.thresholdY}
+                  stroke="var(--warn)"
+                  strokeOpacity={0.8}
+                  strokeWidth={1}
+                  strokeDasharray="4 3"
+                />
+                <text
+                  x={LEFT + geometry.plotWidth}
+                  y={geometry.thresholdY - 4}
+                  textAnchor="end"
+                  fontSize={10}
+                  fill="var(--warn-ink)"
+                  style={{ fontVariantNumeric: "tabular-nums" }}
+                >
+                  {ms(slowAboveMs, t.intl)}
+                </text>
+              </g>
+            )}
+
             {geometry.segments.map((segment) => {
               const coords = segment.map((i) => `${geometry.centers[i]},${geometry.y(points[i].avg_latency_ms!)}`);
               const first = geometry.centers[segment[0]];
@@ -460,6 +516,7 @@ export function LatencyChart({
                     <path
                       className="mon-line"
                       pathLength={1}
+                      onAnimationEnd={() => setDrawn(seriesKey)}
                       d={`M${coords.join(" L")}`}
                       fill="none"
                       stroke="var(--series)"
@@ -474,6 +531,15 @@ export function LatencyChart({
                 </g>
               );
             })}
+
+            {/* The buckets over the threshold, marked in the warn glyph's shape. */}
+            {slowAboveMs > 0 && (
+              <g className="mon-marks">
+                {points.map((p, i) =>
+                  slow(p) ? <SlowMark key={p.start} cx={geometry.centers[i]} cy={geometry.y(p.avg_latency_ms!)} /> : null,
+                )}
+              </g>
+            )}
 
             {/* The availability strip: no data is the baseline alone. */}
             <rect x={LEFT} y={STRIP_TOP + STRIP_HEIGHT - 2} width={geometry.plotWidth} height={2} fill="var(--line)" />
@@ -584,7 +650,7 @@ export function LatencyChart({
         {geometry && marked && marked[1] > marked[0] && (
           <div
             data-selection-toolbar
-            className="pop absolute z-20 flex -translate-x-1/2 items-center gap-2 py-1 pr-1 pl-3 text-xs whitespace-nowrap"
+            className="pop tip-in absolute z-20 flex -translate-x-1/2 items-center gap-2 py-1 pr-1 pl-3 text-xs whitespace-nowrap"
             style={{
               top: 2,
               // Centred on the span, kept inside the chart.
@@ -619,7 +685,7 @@ export function LatencyChart({
         {geometry && point && active !== null && !gesture && (
           <div
             role="status"
-            className="pop pointer-events-none absolute z-10 px-3 py-2.5 text-xs"
+            className="pop tip-in pointer-events-none absolute z-10 px-3 py-2.5 text-xs"
             style={{
               top: marked ? 44 : 8,
               width: TOOLTIP_WIDTH,
@@ -640,6 +706,12 @@ export function LatencyChart({
             {point.max_latency_ms !== null && (
               <div className="mt-0.5 whitespace-nowrap text-ink-3">
                 {t("monitorPage.chart.max")} <span className="tabular-nums text-ink-2">{ms(point.max_latency_ms, t.intl)}</span>
+              </div>
+            )}
+            {slow(point) && (
+              <div className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-warn-ink">
+                <StatusGlyph kind="warn" />
+                {t("monitorPage.chart.slow", { ms: slowAboveMs.toLocaleString(t.intl) })}
               </div>
             )}
             <div className="mt-2 flex items-center gap-2 border-t border-line pt-2">
@@ -681,6 +753,12 @@ export function LatencyChart({
             {t("monitorPage.chart.band.maintenance")}
           </span>
         )}
+        {slowAboveMs > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-3 border-t border-dashed border-warn" aria-hidden />
+            {t("monitorPage.chart.threshold", { ms: slowAboveMs.toLocaleString(t.intl) })}
+          </span>
+        )}
         {!readOnly && <HelpTip label={t("monitorPage.chart.help")}>{t("monitorPage.chart.selectHint")}</HelpTip>}
       </figcaption>
 
@@ -705,7 +783,7 @@ export function LatencyChart({
                 points.map((p) => (
                   <tr key={p.start}>
                     <td className="tabular-nums">{bucketLabel(p)}</td>
-                    <td className="num">{p.avg_latency_ms !== null ? ms(p.avg_latency_ms, t.intl) : "–"}</td>
+                    <td className={`num ${slow(p) ? "text-warn-ink" : ""}`}>{p.avg_latency_ms !== null ? ms(p.avg_latency_ms, t.intl) : "–"}</td>
                     <td className="num">{p.max_latency_ms !== null ? ms(p.max_latency_ms, t.intl) : "–"}</td>
                     <td className="num">{p.checks}</td>
                     <td className={`num ${p.checks > p.up_checks ? "text-down-ink" : ""}`}>{p.checks - p.up_checks}</td>

@@ -31,7 +31,8 @@ export function HeartbeatBar({
       beats={shown.map((r) => ({
         state: paused ? "idle" : r.up ? "ok" : "down",
         at: r.t,
-        text: r.up ? milliseconds(r.ms, t) : t("monitorPage.heartbeat.failed"),
+        word: t(r.up ? "monitorPage.heartbeat.state.ok" : "monitorPage.heartbeat.state.failed"),
+        text: r.up ? milliseconds(r.ms, t) : undefined,
         detail: r.up ? undefined : r.error,
       }))}
       slots={slots}

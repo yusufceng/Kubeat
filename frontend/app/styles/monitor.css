@@ -954,7 +954,10 @@
   }
 }
 
-/* The chart's line draws itself in once, when the chart first appears. */
+/* The chart's line draws itself in when the chart first appears and again
+   when its series changes under it (a zoom); the area and the marks fade in
+   with it. Viewers who ask for less motion get the finished chart at once:
+   latency-chart.tsx leaves mon-intro off for them. */
 @keyframes mon-draw {
   from {
     stroke-dashoffset: 1;
@@ -970,8 +973,9 @@
 }
 .mon-intro .mon-line {
   stroke-dasharray: 1;
-  animation: mon-draw 400ms var(--ease-signal) both;
+  animation: mon-draw var(--duration-slow) var(--ease-out) both;
 }
-.mon-intro .mon-area {
-  animation: mon-fade 400ms var(--ease-signal) both;
+.mon-intro .mon-area,
+.mon-intro .mon-marks {
+  animation: mon-fade var(--duration-slow) var(--ease-out) both;
 }

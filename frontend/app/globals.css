@@ -773,6 +773,46 @@ body {
     border-radius: 0;
     background: var(--line-strong);
   }
+  /* A strip with something to tell takes the focus; the ring stands off the bars. */
+  .beat-strip:focus-visible {
+    border-radius: var(--radius-xs);
+    outline-offset: var(--space-1);
+  }
+  /* The tip of a slot, from the pointer or the keyboard, in the words of
+     the fleet's tips (.fl-tip): when; the state as its glyph and a word,
+     with what it came to; an error in mono. Centred on the slot and kept
+     inside the window by the script, it fades in on the fast beat. */
+  .beat-tip {
+    position: absolute;
+    bottom: calc(100% + var(--space-1-5));
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: max-content;
+    max-width: 280px;
+    padding: var(--space-2) var(--space-2-5);
+    font-size: var(--text-dense);
+    line-height: var(--text-dense--line-height);
+    pointer-events: none;
+    animation: tip-in var(--duration-fast) var(--ease-out);
+  }
+  .beat-tip-state {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-weight: 500;
+  }
+  /* A tooltip or a toolbar that appears over its subject fades in on the fast beat. */
+  .tip-in {
+    animation: tip-in var(--duration-fast) var(--ease-out);
+  }
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+  }
 }
 
 @keyframes glyph-pulse {

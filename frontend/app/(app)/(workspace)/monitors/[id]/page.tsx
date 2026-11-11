@@ -468,7 +468,8 @@ async function MonitorDetail({
             .map((r) => ({
               state: r.up ? "ok" : "down",
               at: new Date(r.checked_at).getTime(),
-              text: r.up ? `${Math.round(r.latency_ms).toLocaleString(t.intl)} ms` : t("monitorPage.heartbeat.failed"),
+              word: t(r.up ? "monitorPage.heartbeat.state.ok" : "monitorPage.heartbeat.state.failed"),
+              text: r.up ? `${Math.round(r.latency_ms).toLocaleString(t.intl)} ms` : undefined,
               detail: r.up ? undefined : (r.error ?? undefined),
             }))}
           slots={config.historyLimit}
@@ -555,6 +556,7 @@ async function MonitorDetail({
                 to: i.resolved_at ? new Date(i.resolved_at).getTime() : null,
               }))}
             maintenance={maintenanceSpans(maintenance, monitor)}
+            slowAboveMs={monitor.slow_above_ms}
           />
         </div>
       </section>
