@@ -357,11 +357,13 @@ aynı.
 
 Sandbox'ta (ROSA, tek namespace) 2026-11-11'de yükseltildi: `helm upgrade`
 51 sn, backend açıldı, yükseltmeye bağlı hata satırı yok (loga yalnız o
-kurulumun bilinen eski bir kanalının bildirim hataları düştü), 11 monitor
-yerinde. Durum sayfası ve rozet 25,4 sn
-okunamadı: yeni pod başka bir node'a düştü ve veri volume'u 17 saniyede
-yeniden bağlandı; pod aynı node'da kalsaydı pencere ~4 sn olurdu (README
-"Durum sayfaları" → "Sınırlar").
+kurulumun bilinen eski bir kanalının bildirim hataları düştü), monitor'ler
+yerinde (önceki yükseltmelerde sayılan 11; bu ölçümde ayrıca sayılmadı).
+Durum sayfası ve rozet ~25 sn okunamadı: yeni pod başka bir node'a düştü;
+veri ve yedek volume'ları eski node'dan ayrılıp yenisine 17 ve 21 saniyede
+bağlandı ve container ikincisini bekledi (imaj 1,1 sn'de çekildi, açılıştan
+hazıra 4 sn); pod aynı node'da kalsaydı pencere ~4 sn olurdu (README "Durum
+sayfaları" → "Sınırlar").
 
 ### Yapılacak
 
@@ -372,9 +374,11 @@ yeniden bağlandı; pod aynı node'da kalsaydı pencere ~4 sn olurdu (README
   imajı ve chart'ı yeniden aynalayın; `cosign verify` kimliği
   `release.yml@refs/tags/v0.53.1` ([pilot.md](pilot.md) "İmajları
   aynalamak").
-- Yükseltme penceresini ölçüyorsanız bu kez yan verileri de kaydedin
-  ([openshift-dogrulama.md](openshift-dogrulama.md) madde 16): README "Durum
-  sayfaları" → "Sınırlar"daki 4–25 sn farkının nedeni bu verilerle yazılacak.
+- Yükseltme penceresini ölçüyorsanız yan verileri de kaydedin
+  ([openshift-dogrulama.md](openshift-dogrulama.md) madde 16): pod aynı
+  node'da kalırsa ~4 sn, başka bir node'a düşerse ~25 sn beklenir (README
+  "Durum sayfaları" → "Sınırlar"; neden 2026-11-11 ölçümüyle yazıldı,
+  yukarıda). Farklı bir dağılım görürseniz geri bildirim şablonuyla bildirin.
 
 ### Davranış değişikliği
 
