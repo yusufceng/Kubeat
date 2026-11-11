@@ -331,6 +331,55 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
 
 Bitince port-forward'u kapatın: `kill $PF`.
 
+## 0.53.1'e yükseltme
+
+0.53.1 bir güvenlik sürümüdür; Kubeat'in kodu, chart'ı ve şeması değişmedi.
+Backend imajı Go 1.26.11 ile yeniden derlendi:
+[GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859) (CVE-2026-97054),
+Go'nun standart kütüphanesinde `net/http`: `MaxBytesReader`'ın sınırı
+aşılırken `Connection: close` başlığı eşzamanlamasız yazılır ve handler aynı
+anda yanıt başlığı yazıyorsa HTTP/1 sunucusu runtime panic'le çöker. Go
+1.26.11'den önceki her sürüm etkilenir; Kubeat'in 0.53.0'a kadar bütün
+sürümleri go1.26.10 ile derlendi, bu yüzden hepsi tarayıcıda (`govulncheck`,
+SBOM okuyan bir imaj tarayıcısı) açıklı görünür.
+
+Kubeat'te etkisi: backend, JSON gövdesi okuyan her API ucunda (giriş ve durum
+sayfası kilidini açma dahil, yani kimlik istemeyen iki uçta da) gövdeyi 1
+MiB'lik `MaxBytesReader` ile okur. Handler'lar gövdeyi aynı goroutine'de
+okuyup bitirdikten sonra yanıt yazar; açığın şartı olan eşzamanlı okuma-yazma
+bu desende oluşmaz, bilinen bir çökme yolu yok. Sürüm, bilinen açıklı bir
+standart kütüphaneyle çalışmamak ve tarayıcıları susturmak için çıkar.
+
+Kim yükseltmeli: 0.53.0 ve öncesini çalıştıran her kurulum, olağan bakım
+penceresinde; internete açık arayüzü ya da SBOM tabanlı tarama zorunluluğu
+olan kurulumlar önce. Şema 26, migration yok; imaj dışında her şey 0.53.0'la
+aynı.
+
+### Yapılacak
+
+- **Yedeği doğrulamalı blokla alın** (yukarıda "Yükseltmeden önce yedek").
+  "yedek doğrulandı" demiyorsa yükseltmeyin.
+- `helm upgrade … --version 0.53.1` (README "Hızlı başlangıç"); 0.53'ün
+  "Yapılacak" adımları yapıldıysa yeni bir şey yok. Aynalı kurulumda iki
+  imajı ve chart'ı yeniden aynalayın; `cosign verify` kimliği
+  `release.yml@refs/tags/v0.53.1` ([pilot.md](pilot.md) "İmajları
+  aynalamak").
+- Yükseltme penceresini ölçüyorsanız bu kez yan verileri de kaydedin
+  ([openshift-dogrulama.md](openshift-dogrulama.md) madde 16): README "Durum
+  sayfaları" → "Sınırlar"daki 4–25 sn farkının nedeni bu verilerle yazılacak.
+
+### Davranış değişikliği
+
+Yok. Yükseltme sırasında tek replica'lı backend `Recreate` ile yeniden
+oluşturulur; pencere README "Durum sayfaları" → "Sınırlar"daki gibidir.
+
+### Geri dönüş
+
+`helm rollback` ile 0.53.0'a; şema aynı. Dönüşte backend yine go1.26.10'un
+`net/http`'siyle çalışır ve tarayıcılar açığı yeniden gösterir.
+
+### Alarm kuralları: değişmedi
+
 ## 0.53'e yükseltme
 
 0.53 bir güvenilirlik sürümüdür; güvenlik sürümü değildir. Kurum aralığı
