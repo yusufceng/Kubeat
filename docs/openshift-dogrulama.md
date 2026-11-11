@@ -88,7 +88,7 @@ Her madde için beklenen sonuç ve bakılacak yer yazılı. Olmayanı not alın.
 | 13 | Yedekleme | `backup.enabled=true` ile kur, `oc -n kubeat exec deploy/kubeat-backend -- ls /backup` | Dosya üretiliyor, PVC'ye yazılabiliyor (fsGroup) |
 | 14 | NetworkPolicy | `networkPolicy.enabled=true` ile kur, başka namespace'ten `curl kubeat-backend.kubeat.svc:8080/api/v1/health` | Reddediliyor; arayüz çalışmaya devam ediyor; ServiceMonitor scrape'i sürüyor (`metricsFrom`); push raporu `kubeat-frontend.kubeat.svc:3000/api/push/<token>` üzerinden geçiyor |
 | 15 | OIDC / LDAP | `oidc.*` ya da `ldap.*` değerleriyle kur (Route host'u router'a bırakıldıysa `publicURL=https://<host>` da ver), Kullanıcılar'da grup eşlemesi yap | "SSO ile giriş" çalışıyor, rol gruptan geliyor; giriş sonrası Route adresine dönülüyor |
-| 16 | Yükseltme süresi | `helm upgrade` sırasında monitor listesini, durum sayfasını ve yayındaki bir sayfadaki monitor'ün rozetini izle; rozeti saniyede bir yokla: `while true; do printf '%s %s\n' "$(date +%T)" "$(curl -s -o /dev/null -m 5 -w '%{http_code}' https://<route>/api/badge/<monitor-id>/status)"; sleep 1; done` | Kontroller kaç saniye durdu, rozet kaç saniye `502` verdi? Tek replica ve `Recreate`: sandbox Route'unda iki yükseltmede ~25 sn (2026-11-08) ve ~4 sn (2026-11-10) ölçüldü (rozet `502`, durum sayfası "okunamıyor"; README "Durum sayfaları" → "Sınırlar") |
+| 16 | Yükseltme süresi | `helm upgrade` sırasında monitor listesini, durum sayfasını ve yayındaki bir sayfadaki monitor'ün rozetini izle; rozeti saniyede bir yokla: `while true; do printf '%s %s\n' "$(date +%T)" "$(curl -s -o /dev/null -m 5 -w '%{http_code}' https://<route>/api/badge/<monitor-id>/status)"; sleep 1; done`. Yükseltmeden önce ve sonra pod'ların node'unu al: `oc -n kubeat get pod -o wide`; bitince yeni backend pod'unun olaylarını: `oc -n kubeat get events --field-selector involvedObject.name=<yeni-backend-pod> --sort-by=.lastTimestamp` | Kontroller kaç saniye durdu, rozet kaç saniye `502` verdi? Tek replica ve `Recreate`: sandbox Route'unda iki yükseltmede ~25 sn (2026-11-08) ve ~4 sn (2026-11-10) ölçüldü (rozet `502`, durum sayfası "okunamıyor"); farkın nedeni ölçülmedi, pencereyi uzatan etkenler README "Durum sayfaları" → "Sınırlar"da. Süreyle birlikte yazın: imaj node'da hazır mıydı (`Pulled` olayı "already present" ya da "… in N s"), pod aynı node'da mı kaldı, değiştirdiyse volume kaç saniyede bağlandı (`SuccessfulAttachVolume`; aynı node'da kaldıysa bu olay yoktur, "aynı node, olay yok" yazın); süreleri `Scheduled` olayından itibaren hesaplayın |
 | 17 | Tarayıcı güvenlik başlıkları | `curl -sI https://<route>/login`; sonra arayüzde birkaç sayfa gez | `Content-Security-Policy` ve `Strict-Transport-Security` var, `X-Powered-By` yok; tarayıcı konsolunda CSP ihlali yok |
 | 18 | Varsayılan-ret namespace'te kontrol | Proje şablonundan `default-deny` alan (ya da elle `default-deny` uygulanan) bir namespace'teki Service'e monitor ekle (`each-pod` ile de); sonra README "Ağ erişimi", İzlenen namespace'ler'deki `allow-from-kubeat` politikasını uygula | Politika yokken Service ve `each_pod` monitor'leri `connect_timeout`, aynı uygulamanın Route monitor'ü yeşil; politikayla yeşile dönüyor |
 | 19 | Uydurma `X-Forwarded-For` ve kural (0.50–0.52) | Tarayıcıdan `admin`'e bir yanlış parola; geliştirici araçlarında (Network) isteği "Copy as cURL" ile alıp `-H 'X-Forwarded-For: 192.0.2.99'` ekleyerek aynı makineden çalıştır; `oc -n kubeat logs deploy/kubeat-backend --since=15m \| grep 'sign-in refused'`. Sonra hop'u geçici olarak `0` yapıp (aynı komut, `UPTIME_TRUST_PROXY_HOPS=0`) yeni pod ilk kez scrape edildikten sonra bir yanlış giriş daha, Observe → Alerting; hop'u `1`'e geri al | İki satırın `source`'u da masaüstünüzün adresi, uydurma başlıklıda `192.0.2.99` **değil** (`192.0.2.99` ise değer fazla ya da router `IfNone`/`Never`; README "Uydurma başlıkla negatif adım"). `0`'da `KubeatSignInSourceDegraded` `reason="hops_zero"` ile Firing (kuralda `for` yok; sandbox'ta UWM ile 2026-11-08'de görüldü), `1`'e dönünce son girişten 15 dk sonra çözülür |
@@ -134,7 +134,9 @@ Ek ön koşullar:
   onayı ([pilot.md](pilot.md) "Vekilli kapsam"taki ilk iki onay kutusu) ve
   adım 8 için vekilin 10 dakikalık erişim kaydı.
 - Kurum CA'sıyla imzalı bir HTTPS hedefi (adım 7).
-- Adım 6 için node drain yetkisi; yoksa adımın drain'siz değişkeni.
+- Adım 6(b) için üretim dışı bir cluster ya da ayrı bir test release'i (madde
+  21'in deseni) ve node drain yetkisi; yoksa adımın `nodeSelector`'lı
+  değişkeni. Üretim cluster'ında yalnız 6(a) ve 6(c) koşulur.
 
 Komutlar yukarıdaki gibi `--context`'siz yazıldı; bağlamı siz verin
 (yukarıda "Bağlam"). `<iç-registry>`, `<cluster-domain>` ve kurum adları
@@ -268,20 +270,32 @@ Beklenen:
 Kurum aralığı (`UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`) pod ağının bir parçasını
 içerirse ilk açılış geçer, pod başka bir node'a taşınınca yakalanır. 0.53'ten
 (S96) beri backend yine açılır ve yalnız o girdi yok sayılır (README "Hedef
-politikası" → "Kurum ağı" → "Açılış koruması"). Adım iki parçadır; ilki kapsamı
-hiç genişletmez, önce onu koşun.
+politikası" → "Kurum ağı" → "Açılış koruması"). Adım üç parçadır. (a) ve (c)
+kapsamı hiç genişletmez ve her cluster'da, üretimde de koşulur. (b) koştuğu
+cluster'ın kapsamını adım boyunca genişletir ve bir node'u boşaltır ya da
+pod'u taşır:
+**yalnız üretim dışı bir cluster'da ya da ayrı bir test release'inde** (madde
+21'in deseni: başka namespace, başka release adı, `route.host` yok) koşulur;
+üretimde yerini (c) alır.
 
-**a) API sunucusunun adresi.** Values'taki kurum aralıklarına API sunucusunun
-Service adresini `/32` ile geçici olarak ekleyip aynı komutla `helm upgrade`
-yapın:
+**a) API sunucusunun adresi (her cluster).** Values'taki kurum aralıklarına
+API sunucusunun Service adresini `/32` ile geçici olarak ekleyip aynı komutla
+`helm upgrade` yapın:
 
 ```
 oc -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}{"\n"}'
 oc -n kubeat logs deploy/kubeat-backend | grep 'target scope external ranges ignored'
 ```
 
-**b) Drain.** Backend'in node'unu ve öteki node'ların pod alt ağlarını
-(OVN-Kubernetes) okuyun:
+`/32` kapsamı açmaz: API sunucusunun adresi kapsamı sınırlı kullanıcıya zaten
+kapalıdır ve girdi açılışta yok sayılır. Bitince girdiyi çıkarıp `helm
+upgrade` yapın. İki `helm upgrade` iki `Recreate` demektir (her biri README
+"Durum sayfaları" → "Sınırlar"daki pencere kadar kontrol duruşu) ve
+`KubeatScopeExternalRangesIgnored` gerçekten yanar: bakım penceresinde koşun,
+nöbetçiyi bilgilendirin; alarm girdi çıkarılınca çözülür.
+
+**b) Drain (yalnız üretim dışı cluster ya da ayrı test release'i).** Backend'in
+node'unu ve öteki node'ların pod alt ağlarını (OVN-Kubernetes) okuyun:
 
 ```
 oc -n kubeat get pod -l app.kubernetes.io/component=backend -o wide
@@ -289,12 +303,18 @@ oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{range .items[*]}{.m
 ```
 
 Backend'in node'u dışındaki, pod'un gidebileceği node'ların alt ağlarını (ör.
-`10.129.0.0/23`; pod'u infra node'lara sabitlediyseniz onlarınkini) kurum
-aralıklarına geçici olarak ekleyip `helm upgrade` yapın. Bu sürede kapsamı
-sınırlı kullanıcılar o node'lardaki pod adreslerine monitor kurabilir: adımı
-bakım penceresinde ya da kapsamı sınırlı kullanıcı yokken koşun, bitince
+`10.129.0.0/23`; pod'u infra node'lara sabitlediyseniz onlarınkini) o
+release'in kurum aralıklarına geçici olarak ekleyip `helm upgrade` yapın. Bu
+sürede o release'in kapsamı sınırlı kullanıcıları o node'lardaki pod
+adreslerine monitor kurabilir; test release'inde böyle kullanıcı yoktur,
+üretim dışı cluster'da adımı kapsamı sınırlı kullanıcı yokken koşun ve bitince
 aralıkları hemen çıkarın. `helm upgrade` pod'u yeniden oluşturur; yeni pod
-listedeki bir node'a düştüyse aşağıdaki sonuç drain'siz de görünür. Değilse:
+listedeki bir node'a düştüyse aşağıdaki sonuç drain'siz de görünür. Değilse
+pod'u taşıyın: test release'inde node'a dokunmadan, bir `helm upgrade` daha
+`--set 'backend.nodeSelector.kubernetes\.io/hostname=<başka-node>'` ile
+(bitince kaldırın; `<başka-node>` veri volume'unun bölgesinde (zone) olsun:
+bölgeye bağlı RWO depolamada volume başka bölgedeki node'a bağlanamaz, pod
+`Pending` kalır); üretim dışı cluster'da drain:
 
 ```
 oc adm drain <backend-node> --ignore-daemonsets --delete-emptydir-data
@@ -304,25 +324,40 @@ oc adm uncordon <backend-node>
 ```
 
 Values'ta cluster ağlarını beyan ettiyseniz (`targetScope.clusterNetworks`,
-0.53): (b)'nin `helm upgrade`'i render hatasıyla durur, beyanın beklenen sonucu
-budur (README "Kurum ağı"). (a) `/32` olduğundan render'da beyanla
-karşılaştırılmaz; beyan varken de render edilir ve aynı `ERROR`, gauge ve
-alarmı verir. (b) için beyanı adım boyunca kaldırın, bitince geri koyun.
+0.53) (b)'nin `helm upgrade`'i render hatasıyla durur; beyanın beklenen sonucu
+budur ve (c) onu cluster'a dokunmadan gösterir. (b)'yi beyanla koşmak için
+beyanı adım boyunca kaldırın, bitince geri koyun; üretimde kaldırmayın. (a)
+`/32` olduğundan render'da beyanla karşılaştırılmaz; beyan varken de render
+edilir ve aynı `ERROR`, gauge ve alarmı verir.
+
+**c) Beyan çakışması lokal render'da (her cluster; cluster'a dokunmaz).**
+Cluster ağlarını beyan eden values'la, öteki node'un pod alt ağını kurum
+aralığına ekleyip yalnız `helm template` koşun; `helm upgrade` yok:
+
+```
+helm template kubeat oci://<iç-registry>/charts/kubeat --version 0.53.0 -f values-pilot.yaml \
+  --set-string backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS=10.129.0.0/23 \
+  --set 'targetScope.clusterNetworks.pods={10.128.0.0/14}' >/dev/null
+```
 
 Beklenen:
 
-- Backend `Running`, `CrashLoopBackOff` değil; izleme sürer.
-- Tek `ERROR` satırı `target scope external ranges ignored: …`; `ignored`
-  alanında (a)'da `<adres>/32 holds the API server's address …`, (b)'de
-  `<aralık> holds <pod adresi>, an address of the backend's own pod …`.
-- Observe → Metrics'te `kubeat_target_scope_external_ranges_ignored` `1`,
-  Observe → Alerting'de `KubeatScopeExternalRangesIgnored` Firing (kuralda
+- (a) ve (b): backend `Running`, `CrashLoopBackOff` değil; izleme sürer.
+- (a) ve (b): tek `ERROR` satırı `target scope external ranges ignored: …`;
+  `ignored` alanında (a)'da `<adres>/32 holds the API server's address …`,
+  (b)'de `<aralık> holds <pod adresi>, an address of the backend's own pod …`.
+- (a) ve (b): Observe → Metrics'te `kubeat_target_scope_external_ranges_ignored`
+  `1`, Observe → Alerting'de `KubeatScopeExternalRangesIgnored` Firing (kuralda
   `for` yok).
-- Yok sayılan aralığa giden kapsamı sınırlı monitor'ler `blocked_by_scope` ile
-  DOWN. Eklenen aralıkları values'tan çıkarıp `helm upgrade` yapınca üçü de
+- (b): yok sayılan aralığa giden kapsamı sınırlı monitor'ler `blocked_by_scope`
+  ile DOWN. Eklenen aralıkları values'tan çıkarıp `helm upgrade` yapınca üçü de
   kalkar.
-- 0.52'de aynı adımda backend açılmaz (`invalid configuration`,
-  `CrashLoopBackOff`); izleme durur.
+- (c): render `Error: … backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS:
+  10.129.0.0/23 overlaps 10.128.0.0/14, the cluster's pod network
+  (targetScope.clusterNetworks.pods) …` ile durur; cluster'a hiçbir şey gitmez.
+- 0.52'de (a)'da da (b)'de de backend açılmaz (`invalid configuration`,
+  `CrashLoopBackOff`) ve izleme durur: 0.52'de (a)'yı da üretimde koşmayın,
+  önce 0.53'e yükseltin.
 
 ### 7. Kurum CA'sı
 
@@ -418,7 +453,9 @@ Kurum CA'sı proxy/cluster spec.trustedCA'da mı:
 | 3 Cluster vekili ve NO_PROXY | | eksik ad ya da aralık | |
 | 4 server resolve ve NO_PROXY | | her adın satırı | |
 | 5 F5/WAF önlü Route | | iki satırın source'u (maskeli) | |
-| 6 Drain | | ERROR satırı, gauge, alarm | |
+| 6a API sunucusunun /32'si | | ERROR satırı, gauge, alarm | |
+| 6b Drain (yalnız üretim dışı ya da test release'i) | | ERROR satırı, gauge, alarm; nerede koşuldu | |
+| 6c Beyan çakışması (helm template) | | render hatası | |
 | 7 Kurum CA'sı | | önce ve sonra sonuç | |
 | 8 Yanıt süresi ve CONNECT | | total, tls; 10 dk'daki CONNECT sayısı | |
 | 9 OADP geri yükleme | | | |
