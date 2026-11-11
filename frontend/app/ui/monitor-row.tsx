@@ -108,9 +108,10 @@ export const Row = memo(function Row({
       onPointerLeave={(e) => e.pointerType === "mouse" && onHover(null, null)}
     >
       {canPick ? (
-        // The whole place of the glyph is the checkbox's target.
+        // The whole place of the glyph is the checkbox's target. The glyph
+        // is a size up from the chips, so its shapes read in a dense row.
         <label className="fl-lead">
-          <StatusGlyph kind={style.glyph} live={item.state === "down"} className="fl-glyph" />
+          <StatusGlyph kind={style.glyph} size={12} live={item.state === "down"} className="fl-glyph" />
           <input
             type="checkbox"
             className="fl-pick"
@@ -123,7 +124,7 @@ export const Row = memo(function Row({
         </label>
       ) : (
         <span className="fl-lead">
-          <StatusGlyph kind={style.glyph} live={item.state === "down"} className="fl-glyph" />
+          <StatusGlyph kind={style.glyph} size={12} live={item.state === "down"} className="fl-glyph" />
         </span>
       )}
       <Link

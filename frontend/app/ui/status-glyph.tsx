@@ -1,22 +1,35 @@
 /**
- * The shapes a state takes. Each differs in shape as well as color, so it
- * reads for the colorblind and in print: up is a filled circle, down a
- * diamond, degraded (verifying, recovering, partial) a half-filled circle,
- * maintenance a hatched one, paused a ring with two bars, pending a dashed
- * ring.
+ * The shapes a state takes, one language everywhere a state is shown (the
+ * list's rows and its state filter, the hover card, the hero, the chart's
+ * legend). Each differs in shape as well as color, so it reads for the
+ * colorblind, in print and under a forced-colors scheme, where only the
+ * shapes' borders survive:
+ *
+ *   up       a filled circle, --up
+ *   down     a diamond, --down; still going on, it wears the pulsing ring
+ *   warn     a half-filled circle, --warn: degraded, verifying, recovering
+ *            (and a partly failed bucket or day)
+ *   maint    a hatched circle, --maint
+ *   paused   a ring with two bars, --ink-3
+ *   pending  a dashed ring, --ink-3: no check has run yet
  */
 export type GlyphKind = "up" | "down" | "warn" | "maint" | "paused" | "pending";
 
+/** 10 in chips, the filter and the hover card; 12 in the list's rows; 16 in the hero. */
 export type GlyphSize = 10 | 12 | 16;
 
 /**
  * A state as its glyph (drawn in globals.css, .glyph). `live` marks an
- * outage that is still going on: the diamond wears a pulsing ring, which
- * stands still for viewers who ask for less motion.
+ * outage that is still going on, and only then does anything move: the
+ * diamond wears a ring that swells a little and fades, then rests, on four
+ * slow beats (--duration-slow, --ease-out); pending and the rest are still.
+ * For viewers who ask for less motion the ring stands still, and the shape
+ * and the color say the rest.
  *
  * Pass `label` when no visible text next to the glyph says the state; the
  * glyph then names it to screen readers and on hover. Without a label it
- * is hidden from them, and the text beside it must do the naming.
+ * is hidden from them, and the text beside it must do the naming (a list
+ * row names the state inside its link, in sr-only text).
  */
 export function StatusGlyph({
   kind,
