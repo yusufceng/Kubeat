@@ -49,7 +49,7 @@ varsa her komuta doğrulanacak cluster'ın bağlamını verin (`oc --context
 Komut README "OpenShift"tekiyle aynıdır:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
@@ -115,9 +115,10 @@ benzetimde doğrulanamadı.
 
 ## Vekilli ve hava boşluklu OpenShift
 
-**Durum: ölçülmedi, prova kullanıcıda.** Bu bölüm bir kurumsal kurulumda
-koşulup geri bildirimi gelmeden 1.0 metni bu yolu "ölçülmedi, prova
-kullanıcıda" diye yazar ([yol haritası](yol-haritasi.md), 32. adım).
+**Durum: ölçülmedi, prova kullanıcıda.** 1.0 (2026-11-11) bu bölüm
+koşulmadan çıktı: belgeler bu yolu "ölçülmedi, prova kullanıcıda" diye yazar
+ve bölüm bir kurumsal kurulumda koşulup geri bildirimi gelince güncellenir
+([yol haritası](yol-haritasi.md), 32. adım).
 
 Kapsam: kurumun kendi veri merkezindeki (on-prem) ya da çıkışı kısıtlı bir
 OpenShift. Dışarıya yalnız cluster dışındaki kurumsal vekilden çıkılır,
@@ -148,7 +149,7 @@ sizin değerlerinizdir.
 parola istiyorsa `imagePullSecrets`); chart iç registry'den kurulur:
 
 ```
-helm upgrade --install kubeat oci://<iç-registry>/charts/kubeat --version 0.53.1 \
+helm upgrade --install kubeat oci://<iç-registry>/charts/kubeat --version 1.0.0 \
   -n kubeat -f values-pilot.yaml
 ```
 
@@ -162,9 +163,9 @@ pod'ların onları çektiğini görün:
 ```
 R=<iç-registry>/kubeat
 cosign verify --trusted-root trusted_root.json \
-  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v0.53.1 \
+  --certificate-identity https://github.com/yusufceng/Kubeat/.github/workflows/release.yml@refs/tags/v1.0.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  $R/kubeat-backend:0.53.1 $R/kubeat-frontend:0.53.1 <iç-registry>/charts/kubeat:0.53.1
+  $R/kubeat-backend:1.0.0 $R/kubeat-frontend:1.0.0 <iç-registry>/charts/kubeat:1.0.0
 oc -n kubeat get pods -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}'
 ```
 
@@ -173,8 +174,8 @@ Beklenen:
 - Her referans için `Verification for <referans> --` ve imzanın hangi
   denetimlerden geçtiğini sayan satırlar; çıkış kodu 0. cosign Sigstore'a
   bağlanmaz.
-- Pod'ların imajları `<iç-registry>/kubeat/kubeat-backend:0.53.1` ve
-  `<iç-registry>/kubeat/kubeat-frontend:0.53.1`; `ImagePullBackOff` yok.
+- Pod'ların imajları `<iç-registry>/kubeat/kubeat-backend:1.0.0` ve
+  `<iç-registry>/kubeat/kubeat-frontend:1.0.0`; `ImagePullBackOff` yok.
 
 ### 2. Açılış satırları
 
@@ -335,7 +336,7 @@ Cluster ağlarını beyan eden values'la, öteki node'un pod alt ağını kurum
 aralığına ekleyip yalnız `helm template` koşun; `helm upgrade` yok:
 
 ```
-helm template kubeat oci://<iç-registry>/charts/kubeat --version 0.53.1 -f values-pilot.yaml \
+helm template kubeat oci://<iç-registry>/charts/kubeat --version 1.0.0 -f values-pilot.yaml \
   --set-string backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS=10.129.0.0/23 \
   --set 'targetScope.clusterNetworks.pods={10.128.0.0/14}' >/dev/null
 ```

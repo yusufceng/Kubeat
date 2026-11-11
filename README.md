@@ -28,7 +28,7 @@ tamamlayıcıdır. Ingress controller'ı ve cert-manager'ı olan bir cluster'a
 kurulum (OpenShift'te "OpenShift" bölümündeki komut):
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 \
   -n kubeat --create-namespace \
   --set podSecurityContext.fsGroup=1001 \
   --set ingress.enabled=true --set ingress.className=<kümenin sınıfı> \
@@ -68,7 +68,7 @@ Kubeat'in kendisi düşerse cluster dışındaki bir heartbeat alıcısı haber 
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum".
@@ -108,7 +108,7 @@ beri imajlar ve chart imzalıdır; sürümün GitHub Release'i digest'leri ve
 SBOM'ları taşır (bkz. "Tedarik zinciri"). 0.44.0 ve öncesi imzasızdır. Herhangi bir cluster'a kurulum:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 \
   --set podSecurityContext.fsGroup=1001 \
   -n kubeat --create-namespace
 ```
@@ -392,7 +392,7 @@ kopyasında `NOTES.txt`'i bir ConfigMap'e sarar (`deploy/helm/test-chart.sh`
 de böyle yapar) ve cluster'a bağlanmaz:
 
 ```sh
-helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 --untar --untardir ci
+helm pull oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 --untar --untardir ci
 t=ci/kubeat/templates; { echo '{{- define "ci.notes" -}}'; cat $t/NOTES.txt; echo '{{- end -}}'; } >$t/_ci_notes.tpl
 printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ci-notes\ndata:\n  notes: |\n{{ include "ci.notes" . | indent 4 }}\n' >$t/ci-notes.yaml
 helm template kubeat ci/kubeat -n kubeat -f values-<cluster>.yaml --show-only templates/ci-notes.yaml \
@@ -446,7 +446,7 @@ OpenShift'te chart şu değerlerle kurulur; `podSecurityContext` boş bırakıl�
 UID ve fsGroup'u SCC atar:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 \
   -n kubeat --create-namespace \
   --set route.enabled=true --set route.host=kubeat.apps.<cluster-domain> \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
@@ -4751,7 +4751,7 @@ satır:
 
 ```
 kubectl -n kubeat create secret generic kubeat-heartbeat --from-literal=url=https://<heartbeat-adresi>
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 -n kubeat --reset-then-reuse-values --set heartbeat.urlSecret.name=kubeat-heartbeat
 ```
 
 ### Heartbeat olmadan: `kubeat_self_healthy` ve `KubeatUnhealthy`

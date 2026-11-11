@@ -4,8 +4,9 @@
 ([gke.md](gke.md), `values-gke.yaml`) CI'da render edilir; gerçek bir GKE'de
 kurulmadı. Bu belge o kurulumda neyin nasıl doğrulanacağını ve sonucun nasıl
 geri bildirileceğini anlatır; [openshift-dogrulama.md](openshift-dogrulama.md)
-deseniyle yazıldı. Koşulup geri bildirimi gelmeden 1.0 metni GKE'yi
-"destekleniyor" değil "ölçülmedi, prova kullanıcıda" diye yazar
+deseniyle yazıldı. 1.0 (2026-11-11) bu runbook koşulmadan çıktı: belgeler
+GKE'yi "destekleniyor" değil "ölçülmedi, prova kullanıcıda" diye yazar ve
+runbook koşulup geri bildirimi gelince güncellenir
 ([yol haritası](yol-haritasi.md), 32. adım). Hepsi bir öğleden sonraya sığar;
 adım 6 ve 7'nin ölçümü onar dakika bekler.
 
@@ -59,7 +60,7 @@ görün.
 kendi adınızla değiştirin:
 
 ```
-helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 \
+helm upgrade --install kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 \
   -n kubeat -f values-gke.yaml
 kubectl -n kubeat rollout status deploy/kubeat-backend
 kubectl -n kubeat logs deploy/kubeat-backend | grep "public URL's addresses"
@@ -153,7 +154,7 @@ Beklenen:
 Hop'u geçici olarak `1` yapın, tarayıcıdan bir yanlış parola daha girin:
 
 ```
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 \
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 \
   -n kubeat -f values-gke.yaml --set-string backend.extraEnv.UPTIME_TRUST_PROXY_HOPS=1
 kubectl -n kubeat logs deploy/kubeat-backend --since=15m | grep -E 'sign-in refused|is lower than needed'
 ```
@@ -216,7 +217,7 @@ Sınırı adım 6–8 boyunca geçici olarak 20 yapın; değerlerin geri kalanı
 `values-gke.yaml`'dan gelir:
 
 ```
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 \
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 \
   -n kubeat -f values-gke.yaml --set-string backend.extraEnv.UPTIME_MAX_MONITORS_PER_HOST=20
 kubectl -n kubeat rollout status deploy/kubeat-backend
 ```
@@ -327,7 +328,7 @@ for id in $(curl -sS -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/mon
     jq -r '.[] | select(.name | startswith("nat-")) | .id'); do
   curl -sS -o /dev/null -w '%{http_code}\n' -X DELETE -H "Authorization: Bearer $TOKEN" localhost:8090/api/v1/monitors/$id
 done
-helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.1 -n kubeat -f values-gke.yaml
+helm upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 -n kubeat -f values-gke.yaml
 ```
 
 Her silme `204` döner; `helm upgrade`'den sonra

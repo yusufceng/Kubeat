@@ -48,14 +48,14 @@ Ara sürümlere tek tek yükseltmeniz gerekmez: tek bir `helm upgrade` hedef
 sürüme geçer. Aradaki her sürümün "Yapılacak" adımları yine yapılır ve
 geri dönüş başladığınız sürüme olur.
 
-### 0.42'den 0.53'e
+### 0.42'den 1.0'a
 
 1. [Yükseltmeden önce yedek](#yükseltmeden-önce-yedek).
 2. 0.43'ün ön kontrolleri ("0.43'e yükseltme", Yapılacak): son gönderimi
    başarısız kanalları düzeltin ya da kapatın; aynı PagerDuty servisine
    bağlı birden çok kurulumu ayırın. `UPTIME_NOTIFY_RETRY_MAX` denetimi
    0.46'dan beri uyarıya döner: 1 dakikadan ya da bir denemenin
-   süresinden kısa bir değer 0.46–0.53'te backend'i durdurmaz, alt
+   süresinden kısa bir değer 0.46'dan beri backend'i durdurmaz, alt
    sınıra yükseltilir ve her açılışta `WARN` yazılır; değeri yine de
    düzeltin: 0.43, 0.44 ya da 0.45'e dönüşte backend'i durdurur (0.42 bu
    ayarı tanımaz).
@@ -128,30 +128,30 @@ geri dönüş başladığınız sürüme olur.
     `KubeatSignInSourceDegraded`'i, `KubeatDiscoveryNamespaceSkipped`'i,
     `KubeatScopeExternalRangesIgnored`'ı ve `KubeatScopeResolveErrors`'ı
     Alertmanager yönlendirmesine ekleyin; kuralları kopyalıyorsanız
-    0.53'ünkileri kopyalayın.
+    1.0'ınkileri kopyalayın (0.53 ile aynı).
 14. Yükseltme (ayarlar bir values dosyasında değilse `-f values.yaml`
     yerine `--reset-then-reuse-values`, Helm 3.14+):
 
     ```sh
-    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 0.53.0 -f values.yaml
+    helm -n kubeat upgrade kubeat oci://ghcr.io/yusufceng/charts/kubeat --version 1.0.0 -f values.yaml
     ```
 
 15. Geri dönüş: şema aynı (26), `helm rollback` ile 0.42.2'ye; önce açık
-    PagerDuty olaylarını kapatın. Dönüşte 0.43–0.53'ün yeniden denemesi,
+    PagerDuty olaylarını kapatın. Dönüşte 0.43–1.0'ın yeniden denemesi,
     kurulum kimliği, alarmları ve metrikleri kalkar; 0.42'nin chart'ı
     PVC'lere kaldırma korumasını basmaz, `helm uninstall` onları yine siler.
 
-### 0.41'den 0.53'e
+### 0.41'den 1.0'a
 
 1. 0.42'nin adımı ("0.42'ye yükseltme", Yapılacak): LDAP ya da OIDC ile
    giriş, namespace'le sınırlı kullanıcılar ya da dizin grupları, denetim
    kaydı ya da birden çok durum sayfası kullanıyorsanız lisansı
    yükseltmeden önce verin.
-2. Sonra "0.42'den 0.53'e"deki adımlar.
+2. Sonra "0.42'den 1.0'a"daki adımlar.
 3. Geri dönüş: şema aynı (26), `helm rollback` ile 0.41.1'e.
 
-0.43–0.52'den gelirken başladığınız sürümden sonraki bölümleri
-eskiden yeniye okuyun. 0.40 ya da öncesinden gelirken de öyle; şemayı
+0.43–0.53'ten gelirken başladığınız sürümden sonraki bölümleri
+eskiden yeniye okuyun; 0.53.1 ve 1.0 yeni adım eklemez. 0.40 ya da öncesinden gelirken de öyle; şemayı
 yükselten 0.38, 0.39 ve 0.40'tan dönüş yalnızca yedekle olur.
 
 ## Ön kontrolleri betiklemek
@@ -330,6 +330,66 @@ api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $TOKEN" "$@" "http://lo
   ```
 
 Bitince port-forward'u kapatın: `kill $PF`.
+
+## 1.0'a yükseltme
+
+1.0.0 kararlı sürümdür ve 0.53.1'in kodudur: davranış, şema (26), chart
+değerleri ve kurallar değişmedi; değişen sürüm numarası ve belgelerdir.
+Karar 2026-11-11'de verildi ([yol haritası](yol-haritasi.md) 32. adım);
+anlamı:
+
+- **Uyumluluk.** 1.x boyunca `/api/v1`, chart değerleri ve `UPTIME_*` ayar
+  adları geriye uyumlu kalır: "kıran" değişiklik (bir API alanının, chart
+  değerinin ya da ayar adının kaldırılması ya da anlamının değişmesi) yalnız
+  2.0'da; kaldırılacak bir şey en az bir minor boyunca uyarılır (uyarı
+  yükseltme notunun "Yapılacak" maddesinde ve kurulum notunda; kaldırılacak
+  bir `UPTIME_*` adı bir minor boyunca eski adla da okunur ve açılışta `WARN`
+  yazar). Davranış değişikliği yükseltme notunda yazılır; bir güvenlik
+  düzeltmesi davranışı uyarı minor'unu beklemeden, gerekirse bir yama
+  sürümünde (1.0.x) de değiştirebilir (0.51'de kapsamın her bağlantıda
+  uygulanması gibi), o zaman not sürümü "güvenlik sürümü" diye adlandırır.
+  Veritabanı yalnız ileri göçer
+  (1.0'da şema 26, geri göç yok): şemayı yükseltmeyen her minor
+  `helm rollback` ile bir öncekine döner; şemayı yükselten bir minor ilk
+  cümlesinde "şema yükselir" der ve dönüşü yalnız yükseltmeden önce alınan
+  doğrulanmış yedekle olur (yukarıda "Yükseltmeden önce yedek").
+- **Güvenlik ve destek.** [SECURITY.md](../SECURITY.md): düzeltme yalnız son
+  minor'a; dışarıdan bildirilen açığa duyuru, kendi bulunana "güvenlik
+  sürümü" ve "Güvenlik sürümleri" tablosu.
+- **Ölçülenler.** OpenShift'te (ROSA, tek namespace'li pilot) ve iki node'lu
+  minikube'da ölçüldü. GKE, vekilli ve hava boşluklu OpenShift, WAF ya da F5
+  önlü Route, gerçek Active Directory, OADP ile geri yükleme ve OpenShift'in
+  kendi izleme yığınında (UWM) ya da Grafana Cloud/Mimir'de 0.53'ün iki kuralı
+  (`KubeatScopeExternalRangesIgnored`, `KubeatScopeResolveErrors`; ikisi
+  minikube'da gerçek bir Prometheus'ta yandı) ölçülmedi; ilk ikisinin
+  runbook'ları var ([gke-dogrulama.md](gke-dogrulama.md),
+  [openshift-dogrulama.md](openshift-dogrulama.md)) ve 1.0 kararı onlar
+  koşulmadan verildi. Belgeler bu yolları "ölçülmedi, prova kullanıcıda" diye
+  yazar; "destekleniyor" yalnız ölçülenler için denir.
+- **Bilinen sınırlar** ve 1.0'a girmeyen maddeler
+  [yol-haritasi.md](yol-haritasi.md) "Bilinen sınırlar"da.
+
+### Yapılacak
+
+- **Yedeği doğrulamalı blokla alın** (yukarıda "Yükseltmeden önce yedek").
+- `helm upgrade … --version 1.0.0` (README "Hızlı başlangıç"); 0.53.1'den
+  gelirken yeni adım yok, 0.53 ve öncesinden gelirken aradaki sürümlerin
+  "Yapılacak" adımları (yukarıda "Atlamalı yol"). Aynalı kurulumda iki imajı
+  ve chart'ı yeniden aynalayın; `cosign verify` kimliği
+  `release.yml@refs/tags/v1.0.0`.
+
+### Davranış değişikliği
+
+Yok. Yükseltme sırasında tek replica'lı backend `Recreate` ile yeniden
+oluşturulur (imaj etiketi 1.0.0); pencere README "Durum sayfaları" →
+"Sınırlar"daki gibidir (pod aynı node'da kalırsa ~4 sn, node değişirse
+~25 sn).
+
+### Geri dönüş
+
+`helm rollback` ile 0.53.1'e ya da başladığınız sürüme; şema aynı.
+
+### Alarm kuralları: değişmedi
 
 ## 0.53.1'e yükseltme
 
