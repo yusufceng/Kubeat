@@ -3288,3 +3288,14 @@ müşteri bulguları"). Altısı da belge, kod yok; ayrıntı ve kanıt satırla
 Tetikleyici: 1.0 kararı. Seçenek 1'de (1.0'ı 0.53.0'dan çıkarmak) metin turunun PR'ı; seçenek
 2'de sprint 12 keşfinin girdisi. İki durumda da altı madde o turla kapanır ve bu bölüm kapanış
 notu alır.
+
+Kapanış (2026-11-11, release manager; PR [#184](https://github.com/yusufceng/Kubeat/pull/184),
+BA ve SRE "yalnız bu diff" onayıyla): 1, 2, 4, 5 ve 6 kapandı. 3'ün iki parçası kapandı (madde 16
+kaydedilecek yan verileri sayar; README "Sınırlar" ve madde 16 "farkın nedeni ölçülmedi" der ve
+pencereyi uzatan etkenleri sayar); nedensel cümle ("imaj node'da hazırsa ~4 sn; çekiliyorsa ya da
+pod node değiştiriyorsa ~25 sn") **ertelendi**: iki ölçümde imaj çekme süresi, pod'ların node'u ve
+volume'un bağlanma süresi kaydedilmemişti, cümle kanıtsız olurdu. Tetikleyici: madde 16'nın yan
+verileriyle kaydedilen ilk yükseltme (sandbox'ta bir sonraki sürüm ya da bir müşterinin geri
+bildirimi); o zaman README "Durum sayfaları" → "Sınırlar" ve yol haritası "Bilinen sınırlar" ilk
+girdisi nedene bağlı yazılır. Aynı PR'ın yol haritası "Bilinen sınırlar"a eklediği "ölçüm yok"
+girdisinin tetikleyicisi yol haritası satır 32'dir (iki runbook'un koşulması).
