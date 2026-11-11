@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ApiError } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import { LockIcon, UnplugIcon } from "@/app/ui/page-icons";
+import { RetryButton } from "@/app/ui/retry-button";
 
 /**
  * Shown where a page could not get its data from the backend. A rejected
@@ -31,6 +32,9 @@ export async function BackendError({ what, err }: { what: string; err?: unknown 
       <span className="pg-callout-body">
         <span className="pg-callout-title">{t("error.unreachableTitle")}</span>
         {t("backend.cannotShow", { what })}
+        <span className="mt-2 block">
+          <RetryButton label={t("backend.retry")} />
+        </span>
       </span>
     </p>
   );

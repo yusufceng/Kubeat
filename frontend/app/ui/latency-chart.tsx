@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Series, SeriesPoint } from "@/lib/api";
@@ -209,8 +210,17 @@ export function LatencyChart({
 
   if (points.length === 0) {
     return (
-      <p className="rounded-md border border-dashed border-line p-8 text-center text-[13px] text-ink-3">
+      <p className="rounded-md border border-dashed border-line p-8 text-center text-dense text-ink-3">
         {t("monitorPage.chart.empty")}
+        {/* Zoomed into a span with nothing in it, the way out is the whole range. */}
+        {selection && !readOnly && (
+          <>
+            {" "}
+            <Link href={baseHref} scroll={false} className="text-accent-text underline">
+              {t("monitorPage.chart.zoomOut", { duration: duration(series.range_seconds, t) })}
+            </Link>
+          </>
+        )}
       </p>
     );
   }
@@ -783,7 +793,17 @@ export function LatencyChart({
                 points.map((p) => (
                   <tr key={p.start}>
                     <td className="tabular-nums">{bucketLabel(p)}</td>
-                    <td className={`num ${slow(p) ? "text-warn-ink" : ""}`}>{p.avg_latency_ms !== null ? ms(p.avg_latency_ms, t.intl) : "–"}</td>
+                    <td className={`num ${slow(p) ? "text-warn-ink" : ""}`}>
+                      {/* Over the threshold: the warn glyph, named for the screen reader, before the figure. */}
+                      {slow(p) && (
+                        <StatusGlyph
+                          kind="warn"
+                          label={t("monitorPage.chart.slow", { ms: slowAboveMs.toLocaleString(t.intl) })}
+                          className="mr-1.5 align-middle"
+                        />
+                      )}
+                      {p.avg_latency_ms !== null ? ms(p.avg_latency_ms, t.intl) : "–"}
+                    </td>
                     <td className="num">{p.max_latency_ms !== null ? ms(p.max_latency_ms, t.intl) : "–"}</td>
                     <td className="num">{p.checks}</td>
                     <td className={`num ${p.checks > p.up_checks ? "text-down-ink" : ""}`}>{p.checks - p.up_checks}</td>

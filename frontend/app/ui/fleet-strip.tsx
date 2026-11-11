@@ -18,25 +18,28 @@ function slotBeat(slot: FleetSlot, t: T): Beat {
   const time = (ms: number) =>
     new Date(ms).toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const range = `${time(slot.start)}–${time(slot.end)}`;
+  // The state in words heads the tip, beside its glyph; the slot's span follows.
   switch (slot.state) {
     case "down":
       return {
         state: "down",
         level: slot.level,
-        text: `${range} · ${t.n("monitorsList.hero.strip.down", slot.down.length)}`,
+        word: t.n("monitorsList.hero.strip.down", slot.down.length),
+        text: range,
         detail: names(slot.down, t),
       };
     case "partial":
       return {
         state: "partial",
         level: slot.level,
-        text: `${range} · ${t.n("monitorsList.hero.strip.partial", slot.down.length)}`,
+        word: t.n("monitorsList.hero.strip.partial", slot.down.length),
+        text: range,
         detail: names(slot.down, t),
       };
     case "maint":
-      return { state: "maint", text: `${range} · ${t("monitorsList.hero.strip.maint")}`, detail: names(slot.maint, t) };
+      return { state: "maint", word: t("monitorsList.hero.strip.maint"), text: range, detail: names(slot.maint, t) };
     default:
-      return { state: "ok", text: `${range} · ${t("monitorsList.hero.strip.ok")}` };
+      return { state: "ok", word: t("monitorsList.hero.strip.ok"), text: range };
   }
 }
 

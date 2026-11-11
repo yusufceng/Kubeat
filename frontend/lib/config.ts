@@ -141,6 +141,8 @@ export const config = {
   overviewEvents: positiveInt(process.env.OVERVIEW_EVENTS, 12),
   /** Number of ongoing outages listed in the overview's summary; the rest are a click away in the list. */
   overviewOutages: positiveInt(process.env.OVERVIEW_OUTAGES, 5),
+  /** Number of monitors the summary names among the slowest to answer; 0 leaves the line out. */
+  overviewSlowest: nonNegativeInt(process.env.OVERVIEW_SLOWEST, 3),
   /**
    * A monitor that flaps: three or more of its outages in a row, each
    * shorter than this and each within this long of the one before, are

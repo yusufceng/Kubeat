@@ -11,10 +11,13 @@ import { DRAWER_MEDIA, type ListFilter, useListDrawer, useListFilter } from "@/a
 export function ShowInList({
   filter,
   className,
+  title,
   children,
 }: {
   filter: ListFilter;
   className?: string;
+  /** What the button does, on hover, where its text says only what it counts. */
+  title?: string;
   children: React.ReactNode;
 }) {
   const [, setFilter] = useListFilter();
@@ -23,6 +26,7 @@ export function ShowInList({
     <button
       type="button"
       className={className}
+      title={title}
       onClick={() => {
         setFilter(filter);
         if (matchMedia(DRAWER_MEDIA).matches) setDrawerOpen(true);

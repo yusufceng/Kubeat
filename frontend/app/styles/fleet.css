@@ -534,73 +534,136 @@
     container-type: inline-size;
   }
 
-  /* The summary: a sentence, figures and the strip, over an aura of the
-     fleet's state. The aura is still: it is a color, not an alarm. */
+  /* The summary: the fleet's state as a sentence, its counts by state, a
+     line of figures and the facts worth a line, beside the last hours as a
+     strip. No aura and no display face: the glyphs carry the color, and
+     every line is a figure, a state or a way somewhere. */
   .fl-hero {
     position: relative;
-    padding: 22px 24px 18px;
-  }
-  /* The aura is a background of the panel's own box, so it needs no
-     clipping that would also cut off the strip's hover. */
-  .fl-hero::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: radial-gradient(closest-side, color-mix(in oklab, var(--aura, transparent) 16%, transparent), transparent)
-      -120px -180px / 520px 420px no-repeat;
-    pointer-events: none;
-  }
-  .fl-hero[data-tone="down"] {
-    --aura: var(--down);
-  }
-  .fl-hero[data-tone="warn"] {
-    --aura: var(--warn);
-  }
-  .fl-hero[data-tone="up"] {
-    --aura: color-mix(in oklab, var(--up) 88%, transparent);
+    padding: var(--space-4) var(--space-5);
   }
   .fl-hero-top {
-    position: relative;
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
-    gap: 18px 28px;
+    gap: var(--space-3) var(--space-6);
   }
   .fl-hero-text {
+    display: flex;
     flex: 1 1 300px;
+    flex-direction: column;
+    gap: var(--space-2);
     min-width: 0;
   }
   .fl-state {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: var(--space-2);
   }
   .fl-state > .glyph {
     flex: none;
   }
+  /* The counts: a chip each, its glyph, its figure and its word; a zero is quiet. */
+  .fl-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+  .fl-count {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    height: var(--space-6);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    color: var(--ink-2);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    line-height: var(--text-xs--line-height);
+    font-variant-numeric: tabular-nums;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
+  }
+  .fl-count:hover {
+    border-color: var(--line-strong);
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .fl-count b {
+    color: var(--ink);
+    font-weight: 650;
+  }
+  .fl-count-down b {
+    color: var(--down-ink);
+  }
+  .fl-count-warn b {
+    color: var(--warn-ink);
+  }
+  .fl-count-zero,
+  .fl-count-zero b {
+    color: var(--ink-3);
+  }
   .fl-sub {
     display: flex;
     flex-wrap: wrap;
-    margin-top: 6px;
     color: var(--ink-2);
-    font-size: 13px;
-    line-height: 18px;
+    font-size: var(--text-dense);
+    line-height: var(--text-dense--line-height);
     font-variant-numeric: tabular-nums;
   }
   /* The dot ends a line that wraps, rather than starting the next. */
   .fl-sub > span:not(:last-child)::after {
     content: "·";
-    margin: 0 6px;
+    margin: 0 var(--space-1-5);
     color: var(--ink-3);
   }
-  /* On a phone the summary is tighter, and its sentence a size down. */
+  /* The facts: a term, then its parts on one line, dots between them. */
+  .fl-facts {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 2px var(--space-2-5);
+    font-size: var(--text-dense);
+    line-height: var(--text-dense--line-height);
+  }
+  .fl-facts dt {
+    color: var(--ink-3);
+    white-space: nowrap;
+  }
+  .fl-facts dd {
+    display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .fl-fact {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+  .fl-fact + .fl-fact::before {
+    content: "·";
+    margin: 0 var(--space-1-5);
+    color: var(--ink-3);
+  }
+  .fl-fact a {
+    overflow: hidden;
+    color: var(--ink);
+    font-weight: 550;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fl-fact a:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  /* On a phone the summary is tighter still. */
   @container (width < 560px) {
     .fl-hero {
-      padding: 16px;
-    }
-    .fl-state {
-      gap: 12px;
+      padding: var(--space-3) var(--space-4);
     }
   }
   .fl-strip {
@@ -635,7 +698,7 @@
      the monitor, with a button on it to the incident's page. */
   .fl-outages {
     position: relative;
-    margin-top: 18px;
+    margin-top: var(--space-3);
     border-top: 1px solid var(--line);
   }
   .fl-outages > li + li {
@@ -644,10 +707,10 @@
   .fl-outage {
     position: relative;
     display: grid;
-    grid-template-columns: 16px auto minmax(0, 1fr) auto auto;
+    grid-template-columns: var(--space-4) auto minmax(0, 1fr) auto auto;
     align-items: center;
-    column-gap: 12px;
-    min-height: 44px;
+    column-gap: var(--space-2-5);
+    min-height: var(--space-8);
   }
   .fl-outage-name::after {
     content: "";
@@ -937,54 +1000,32 @@
     letter-spacing: -0.01em;
   }
 
-  /* Before anything is watched: three ways in, the cluster's first. */
+  /* Before anything is watched: one sentence, the way in, and the other
+     two ways on a line below. */
   .fl-empty {
-    padding: 28px;
-  }
-  .fl-empty-icon {
-    display: grid;
-    place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-md);
-    background: var(--accent-soft);
-    color: var(--accent-text);
-  }
-  .fl-steps {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 12px;
-    margin-top: 22px;
-    counter-reset: step;
-  }
-  .fl-steps > li {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 16px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    counter-increment: step;
+    gap: var(--space-2);
+    padding: var(--space-5);
   }
-  .fl-steps > li::before {
-    content: counter(step);
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    margin-bottom: 4px;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-xs);
+  .fl-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+  }
+  .fl-empty-or {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
     color: var(--ink-3);
-    font-family: var(--font-plex), ui-monospace, monospace;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: var(--text-dense);
+    line-height: var(--text-dense--line-height);
   }
-  .fl-steps p {
-    margin-bottom: 8px;
-    color: var(--ink-2);
-    font-size: 13px;
-    line-height: 18px;
+  .fl-empty-or .fl-code {
+    margin-top: 0;
   }
   .fl-code {
     display: flex;

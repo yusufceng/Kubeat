@@ -7,20 +7,13 @@ export const monitorsList = defineMessages(
     "monitorsList.overview.what": "Genel bakış",
     "monitorsList.overview.empty.title": "Henüz izlenen bir şey yok",
     "monitorsList.overview.empty.viewerTitle": "Görebildiğiniz bir monitor yok",
-    "monitorsList.overview.empty.body": "Kubeat cluster'ınızda çalışanları izler. Üç yoldan biriyle başlayın:",
-    "monitorsList.overview.empty.discoverTitle": "Cluster'ı tarayın",
-    "monitorsList.overview.empty.discoverBody":
-      "Service, Route ve Ingress'leri bulur; hangilerinin izleneceğini siz seçersiniz.",
+    "monitorsList.overview.empty.lead":
+      "Kubeat cluster'ınızda çalışanları izler; Service, Route ve Ingress'leri tarayarak başlayın.",
     "monitorsList.overview.empty.discover": "Cluster'dan keşfet",
-    "monitorsList.overview.empty.annotateTitle": "Annotation ekleyin",
-    "monitorsList.overview.empty.annotateBody":
-      "Bir Service, Route ya da Ingress'in manifest'ine bu annotation'ı yazın; Kubeat onu kendiliğinden izlemeye başlar.",
+    "monitorsList.overview.empty.addManually": "Monitor ekle",
+    "monitorsList.overview.empty.annotateInline": "ya da bir Service, Route ya da Ingress'in manifest'ine şunu ekleyin:",
     "monitorsList.overview.empty.copy": "Kopyala",
     "monitorsList.overview.empty.copied": "Kopyalandı",
-    "monitorsList.overview.empty.manualTitle": "Elle ekleyin",
-    "monitorsList.overview.empty.manualBody":
-      "Cluster dışındaki bir adres de olur: HTTP, TCP, ping, DNS, gRPC, WebSocket ya da kendi rapor veren bir iş.",
-    "monitorsList.overview.empty.addManually": "Monitor ekle",
     "monitorsList.overview.empty.viewerBody":
       "Hesabınızın kapsamındaki namespace'lerde monitor yok. Bir yönetici kapsamınızı genişletebilir.",
     "monitorsList.overview.status.monitors.one": "{count} monitor",
@@ -45,6 +38,11 @@ export const monitorsList = defineMessages(
     "monitorsList.hero.incident": "Olay",
     "monitorsList.hero.moreOutages.one": "{count} kesinti daha listede",
     "monitorsList.hero.moreOutages.other": "{count} kesinti daha listede",
+    "monitorsList.hero.counts": "Duruma göre sayılar",
+    "monitorsList.hero.slowest": "En yavaş yanıt",
+    "monitorsList.hero.slow": "yavaş yanıt eşiğinin üstünde",
+    "monitorsList.hero.lastOutage": "Son kesinti",
+    "monitorsList.hero.lasted": "{duration} sürdü",
     "monitorsList.hero.strip.label":
       "Son {window} içindeki kesintiler: {all} dilimin {slots} tanesinde kesinti var; aynı anda en çok {total} monitor'un {most} tanesi kesintide",
     "monitorsList.hero.strip.labelNone": "Son {window} içinde kesinti yok",
@@ -144,6 +142,7 @@ export const monitorsList = defineMessages(
     "monitorsList.list.empty.link": "cluster'dan keşfedin",
     "monitorsList.list.empty.viewer": "Görebildiğiniz bir monitor yok.",
     "monitorsList.list.empty.filtered": "Bu süzgece uyan monitor yok.",
+    "monitorsList.list.empty.clear": "Süzgeçleri temizle",
     "monitorsList.list.group.selectAll": "{group} grubunun tümünü seç",
     "monitorsList.list.group.page": "Namespace sayfası",
     "monitorsList.list.group.pageOf": "{group} sayfasını aç",
@@ -182,19 +181,13 @@ export const monitorsList = defineMessages(
     "monitorsList.overview.what": "The overview",
     "monitorsList.overview.empty.title": "Nothing is monitored yet",
     "monitorsList.overview.empty.viewerTitle": "There are no monitors you can see",
-    "monitorsList.overview.empty.body": "Kubeat watches what runs in your cluster. Start in one of three ways:",
-    "monitorsList.overview.empty.discoverTitle": "Discover services",
-    "monitorsList.overview.empty.discoverBody": "Finds the Services, Routes and Ingresses; you choose which to monitor.",
+    "monitorsList.overview.empty.lead":
+      "Kubeat watches what runs in your cluster; start by discovering its Services, Routes and Ingresses.",
     "monitorsList.overview.empty.discover": "Discover from the cluster",
-    "monitorsList.overview.empty.annotateTitle": "Annotate",
-    "monitorsList.overview.empty.annotateBody":
-      "Write this annotation into the manifest of a Service, Route or Ingress, and Kubeat starts checking it by itself.",
+    "monitorsList.overview.empty.addManually": "Add a monitor",
+    "monitorsList.overview.empty.annotateInline": "or add this to the manifest of a Service, Route or Ingress:",
     "monitorsList.overview.empty.copy": "Copy",
     "monitorsList.overview.empty.copied": "Copied",
-    "monitorsList.overview.empty.manualTitle": "Add by hand",
-    "monitorsList.overview.empty.manualBody":
-      "An address outside the cluster works too: HTTP, TCP, ping, DNS, gRPC, WebSocket or a job that reports in by itself.",
-    "monitorsList.overview.empty.addManually": "Add a monitor",
     "monitorsList.overview.empty.viewerBody":
       "There are no monitors in the namespaces your account covers. An administrator can widen your scope.",
     "monitorsList.overview.status.monitors.one": "{count} monitor",
@@ -219,6 +212,11 @@ export const monitorsList = defineMessages(
     "monitorsList.hero.incident": "Incident",
     "monitorsList.hero.moreOutages.one": "{count} more outage in the list",
     "monitorsList.hero.moreOutages.other": "{count} more outages in the list",
+    "monitorsList.hero.counts": "Counts by state",
+    "monitorsList.hero.slowest": "Slowest answers",
+    "monitorsList.hero.slow": "over its slow-response threshold",
+    "monitorsList.hero.lastOutage": "Last outage",
+    "monitorsList.hero.lasted": "lasted {duration}",
     "monitorsList.hero.strip.label":
       "Outages over the last {window}: {slots} of {all} slots had one, with at most {most} of {total} monitors down at once",
     "monitorsList.hero.strip.labelNone": "No outages over the last {window}",
@@ -318,6 +316,7 @@ export const monitorsList = defineMessages(
     "monitorsList.list.empty.link": "discover them from the cluster",
     "monitorsList.list.empty.viewer": "There are no monitors you can see.",
     "monitorsList.list.empty.filtered": "No monitor matches this filter.",
+    "monitorsList.list.empty.clear": "Clear the filters",
     "monitorsList.list.group.selectAll": "Select every monitor of the {group} group",
     "monitorsList.list.group.page": "Namespace page",
     "monitorsList.list.group.pageOf": "open the page of {group}",

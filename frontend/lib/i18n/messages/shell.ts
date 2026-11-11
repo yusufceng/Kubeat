@@ -34,6 +34,7 @@ export const shell = defineMessages(
     "backend.unreachable": "Backend'e ulaşılamıyor. {what} gösterilemiyor.",
     "backend.sessionExpired": "Oturumunuz sona erdi.",
     "backend.signInAgain": "Yeniden giriş yapın",
+    "backend.retry": "Yeniden dene",
     "backend.outdated":
       "Backend bu arayüzden eski bir sürüm çalıştırıyor; bazı bilgiler eksik görünebilir. Backend'i yeniden başlatın ya da güncelleyin.",
     "error.unreachableTitle": "Backend'e ulaşılamıyor",
@@ -245,6 +246,7 @@ export const shell = defineMessages(
     "backend.unreachable": "The backend cannot be reached. {what} cannot be shown.",
     "backend.sessionExpired": "Your session has expired.",
     "backend.signInAgain": "Sign in again",
+    "backend.retry": "Try again",
     "backend.outdated":
       "The backend is running an older version than this UI expects; some information may be missing. Restart or update the backend.",
     "error.unreachableTitle": "The backend cannot be reached",

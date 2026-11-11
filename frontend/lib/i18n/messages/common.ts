@@ -47,8 +47,7 @@ export const common = defineMessages(
     "copy.copied": "Kopyalandı",
 
     // app/ui/backend-error.tsx
-    "backend.cannotShow":
-      "{what} gösterilemiyor. Backend başlıyor ya da yeniden başlıyor olabilir; birkaç saniye sonra sayfayı yenileyin.",
+    "backend.cannotShow": "{what} gösterilemiyor; backend başlıyor ya da yeniden başlıyor olabilir.",
   },
   {
     "format.span.lessThanSecond": "<1s",
@@ -85,7 +84,6 @@ export const common = defineMessages(
     "copy.copy": "Copy",
     "copy.copied": "Copied",
 
-    "backend.cannotShow":
-      "{what} cannot be shown. The backend may be starting or restarting; reload the page in a few seconds.",
+    "backend.cannotShow": "{what} cannot be shown; the backend may be starting or restarting.",
   },
 );

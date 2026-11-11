@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { getStats, type Incident, listMaintenance, type Maintenance, type Monitor, queryIncidents } from "@/lib/api";
 import { config } from "@/lib/config";
 import { activity, fleetUptime, lastChecked, ongoingOutages, readTime, stripInputs, windowsFor } from "@/lib/fleet";
+import { lastEndedOutage, slowestMonitors } from "@/lib/fleet-hero";
 import { getT } from "@/lib/i18n/server";
 import { MANUAL_LABEL, namespaceFromSlug } from "@/lib/namespaces";
 import { urgencyRank } from "@/lib/urgency";
@@ -12,6 +13,7 @@ import { ActivityFeed } from "@/app/ui/activity-feed";
 import { BackendError } from "@/app/ui/backend-error";
 import { FleetHero } from "@/app/ui/fleet-hero";
 import { FleetReadouts, mttrReadout, outagesReadout, stateReadouts, uptimeReadout } from "@/app/ui/fleet-readouts";
+import { monitorLabel } from "@/app/ui/monitor-name";
 import { MonitorTable } from "@/app/ui/monitor-table";
 import { CrumbTrail } from "@/app/ui/nav";
 import { Crumbs } from "@/app/ui/shell-state";
@@ -76,6 +78,8 @@ async function Namespace({ params }: { params: Promise<{ name: string }> }) {
   const counts = countStates(monitors);
   const { uptime, window } = fleetUptime(monitors);
   const states = stateReadouts(counts, monitors, windows, t, now);
+  const strip = stripInputs(monitors, incidents, windows, config.incidentsLimit);
+  const byId = new Map(monitors.map((m) => [m.id, m]));
   // Problems first; otherwise in the order the backend gives.
   const ordered = [...monitors].sort((a, b) => urgencyRank(displayState(a)) - urgencyRank(displayState(b)));
   const overview = { label: t("monitorsList.overview.title"), href: "/" };
@@ -100,9 +104,11 @@ async function Namespace({ params }: { params: Promise<{ name: string }> }) {
         uptime={uptime}
         window={window}
         checkedAt={lastChecked(monitors)}
-        strip={{ ...stripInputs(monitors, incidents, windows, config.incidentsLimit), now, ...config.fleetStrip }}
+        strip={{ ...strip, now, ...config.fleetStrip }}
         outages={ongoingOutages(monitors)}
         outagesLimit={config.overviewOutages}
+        slowest={slowestMonitors(monitors, config.overviewSlowest).map((s) => ({ ...s, name: monitorLabel(byId.get(s.id)!).name }))}
+        lastOutage={lastEndedOutage(strip.outages)}
       />
       <FleetReadouts
         label={t("monitorsList.readouts.labelOf", { group: label })}

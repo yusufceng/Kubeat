@@ -121,6 +121,14 @@ export function MonitorList({
     setBulkError(null);
   }
 
+  /** The way out of a filter that matches nothing: every filter off, the query cleared. */
+  function clearFilters() {
+    setQuery("");
+    setStateFilter("all");
+    setTypeFilter("");
+    setTagFilter("");
+  }
+
   function bulk(action: BulkAction) {
     const ids = chosen.map((i) => i.id);
     setBulkError(null);
@@ -346,7 +354,12 @@ export function MonitorList({
           </p>
         )}
         {items.length > 0 && groups.length === 0 && (
-          <p className="px-4 py-6 text-center text-sm text-ink-3">{t("monitorsList.list.empty.filtered")}</p>
+          <p className="px-4 py-6 text-center text-sm text-ink-3">
+            {t("monitorsList.list.empty.filtered")}{" "}
+            <button type="button" className="text-accent-text underline" onClick={clearFilters}>
+              {t("monitorsList.list.empty.clear")}
+            </button>
+          </p>
         )}
         {groups.map(({ namespace, items: group }) => {
           const label = namespace || t(MANUAL_LABEL);

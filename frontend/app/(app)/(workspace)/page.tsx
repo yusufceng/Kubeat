@@ -11,6 +11,7 @@ import {
   stripInputs,
   toFleetItem,
 } from "@/lib/fleet";
+import { lastEndedOutage, slowestMonitors } from "@/lib/fleet-hero";
 import { getT } from "@/lib/i18n/server";
 import { compareNamespaces } from "@/lib/namespaces";
 import { byUrgency } from "@/lib/urgency";
@@ -21,6 +22,7 @@ import { ClusterMap, type MapGroup, type MapItem } from "@/app/ui/cluster-map";
 import { EmptyFleet } from "@/app/ui/empty-fleet";
 import { FleetHero } from "@/app/ui/fleet-hero";
 import { certificateReadout, FleetReadouts, mttrReadout, stateReadouts } from "@/app/ui/fleet-readouts";
+import { monitorLabel } from "@/app/ui/monitor-name";
 import { shellUser } from "@/app/ui/session-controls";
 
 /**
@@ -81,6 +83,8 @@ async function Overview() {
   const counts = countStates(monitors);
   const { uptime, window } = fleetUptime(monitors);
   const states = stateReadouts(counts, monitors, windows, t, now);
+  const strip = stripInputs(monitors, incidents, windows, config.incidentsLimit);
+  const byId = new Map(monitors.map((m) => [m.id, m]));
 
   return (
     <div className="fl-overview">
@@ -90,9 +94,11 @@ async function Overview() {
         uptime={uptime}
         window={window}
         checkedAt={lastChecked(monitors)}
-        strip={{ ...stripInputs(monitors, incidents, windows, config.incidentsLimit), now, ...config.fleetStrip }}
+        strip={{ ...strip, now, ...config.fleetStrip }}
         outages={ongoingOutages(monitors)}
         outagesLimit={config.overviewOutages}
+        slowest={slowestMonitors(monitors, config.overviewSlowest).map((s) => ({ ...s, name: monitorLabel(byId.get(s.id)!).name }))}
+        lastOutage={lastEndedOutage(strip.outages)}
       />
       <FleetReadouts
         label={t("monitorsList.readouts.label")}
