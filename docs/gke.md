@@ -113,7 +113,15 @@ Değerlerin gerekçesi README'de:
 - hop `2`: "Hesaplar ve giriş" → "Vekil-hop rehberi";
 - `from`'daki iki `ipBlock`: "Cluster'a kurulum" → "GKE kontrol listesi".
   Frontend Service'ini NEG yerine `NodePort` yaparsanız kaynak node olabilir,
-  node'ların aralığını da ekleyin.
+  node'ların aralığını da ekleyin;
+- kurum aralığı (`backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`)
+  verirseniz cluster ağlarının beyanı da (`targetScope.clusterNetworks`, 0.53):
+  pod ve Service ağı `gcloud container clusters describe <cluster> --location
+  <konum> --format='value(clusterIpv4Cidr,servicesIpv4Cidr)'`, node ağı
+  subnet'in birincil aralığı (`gcloud compute networks subnets describe
+  <subnet> --region <bölge> --format='value(ipCidrRange)'`): "Hedef politikası"
+  → "Kurum ağı" → "Cluster ağlarının beyanı". Yukarıdaki values ikisini de
+  vermez.
 
 ## 3. Kurulum
 

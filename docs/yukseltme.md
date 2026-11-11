@@ -380,7 +380,10 @@ koşulacak ([gke-dogrulama.md](gke-dogrulama.md),
   Beyanla çakışan bir IPv4 aralığı `helm upgrade`'i render hatasıyla durdurur
   (IPv6 çakışmasını açılış yok sayar), Argo
   CD'de sync hatası olarak görünür, kurulum değişmez. OpenShift'te değerler
-  `oc get network.config/cluster` ile okunur; node ağı elle yazılır. Kurum
+  `oc get network.config/cluster` ile, GKE'de `gcloud container clusters
+  describe` ile (`clusterIpv4Cidr`, `servicesIpv4Cidr`) okunur; node ağı elle
+  yazılır (GKE'de subnet'in birincil aralığı; komutlar README "Hedef
+  politikası" → "Kurum ağı" → "Şart"). Kurum
   aralığındaki tek adres (`/32`) beyanla karşılaştırılmaz; router VIP'i
   bilerek yazılabilir. `targetScope` altında okunmayan bir anahtar (ör.
   `clusterNetworks.pod`) ve `backend.extraEnv.UPTIME_TARGET_SCOPE_CLUSTER_CIDRS`

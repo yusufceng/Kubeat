@@ -80,13 +80,21 @@ Ayrıntılar, desteklenen sürümler ve yükseltme notları: "Cluster'a kurulum"
 >   (["Hesaplar ve giriş" → "Vekil-hop rehberi"](#hesaplar-ve-giriş));
 > - ["Operator'süz cluster"](#operatorsüz-cluster-alloy-grafana-cloud-ve-mimir),
 >   ["Durum sayfaları"](#durum-sayfaları), ["Bildirim kanalları"](#bildirim-kanalları)
->   ve ["Yedekleme ve geri yükleme"](#yedekleme-ve-geri-yükleme).
+>   ve ["Yedekleme ve geri yükleme"](#yedekleme-ve-geri-yükleme);
+> - betikler ve CI için ["API"](#api) (`UPTIME_API_TOKEN`);
+> - hedefleriniz kurum CA'sıyla imzalıysa ["OpenShift" → "Kurum CA'sı"](#openshift):
+>   reçete her cluster'da geçer, yalnız o başlığın altında durur.
+>
+> Lisans gerekmez: monitor'ler, keşif, alarmlar, bildirim kanalları, raporlar ve
+> bir durum sayfası lisanssızdır; lisans yalnız LDAP/OIDC ile giriş, namespace
+> sınırı, denetim kaydını görmek ve birden çok durum sayfası içindir
+> (["Kubeat Enterprise lisansı"](#kubeat-enterprise-lisansı)).
 >
 > Atlanabilir: kapsam ve kurum aralığı (["Hedef politikası"](#hedef-politikası)),
-> ["LDAP"](#ldap), ["OpenShift"](#openshift) ve denetim
-> (["Hedef politikası" → "Kapsam ihlali denetimi"](#hedef-politikası)). Annotation
-> monitor'ü her kurulumda nesnesinin namespace'ine bağlıdır; kapsam reddiyle DOWN
-> olursa: ["Hedef politikası" → "Her bağlantıda"](#hedef-politikası).
+> ["LDAP"](#ldap), ["OpenShift"](#openshift) (kurum CA'sı reçetesi hariç, yukarıda)
+> ve denetim (["Hedef politikası" → "Kapsam ihlali denetimi"](#hedef-politikası)).
+> Annotation monitor'ü her kurulumda nesnesinin namespace'ine bağlıdır; kapsam
+> reddiyle DOWN olursa: ["Hedef politikası" → "Her bağlantıda"](#hedef-politikası).
 
 ## Cluster'a kurulum
 
@@ -668,17 +676,25 @@ bölümdedir:
 - Ekiplere namespace'le sınırlı kapsam; kurum ağı için `UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`,
   0.53'ten beri cluster ağlarının beyanı (`targetScope.clusterNetworks`):
   ["Hedef politikası" → "Kullanıcı başına kapsam", "Kurum ağı"](#hedef-politikası).
+- Yönetim ve iç servis aralıkları `UPTIME_TARGET_DENY_CIDRS`'te; kapsam varken de her
+  monitor ve kanal için derinlemesine savunma: ["Hedef politikası"](#hedef-politikası).
 - Kapsam kontrolün açtığı her bağlantıda (0.51 ve üstü):
   ["Hedef politikası" → "Her bağlantıda"](#hedef-politikası).
 - Doğru `UPTIME_TRUST_PROXY_HOPS` ve uydurma `X-Forwarded-For` ile negatif adım:
   ["Hesaplar ve giriş" → "Vekil-hop rehberi", "Uydurma başlıkla negatif adım"](#hesaplar-ve-giriş).
 - `frontend.networkPolicy.enabled=true` ve uygulandığının doğrulanması:
   ["Hesaplar ve giriş" → "Arayüzün ağ politikası"](#hesaplar-ve-giriş).
+- `networkPolicy.enabled=true`: backend'e yalnız arayüz, Prometheus ve sayılanlar
+  bağlanır; NetworkPolicy uygulayan bir ağ eklentisi ister: ["Güvenlik" → "Ağ erişimi"](#ağ-erişimi).
 - Dizinle girişte `UPTIME_LOGIN_MAX_FAILURES` dizinin kilit eşiğinin altında ve kaynak
   tavanı `UPTIME_LOGIN_SOURCE_MAX_FAILURES=20`: ["LDAP" → "Dizin hesap kilidi (LDAP/AD)"](#ldap).
 - Kapsam reddinin denetimi ve `kubeat_target_scope_denied_total` üzerine alarm kuralı:
   ["Hedef politikası" → "Kapsam ihlali denetimi"](#hedef-politikası); kaydı SIEM'e
   almak: ["Hesaplar ve giriş" → "Denetim kaydını SIEM'e almak"](#hesaplar-ve-giriş).
+- İmajları ve chart'ı cosign doğrulamasından geçirip aynalamak ve digest'le sabitlemek:
+  ["Güvenlik" → "Tedarik zinciri"](#tedarik-zinciri).
+- `backup.enabled=true` ve her yükseltmeden önce doğrulamalı yedek:
+  ["Yedekleme ve geri yükleme"](#yedekleme-ve-geri-yükleme), [docs/yukseltme.md](docs/yukseltme.md).
 
 Backend API'si her istekte ya giriş yapmış bir kullanıcının oturumunu ya da
 `UPTIME_API_TOKEN` anahtarını (`Authorization: Bearer ...`) ister; arayüz
@@ -1382,9 +1398,15 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
     - cluster'ın pod ağı, Service ağı, node (makine) ağı ve API VIP'i hiçbir
       zaman girmez. OpenShift'te pod ve Service ağı
       `oc get network.config/cluster -o jsonpath='{.status.clusterNetwork[*].cidr} {.status.serviceNetwork[*]}'`
-      ile, node adresleri `oc get nodes -o wide` ile okunur; 0.53'ten beri bu
-      ağlar chart'ta beyan edilince çakışma render'da durur (aşağıda "Cluster
-      ağlarının beyanı");
+      ile, node adresleri `oc get nodes -o wide` ile okunur. GKE'de pod ve
+      Service ağı
+      `gcloud container clusters describe <cluster> --location <konum> --format='value(clusterIpv4Cidr,servicesIpv4Cidr)'`
+      ile okunur (bir node havuzuna kendi pod aralığı verildiyse o da:
+      `gcloud container node-pools describe <havuz> --cluster <cluster> --location <konum> --format='value(networkConfig.podIpv4CidrBlock)'`);
+      node ağı subnet'in birincil aralığıdır:
+      `gcloud compute networks subnets describe <subnet> --region <bölge> --format='value(ipCidrRange)'`.
+      0.53'ten beri bu ağlar chart'ta beyan edilince çakışma render'da durur
+      (aşağıda "Cluster ağlarının beyanı");
     - router VIP'i yalnız on-prem Route'lar için (bir LoadBalancer Service'inin
       VIP'i de yalnız o Service için) ve bilerek girer: VIP node ağındaysa
       node ağının aralığı değil, yalnız VIP `/32` olarak yazılır; router'ın
@@ -1448,15 +1470,16 @@ aşağıda "Çözüm anında denetim" notuyla birlikte):
   - **Cluster ağlarının beyanı (0.53, opt-in).** Operatör cluster'ın pod,
     Service ve node ağlarını cluster başına values'ta beyan eder; kurum
     aralığıyla çakışma kurulmadan, render anında durur. Chart cluster'dan
-    okumaz (`lookup` yok); node ağı platform ekibinin IPAM kaydından elle
-    yazılır:
+    okumaz (`lookup` yok): pod ve Service ağı yukarıda "Şart"taki `oc` ya da
+    `gcloud` komutuyla okunur, node ağı platform ekibinin IPAM kaydından
+    (GKE'de subnet'in birincil aralığı) elle yazılır:
 
     ```yaml
     targetScope:
       clusterNetworks:
-        pods: [10.128.0.0/14]      # OpenShift: network.config/cluster, clusterNetwork
-        services: [172.30.0.0/16]  # OpenShift: network.config/cluster, serviceNetwork
-        nodes: [192.168.40.0/24]   # makinelerin ağı; Kubeat okumaz
+        pods: [10.128.0.0/14]      # OpenShift: network.config/cluster, clusterNetwork; GKE: clusterIpv4Cidr
+        services: [172.30.0.0/16]  # OpenShift: network.config/cluster, serviceNetwork; GKE: servicesIpv4Cidr
+        nodes: [192.168.40.0/24]   # makinelerin ağı (GKE: subnet'in ipCidrRange'i); Kubeat okumaz
     ```
 
     - **Render hatası.** `backend.extraEnv.UPTIME_TARGET_SCOPE_EXTERNAL_CIDRS`'teki
@@ -3625,9 +3648,19 @@ okunamaz hâle gelir:
   yükseltilirken ve backend pod'u başka bir node'a taşınırken (node drain,
   eviction) sayfa bir süre "Durum şu anda okunamıyor" gösterir ve rozetler
   502 verir. Süre yeni pod'un açılmasına bağlıdır: sandbox Route'unda iki
-  yükseltmede yaklaşık 25 sn (2026-11-08) ve 4 sn (2026-11-10) ölçüldü;
-  drain'de pod'un yeniden zamanlanması ve imajın çekilmesi buna eklenir. Bir olay sürerken Kubeat'i yükseltmeyin; bakımı
-  sakin bir zamana planlayın.
+  yükseltmede yaklaşık 25 sn (2026-11-08, 0.52.0'a; pencere iki parçaydı,
+  backend'in `Recreate`'i ve arayüz pod'unun değişimi) ve 4 sn (2026-11-10,
+  0.53.0'a) ölçüldü. Altı katlık farkın nedeni ölçülmedi: imajın çekilme
+  süresi, pod'ların node'u ve volume'un bağlanma süresi iki ölçümde de
+  kaydedilmedi. Pencereyi uzatan bilinen etkenler: yeni sürümün imajının
+  node'a çekilmesi (node'da hazırsa saniyeler; değilse imajın boyutuna ve
+  registry'ye bağlı), pod'un başka bir node'a düşmesi (veri volume'unun
+  eski node'dan ayrılıp yenisine bağlanması; drain'de yeniden zamanlama da
+  eklenir) ve açılış ile hazırlık yoklamalarının aralığı (5 ve 10 sn).
+  Ölçerken bunları da kaydedin
+  ([docs/openshift-dogrulama.md](docs/openshift-dogrulama.md) madde 16).
+  Bir olay sürerken Kubeat'i yükseltmeyin; bakımı sakin bir zamana
+  planlayın.
 - Tam cluster kesintisi için dışarıdan bakan bir tamamlayıcı kullanın
   (ör. UptimeRobot ya da Grafana Cloud Synthetic Monitoring): sayfanın
   adresini ve müşteriye dönük birkaç uç noktayı cluster dışından yoklar,

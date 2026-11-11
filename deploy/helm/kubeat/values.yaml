@@ -230,11 +230,16 @@ backend:
 targetScope:
   clusterNetworks:
     # OpenShift: oc get network.config/cluster -o jsonpath='{.status.clusterNetwork[*].cidr}'
+    # GKE: gcloud container clusters describe <cluster> --location <location> --format='value(clusterIpv4Cidr)',
+    # and a node pool's own range, if it has one: gcloud container node-pools
+    # describe <pool> --cluster <cluster> --location <location> --format='value(networkConfig.podIpv4CidrBlock)'
     pods: []       # [10.128.0.0/14]
     # OpenShift: oc get network.config/cluster -o jsonpath='{.status.serviceNetwork[*]}'
+    # GKE: gcloud container clusters describe <cluster> --location <location> --format='value(servicesIpv4Cidr)'
     services: []   # [172.30.0.0/16]
     # The machines' network, from the platform team's IPAM record; Kubeat
-    # does not read it.
+    # does not read it. GKE: the subnet's primary range,
+    # gcloud compute networks subnets describe <subnet> --region <region> --format='value(ipCidrRange)'
     nodes: []      # [192.168.40.0/24]
 
 frontend:

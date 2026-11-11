@@ -121,7 +121,21 @@ Hâlâ doğrulanmayanlar (cluster-admin gerektirir):
 ## Bilinen sınırlar
 
 - Backend tek replica çalışır; güncelleme sırasında kontroller durur
-  (gerçek OpenShift'te ölçülen boşluk 23–27 sn).
+  (gerçek OpenShift'te ölçülen boşluk 23–27 sn; durum sayfasının ve rozetin
+  penceresi iki yükseltmede ~25 ve ~4 sn, farkın nedeni ölçülmedi: README
+  "Durum sayfaları" → "Sınırlar").
+- GKE ile vekilli ve hava boşluklu OpenShift'te ölçüm yok. İki yol kullanıcının
+  koşacağı runbook'lardadır ([gke-dogrulama.md](gke-dogrulama.md),
+  [openshift-dogrulama.md](openshift-dogrulama.md) "Vekilli ve hava boşluklu
+  OpenShift"); koşulup geri bildirimi gelmeden belgeler bu yolları "ölçülmedi,
+  prova kullanıcıda" diye yazar, "destekleniyor" demez. Aynı durumda: WAF ya da
+  F5 önlü Route'ta hop ve uydurma `X-Forwarded-For` (runbook adım 5), gerçek bir
+  Active Directory'de kaynak tavanı (S88), OADP ile geri yükleme (S41) ve
+  OpenShift'in kendi izleme yığınında (UWM) 0.53'ün iki kuralı
+  (`KubeatScopeExternalRangesIgnored`, `KubeatScopeResolveErrors`; ikisi
+  minikube'da gerçek bir Prometheus'ta yandı). Ölçülenler Developer Sandbox'taki
+  (ROSA) tek namespace'li pilot ve iki node'lu minikube'dır
+  ([sprints/](sprints/)).
 - 0.52'den beri her HTTP kontrolü bağlantısını kendisi açtığı için adı her kontrolde
   çözülür: cluster DNS'i kesilince her HTTP monitor'ü kendi zaman aşımında aynı turda
   DOWN olur (sprint 10 prova (a), minikube) ve her ekibin kanalına ayrı bir bildirim

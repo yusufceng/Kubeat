@@ -109,11 +109,13 @@ kubectl -n kubeat get networkpolicy -o name
 
 Sonra README "Hesaplar ve giriş" → "Politikanın uygulandığını doğrulamak"taki
 negatif adım: `from`'da olmayan geçici bir namespace'teki pod'dan arayüz
-Service'ine istek (curl imajı README'de sabitlidir):
+Service'ine istek. İmaj README'dekiyle aynıdır ve digest'e sabittir;
+`scripts/check-versions.sh` ikisini birlikte denetler, yeni bir etiket ikisinde
+birden değişir:
 
 ```
 kubectl create namespace kubeat-np-check
-kubectl -n kubeat-np-check run np-check --rm -i --restart=Never --image=<README'deki curl imajı> -- \
+kubectl -n kubeat-np-check run np-check --rm -i --restart=Never --image=curlimages/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b -- \
   curl -sS -m 5 -o /dev/null -w '%{http_code}\n' http://kubeat-frontend.kubeat.svc:3000/login
 kubectl delete namespace kubeat-np-check
 ```
