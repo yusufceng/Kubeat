@@ -136,6 +136,7 @@ async function Detail({
           {t("statusPage.detail.latency", { range: duration(detail.series.range_seconds, t) })}
         </h2>
         <div className="panel sp-chart">
+          {/* No threshold line here: a monitor's slow-response setting is its owner's, and the public page is not told it. */}
           <LatencyChart series={detail.series} baseHref="" selection={null} incidents={bands} readOnly />
         </div>
       </section>

@@ -3503,7 +3503,12 @@ sisteminde "hareketi azalt" açıksa ikisi de durur; şekiller ve halka kalır.
   · yanıtlar 800 ms'den uzun" ve altında eşiği ve son kontrollerin sürelerini
   sayan kehribar bir satır), son 60 kontrol, yanıt süresi, uptime ve
   "MTBF · 7 gün" özetleri (`STATS_DAYS`), kesinti ve bakım bantlı grafik,
-  pod'lar, olaylar, kontrol geçmişi ve ayarların özeti. Son kontrol
+  pod'lar, olaylar, kontrol geçmişi ve ayarların özeti. Son 60 kontrolün
+  şeridi listedeki gibi boyuyla da okunur; üzerine gelinen ya da ok
+  tuşlarıyla gezilen her kontrol zamanını, yanıt süresini ve varsa hatasını
+  söyler. Grafik yavaş yanıt eşiğini kesik bir çizgiyle gösterir ve çizginin
+  üstünde kalan kısmı kehribar çizer; eşik ölçeğin çok üstündeyse çizgi
+  yerine açıklama satırı eşiği yazar. Son kontrol
   başarısızsa **Neden?** bölümü hatanın ne anlama geldiğini, bağlantının
   hangi adımda (DNS, bağlantı, TLS, ilk bayt) takıldığını, ulaşılan adresi
   ve sertifikayı gösterir (bkz. "Başarısız kontrolün ayrıntıları"). Buradan
@@ -3756,7 +3761,8 @@ bir çerezde (`kubeat_sp_<adres>`) tutar; sayfa ve ayrıntı sayfaları token'ı
 parola değişince backend 401 döner ve form yeniden görünür. Ayrıntı
 sayfası (`/status/<adres>/<monitor-id>`) servisin adını, durumunu, dört
 dönemin uptime'ını, gün gün geçmişini, yanıt süresi grafiğini (monitor
-sayfasındaki grafiğin salt okunur hali; seçim ve yakınlaştırma yok) ve
+sayfasındaki grafiğin salt okunur hali; seçim, yakınlaştırma ve eşik çizgisi
+yok: yavaş yanıt eşiği monitor'un sahibinin ayarıdır, dışarı verilmez) ve
 kesintilerini başlangıç, bitiş ve süre olarak gösterir.
 
 **Duvar ekranı.** Sayfanın başındaki "Duvar ekranı" düğmesi sayfayı tam
@@ -5650,6 +5656,12 @@ yarım daire ve sayı, monitor sayfasında "Sorunlu · 12 dk · yanıtlar 800
 ms'den uzun" çipi (süre `slow_since`'ten sayılır) ve altında eşiği ile son
 `failure_threshold` kontrolün sürelerini sayan kehribar bir satır. Olay
 açılmadığından olay listesine düşmez.
+
+Eşiği aşan tek bir kontrol de görünür: kontrol şeritlerinde bir basamak uzun
+ve kehribar durur, üzerine gelince süresi eşikle birlikte yazılır; yanıt
+süresi grafiğinde eşik kesik bir çizgidir, üstünde kalan kısım kehribardır.
+Bunlar tek tek kontrollerin okumasıdır; monitor'un **Sorunlu** sayılması
+yukarıdaki kuralla, art arda kontrollerle olur.
 
 ### Bakım pencereleri ve susturma
 

@@ -21,9 +21,10 @@ const STRIP_HEIGHT = 8;
 const HEIGHT = STRIP_TOP + STRIP_HEIGHT + 24;
 const TOOLTIP_WIDTH = 224;
 /**
- * How long the chart's intro is given: the line draws itself in, the wash
- * under it follows and the newest reading's dot comes last (monitor.css).
- * The class only has to outlast them, so this is a little more than their sum.
+ * How long the chart's intro is given: the line draws itself in and, once
+ * it has arrived, the wash under it and the newest reading's dot come up
+ * (monitor.css). The class only has to outlast them, so this is a little
+ * more than their sum.
  */
 const INTRO_MS = 850;
 
@@ -113,13 +114,16 @@ export function LatencyChart({
   const [draft, setDraft] = useState<{ from: number; to: number } | null>(null);
   const [overEdge, setOverEdge] = useState(false);
 
+  // A chart without readings has no plot to measure: it is measured when
+  // its first one puts the plot on the page.
+  const empty = series.points.length === 0;
   useEffect(() => {
     const el = wrapper.current;
     if (!el) return;
     const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [empty]);
 
   const { points } = series;
   // The point in hand; a series that changed under it (a zoom) lets go.
@@ -220,7 +224,7 @@ export function LatencyChart({
     return `${day(start)} ${clock(start, fine)} – ${clock(end, fine)}`;
   };
 
-  if (points.length === 0) {
+  if (empty) {
     return (
       <p className="rounded-md border border-dashed border-line p-8 text-center text-[13px] text-ink-3">
         {t("monitorPage.chart.empty")}
@@ -318,8 +322,8 @@ export function LatencyChart({
       <div
         ref={wrapper}
         className={`relative select-none rounded-sm outline-offset-4 ${intro ? "mon-intro" : ""}`}
-        // Horizontal drags select; vertical ones still scroll the page.
-        style={{ height: HEIGHT, touchAction: "pan-y", cursor: readOnly ? "default" : overEdge || gesture?.kind === "edge" ? "ew-resize" : "crosshair" }}
+        // Horizontal drags select; vertical ones still scroll the page, and two fingers still zoom it.
+        style={{ height: HEIGHT, touchAction: "pan-y pinch-zoom", cursor: readOnly ? "default" : overEdge || gesture?.kind === "edge" ? "ew-resize" : "crosshair" }}
         tabIndex={0}
         role="group"
         aria-label={t("monitorPage.chart.aria")}
@@ -564,7 +568,7 @@ export function LatencyChart({
 
               {/* The line's head: the newest reading, and one ring off it when a check lands. */}
               {headMs !== null && (
-                <g className="mon-head">
+                <g className="mon-line-head">
                   {landed && (
                     <circle
                       key={head}
@@ -593,6 +597,7 @@ export function LatencyChart({
             {/* The threshold's own words, on the line: over it, or under it at the plot's top. */}
             {geometry.limit !== null && (
               <text
+                className="mon-limit-label"
                 x={LEFT + 6}
                 y={geometry.limit - TOP < 16 ? geometry.limit + 14 : geometry.limit - 5}
                 fontSize={11}
@@ -796,7 +801,9 @@ export function LatencyChart({
         )}
       </div>
 
-      <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 pl-11 text-xs text-ink-3 select-none">
+      <figcaption
+        className={`relative mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 pl-11 text-xs text-ink-3 select-none ${readOnly ? "" : "pr-7"}`}
+      >
         <span className="font-medium text-ink-2">{t("monitorPage.chart.availability")}</span>
         {/* The swatches are keys to colors in the plot, which a forced palette
             leaves as they are; so they keep theirs too. */}
@@ -830,7 +837,12 @@ export function LatencyChart({
             })}
           </span>
         )}
-        {!readOnly && <HelpTip label={t("monitorPage.chart.help")}>{t("monitorPage.chart.selectHint")}</HelpTip>}
+        {/* At the end of the caption's first line, whatever the keys before it wrap to. */}
+        {!readOnly && (
+          <span className="absolute top-0 right-0 inline-flex">
+            <HelpTip label={t("monitorPage.chart.help")}>{t("monitorPage.chart.selectHint")}</HelpTip>
+          </span>
+        )}
       </figcaption>
 
       <details className="mon-more mt-3 px-0 pb-0">
@@ -840,6 +852,10 @@ export function LatencyChart({
         </summary>
         <div className="mt-2 max-h-72 overflow-auto rounded-md border border-line">
           <table className="mon-table text-xs">
+            {/* What a reading marked slow below is slower than. */}
+            {slowAboveMs > 0 && (
+              <caption className="sr-only">{t("monitorPage.chart.threshold", { value: ms(slowAboveMs, t.intl) })}</caption>
+            )}
             <thead className="sticky top-0 bg-panel">
               <tr>
                 <th>{t("monitorPage.chart.table.bucket")}</th>
@@ -856,9 +872,11 @@ export function LatencyChart({
                     <td className="tabular-nums">{bucketLabel(p)}</td>
                     <td className={`num ${slow(p.avg_latency_ms) ? "text-warn-ink" : ""}`}>
                       {p.avg_latency_ms !== null ? ms(p.avg_latency_ms, t.intl) : "–"}
+                      {slow(p.avg_latency_ms) && <span className="sr-only">, {t("beat.slow")}</span>}
                     </td>
                     <td className={`num ${slow(p.max_latency_ms) ? "text-warn-ink" : ""}`}>
                       {p.max_latency_ms !== null ? ms(p.max_latency_ms, t.intl) : "–"}
+                      {slow(p.max_latency_ms) && <span className="sr-only">, {t("beat.slow")}</span>}
                     </td>
                     <td className="num">{p.checks}</td>
                     <td className={`num ${p.checks > p.up_checks ? "text-down-ink" : ""}`}>{p.checks - p.up_checks}</td>

@@ -46,11 +46,15 @@ export const common = defineMessages(
     "copy.copy": "Kopyala",
     "copy.copied": "Kopyalandı",
 
-    // app/ui/beat-strip.tsx: a slot's hover, and how the keyboard walks a strip.
-    // The threshold's words are also the latency chart's, on its line.
+    // app/ui/beat-strip.tsx: what a slot's hover says of a check, and what
+    // a strip of checks comes to in a sentence (read in place of the
+    // picture). The threshold's words are also the latency chart's, on its line.
+    "beat.ok": "Başarılı",
+    "beat.failed": "Başarısız",
     "beat.slow": "Yavaş",
     "beat.threshold": "eşik {value}",
-    "beat.keys": "Sol ve sağ ok tuşlarıyla gezinin; Escape bırakır.",
+    "beat.summary": "Son {count} kontrolün {failed} tanesi başarısız",
+    "beat.summarySlow": "Son {count} kontrolün {failed} tanesi başarısız, {slow} tanesi yavaş",
 
     // app/ui/backend-error.tsx
     "backend.cannotShow":
@@ -91,9 +95,12 @@ export const common = defineMessages(
     "copy.copy": "Copy",
     "copy.copied": "Copied",
 
+    "beat.ok": "Succeeded",
+    "beat.failed": "Failed",
     "beat.slow": "Slow",
     "beat.threshold": "threshold {value}",
-    "beat.keys": "Use the left and right arrow keys to move through it; Escape lets go.",
+    "beat.summary": "{failed} of the last {count} checks failed",
+    "beat.summarySlow": "{failed} of the last {count} checks failed, {slow} slow",
 
     "backend.cannotShow":
       "{what} cannot be shown. The backend may be starting or restarting; reload the page in a few seconds.",

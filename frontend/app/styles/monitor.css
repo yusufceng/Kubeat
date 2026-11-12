@@ -955,9 +955,11 @@
 }
 
 /* The chart's line draws itself in when the chart first appears, and again
-   when its range or zoom changes: the line first, the wash under it after,
-   the newest reading's dot last. The longest of them is one and a half
-   slow steps; the chart's INTRO_MS is a little more than their sum. */
+   when its range or zoom changes: the line first, over one and a half slow
+   steps; when it has arrived, the wash under it and the newest reading's
+   dot come up. (A wash that came up with the line stood ahead of it, over
+   a stretch the line had not reached.) The chart's INTRO_MS is a little
+   more than their sum. */
 @keyframes mon-draw {
   from {
     stroke-dashoffset: 1;
@@ -976,9 +978,9 @@
   animation: mon-draw calc(var(--duration-slow) * 1.5) var(--ease-out) both;
 }
 .mon-intro .mon-area {
-  animation: mon-fade var(--duration-slow) var(--ease-out) calc(var(--duration-slow) * 0.5) both;
+  animation: mon-fade var(--duration-base) var(--ease-out) calc(var(--duration-slow) * 1.5) both;
 }
-.mon-intro .mon-head {
+.mon-intro .mon-line-head {
   animation: mon-fade var(--duration-fast) var(--ease-out) calc(var(--duration-slow) * 1.5) both;
 }
 /* A check that lands while the chart is open: one ring off the line's
@@ -997,4 +999,16 @@
   transform-origin: center;
   vector-effect: non-scaling-stroke;
   animation: mon-ping calc(var(--duration-slow) * 1.5) var(--ease-out) both;
+}
+
+
+/* A forced palette repaints the text of the plot, its outline included:
+   the threshold's label would be a blot of one color. Its words take the
+   palette's text color and the halo that lifts them off the line its
+   background. */
+@media (forced-colors: active) {
+  .mon-limit-label {
+    fill: CanvasText;
+    stroke: Canvas;
+  }
 }

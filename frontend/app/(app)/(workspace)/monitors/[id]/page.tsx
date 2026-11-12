@@ -478,15 +478,15 @@ async function MonitorDetail({
         <BeatStrip
           beats={recent}
           slots={config.historyLimit}
-          height={36}
+          height={40}
           graded
           slowAboveMs={monitor.slow_above_ms}
           keys
           arrivals
           label={
             recentSlow > 0
-              ? t("monitorsList.list.beats.labelSlow", { count: recent.length, failed: recentFailed, slow: recentSlow })
-              : t("monitorPage.heartbeat.summary", { shown: recent.length, failed: recentFailed })
+              ? t("beat.summarySlow", { count: recent.length, failed: recentFailed, slow: recentSlow })
+              : t("beat.summary", { count: recent.length, failed: recentFailed })
           }
         />
         <p className="mon-strip-cap">

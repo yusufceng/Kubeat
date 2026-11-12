@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { milliseconds } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 import type { T } from "@/lib/i18n/translate";
@@ -16,14 +17,15 @@ export type SlotState = "ok" | "slow" | "down" | "partial" | "maint" | "idle" | 
 
 /**
  * How much of a graded strip's height a slot stands to: what went well
- * stays a step below, what was slow or partly failed stands between, and
- * a failure fills the height. The steps are small on purpose: a healthy
- * strip keeps the body it has ungraded (10 of a row's 14px), and the
- * outline still breaks where something went wrong (10, 12, 14). They are
- * shares of the height, not pixels, because a page may set the strip's
- * height itself (the wall screen of a status page does).
+ * stays two steps below the top, what was slow or partly failed one, and
+ * a failure fills the height. The steps are small on purpose: a calm
+ * stretch keeps most of its body and the outline still breaks where
+ * something went wrong. They are shares of the height, not pixels,
+ * because a page may set the strip's height itself; in eighths, so that a
+ * strip whose height is a multiple of eight draws whole pixels (a row's
+ * 16px strip: 12, 14, 16; a monitor page's 40px: 30, 35, 40).
  */
-const GRADES: Partial<Record<SlotState, number>> = { ok: 5 / 7, idle: 5 / 7, maint: 5 / 7, slow: 6 / 7, partial: 6 / 7 };
+const GRADES: Partial<Record<SlotState, number>> = { ok: 6 / 8, idle: 6 / 8, maint: 6 / 8, slow: 7 / 8, partial: 7 / 8 };
 
 /** The state sign a slot's hover carries next to its words. */
 const GLYPHS: Partial<Record<SlotState, GlyphKind>> = {
@@ -50,6 +52,17 @@ let warmUntil = 0;
 /** How far the hover stands off the strip, and off the window's edges. */
 const TIP_GAP = 6;
 const TIP_MARGIN = 8;
+
+/**
+ * Whether the browser can open a popover by hand (Chrome 114, Safari 17,
+ * Firefox 125). The older ones Next still serves get the same hover as a
+ * fixed box at the end of the page: the same words in the same place,
+ * only not in the top layer.
+ */
+const POPOVER = typeof HTMLElement !== "undefined" && typeof HTMLElement.prototype.showPopover === "function";
+
+/** An error can be a page long: a screen reader is told its first line, to a sentence's length. */
+const HEARD_CHARS = 160;
 
 /** One slot of a strip: a check, a bucket of checks, or a day. */
 export type Beat = {
@@ -103,6 +116,17 @@ function slotAt(strip: HTMLElement, clientX: number, narrowSlots: number | undef
   return first + Math.min(Math.max(index, 0), count - 1);
 }
 
+/**
+ * How far the keyboard's ring reaches out of a strip it is drawn around,
+ * nothing without one: the hover stands off the ring, not on it.
+ */
+function ringReach(strip: HTMLElement): number {
+  if (!strip.matches(":focus-visible")) return 0;
+  const style = getComputedStyle(strip);
+  if (style.outlineStyle === "none") return 0;
+  return Math.max(0, (parseFloat(style.outlineOffset) || 0) + (parseFloat(style.outlineWidth) || 0));
+}
+
 /** What a slot was, in the parts its hover shows and a screen reader is told. */
 function describe(beat: Beat, slowAboveMs: number, t: T) {
   const clock = (at: number, seconds: boolean) =>
@@ -134,7 +158,7 @@ function describe(beat: Beat, slowAboveMs: number, t: T) {
   if (beat.state === "down") {
     return {
       ...base,
-      reading: t("monitorPage.check.failed"),
+      reading: t("beat.failed"),
       tone: "text-down-ink",
       // A failure took its time too: a timeout reads differently from a refusal.
       note: beat.ms !== undefined && beat.ms >= 1 ? milliseconds(beat.ms, t) : undefined,
@@ -147,7 +171,7 @@ function describe(beat: Beat, slowAboveMs: number, t: T) {
     reading: milliseconds(beat.ms, t),
     tone: slow ? "text-warn-ink" : "text-ink",
     // The figure alone does not name the outcome; the glyph does for the eye, this for the ear.
-    word: slow ? t("beat.slow") : t("monitorPage.check.ok"),
+    word: slow ? t("beat.slow") : t("beat.ok"),
     note: slow && slowAboveMs > 0 ? t("beat.threshold", { value: milliseconds(slowAboveMs, t) }) : undefined,
   };
 }
@@ -175,11 +199,16 @@ function describe(beat: Beat, slowAboveMs: number, t: T) {
  * slow) and its error. The pointer picks the slot by where it is along
  * the strip, a finger by a touch or a sideways drag. passing is for a
  * strip among many that the pointer crosses on its way elsewhere (a list
- * row's): the first hover waits for the pointer to rest. keys lets the
- * keyboard walk the slots, as the latency chart does, and a screen reader
- * hear each one. arrivals lets the newest slot rise once when a check
- * lands. onScrub tells the surroundings that the pointer is reading the
- * strip, so that they can put their own hover away.
+ * row's): the first hover waits for the pointer to rest. Escape puts the
+ * hover away.
+ *
+ * keys makes the strip a stop for the keyboard: a slider over its slots
+ * that stands at the newest one, which the arrow keys, Home and End move
+ * and a screen reader reads as it moves. The keyboard holds a check, not
+ * a place: when a newer one lands, what is being read moves along with
+ * its slot. arrivals lets the newest slot rise once when a check lands.
+ * onScrub tells the surroundings that the pointer is reading the strip,
+ * so that they can put their own hover away.
  */
 export function BeatStrip({
   beats,
@@ -220,23 +249,34 @@ export function BeatStrip({
   const all: (Beat | null)[] = [...Array.from({ length: padding }, () => null), ...shown];
   const root = useRef<HTMLDivElement>(null);
   const tip = useRef<HTMLDivElement>(null);
-  // The slot being read, and (for the keyboard alone) what a screen reader is told of it.
+  // The slot being read: a pointer reads a place along the strip, the
+  // keyboard holds a check by its time (kept) and follows it from there.
   const [hovered, setHovered] = useState<number | null>(null);
-  const [said, setSaid] = useState("");
+  const [kept, setKept] = useState<number | null>(null);
+  // The oldest slot on screen when the keyboard last came by (a narrow screen hides the oldest).
+  const [first, setFirst] = useState(0);
   const open = useRef(false);
+  const dismissed = useRef(false);
   const rest = useRef<{ timer: ReturnType<typeof setTimeout>; index: number | null } | null>(null);
+  // The frame in which a strip the keyboard has just come to shows its newest slot.
+  const arrival = useRef(0);
   // The check the newest slot stood for when it last rose, or when the strip first showed.
   const newest = shown.length > 0 ? shown[shown.length - 1].at : undefined;
   const [seen, setSeen] = useState(newest);
   const tips = shown.some(tells);
-  // The slot in hand; a strip that changed under it (fewer slots, a slot gone quiet) lets go.
-  const active = hovered !== null && hovered < all.length && tells(all[hovered]) ? hovered : null;
+  // The slot in hand; a strip that changed under it (fewer slots, a slot
+  // gone quiet, the held check fallen off the old end) lets go.
+  const place = kept === null ? hovered : all.findIndex((beat) => beat?.at === kept);
+  const active =
+    place !== null && place >= (kept === null ? 0 : first) && place < all.length && tells(all[place]) ? place : null;
+  const walkable = keys && tips;
   // A no-data slot is a baseline, a little heavier on the tall strips.
   const baseline = height >= 24 ? 3 : 2;
 
-  const show = (index: number | null) => {
+  const show = (index: number | null, byKey = false) => {
     open.current = index !== null;
     setHovered(index);
+    setKept(byKey && index !== null ? (all[index]?.at ?? null) : null);
   };
   const unrest = () => {
     if (rest.current) clearTimeout(rest.current.timer);
@@ -251,35 +291,45 @@ export function BeatStrip({
     const el = tip.current;
     const strip = root.current;
     if (!el || !strip || active === null) return;
-    if (!el.matches(":popover-open")) el.showPopover();
+    if (POPOVER && !el.matches(":popover-open")) el.showPopover();
     const slot = strip.querySelectorAll<HTMLElement>(":scope > .slot")[active];
     if (!slot) return;
     const s = slot.getBoundingClientRect();
     const r = strip.getBoundingClientRect();
+    const gap = TIP_GAP + ringReach(strip);
     const left = s.left + s.width / 2 - el.offsetWidth / 2;
-    const above = r.top - el.offsetHeight - TIP_GAP;
+    const above = r.top - el.offsetHeight - gap;
     el.style.left = `${Math.max(TIP_MARGIN, Math.min(left, window.innerWidth - el.offsetWidth - TIP_MARGIN))}px`;
-    el.style.top = `${above >= TIP_MARGIN ? above : r.bottom + TIP_GAP}px`;
+    el.style.top = `${above >= TIP_MARGIN ? above : r.bottom + gap}px`;
   });
 
-  // The page moving under the hover, or a press anywhere else, closes it.
+  // The page moving under the hover, a press anywhere else or Escape closes it.
   const reading = active !== null;
   useEffect(() => {
     if (!reading) return;
     const close = () => {
       open.current = false;
       setHovered(null);
+      setKept(null);
     };
     const away = (e: PointerEvent) => {
       if (!root.current?.contains(e.target as Node)) close();
     };
+    // Put away with Escape, a pointer's hover stays away until the pointer leaves the strip or presses it.
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      dismissed.current = true;
+      close();
+    };
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", escape);
     return () => {
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("resize", close);
       document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", escape);
     };
   }, [reading]);
 
@@ -287,6 +337,7 @@ export function BeatStrip({
   useEffect(
     () => () => {
       if (rest.current) clearTimeout(rest.current.timer);
+      cancelAnimationFrame(arrival.current);
     },
     [],
   );
@@ -295,6 +346,8 @@ export function BeatStrip({
     const mouse = e.pointerType === "mouse";
     // A strip inside a link leaves a touch to the link.
     if (!mouse && e.currentTarget.closest("a")) return;
+    if (e.type !== "pointermove") dismissed.current = false;
+    else if (dismissed.current) return;
     const index = slotAt(e.currentTarget, e.clientX, narrowSlots);
     const next = index !== null && tells(all[index]) ? index : null;
     if (open.current || !passing || !mouse || e.timeStamp < warmUntil) {
@@ -312,44 +365,80 @@ export function BeatStrip({
     }
   };
 
+  /** The slots the keyboard stops at: those on screen that have something to say. */
+  const stopsFrom = (from: number) => all.flatMap((beat, i) => (i >= from && tells(beat) ? [i] : []));
+
   const walk = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       show(null);
-      setSaid("");
       return;
     }
-    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    // A slider's keys: right and up are newer, left and down older.
+    const step =
+      e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -1 : 0;
     if (step === 0 && e.key !== "Home" && e.key !== "End") return;
     e.preventDefault();
-    const { first } = visibleSlots(e.currentTarget, narrowSlots);
-    const stops = all.map((beat, i) => (i >= first && tells(beat) ? i : -1)).filter((i) => i >= 0);
+    const from = visibleSlots(e.currentTarget, narrowSlots).first;
+    setFirst(from);
+    const stops = stopsFrom(from);
     if (stops.length === 0) return;
-    // From nothing, right starts at the oldest and left at the newest, as the chart does.
-    const at = active === null ? (step > 0 ? -1 : stops.length) : stops.indexOf(active);
+    // With nothing in hand the strip stands at its newest slot, as it tells a screen reader.
+    const at = active === null ? stops.length - 1 : stops.indexOf(active);
     const next =
       e.key === "Home"
         ? stops[0]
         : e.key === "End"
           ? stops[stops.length - 1]
           : stops[Math.min(Math.max(at + step, 0), stops.length - 1)];
-    show(next);
-    const d = describe(all[next]!, slowAboveMs, t);
-    setSaid([d.when, d.word, d.reading, d.note, d.detail].filter(Boolean).join(", "));
+    show(next, true);
   };
 
   const arrived = arrivals && newest !== seen;
   const told = active !== null ? describe(all[active]!, slowAboveMs, t) : null;
 
+  // The slider's value, for a screen reader: the slot in hand, the newest one otherwise, in words.
+  const stops = walkable ? stopsFrom(first) : [];
+  const value = active !== null && stops.includes(active) ? active : (stops[stops.length - 1] ?? null);
+  const heard = (beat: Beat) => {
+    const d = describe(beat, slowAboveMs, t);
+    const line = d.detail?.split("\n", 1)[0].trim();
+    const detail = line && line.length > HEARD_CHARS ? `${line.slice(0, HEARD_CHARS)}…` : line;
+    return [d.when, d.word, d.reading, d.note, detail].filter(Boolean).join(", ");
+  };
+
+  const hover = told && (
+    <div ref={tip} popover={POPOVER ? "manual" : undefined} aria-hidden className="beat-tip pop text-xs">
+      {told.when && <span className="text-ink-3 tabular-nums">{told.when}</span>}
+      {told.reading && (
+        <span className="beat-tip-read">
+          {told.glyph && <StatusGlyph kind={told.glyph} />}
+          <strong className={told.tone}>{told.reading}</strong>
+          {told.note && <span className="text-ink-3 tabular-nums">{told.note}</span>}
+        </span>
+      )}
+      {told.detail && <span className="beat-tip-detail type-mono-s text-ink-2">{told.detail}</span>}
+    </div>
+  );
+
   return (
     <div
       ref={root}
-      role={keys && tips ? "group" : "img"}
-      aria-label={keys && tips ? `${label}. ${t("beat.keys")}` : label}
-      tabIndex={keys && tips ? 0 : undefined}
-      className={`beat-strip ${keys ? "rounded-sm outline-offset-4" : ""} ${className}`}
+      role={walkable ? "slider" : "img"}
+      aria-label={label}
+      aria-valuemin={walkable ? 1 : undefined}
+      aria-valuemax={walkable ? Math.max(stops.length, 1) : undefined}
+      aria-valuenow={walkable ? Math.max(stops.indexOf(value ?? -1) + 1, 1) : undefined}
+      aria-valuetext={walkable && value !== null ? heard(all[value]!) : undefined}
+      tabIndex={walkable ? 0 : undefined}
+      className={`beat-strip ${keys ? "rounded-sm" : ""} ${className}`}
       data-scrub={active !== null || undefined}
-      // A finger reads along the strip; up and down still scroll the page.
-      style={{ height, gap, width: slotWidth ? "fit-content" : undefined, touchAction: tips && !passing ? "pan-y" : undefined }}
+      // A finger reads along the strip; up and down still scroll the page, and two fingers still zoom it.
+      style={{
+        height,
+        gap,
+        width: slotWidth ? "fit-content" : undefined,
+        touchAction: tips && !passing ? "pan-y pinch-zoom" : undefined,
+      }}
       onPointerEnter={
         tips
           ? (e) => {
@@ -366,18 +455,37 @@ export function BeatStrip({
               unrest();
               // A finger's hover stays until a touch elsewhere: it left with the tap that opened it.
               if (e.pointerType !== "mouse") return;
+              dismissed.current = false;
               onScrub?.(false);
               if (open.current) warmUntil = e.timeStamp + WARM_MS;
               show(null);
             }
           : undefined
       }
-      onKeyDown={keys && tips ? walk : undefined}
+      onKeyDown={walkable ? walk : undefined}
+      onFocus={
+        walkable
+          ? (e) => {
+              const el = e.currentTarget;
+              const from = visibleSlots(el, narrowSlots).first;
+              setFirst(from);
+              // Arriving by keyboard shows the newest slot: what a screen reader is told is on screen
+              // too. A frame later, since the browser may be bringing the strip into view, and that
+              // scroll (told before the frame's callbacks run) would close a hover opened here.
+              cancelAnimationFrame(arrival.current);
+              arrival.current = requestAnimationFrame(() => {
+                if (document.activeElement !== el || !el.matches(":focus-visible")) return;
+                const stops = stopsFrom(from);
+                if (stops.length > 0) show(stops[stops.length - 1], true);
+              });
+            }
+          : undefined
+      }
       onBlur={
-        keys && tips
+        walkable
           ? () => {
+              cancelAnimationFrame(arrival.current);
               show(null);
-              setSaid("");
             }
           : undefined
       }
@@ -406,24 +514,7 @@ export function BeatStrip({
           />
         );
       })}
-      {keys && tips && (
-        <span role="status" className="sr-only">
-          {said}
-        </span>
-      )}
-      {told && (
-        <div ref={tip} popover="manual" aria-hidden className="beat-tip pop text-xs">
-          {told.when && <span className="text-ink-3 tabular-nums">{told.when}</span>}
-          {told.reading && (
-            <span className="beat-tip-read">
-              {told.glyph && <StatusGlyph kind={told.glyph} />}
-              <strong className={told.tone}>{told.reading}</strong>
-              {told.note && <span className="text-ink-3 tabular-nums">{told.note}</span>}
-            </span>
-          )}
-          {told.detail && <span className="beat-tip-detail type-mono-s text-ink-2">{told.detail}</span>}
-        </div>
-      )}
+      {POPOVER ? hover : hover && createPortal(hover, document.body)}
     </div>
   );
 }

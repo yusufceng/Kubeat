@@ -45,8 +45,8 @@ export function HeartbeatBar({
       passing
       label={
         slow > 0
-          ? t("monitorsList.list.beats.labelSlow", { count: shown.length, failed, slow })
-          : t("monitorPage.heartbeat.summary", { shown: shown.length, failed })
+          ? t("beat.summarySlow", { count: shown.length, failed, slow })
+          : t("beat.summary", { count: shown.length, failed })
       }
     />
   );

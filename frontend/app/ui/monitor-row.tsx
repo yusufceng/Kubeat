@@ -181,7 +181,7 @@ export const Row = memo(function Row({
         <BeatStrip
           beats={shown}
           slots={beats}
-          height={14}
+          height={16}
           slotWidth={beatWidth(beats)}
           gap={1}
           graded
@@ -193,8 +193,8 @@ export const Row = memo(function Row({
           onScrub={(over) => onHover(over ? null : item.id, over ? null : ref.current)}
           label={
             slow > 0
-              ? t("monitorsList.list.beats.labelSlow", { count: shown.length, failed, slow })
-              : t("monitorsList.list.beats.label", { count: shown.length, failed })
+              ? t("beat.summarySlow", { count: shown.length, failed, slow })
+              : t("beat.summary", { count: shown.length, failed })
           }
           className="shrink-0"
         />

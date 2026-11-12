@@ -143,6 +143,8 @@ function Service({ monitor, view, t }: { monitor: StatusPageViewMonitor; view: S
         beats={dayBeats(monitor.history, new Date(view.from).getTime(), t)}
         slots={view.days}
         narrowSlots={NARROW_DAYS}
+        // Without a page of its own to read the days on, a service's strip is the keyboard's stop.
+        keys={!view.detail_pages}
         label={t.n("statusPage.history.aria", monitor.history.length)}
       />
       <div className="sp-axis">
@@ -166,6 +168,7 @@ function CompactService({ monitor, view, t }: { monitor: StatusPageViewMonitor; 
         slots={view.days}
         narrowSlots={NARROW_DAYS}
         height={14}
+        keys={!view.detail_pages}
         label={t.n("statusPage.history.aria", monitor.history.length)}
         className="sp-compact-strip"
       />

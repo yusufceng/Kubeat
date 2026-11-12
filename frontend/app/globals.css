@@ -821,12 +821,24 @@ body {
     background: var(--line-strong);
   }
   /* Reading one slot of a strip, with a pointer over it or the keyboard
-     on it: the others step back, as the chart's availability strip does. */
+     on it: the calm slots step back as far as the chart's availability
+     strip does, and a tick under the slot in hand marks its place. What
+     failed or was slow keeps its full color, so that the trouble around
+     the slot being read stays as legible as it was. */
   .slot {
+    position: relative;
     transition: opacity var(--duration-fast) var(--ease-out);
   }
-  .beat-strip[data-scrub] > .slot:not([data-on]) {
-    opacity: 0.5;
+  .beat-strip[data-scrub] > .slot:is(.slot-ok, .slot-idle, .slot-maint, .slot-none):not([data-on]) {
+    opacity: 0.55;
+  }
+  .beat-strip > .slot[data-on]::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 calc(var(--space-1) * -1);
+    height: var(--space-0_5);
+    border-radius: 1px;
+    background: var(--ink);
   }
   /* The check that just landed rises into its place, once. */
   .slot-new {
@@ -837,10 +849,21 @@ body {
      popover the strip opens by hand, so it is drawn in the top layer,
      where no list that scrolls or skips its rendering can cut it off, and
      the strip sets it over the slot. The surface is .pop's. It comes up
-     once with a fade and then follows from slot to slot without one. */
+     once with a fade and then follows from slot to slot without one.
+     A browser without popovers gets the same box at the end of the page,
+     which is why it has a place in the stacking order and its layout
+     does not wait for :popover-open (the box exists only while open).
+     It does not take the pointer, so it cannot be hovered itself: it
+     stands over the strip of the row above, and a hover that held the
+     pointer would be in the way of reading down a column of strips. What
+     it says is in reach of the keyboard on every strip that is a stop. */
   .beat-tip {
     position: fixed;
+    z-index: 70;
     inset: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0_5);
     margin: 0;
     width: max-content;
     max-width: min(18rem, calc(100vw - var(--space-4)));
@@ -849,11 +872,6 @@ body {
     color: var(--ink);
     pointer-events: none;
     animation: beat-tip-in var(--duration-fast) var(--ease-out);
-  }
-  .beat-tip:popover-open {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-0_5);
   }
   .beat-tip-read {
     display: flex;
@@ -877,6 +895,12 @@ body {
     overflow: hidden;
     overflow-wrap: anywhere;
   }
+}
+
+/* The keyboard's ring around a strip stands clear of the tick under the
+   slot in hand. Outside the layer, like the focus mark it moves. */
+.beat-strip:focus-visible {
+  outline-offset: var(--space-1_5);
 }
 
 /* A strip's two one-shot motions: the newest slot rising into its place
@@ -973,5 +997,9 @@ body {
   .slot,
   .rail-item[aria-current="page"]::before {
     forced-color-adjust: none;
+  }
+  /* The tick under the slot in hand is the palette's own text color. */
+  .beat-strip > .slot[data-on]::after {
+    background: CanvasText;
   }
 }
