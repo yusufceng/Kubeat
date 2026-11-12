@@ -17,6 +17,7 @@ import type { UptimeTones } from "@/lib/uptime-tone";
 import { Chevron, groupCount, HealthBar, HoverCard, Row } from "@/app/ui/monitor-row";
 import { type ListFilter, useListFilter } from "@/app/ui/shell-state";
 import type { DisplayState } from "@/app/ui/status";
+import { type GlyphKind, StatusGlyph } from "@/app/ui/status-glyph";
 
 const degradedStates: DisplayState[] = ["verifying", "recovering", "degraded"];
 const idleStates: DisplayState[] = ["paused", "pending", "maintenance"];
@@ -40,9 +41,9 @@ function matchesState(item: FleetItem, filter: ListFilter): boolean {
 }
 
 /**
- * Every monitor, grouped by namespace, with a filter, a segmented state
- * control and, in a menu, the type and tag filters. The data comes from
- * the server on each refresh; filtering happens here, so it is instant.
+ * Every monitor, grouped by namespace, with a filter, a tab for each state
+ * and, in a menu, the type and tag filters. The data comes from the server
+ * on each refresh; filtering happens here, so it is instant.
  *
  * Editors select monitors with the checkbox that takes the glyph's place
  * on hover (or with x on a focused row, or "Select monitors" in the menu),
@@ -244,12 +245,13 @@ export function MonitorList({
     }
   }
 
-  const filters: { key: ListFilter; label: string }[] = [
+  // "All" is a word; a state is the glyph its monitors wear in the rows below.
+  const filters: { key: ListFilter; label: string; glyph?: GlyphKind }[] = [
     { key: "all", label: t("monitorsList.filter.all") },
-    { key: "up", label: t("monitorsList.filter.up") },
-    { key: "down", label: t("monitorsList.filter.down") },
-    { key: "degraded", label: t("monitorsList.filter.degraded") },
-    { key: "idle", label: t("monitorsList.filter.idle") },
+    { key: "up", label: t("monitorsList.filter.up"), glyph: "up" },
+    { key: "down", label: t("monitorsList.filter.down"), glyph: "down" },
+    { key: "degraded", label: t("monitorsList.filter.degraded"), glyph: "warn" },
+    { key: "idle", label: t("monitorsList.filter.idle"), glyph: "paused" },
   ];
 
   return (
@@ -284,31 +286,47 @@ export function MonitorList({
             />
           )}
         </div>
-        {/* A segmented control; narrow widths and long Turkish names may wrap it. */}
-        <div role="group" aria-label={t("monitorsList.filter.label")} className="fl-seg">
-          {filters.map((f) => (
-            <button key={f.key} type="button" onClick={() => setStateFilter(f.key)} aria-pressed={stateFilter === f.key}>
-              {f.label}
-              <span
-                className={`font-semibold tabular-nums ${
-                  f.key === "down" && counts.down > 0
-                    ? "text-down-ink"
-                    : f.key === "degraded" && counts.degraded > 0
-                      ? "text-warn-ink"
-                      : "text-ink-3"
-                }`}
-              >
-                {counts[f.key]}
-              </span>
-            </button>
-          ))}
-        </div>
         {(type || tag) && (
           <div className="flex flex-wrap gap-1.5" aria-label={t("monitorsList.list.filters.active")} role="group">
             {type && <FilterChip label={t(typeLabel(type))} onRemove={() => setTypeFilter("")} />}
             {tag && <FilterChip label={tag} onRemove={() => setTagFilter("")} />}
           </div>
         )}
+        {/* The glyph says the state to the eye; the name and the title say it in
+            words, and so does the row's end for the state that is on. */}
+        <div role="group" aria-label={t("monitorsList.filter.label")} className="fl-states">
+          {filters.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setStateFilter(f.key)}
+              aria-pressed={stateFilter === f.key}
+              aria-label={`${f.label} ${counts[f.key]}`}
+              title={f.glyph && f.label}
+              data-empty={(f.glyph && counts[f.key] === 0) || undefined}
+            >
+              {f.glyph ? <StatusGlyph kind={f.glyph} /> : f.label}
+              <span
+                className={
+                  f.key === "down" && counts.down > 0
+                    ? "font-semibold text-down-ink"
+                    : f.key === "degraded" && counts.degraded > 0
+                      ? "font-semibold text-warn-ink"
+                      : f.key === "all"
+                        ? "font-semibold text-ink-3"
+                        : "font-semibold"
+                }
+              >
+                {counts[f.key]}
+              </span>
+            </button>
+          ))}
+          {stateFilter !== "all" && (
+            <span className="fl-states-name" aria-hidden>
+              {filters.find((f) => f.key === stateFilter)?.label}
+            </span>
+          )}
+        </div>
       </div>
 
       <p id={hintId} className="sr-only">
@@ -350,7 +368,7 @@ export function MonitorList({
               key={namespace}
               aria-label={label}
               className="fl-group"
-              style={{ containIntrinsicSize: `auto ${30 + (open ? group.length * 34 : 0)}px` }}
+              style={{ "--rows": open ? group.length : 0 } as React.CSSProperties}
             >
               <div className="fl-ns">
                 {selectMode && (

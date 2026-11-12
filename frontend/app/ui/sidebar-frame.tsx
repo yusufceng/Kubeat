@@ -11,7 +11,7 @@ import { useListDrawer } from "@/app/ui/shell-state";
 export const LIST_BUTTON_ID = "list-drawer-button";
 
 /**
- * The column that holds the monitor list, 340px wide. From 1200px it is
+ * The column that holds the monitor list, 320px wide. From 1200px it is
  * always there. Between 1024 and 1199px the page gets the width instead,
  * and the list is a drawer over it, opened from the context bar; it closes
  * on Escape, on a click beside it, and once a monitor is chosen. On a
@@ -55,7 +55,7 @@ export function SidebarFrame({ children }: { children: React.ReactNode }) {
           // Escape while monitors are being selected stops selecting first.
           if (e.key === "Escape" && open && !(e.target as HTMLElement).closest("[data-selecting]")) close();
         }}
-        className={`order-2 shrink-0 scroll-mt-[52px] border-line bg-panel ${onOverview ? "flex flex-col border-t" : "hidden"} lg:fixed lg:inset-y-0 lg:left-[60px] lg:z-[35] lg:w-[340px] lg:flex-col lg:border-t-0 lg:border-r lg:shadow-[var(--shadow-pop)] ${
+        className={`order-2 shrink-0 scroll-mt-[52px] border-line bg-panel ${onOverview ? "flex flex-col border-t" : "hidden"} lg:fixed lg:inset-y-0 lg:left-12 lg:z-[35] lg:w-80 lg:flex-col lg:border-t-0 lg:border-r lg:shadow-[var(--shadow-pop)] ${
           open ? "lg:flex" : "lg:hidden"
         } min-[75rem]:static min-[75rem]:z-auto min-[75rem]:order-1 min-[75rem]:flex min-[75rem]:h-dvh min-[75rem]:shadow-none`}
       >
@@ -79,7 +79,7 @@ export function ListButton() {
       onClick={() => setOpen(!open)}
       aria-expanded={open}
       aria-controls="monitors"
-      className="btn btn-ghost hidden flex-none lg:inline-flex min-[75rem]:hidden"
+      className="btn btn-ghost btn-sm hidden flex-none lg:inline-flex min-[75rem]:hidden"
     >
       <ListPaneIcon />
       {t("monitorsList.sidebar.label")}

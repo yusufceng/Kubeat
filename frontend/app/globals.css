@@ -491,43 +491,67 @@ body {
     font-size: 12px;
   }
 
-  /* A section of the rail: an icon in a 40px tile. The current one is an
-     accent tile with a bar at the rail's edge. */
+  /* A section of the rail: an icon in a 32px tile, 8px from each edge of
+     the rail. The current one is in full ink on a neutral tile, with a bar
+     at the rail's edge: the bar is the rail's one blue mark. */
   .rail-item {
     position: relative;
     display: grid;
     flex: none;
     place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-md);
+    width: var(--space-8);
+    height: var(--space-8);
+    border-radius: var(--radius-sm);
     color: var(--ink-3);
     transition:
-      background-color 120ms var(--ease-signal),
-      color 120ms var(--ease-signal);
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
   }
   .rail-item:hover {
     background: var(--hover);
     color: var(--ink);
   }
   .rail-item[aria-current="page"] {
-    background: color-mix(in oklab, var(--accent) 14%, transparent);
-    color: var(--accent-text);
+    background: color-mix(in oklab, var(--ink) 9%, transparent);
+    color: var(--ink);
   }
   .rail-item[aria-current="page"]::before {
     content: "";
     position: absolute;
-    left: -10px;
-    top: 10px;
-    bottom: 10px;
+    left: calc(var(--space-2) * -1);
+    top: var(--space-2);
+    bottom: var(--space-2);
     width: 2px;
-    border-radius: 2px;
+    border-radius: 0 2px 2px 0;
     background: var(--accent);
+  }
+  /* Who is signed in, at the rail's foot: the button of the rail's menu. */
+  .rail-avatar {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: var(--space-7);
+    height: var(--space-7);
+    margin: var(--space-0_5);
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    background: var(--raised);
+    color: var(--ink-2);
+    font-size: var(--text-micro);
+    font-weight: 600;
+    line-height: var(--text-micro--line-height);
+    transition:
+      border-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+  .rail-avatar:hover {
+    border-color: var(--ink-3);
+    color: var(--ink);
   }
   /* The name of a rail item, beside it on hover and on keyboard focus. */
   .rail-tip {
     position: absolute;
-    left: calc(100% + 12px);
+    left: calc(100% + var(--space-3));
     top: 50%;
     z-index: 60;
     translate: -4px -50%;
@@ -544,8 +568,8 @@ body {
     font-weight: 500;
     line-height: 16px;
     transition:
-      opacity 120ms var(--ease-signal),
-      translate 120ms var(--ease-signal);
+      opacity var(--duration-fast) var(--ease-out),
+      translate var(--duration-fast) var(--ease-out);
   }
   .rail-item:hover .rail-tip,
   .rail-item:focus-visible .rail-tip {

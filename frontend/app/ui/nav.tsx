@@ -103,9 +103,13 @@ function NavView({ pathname, user }: { pathname: string | null; user: ShellUser 
 }
 
 /**
- * A 60px column of icons; each names itself in a tooltip. Sticky, the rail
- * is a stacking context of its own: z-40 puts it, and so its tooltips, over
- * the page beside it, which comes later and would otherwise paint on top.
+ * A 48px column of icons; each names itself in a tooltip. It holds the
+ * sections and, at its foot, one menu for everything about the viewer: the
+ * account, the theme, the language and the way out. The mark and the tiles
+ * are one 32px column, and the mark's cell is as tall as the context bar
+ * beside it. Sticky, the rail is a stacking context of its own: z-40 puts
+ * it, and so its tooltips, over the page beside it, which comes later and
+ * would otherwise paint on top.
  */
 function Rail({ pathname, user }: { pathname: string | null; user: ShellUser | null }) {
   const t = useT();
@@ -116,68 +120,81 @@ function Rail({ pathname, user }: { pathname: string | null; user: ShellUser | n
       aria-current={pathname !== null && s.match(pathname) ? "page" : undefined}
       className="rail-item"
     >
-      <s.icon width={20} height={20} />
+      <s.icon width={18} height={18} />
       <span className="rail-tip">{t(s.label)}</span>
     </Link>
   );
   return (
     <nav
       aria-label={t("shell.nav")}
-      className="sticky top-0 z-40 hidden h-dvh w-[60px] flex-none flex-col items-center gap-1 border-r border-line bg-panel py-3 lg:flex dark:bg-canvas"
+      className="sticky top-0 z-40 hidden h-dvh w-12 flex-none flex-col items-start gap-1 border-r border-line bg-panel py-2 pl-2 lg:flex dark:bg-canvas"
     >
-      <Link href="/" aria-label={t("shell.home")} className="mb-3.5 rounded-md">
+      <Link href="/" aria-label={t("shell.home")} className="mb-3 rounded-md">
         <LogoMark size={32} />
       </Link>
       {sections.map(link)}
       {user?.admin && (
         <>
-          <span className="h-2.5" aria-hidden />
+          <span className="h-2" aria-hidden />
           {adminSections.map(link)}
         </>
       )}
       <span className="flex-1" aria-hidden />
-      <ThemeToggle />
-      <span className="mt-1.5 mb-3">
-        <LanguageToggle />
-      </span>
-      {user && <AccountMenu user={user} />}
+      <RailMenu user={user} />
     </nav>
   );
 }
 
-/** The avatar at the foot of the rail, and its menu: the account and the way out. */
-function AccountMenu({ user }: { user: ShellUser }) {
+/**
+ * The foot of the rail and its menu: who is signed in, their account, the
+ * theme, the language and the way out. Before the session is known, or with
+ * the backend out of reach, the two settings stay within reach under More.
+ */
+function RailMenu({ user }: { user: ShellUser | null }) {
   const t = useT();
   const id = useId();
   const menu = useRef<HTMLDivElement>(null);
   return (
     <>
-      <button
-        type="button"
-        popoverTarget={id}
-        aria-label={t("shell.accountMenu", { name: user.name })}
-        className="grid h-[30px] w-[30px] place-items-center rounded-full border border-line-strong bg-raised text-[11px] font-semibold text-ink-2 hover:border-ink-3 hover:text-ink"
-      >
-        {initials(user.name, t.intl)}
-      </button>
-      <div id={id} ref={menu} popover="auto" className="menu inset-auto bottom-3 left-[68px] w-60">
-        <p className="px-2.5 pt-1.5 pb-2">
-          <span className="block truncate font-semibold">{user.name}</span>
-          <span className="block truncate text-xs text-ink-3">
-            {user.username} · {user.role}
-          </span>
-        </p>
-        <hr className="menu-sep" />
-        <Link href="/account" className="menu-item" onClick={() => menu.current?.hidePopover()}>
-          <AccountIcon />
-          {t("shell.account")}
-        </Link>
-        <form action={logoutAction}>
-          <button type="submit" className="menu-item">
-            <SignOutIcon />
-            {t("session.signOut")}
-          </button>
-        </form>
+      {user ? (
+        <button type="button" popoverTarget={id} aria-label={t("shell.accountMenu", { name: user.name })} className="rail-avatar">
+          {initials(user.name, t.intl)}
+        </button>
+      ) : (
+        <button type="button" popoverTarget={id} aria-label={t("shell.more")} className="rail-item">
+          <MoreIcon width={18} height={18} />
+          <span className="rail-tip">{t("shell.more")}</span>
+        </button>
+      )}
+      <div id={id} ref={menu} popover="auto" className="menu inset-auto bottom-2 left-14 w-60">
+        {user && (
+          <>
+            <p className="px-2.5 pt-1.5 pb-2">
+              <span className="block truncate font-semibold">{user.name}</span>
+              <span className="block truncate text-xs text-ink-3">
+                {user.username} · {user.role}
+              </span>
+            </p>
+            <hr className="menu-sep" />
+            <Link href="/account" className="menu-item" onClick={() => menu.current?.hidePopover()}>
+              <AccountIcon />
+              {t("shell.account")}
+            </Link>
+          </>
+        )}
+        <ThemeToggle variant="menu" />
+        <LanguageToggle variant="menu" />
+        {user && (
+          <>
+            <hr className="menu-sep" />
+            <form action={logoutAction}>
+              <button type="submit" className="menu-item">
+                <SignOutIcon />
+                {t("session.signOut")}
+              </button>
+            </form>
+          </>
+        )}
       </div>
     </>
   );

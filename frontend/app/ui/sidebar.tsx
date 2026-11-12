@@ -39,17 +39,24 @@ export async function Sidebar() {
   );
 }
 
-/** What the list's place shows until the first data arrives: the toolbar and a few rows, without words. */
+/**
+ * What the list's place shows until the first data arrives: the toolbar and
+ * a few rows, without words, at the list's own heights (fl-list has them).
+ */
 export function SidebarSkeleton() {
   return (
-    <div className="flex flex-col" aria-hidden>
-      <div className="flex flex-col gap-2.5 border-b border-line px-3 pt-3 pb-2.5">
-        <div className="h-[34px] rounded-sm bg-well" />
-        <div className="h-[32px] rounded-sm bg-well" />
+    <div className="fl-list" aria-hidden>
+      <div className="flex flex-col gap-1.5 border-b border-line px-3 pt-2.5">
+        <div className="h-(--ctl) rounded-sm bg-well" />
+        <div className="flex h-(--ctl) items-center gap-4">
+          {[40, 24, 24, 24].map((width, i) => (
+            <span key={i} className="h-2.5 rounded-xs bg-hover" style={{ width }} />
+          ))}
+        </div>
       </div>
       <div className="flex flex-col py-1.5">
-        {Array.from({ length: 9 }, (_, i) => (
-          <div key={i} className="flex h-[34px] items-center gap-2 pr-3 pl-3.5">
+        {Array.from({ length: 12 }, (_, i) => (
+          <div key={i} className="flex h-(--row) items-center gap-2 pr-3 pl-3.5">
             <span className="h-2.5 w-2.5 flex-none rounded-full bg-line" />
             <span className="h-2.5 flex-1 rounded-xs bg-hover" style={{ maxWidth: `${40 + ((i * 37) % 45)}%` }} />
             <span className="ml-auto h-3.5 w-[71px] rounded-xs bg-hover" />
