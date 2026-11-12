@@ -211,10 +211,13 @@ export function LatencyChart({
     });
   const day = (at: number) => new Date(at).toLocaleDateString(t.intl, { day: "numeric", month: "short" });
   const timeLabel = (at: number) => (longRange ? day(at) : clock(at));
+  // A bucket shorter than a minute is told to the second: its two ends would
+  // read as one time otherwise.
   const bucketLabel = (p: SeriesPoint) => {
     const start = new Date(p.start).getTime();
     const end = Math.min(start + bucket, to);
-    return `${day(start)} ${clock(start)} – ${clock(end)}`;
+    const fine = bucket < 60_000;
+    return `${day(start)} ${clock(start, fine)} – ${clock(end, fine)}`;
   };
 
   if (points.length === 0) {
