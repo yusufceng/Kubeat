@@ -14,13 +14,14 @@ import { ListButton } from "@/app/ui/sidebar-frame";
  * The bar over a page: where the page is on the left, after the button of
  * the monitor list where that is a drawer; on the right the command
  * palette's button (⌘K), the fleet's pulse and, for those who may, a new
- * monitor. On a narrow screen it stays at the top and shows the name in
- * place of the breadcrumb.
+ * monitor. On a wide screen it is 48px, as tall as the rail is wide, and
+ * what is in it is 28px; on a narrow one it stays at the top, 52px, and
+ * shows the name in place of the breadcrumb.
  */
 export async function ContextBar() {
   const t = await getT();
   return (
-    <header className="fixed inset-x-0 top-0 z-30 flex h-[52px] items-center gap-3 border-b border-line bg-panel px-4 lg:static lg:z-auto lg:flex-none lg:bg-canvas lg:px-6">
+    <header className="fixed inset-x-0 top-0 z-30 flex h-[52px] items-center gap-3 border-b border-line bg-panel px-4 lg:static lg:z-auto lg:h-12 lg:flex-none lg:bg-canvas lg:px-6">
       <Link href="/" aria-label={t("shell.home")} className="flex-none rounded-md lg:hidden">
         <Logo size={18} className="block" />
       </Link>
@@ -69,11 +70,12 @@ async function NewMonitorButton() {
   const me = await shellUser();
   if (!me?.can_edit) return null;
   const t = await getT();
-  // Below the widest screens the button keeps to its icon, leaving the room to the breadcrumb.
+  // Below the widest screens the button keeps to its icon, leaving the room
+  // to the breadcrumb. From 1024px it has the measures of btn-sm, 28px.
   return (
     <Link
       href="/monitors/new"
-      className="btn btn-primary max-xl:px-2"
+      className="btn btn-primary max-xl:px-2 lg:py-[5px] lg:text-xs"
       aria-label={t("monitorsList.list.newMonitor")}
       title={t("monitorsList.list.newMonitor")}
     >

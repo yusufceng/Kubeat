@@ -84,7 +84,7 @@ function entries(monitors: PaletteMonitor[], canEdit: boolean, admin: boolean, t
       label: m.name,
       hint: m.namespace || t(MANUAL_LABEL),
       href: `/monitors/${m.id}`,
-      icon: <StatusGlyph kind={style.glyph} live={m.state === "down"} label={t(style.label)} />,
+      icon: <StatusGlyph kind={style.glyph} live label={t(style.label)} />,
       fields: [m.name, m.namespace, m.kind, m.aka],
       rank: urgencyRank(m.state),
     });

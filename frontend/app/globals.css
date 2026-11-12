@@ -130,6 +130,10 @@
 
   /* Motion: quick to start, soft to land. */
   --ease-signal: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* The clock of what is live: an ongoing outage beats once in this long.
+     It is not one of the durations: for viewers who ask for less motion a
+     duration shortens, and what runs on this clock stops. */
+  --beat: 1.6s;
 }
 
 @theme inline {
@@ -179,6 +183,77 @@
   --ease-signal: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* The scales for type, space and time, beside the radii above, for the
+   stylesheets and inline styles to take their numbers from. static keeps
+   every step in the build, used or not. */
+@theme static {
+  /* Type, as size over leading in px. 12/16, 13/18 and 14/20 are the
+     working sizes, and 14/20 (sm, not base) is the body; 11/14 is the
+     floor, for kind tags and fine print. 20/26 is the title and 24/28 the
+     small display; 16/22 and 18/24 fill the gap below them. Above 24 a
+     size comes with its role. xs and sm keep Tailwind's leading, a ratio;
+     the other six set a length, as the roles do, because 18 over 13 as a
+     ratio lands a 64th of a pixel short. micro and dense are the sizes of
+     type-micro and type-dense without their weight. */
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 0.875rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-dense: 0.8125rem;
+  --text-dense--line-height: 1.125rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --text-base: 1rem;
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.625rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.75rem;
+
+  /* Space, numbered like p-2 and gap-4, which still compute from --spacing
+     and do not read these, and in rem as they are. At a 16px root: every
+     2px up to 16, every 4 up to 32, then 40, 48 and 64. 1_5 is how
+     Tailwind spells 1.5 in a name. In a class it also reads an underscore
+     as a space, and calc(100%+var(--space-1_5)) loses the name: there,
+     write --spacing(1.5). */
+  --space-0_5: 0.125rem;
+  --space-1: 0.25rem;
+  --space-1_5: 0.375rem;
+  --space-2: 0.5rem;
+  --space-2_5: 0.625rem;
+  --space-3: 0.75rem;
+  --space-3_5: 0.875rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Time, for motion that runs once: fast answers the pointer (a hover, a
+     press, a tooltip, a chevron), base brings in a surface that was asked
+     for (a menu, a dialog, a drawer), slow draws data. The outage pulse
+     and the row flash keep their own periods. A wait is not motion: hover
+     intent and a debounce keep their own numbers, because these three
+     collapse under reduced motion. They make no class of their own: write
+     duration-(--duration-fast). */
+  --duration-fast: 120ms;
+  --duration-base: 160ms;
+  --duration-slow: 400ms;
+
+  /* One curve under two names: --ease-out points at --ease-signal, and so
+     does the ease-out class. The CSS keyword ease-out is another curve.
+     Tailwind's transition classes take the same clock and curve unless
+     they name another. */
+  --ease-out: var(--ease-signal);
+  --default-transition-duration: var(--duration-fast);
+  --default-transition-timing-function: var(--ease-signal);
+}
+
 body {
   background: var(--canvas);
   color: var(--ink);
@@ -210,7 +285,7 @@ body {
   outline-offset: 2px;
 }
 
-/* The type scale. Mona Sans is a variable font: the display sizes widen it,
+/* The type roles. Mona Sans is a variable font: the display sizes widen it,
    the figures of the readouts narrow it. Nothing is set in capitals. */
 @utility type-display-l {
   font-size: 32px;
@@ -420,46 +495,70 @@ body {
     font-size: 12px;
   }
 
-  /* A section of the rail: an icon in a 40px tile. The current one is an
-     accent tile with a bar at the rail's edge. */
+  /* A section of the rail: an icon in a 32px tile, 8px from each edge of
+     the rail. The current one is in full ink on a neutral tile, with a bar
+     at the rail's edge: the bar is the rail's one blue mark, 20px of it. */
   .rail-item {
     position: relative;
     display: grid;
     flex: none;
     place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-md);
+    width: var(--space-8);
+    height: var(--space-8);
+    border-radius: var(--radius-sm);
     color: var(--ink-3);
     transition:
-      background-color 120ms var(--ease-signal),
-      color 120ms var(--ease-signal);
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
   }
   .rail-item:hover {
     background: var(--hover);
     color: var(--ink);
   }
   .rail-item[aria-current="page"] {
-    background: color-mix(in oklab, var(--accent) 14%, transparent);
-    color: var(--accent-text);
+    background: color-mix(in oklab, var(--ink) 9%, transparent);
+    color: var(--ink);
   }
   .rail-item[aria-current="page"]::before {
     content: "";
     position: absolute;
-    left: -10px;
-    top: 10px;
-    bottom: 10px;
+    left: calc(var(--space-2) * -1);
+    top: var(--space-1_5);
+    bottom: var(--space-1_5);
     width: 2px;
-    border-radius: 2px;
+    border-radius: 0 2px 2px 0;
     background: var(--accent);
   }
-  /* The name of a rail item, beside it on hover and on keyboard focus. */
-  .rail-tip {
+  /* Who is signed in, at the rail's foot: the button of the rail's menu. */
+  .rail-avatar {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: var(--space-7);
+    height: var(--space-7);
+    margin: var(--space-0_5);
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    background: var(--raised);
+    color: var(--ink-2);
+    font-size: var(--text-micro);
+    font-weight: 600;
+    line-height: var(--text-micro--line-height);
+    transition:
+      border-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+  .rail-avatar:hover {
+    border-color: var(--ink-3);
+    color: var(--ink);
+  }
+  /* The word for a control that is only a picture (an icon of the rail, a
+     state tab of the list), shown on hover and on keyboard focus. Where it
+     stands and which way it comes in is the control's own rule. */
+  .rail-tip,
+  .fl-tab-tip {
     position: absolute;
-    left: calc(100% + 12px);
-    top: 50%;
     z-index: 60;
-    translate: -4px -50%;
     white-space: nowrap;
     pointer-events: none;
     opacity: 0;
@@ -473,8 +572,14 @@ body {
     font-weight: 500;
     line-height: 16px;
     transition:
-      opacity 120ms var(--ease-signal),
-      translate 120ms var(--ease-signal);
+      opacity var(--duration-fast) var(--ease-out),
+      translate var(--duration-fast) var(--ease-out);
+  }
+  /* A rail item's is beside it. */
+  .rail-tip {
+    left: calc(100% + var(--space-3));
+    top: 50%;
+    translate: -4px -50%;
   }
   .rail-item:hover .rail-tip,
   .rail-item:focus-visible .rail-tip {
@@ -617,15 +722,39 @@ body {
     border-radius: 1.5px;
     transform: rotate(45deg) scale(0.86);
   }
-  /* An outage that is still going on wears a ring that pulses. */
+  /* An outage that is still going on has a heartbeat. The diamond stands
+     in a ring, which says "ongoing" even when nothing moves; the two beat
+     twice as one and rest, and as the first beat peaks a wave leaves the
+     ring and fades. The beat is the glyph's own scale, which leaves the
+     diamond's turn alone and carries the ring along. */
+  .glyph-down.glyph-live {
+    animation: glyph-beat var(--beat) var(--ease-signal) infinite;
+  }
+  .glyph-down.glyph-live::before,
   .glyph-down.glyph-live::after {
     content: "";
     position: absolute;
     inset: calc(var(--g, 10px) * -0.32);
     border: 1.5px solid var(--down);
     border-radius: 2px;
-    opacity: 0.45;
-    animation: glyph-pulse 1.6s var(--ease-signal) infinite;
+  }
+  /* The ring at rest is a hairline in almost full color: it has to read
+     as a part of the sign (3:1 on a panel and on a hovered row), and a
+     thin line leaves the diamond the room to stay a diamond. */
+  .glyph-down.glyph-live::before {
+    border-width: 1px;
+    opacity: 0.8;
+  }
+  .glyph-down.glyph-live::after {
+    opacity: 0;
+    animation: glyph-pulse var(--beat) var(--ease-signal) infinite;
+  }
+  /* In a label of its own (a chip, a pill, a card's head) the ring takes
+     its room from the words beside it: with this much its corner, and not
+     the diamond's, lines up with the text around. Rows, feeds and tables
+     leave this off: their glyphs share a column, beating or not. */
+  .glyph-down.glyph-live.glyph-room {
+    margin-inline: calc(var(--g, 10px) * 0.4);
   }
   .glyph-warn {
     background: linear-gradient(90deg, var(--warn) 50%, transparent 50%);
@@ -651,6 +780,10 @@ body {
   .glyph-pending {
     border: 1.5px dashed var(--ink-3);
   }
+  /* Waiting for its first check: the dashed ring turns, slowly. */
+  .glyph-pending.glyph-live {
+    animation: glyph-turn calc(var(--beat) * 2.5) linear infinite;
+  }
 
   /* BeatStrip: checks, buckets or days as slots, newest on the right. A
      slot without data is a baseline, never a grey bar that looks like one. */
@@ -668,7 +801,10 @@ body {
   .slot-down {
     background: var(--down);
   }
-  .slot-partial {
+  /* A bucket or a day with some failures; a check that passed, but slower
+     than its monitor's threshold. */
+  .slot-partial,
+  .slot-slow {
     background: var(--warn);
   }
   .slot-maint {
@@ -684,23 +820,160 @@ body {
     border-radius: 0;
     background: var(--line-strong);
   }
+  /* Reading one slot of a strip, with a pointer over it or the keyboard
+     on it: the calm slots step back as far as the chart's availability
+     strip does, and a tick under the slot in hand marks its place. What
+     failed or was slow keeps its full color, so that the trouble around
+     the slot being read stays as legible as it was. */
+  .slot {
+    position: relative;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+  .beat-strip[data-scrub] > .slot:is(.slot-ok, .slot-idle, .slot-maint, .slot-none):not([data-on]) {
+    opacity: 0.55;
+  }
+  .beat-strip > .slot[data-on]::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 calc(var(--space-1) * -1);
+    height: var(--space-0_5);
+    border-radius: 1px;
+    background: var(--ink);
+  }
+  /* The check that just landed rises into its place, once. */
+  .slot-new {
+    transform-origin: bottom;
+    animation: slot-rise var(--duration-slow) var(--ease-out);
+  }
+  /* What the slot in hand was: when, what it came to, its error. It is a
+     popover the strip opens by hand, so it is drawn in the top layer,
+     where no list that scrolls or skips its rendering can cut it off, and
+     the strip sets it over the slot. The surface is .pop's. It comes up
+     once with a fade and then follows from slot to slot without one.
+     A browser without popovers gets the same box at the end of the page,
+     which is why it has a place in the stacking order and its layout
+     does not wait for :popover-open (the box exists only while open).
+     It does not take the pointer, so it cannot be hovered itself: it
+     stands over the strip of the row above, and a hover that held the
+     pointer would be in the way of reading down a column of strips. What
+     it says is in reach of the keyboard on every strip that is a stop. */
+  .beat-tip {
+    position: fixed;
+    z-index: 70;
+    inset: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0_5);
+    margin: 0;
+    width: max-content;
+    max-width: min(18rem, calc(100vw - var(--space-4)));
+    padding: var(--space-2) var(--space-2_5);
+    overflow: visible;
+    color: var(--ink);
+    pointer-events: none;
+    animation: beat-tip-in var(--duration-fast) var(--ease-out);
+  }
+  .beat-tip-read {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1_5);
+  }
+  .beat-tip-read > strong {
+    font-size: var(--text-dense);
+    line-height: var(--text-dense--line-height);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .beat-tip-read > span:last-child {
+    white-space: nowrap;
+  }
+  /* An error can be a page long; the hover keeps its first lines. */
+  .beat-tip-detail {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
 }
 
-@keyframes glyph-pulse {
+/* The keyboard's ring around a strip stands clear of the tick under the
+   slot in hand. Outside the layer, like the focus mark it moves. */
+.beat-strip:focus-visible {
+  outline-offset: var(--space-1_5);
+}
+
+/* A strip's two one-shot motions: the newest slot rising into its place
+   when a check lands, and the hover over a slot coming up. */
+@keyframes slot-rise {
   from {
-    transform: scale(1);
-    opacity: 0.45;
+    transform: scaleY(0);
   }
-  to {
-    transform: scale(1.6);
+}
+@keyframes beat-tip-in {
+  from {
     opacity: 0;
   }
 }
 
-/* Motion is a courtesy: without it, the pulse stands still as a ring and
-   nothing tweens. */
+/* The heartbeat of an ongoing outage, on the --beat clock: two beats, then
+   a rest twice as long. app/ui/beat-clock.tsx knows these two names and
+   keeps every animation of theirs in phase, so a screen has one pulse. */
+@keyframes glyph-beat {
+  0%,
+  34%,
+  100% {
+    scale: 1;
+  }
+  7% {
+    scale: 1.18;
+  }
+  15% {
+    scale: 1;
+  }
+  23% {
+    scale: 1.09;
+  }
+}
+/* The wave leaves the ring as the first beat peaks and is gone by the rest. */
+@keyframes glyph-pulse {
+  0%,
+  6% {
+    transform: scale(1);
+    opacity: 0;
+  }
+  7% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  70%,
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+@keyframes glyph-turn {
+  to {
+    rotate: 1turn;
+  }
+}
+
+/* Motion is a courtesy: without it, the heartbeat stands still as a
+   diamond in its ring, the dashed ring does not turn and nothing tweens. */
 @media (prefers-reduced-motion: reduce) {
-  .glyph-down.glyph-live::after {
+  /* The duration tokens collapse too, for what the rule below cannot
+     reach: a delay written with one, a ::backdrop, a script. A script
+     reads another unit than the one written above (.4s from a build,
+     .01ms here), so it asks matchMedia instead, as the row flash does,
+     and never loops on the value. */
+  :root {
+    --duration-fast: 0.01ms;
+    --duration-base: 0.01ms;
+    --duration-slow: 0.01ms;
+  }
+  .glyph-live,
+  .glyph-live::before,
+  .glyph-live::after {
     animation: none;
   }
   *,
@@ -710,5 +983,23 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* A forced palette (a contrast theme of the system) repaints every
+   background with its own, and a state that is drawn as a background
+   would go with it: the glyphs, the slots of a strip and the bar of the
+   rail's current section keep the colors they were given. */
+@media (forced-colors: active) {
+  .glyph,
+  .glyph::before,
+  .glyph::after,
+  .slot,
+  .rail-item[aria-current="page"]::before {
+    forced-color-adjust: none;
+  }
+  /* The tick under the slot in hand is the palette's own text color. */
+  .beat-strip > .slot[data-on]::after {
+    background: CanvasText;
   }
 }

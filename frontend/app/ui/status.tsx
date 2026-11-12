@@ -55,13 +55,14 @@ export const stateStyles: Record<DisplayState, { glyph: GlyphKind; text: string;
  * handed the translator of wherever they are: getT() or useT().
  *
  * The state as its glyph and name. live marks the monitor's state right
- * now, so that an ongoing outage pulses; a past event leaves it off.
+ * now, so that an ongoing outage beats and a monitor waiting for its first
+ * check turns; a past event leaves it off.
  */
 export function StatusBadge({ state, t, live = false }: { state: DisplayState; t: T; live?: boolean }) {
   const s = stateStyles[state];
   return (
     <span className={`inline-flex items-center gap-2 text-sm font-medium ${s.text}`}>
-      <StatusGlyph kind={s.glyph} live={live && state === "down"} />
+      <StatusGlyph kind={s.glyph} live={live} />
       {t(s.label)}
     </span>
   );
@@ -69,7 +70,7 @@ export function StatusBadge({ state, t, live = false }: { state: DisplayState; t
 
 /**
  * The state as a chip, for headers: always the current state, so an outage
- * pulses. With since (an outage's start), the chip counts how long it has
+ * beats. With since (an outage's start), the chip counts how long it has
  * lasted. With incident (the open one's id), the chip opens its page and
  * says which it is. note is a few words after the rest, such as what a
  * degraded monitor is slower than.
@@ -92,7 +93,7 @@ export function StatusPill({
   // The duration is a component, so the sentence is split around its placeholder.
   const [before, after] = since ? t("stateChip.for", { state: name }).split("{duration}") : [name, ""];
   const chip = (
-    <StateChip kind={s.glyph} live={state === "down"}>
+    <StateChip kind={s.glyph} live>
       {before}
       {since && <LiveDuration since={since} />}
       {after}

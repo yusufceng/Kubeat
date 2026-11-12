@@ -87,10 +87,11 @@ const labels: Record<Choice, string> = { system: "theme.system", light: "theme.l
 const icons = { system: DisplayIcon, light: SunIcon, dark: MoonIcon };
 
 /**
- * Cycles the theme: follow the system, light, dark. In the rail it is an
- * icon with a tooltip; in a menu, a row that says the theme.
+ * Cycles the theme: follow the system, light, dark. In a menu (the rail's,
+ * the tab bar's) it is a row that says the theme; in running text, the icon
+ * and the theme's name.
  */
-export function ThemeToggle({ variant = "rail" }: { variant?: "rail" | "menu" | "inline" }) {
+export function ThemeToggle({ variant = "menu" }: { variant?: "menu" | "inline" }) {
   const choice = useSyncExternalStore<Choice>(subscribe, read, () => "system");
   const t = useT();
   const Icon = icons[choice];
@@ -106,25 +107,10 @@ export function ThemeToggle({ variant = "rail" }: { variant?: "rail" | "menu" | 
       </button>
     );
   }
-  if (variant === "menu") {
-    return (
-      <button type="button" onClick={() => choose(next)} className="menu-item" title={t("theme.switchHint", { theme: t(labels[choice]), next: t(labels[next]) })}>
-        <Icon />
-        {name}
-      </button>
-    );
-  }
   return (
-    <button
-      type="button"
-      onClick={() => choose(next)}
-      aria-label={name}
-      className="rail-item"
-    >
-      <Icon width={20} height={20} />
-      <span className="rail-tip" aria-hidden>
-        {t("theme.switchHint", { theme: t(labels[choice]), next: t(labels[next]) })}
-      </span>
+    <button type="button" onClick={() => choose(next)} className="menu-item" title={t("theme.switchHint", { theme: t(labels[choice]), next: t(labels[next]) })}>
+      <Icon />
+      {name}
     </button>
   );
 }

@@ -43,7 +43,7 @@ export function PulsePill({ up, down, degraded }: { up: number; down: number; de
       title={t("shell.pulse.show", { what: `${count} ${word}` })}
       className={`flex h-6 items-center gap-1.5 rounded-full px-2 hover:bg-hover aria-pressed:bg-hover ${tone}`}
     >
-      <StatusGlyph kind={kind} live={kind === "down"} />
+      <StatusGlyph kind={kind} live={kind === "down"} className="glyph-room" />
       <span>{count}</span>
       {/* Below 1280px the breadcrumb needs the room: the glyphs say enough. */}
       <span className="max-xl:sr-only">{word}</span>
@@ -54,7 +54,7 @@ export function PulsePill({ up, down, degraded }: { up: number; down: number; de
     <div
       role="group"
       aria-label={t("shell.pulse.label")}
-      className="flex h-[30px] items-center gap-0.5 rounded-full border border-line bg-panel px-[3px] text-xs font-[550] tabular-nums"
+      className="flex h-[30px] items-center gap-0.5 rounded-full border border-line bg-panel px-[3px] text-xs font-[550] tabular-nums lg:h-7 lg:px-px"
     >
       {part("up", "up", up, t("shell.pulse.up"))}
       {down > 0 && part("down", "down", down, t("shell.pulse.down"), "text-down-ink")}

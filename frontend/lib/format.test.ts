@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { T } from "./i18n/translate.ts";
-import { compactTime, dayDistance, span, timeAgo } from "./format.ts";
+import { compactTime, dayDistance, span, spanShort, timeAgo } from "./format.ts";
 
 // The times below are read in this zone, as a viewer there would see them.
 process.env.TZ = "Europe/Istanbul";
@@ -67,6 +67,26 @@ test("a span leaves out a smaller unit that is zero, and is never zero seconds",
   assert.equal(span(400, en), "<1s");
   assert.equal(span(-5000, en), "<1s");
   assert.doesNotMatch(span(2 * MINUTE + 300, tr), /0 sn/);
+});
+
+test("a short span is the larger unit of the span, and nothing else", () => {
+  assert.equal(spanShort(6 * SECOND, en), "6s");
+  assert.equal(spanShort(3 * MINUTE + 20 * SECOND, tr), "3 dk");
+  assert.equal(spanShort(59 * MINUTE + 59 * SECOND, en), "59m");
+  assert.equal(spanShort(HOUR + 5 * MINUTE, tr), "1 sa");
+  assert.equal(spanShort(23 * HOUR + 59 * MINUTE, en), "23h");
+  assert.equal(spanShort(5 * DAY + 14 * HOUR, tr), "5 gün");
+  assert.equal(spanShort(0, tr), "<1 sn");
+  assert.equal(spanShort(-5000, en), "<1s");
+  // A unit begins where the smaller one is full, and half a second rounds up into it.
+  assert.equal(spanShort(59_500, tr), "1 dk");
+  assert.equal(spanShort(60 * SECOND, tr), "1 dk");
+  assert.equal(spanShort(60 * MINUTE, tr), "1 sa");
+  assert.equal(spanShort(24 * HOUR, tr), "1 gün");
+  // Whatever the length, it opens the way the full span does.
+  for (const ms of [42 * SECOND, 3 * MINUTE + 20 * SECOND, HOUR + 5 * MINUTE, 5 * DAY + 14 * HOUR, 9 * DAY]) {
+    assert.ok(span(ms, tr).startsWith(spanShort(ms, tr)), `${ms} ms`);
+  }
 });
 
 test("time ago says just now rather than zero seconds", () => {

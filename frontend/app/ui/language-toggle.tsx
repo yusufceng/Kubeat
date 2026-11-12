@@ -7,10 +7,10 @@ import { useT } from "@/lib/i18n/client";
 
 /**
  * One click switches to the other language; the choice is kept in a cookie.
- * In the rail it is a chip with the other language's code (TR, EN); in a
- * menu, a row with its name; on a status page, a plain link-like button.
+ * In a menu (the rail's, the tab bar's) it is a row with the other
+ * language's name; on a status page, a plain link-like button.
  */
-export function LanguageToggle({ variant = "rail" }: { variant?: "rail" | "menu" | "inline" }) {
+export function LanguageToggle({ variant = "menu" }: { variant?: "menu" | "inline" }) {
   const t = useT();
   const [pending, start] = useTransition();
   const other = t.locale === "tr" ? "en" : "tr";
@@ -22,14 +22,6 @@ export function LanguageToggle({ variant = "rail" }: { variant?: "rail" | "menu"
     lang: other,
   };
 
-  if (variant === "menu") {
-    return (
-      <button {...props} className="menu-item">
-        <LanguageIcon />
-        {t("lang.switchTo")}
-      </button>
-    );
-  }
   if (variant === "inline") {
     return (
       <button {...props} className="underline-offset-2 hover:text-ink hover:underline">
@@ -38,13 +30,9 @@ export function LanguageToggle({ variant = "rail" }: { variant?: "rail" | "menu"
     );
   }
   return (
-    <button
-      {...props}
-      className="rounded-xs border border-line px-[5px] py-1 font-mono text-[11px] leading-none font-semibold text-ink-3 hover:border-line-strong hover:text-ink"
-    >
-      {/* A code, not a word: written in capitals rather than transformed,
-          which would follow Turkish casing rules. */}
-      {other === "tr" ? "TR" : "EN"}
+    <button {...props} className="menu-item">
+      <LanguageIcon />
+      {t("lang.switchTo")}
     </button>
   );
 }

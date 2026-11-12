@@ -3461,24 +3461,32 @@ monitor'ların listesi, sağda genel bakış ya da açılan monitor. Üst çubuk
 bulunulan yeri, filonun nabzını (çalışan ve kesintideki monitor sayısı) ve
 "Yeni monitor"u gösterir. Telefonda menü alta iner.
 
-Arayüz İngilizce ve Türkçe'dir: tarayıcının istediği dil kullanılır, menünün
-altındaki düğme değiştirir ve seçim bir çerezde kalır; ikisi de yoksa
-`DEFAULT_LOCALE` geçerlidir. Bildirim metinlerinin dili backend'de ayrıdır
+Arayüz İngilizce ve Türkçe'dir: tarayıcının istediği dil kullanılır, dar
+menünün altındaki hesap menüsünden (telefonda **Diğer**) değiştirilir ve
+seçim bir çerezde kalır; ikisi de yoksa `DEFAULT_LOCALE` geçerlidir. Bildirim
+metinlerinin dili backend'de ayrıdır
 (`UPTIME_LANGUAGE`); chart'ta ikisini birden `language` değeri ayarlar.
 Herkese açık durum sayfaları bunun dışındadır: her sayfa kendi ayarındaki
 dilde (ayarsızsa `UPTIME_LANGUAGE`) gösterilir (bkz. "Durum sayfaları").
 
 Durum her yerde renkle olduğu kadar şekille de okunur: çalışan daire, kesinti
 elmas, sorunlu yarım daire, bakım taralı, duraklatılmış içi boş; renk körü
-biri de listeyi okuyabilir.
+biri de listeyi okuyabilir. Yalnızca iki şey kendiliğinden hareket eder:
+süren bir kesintinin elması bir halkanın içinde kalp atışı gibi atar, ilk
+kontrolünü bekleyen monitor'un kesik çizgili halkası yavaşça döner. İşletim
+sisteminde "hareketi azalt" açıksa ikisi de durur; şekiller ve halka kalır.
 
 - **Liste**: namespace'e ya da gruba göre toplanır; ada, adrese, gruba ya da
   etikete göre aranır; duruma göre (hepsi, çalışan, kesinti, sorunlu, pasif)
   süzülür, tip ve etiket süzgeçleri menüdedir. Her satır tek satırdır:
   durum, ad, kubectl kısaltmasıyla tür (`svc`, `route`, `deploy`...), son
-  24 kontrol ve uptime; uptime yalnızca eşiklerin altındayken renklenir
-  (`WARN_UPTIME_BELOW`, `CRITICAL_UPTIME_BELOW`). Sertifikasının bitmesine
-  14 gün ya da daha az kalanlar satırında işaretlenir.
+  24 kontrol ve uptime. Satırın en çok söylemesi gereken şey türün yerini
+  alır: kesintideki monitor'da kesintinin ne kadardır sürdüğü ("19 sa"),
+  sertifikasının bitmesine 14 gün ya da daha az kalanda kalan gün, sorunlu
+  olanda son yanıt süresi. Son 24 kontrol boyuyla da okunur: geçen kısa,
+  yavaş kalan bir basamak uzun ve kehribar, başarısız tam boy ve kırmızı.
+  Uptime yalnızca eşiklerin altındayken renklenir (`WARN_UPTIME_BELOW`,
+  `CRITICAL_UPTIME_BELOW`).
 - **Toplu işlem**: satırın üzerine gelince çıkan kutularla birden çok
   monitor seçilir; alttaki çubuk onları birlikte durdurur, devam ettirir ya
   da siler. Grup başlığındaki kutu o gruptaki görünenlerin hepsini seçer.
@@ -3495,7 +3503,12 @@ biri de listeyi okuyabilir.
   · yanıtlar 800 ms'den uzun" ve altında eşiği ve son kontrollerin sürelerini
   sayan kehribar bir satır), son 60 kontrol, yanıt süresi, uptime ve
   "MTBF · 7 gün" özetleri (`STATS_DAYS`), kesinti ve bakım bantlı grafik,
-  pod'lar, olaylar, kontrol geçmişi ve ayarların özeti. Son kontrol
+  pod'lar, olaylar, kontrol geçmişi ve ayarların özeti. Son 60 kontrolün
+  şeridi listedeki gibi boyuyla da okunur; üzerine gelinen ya da ok
+  tuşlarıyla gezilen her kontrol zamanını, yanıt süresini ve varsa hatasını
+  söyler. Grafik yavaş yanıt eşiğini kesik bir çizgiyle gösterir ve çizginin
+  üstünde kalan kısmı kehribar çizer; eşik ölçeğin çok üstündeyse çizgi
+  yerine açıklama satırı eşiği yazar. Son kontrol
   başarısızsa **Neden?** bölümü hatanın ne anlama geldiğini, bağlantının
   hangi adımda (DNS, bağlantı, TLS, ilk bayt) takıldığını, ulaşılan adresi
   ve sertifikayı gösterir (bkz. "Başarısız kontrolün ayrıntıları"). Buradan
@@ -3514,8 +3527,8 @@ biri de listeyi okuyabilir.
   sürerse haber verir; sonra her 1 sa tekrar hatırlatır"; ikisi de sıfırken
   "Hemen; tekrar genel ayar"). Olaylar arasında "yavaşladı" ve "yeniden
   hızlı" da seçilir.
-- **Tema**: menünün altındaki düğme sistem, açık ve koyu arasında geçer;
-  seçim tarayıcıda saklanır.
+- **Tema**: hesap menüsündeki seçenek (telefonda **Diğer**) sistem, açık ve
+  koyu arasında geçer; seçim tarayıcıda saklanır.
 - **Logo**: kelimenin kendisidir, k'si işarettir (menüdeki mavi karo,
   sekmedeki k). k hep vurgu mavisindedir, hiçbir zaman bir durum renginde
   değil. Dosyalar ve kurallar: [docs/assets](docs/assets/README.md).
@@ -3748,7 +3761,8 @@ bir çerezde (`kubeat_sp_<adres>`) tutar; sayfa ve ayrıntı sayfaları token'ı
 parola değişince backend 401 döner ve form yeniden görünür. Ayrıntı
 sayfası (`/status/<adres>/<monitor-id>`) servisin adını, durumunu, dört
 dönemin uptime'ını, gün gün geçmişini, yanıt süresi grafiğini (monitor
-sayfasındaki grafiğin salt okunur hali; seçim ve yakınlaştırma yok) ve
+sayfasındaki grafiğin salt okunur hali; seçim, yakınlaştırma ve eşik çizgisi
+yok: yavaş yanıt eşiği monitor'un sahibinin ayarıdır, dışarı verilmez) ve
 kesintilerini başlangıç, bitiş ve süre olarak gösterir.
 
 **Duvar ekranı.** Sayfanın başındaki "Duvar ekranı" düğmesi sayfayı tam
@@ -5642,6 +5656,12 @@ yarım daire ve sayı, monitor sayfasında "Sorunlu · 12 dk · yanıtlar 800
 ms'den uzun" çipi (süre `slow_since`'ten sayılır) ve altında eşiği ile son
 `failure_threshold` kontrolün sürelerini sayan kehribar bir satır. Olay
 açılmadığından olay listesine düşmez.
+
+Eşiği aşan tek bir kontrol de görünür: kontrol şeritlerinde bir basamak uzun
+ve kehribar durur, üzerine gelince süresi eşikle birlikte yazılır; yanıt
+süresi grafiğinde eşik kesik bir çizgidir, üstünde kalan kısım kehribardır.
+Bunlar tek tek kontrollerin okumasıdır; monitor'un **Sorunlu** sayılması
+yukarıdaki kuralla, art arda kontrollerle olur.
 
 ### Bakım pencereleri ve susturma
 

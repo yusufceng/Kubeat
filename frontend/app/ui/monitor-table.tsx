@@ -67,7 +67,7 @@ export async function MonitorTable({
               <tr key={m.id}>
                 <td>
                   <Link href={`/monitors/${m.id}`} className="fl-table-name">
-                    <StatusGlyph kind={style.glyph} live={item.state === "down"} />
+                    <StatusGlyph kind={style.glyph} live />
                     <span className="fl-name-text" title={item.name}>
                       {name}
                       {rest && <span className="text-ink-3">{rest}</span>}
@@ -91,7 +91,7 @@ export async function MonitorTable({
                   </span>
                 </td>
                 <td className="fl-col-beats">
-                  <HeartbeatBar results={m.history} slots={slots} height={16} paused={!m.enabled} />
+                  <HeartbeatBar results={m.history} slots={slots} height={16} paused={!m.enabled} slowAboveMs={m.slow_above_ms} />
                 </td>
                 <td className={`fl-col-num fl-col-uptime ${m.enabled ? uptimeTone(m.uptime_percent, tones) : "text-ink-3"}`}>
                   {uptime(m.uptime_percent, t)}

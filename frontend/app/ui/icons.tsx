@@ -2,7 +2,7 @@ import type { SVGProps } from "react";
 
 /**
  * A stroke icon drawn on a 24px grid with a 1.5px line and round ends; 16px
- * inline, 20px in the rail (pass width and height).
+ * inline, 18px in the rail (pass width and height).
  */
 function Icon({ children, ...props }: SVGProps<SVGSVGElement>) {
   return (

@@ -40,6 +40,8 @@ export type FleetItem = ListItem & {
   certDays: number | null;
   /** When the ongoing outage began. */
   downSince: string | null;
+  /** How long the latest check took, in milliseconds, when it passed. */
+  latencyMs: number | null;
   /** When the latest check ran; for a paused monitor, about when it was paused. */
   lastCheck: string | null;
   /** Since when the due check waits for its target host's ceiling of checks a minute; null while it does not. */
@@ -64,6 +66,7 @@ export function toFleetItem(m: Monitor): FleetItem {
     error,
     certDays,
     downSince: m.open_incident?.started_at ?? null,
+    latencyMs: last?.up ? last.latency_ms : null,
     lastCheck: last?.checked_at ?? null,
     throttledSince: m.throttled_since,
   };

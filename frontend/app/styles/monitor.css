@@ -954,7 +954,12 @@
   }
 }
 
-/* The chart's line draws itself in once, when the chart first appears. */
+/* The chart's line draws itself in when the chart first appears, and again
+   when its range or zoom changes: the line first, over one and a half slow
+   steps; when it has arrived, the wash under it and the newest reading's
+   dot come up. (A wash that came up with the line stood ahead of it, over
+   a stretch the line had not reached.) The chart's INTRO_MS is a little
+   more than their sum. */
 @keyframes mon-draw {
   from {
     stroke-dashoffset: 1;
@@ -970,8 +975,40 @@
 }
 .mon-intro .mon-line {
   stroke-dasharray: 1;
-  animation: mon-draw 400ms var(--ease-signal) both;
+  animation: mon-draw calc(var(--duration-slow) * 1.5) var(--ease-out) both;
 }
 .mon-intro .mon-area {
-  animation: mon-fade 400ms var(--ease-signal) both;
+  animation: mon-fade var(--duration-base) var(--ease-out) calc(var(--duration-slow) * 1.5) both;
+}
+.mon-intro .mon-line-head {
+  animation: mon-fade var(--duration-fast) var(--ease-out) calc(var(--duration-slow) * 1.5) both;
+}
+/* A check that lands while the chart is open: one ring off the line's
+   head, once. Its line keeps its width while the ring grows. */
+@keyframes mon-ping {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 0;
+    transform: scale(4);
+  }
+}
+.mon-ping {
+  transform-box: fill-box;
+  transform-origin: center;
+  vector-effect: non-scaling-stroke;
+  animation: mon-ping calc(var(--duration-slow) * 1.5) var(--ease-out) both;
+}
+
+
+/* A forced palette repaints the text of the plot, its outline included:
+   the threshold's label would be a blot of one color. Its words take the
+   palette's text color and the halo that lifts them off the line its
+   background. */
+@media (forced-colors: active) {
+  .mon-limit-label {
+    fill: CanvasText;
+    stroke: Canvas;
+  }
 }

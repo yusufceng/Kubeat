@@ -4,6 +4,7 @@ import "server-only";
 import { connection } from "next/server";
 import { cache } from "react";
 import { listMonitors, type Monitor } from "@/lib/api";
+import { encodeBeatLatencies, encodeBeats, encodeBeatTimes } from "@/lib/beats";
 import { config } from "@/lib/config";
 import { monitorLabel, otherNames } from "@/app/ui/monitor-name";
 import { type DisplayState, displayState } from "@/app/ui/status";
@@ -49,8 +50,14 @@ export type ListItem = {
   target: string;
   state: DisplayState;
   uptime: number | null;
-  /** The recent checks, oldest first: "1" for a success, "0" for a failure. */
+  /** The recent checks, oldest first, a symbol each; see encodeBeats. */
   beats: string;
+  /** When each of those checks ran, for the hover over one; see encodeBeatTimes. */
+  beatTimes: string;
+  /** How long each of them took; see encodeBeatLatencies. */
+  beatMs: string;
+  /** A response slower than this many milliseconds counts as slow; 0 when the monitor has no threshold. */
+  slowAboveMs: number;
   /** Kept in step with an annotated cluster object; it cannot be deleted here. */
   managed: boolean;
 };
@@ -70,10 +77,10 @@ export function toListItem(m: Monitor): ListItem {
     state: displayState(m),
     uptime: m.uptime_percent,
     managed: m.managed,
-    beats: m.history
-      .toReversed()
-      .map((h) => (h.up ? "1" : "0"))
-      .join(""),
+    beats: encodeBeats(m.history, m.slow_above_ms),
+    beatTimes: encodeBeatTimes(m.history),
+    beatMs: encodeBeatLatencies(m.history),
+    slowAboveMs: m.slow_above_ms,
   };
 }
 

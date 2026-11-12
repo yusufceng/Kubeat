@@ -3345,3 +3345,56 @@ erişilen bir kurulumda `KubeatSignInSourceDegraded` kuralı hop değerini düze
 README "Sayaç ve kural" → "Port-forward"ta. Kurulum notu ve kural metni bu durumu ayırmaz.
 Tetikleyici: `NOTES.txt`'ye dokunan bir sonraki madde ya da yalnız port-forward'la erişilen bir
 kurulumun bulgusu.
+
+## Arayüzde hareketi durdurma ayarı (frontend revizyonu, adım 3)
+
+2026-11-12'de eklendi (frontend revizyonu, adım 3). Süren bir kesintinin elması atar, ilk kontrolünü
+bekleyen monitor'ün kesikli halkası döner; ikisi de kendiliğinden başlar ve beş saniyeden uzun sürer.
+Bugün bunları durdurmanın yolu işletim sisteminin "hareketi azalt" ayarıdır
+(`prefers-reduced-motion`): açıkken ikisi de durur, durum şekil ve renkle okunur. WCAG 2.2.2 ise
+durdurma düzeneğinin sayfanın kendisinde olmasını bekler; kullanıcı menüsünde tema ve dilin yanına
+bir "hareket" seçeneği bunu karşılar. Yapılmadı: yeni bir ayar ve onu taşıyan bir çerez ister, adımın
+kapsamı ise görsel tasarımdı. Tetikleyici: bir erişilebilirlik denetimi ya da VPAT isteği, ya da
+sürekli dönen üçüncü bir hareketin eklenmesi. Maliyeti düşük: sürekli hareketlerin hepsi
+`frontend/app/globals.css`'te `--beat` saatine bağlı kurallarda, tek sınıfla (`.glyph-live`) açılır.
+
+## Üzerine gelince açılan kutuların imleci alması: WCAG 1.4.13 (frontend revizyonu, adım 4)
+
+2026-11-12'de eklendi (frontend revizyonu, adım 4 incelemesi). Kontrol şeritlerinin ve yanıt süresi
+grafiğinin üzerine gelince açılan kutuları imleci almaz: imleç şeritten çıkınca kutu kapanır, üstüne
+gidilemez. WCAG 1.4.13 bunu ister (ekran büyüteciyle çalışan, kutuyu okumak için imleci üstüne taşır).
+Bilerek böyle bırakıldı: kutu bir üst satırın şeridinin üstünde durur, imleci tutan bir kutu alt alta
+şeritleri okumayı keser; grafiğin kutusu 1.0.0'dan beri böyledir. Kutunun söylediği her şey klavyeyle
+de okunur (monitor sayfasının şeridi, filo şeridi ve durum sayfasının gün şeridi ok tuşlarıyla gezilir,
+grafiğin tablosu vardır) ve Escape kutuyu kapatır. Tetikleyici: bir erişilebilirlik denetimi ya da
+VPAT isteği, ya da ekran büyüteciyle çalışan bir kullanıcının bulgusu. Çaresi belli: kutu imleci alır,
+şeritle arasındaki boşluk görünmez bir köprüyle kapatılır.
+
+## Tarayıcı tabanı: menüler ve yardım ipucu Popover API ister (frontend revizyonu, adım 4)
+
+2026-11-12'de eklendi (frontend revizyonu, adım 4 incelemesi). Arayüzün menüleri (hesap menüsü, liste
+süzgeci, monitor'un ⋯ menüsü, telefondaki "daha fazla") ve `?` yardım ipucu 1.0.0'da Popover API'siyle
+açılır (`popover="auto"`, `popoverTarget`). Next'in hâlâ hizmet verdiği en eski tarayıcılarda (Safari
+16.4–16.6, Chrome ve Edge 111–113) bu API yoktur; oralarda menüler açılmaz (koddan okundu, öyle bir
+tarayıcıda denenmedi). README desteklenen tarayıcıları yazmıyor. Adım 4 yalnız kendi eklediğini
+korudu: kontrol şeritlerinin kutusu API yoksa sayfanın sonunda sabit bir kutu olarak açılır (herkese
+açık durum sayfası dahil). Menüler bu adımın kapsamı değildi. Tetikleyici: eski bir tarayıcıyla gelen
+kullanıcının bulgusu, ya da README'ye desteklenen tarayıcılar yazılırken. Seçenekler: tabanı
+belgelemek (Chrome 114, Safari 17, Firefox 125) ya da menülere aynı yedeği vermek.
+
+## Odak halkasını değiştirmek isteyen katmanlı kurallar ve utility'ler işlemiyor (frontend revizyonu, adım 4)
+
+2026-11-12'de eklendi (frontend revizyonu, adım 4 incelemesi). Odak halkası `globals.css`'te katmansız
+tek bir kuraldır (`:focus-visible`, 2 piksel, 2 piksel dışarıda). Katmansız kural, `@layer components`
+içindeki her kuralı ve her Tailwind utility'sini yener; halkayı değiştirmek isteyen kural ancak kendisi
+de katmansızsa işler. `fleet.css`'in sonundaki katmansız blok bunu doğru yapar; şu ikisi 1.0.0'dan beri
+yapmaz (ikisi de tarayıcıda ölçüldü, 1.0.0'da ve revizyon dalında aynı): form alanı halkayı kenarlığın
+içine almak ister (`.field:focus-visible`, -1 piksel), halka 2 piksel dışarıda çizilir; yanıt süresi
+grafiği halkayı 4 piksel dışarı ister (`outline-offset-4`), 2 pikselde kalır. `check-grid.tsx`'teki aynı
+utility ve `monitor.css`, `incidents.css`, `polish.css` içindeki katmanlı `outline` satırları tek tek
+bakılmadı. Adım 4 yalnız kendi eklediğini düzeltti: kontrol şeridinin halkası katmansız bir kuralla 6
+piksel dışarıdadır, çünkü 2 pikselde tutulan kontrolün çizgisinin üstüne geliyordu. Gerisi yapılmadı:
+kurallar işlemeye başlayınca formların, menülerin ve sekmelerin odak görünümü birlikte değişir, her
+birine ayrı bakmak gerekir. Tetikleyici: odak halkasına dokunan ilk iş ya da bir erişilebilirlik
+denetimi. Seçenekler: işlemeyen satırları silmek (bugünkü görünüm aynen kalır) ya da tek tek katman
+dışına alıp her birine ekran görüntüsüyle bakmak.

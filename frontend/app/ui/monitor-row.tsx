@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { duration, uptime as formatUptime } from "@/lib/format";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { decodeBeatLatencies, decodeBeats, decodeBeatTimes } from "@/lib/beats";
+import { duration, milliseconds, uptime as formatUptime } from "@/lib/format";
 import type { FleetItem } from "@/lib/fleet";
 import { useT } from "@/lib/i18n/client";
 import type { T } from "@/lib/i18n/translate";
@@ -56,9 +57,14 @@ export function CertChip({ days }: { days: number }) {
 }
 
 /**
- * One monitor of the list, 34px tall: its state, its name with the kind,
- * its recent checks and its uptime. The glyph's place holds a checkbox for
- * editors, shown on hover and while monitors are being selected.
+ * One monitor of the list, a row of the list's height (--row): its state,
+ * its name with the kind, its recent checks and its uptime. The glyph's
+ * place holds a checkbox for editors, shown on hover and while monitors
+ * are being selected.
+ *
+ * The state does not rest on color: the glyph has a shape for each, the
+ * one of an ongoing outage beats, the recent checks stand to different
+ * heights, and an outage's row says in words how long it has lasted.
  */
 export const Row = memo(function Row({
   item,
@@ -93,8 +99,19 @@ export const Row = memo(function Row({
   const style = stateStyles[item.state];
   const [name, rest] = splitName(item.name, item.derived);
   const figure = uptimeFigure(item, t);
-  const shown = item.beats.slice(-beats);
-  const failed = shown.split("0").length - 1;
+  // The row's latest checks, each with when it ran and how long it took, for the hover over one.
+  const shown = useMemo(() => {
+    const times = decodeBeatTimes(item.beatTimes);
+    const latencies = decodeBeatLatencies(item.beatMs);
+    return decodeBeats(item.beats)
+      .map((state, i) => ({ state, at: times[i], ms: latencies[i] }))
+      .slice(-beats);
+  }, [item.beats, item.beatTimes, item.beatMs, beats]);
+  const failed = shown.filter((beat) => beat.state === "down").length;
+  const slow = shown.filter((beat) => beat.state === "slow").length;
+  // An ongoing outage counts how long it has lasted, in the row itself.
+  const downSince = item.state === "down" ? item.downSince : null;
+  const [before, after] = t("monitorsList.list.card.downFor").split("{duration}");
 
   return (
     <li
@@ -109,7 +126,7 @@ export const Row = memo(function Row({
       {canPick ? (
         // The whole place of the glyph is the checkbox's target.
         <label className="fl-lead">
-          <StatusGlyph kind={style.glyph} live={item.state === "down"} className="fl-glyph" />
+          <StatusGlyph kind={style.glyph} live className="fl-glyph" />
           <input
             type="checkbox"
             className="fl-pick"
@@ -122,7 +139,7 @@ export const Row = memo(function Row({
         </label>
       ) : (
         <span className="fl-lead">
-          <StatusGlyph kind={style.glyph} live={item.state === "down"} className="fl-glyph" />
+          <StatusGlyph kind={style.glyph} live className="fl-glyph" />
         </span>
       )}
       <Link
@@ -140,26 +157,45 @@ export const Row = memo(function Row({
             {name}
             {rest && <span className="text-ink-3">{rest}</span>}
           </span>
-          {/* A certificate near its end, or a check held back by its target's rate limit, matters more than the kind, which the card still shows. */}
-          {item.certDays !== null ? (
+          {/* What the row most needs said takes the kind's place, and the card still shows the kind: how long an outage has lasted, a certificate near its end, a check held back by its target's rate limit, how long a degraded monitor takes to answer. */}
+          {downSince !== null ? (
+            // Read out as the whole sentence, "down for 3 min", which also names the state.
+            <span className="fl-fact fl-fact-down">
+              <span className="sr-only">, {before}</span>
+              <LiveDuration since={downSince} short />
+              <span className="sr-only">{after}</span>
+            </span>
+          ) : item.certDays !== null ? (
             <CertChip days={item.certDays} />
           ) : item.throttledSince !== null ? (
             <span className="fl-wait" title={t("monitorsList.list.throttled")}>
               {t("monitorsList.list.throttled.short")}
             </span>
+          ) : item.state === "degraded" && item.latencyMs !== null ? (
+            <span className="fl-fact fl-fact-warn">{milliseconds(item.latencyMs, t)}</span>
           ) : (
             <span className="fl-kind">{item.kindShort}</span>
           )}
-          <span className="sr-only">, {t(style.label)}</span>
+          {downSince === null && <span className="sr-only">, {t(style.label)}</span>}
         </span>
         <BeatStrip
-          // A paused monitor's last checks are history, not its state: they are idle grey.
-          beats={[...shown].map((beat) => ({ state: item.state === "paused" ? "idle" : beat === "1" ? "ok" : "down" }))}
+          beats={shown}
           slots={beats}
-          height={14}
+          height={16}
           slotWidth={beatWidth(beats)}
           gap={1}
-          label={t("monitorsList.list.beats.label", { count: shown.length, failed })}
+          graded
+          // A paused monitor's last checks are history, not its state: they are idle grey.
+          idle={item.state === "paused"}
+          slowAboveMs={item.slowAboveMs}
+          passing
+          // While the pointer reads the strip the row's card stays away: one hover at a time.
+          onScrub={(over) => onHover(over ? null : item.id, over ? null : ref.current)}
+          label={
+            slow > 0
+              ? t("beat.summarySlow", { count: shown.length, failed, slow })
+              : t("beat.summary", { count: shown.length, failed })
+          }
           className="shrink-0"
         />
         <span className={`fl-uptime ${item.state === "paused" ? "text-ink-3" : uptimeTone(item.uptime, tones)}`}>
@@ -260,7 +296,7 @@ export function HoverCard({ item, anchor }: { item: FleetItem; anchor: HTMLEleme
       style={position ? { left: position.left, top: position.top } : { visibility: "hidden" }}
     >
       <div className="flex items-center gap-2">
-        <StatusGlyph kind={style.glyph} live={item.state === "down"} />
+        <StatusGlyph kind={style.glyph} live className="glyph-room" />
         <span className="min-w-0 flex-1 truncate font-semibold">{item.name}</span>
         <span className={`text-xs font-medium ${style.text}`}>{t(style.label)}</span>
       </div>
