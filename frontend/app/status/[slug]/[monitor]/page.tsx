@@ -120,6 +120,7 @@ async function Detail({
             slots={detail.days}
             narrowSlots={NARROW_DAYS}
             height={36}
+            keys
             label={t.n("statusPage.history.aria", m.history.length)}
           />
           <div className="sp-axis">

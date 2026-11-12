@@ -15,28 +15,29 @@ function names(list: string[], t: T): string {
 
 function slotBeat(slot: FleetSlot, t: T): Beat {
   if (slot.state === "none") return { state: "none" };
-  const time = (ms: number) =>
-    new Date(ms).toLocaleTimeString(t.intl, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-  const range = `${time(slot.start)}–${time(slot.end)}`;
+  // The hover writes the slot's span itself; here is what happened in it.
+  const span = { at: slot.start, until: slot.end };
   switch (slot.state) {
     case "down":
       return {
         state: "down",
         level: slot.level,
-        text: `${range} · ${t.n("monitorsList.hero.strip.down", slot.down.length)}`,
+        ...span,
+        text: t.n("monitorsList.hero.strip.down", slot.down.length),
         detail: names(slot.down, t),
       };
     case "partial":
       return {
         state: "partial",
         level: slot.level,
-        text: `${range} · ${t.n("monitorsList.hero.strip.partial", slot.down.length)}`,
+        ...span,
+        text: t.n("monitorsList.hero.strip.partial", slot.down.length),
         detail: names(slot.down, t),
       };
     case "maint":
-      return { state: "maint", text: `${range} · ${t("monitorsList.hero.strip.maint")}`, detail: names(slot.maint, t) };
+      return { state: "maint", ...span, text: t("monitorsList.hero.strip.maint"), detail: names(slot.maint, t) };
     default:
-      return { state: "ok", text: `${range} · ${t("monitorsList.hero.strip.ok")}` };
+      return { state: "ok", ...span, text: t("monitorsList.hero.strip.ok") };
   }
 }
 
@@ -84,6 +85,7 @@ export function FleetStrip({
         slots={slots}
         height={32}
         gap={1}
+        keys
         label={
           failing.length === 0
             ? t("monitorsList.hero.strip.labelNone", { window })

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { decodeBeats } from "@/lib/beats";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { decodeBeatLatencies, decodeBeats, decodeBeatTimes } from "@/lib/beats";
 import { duration, milliseconds, uptime as formatUptime } from "@/lib/format";
 import type { FleetItem } from "@/lib/fleet";
 import { useT } from "@/lib/i18n/client";
@@ -99,9 +99,16 @@ export const Row = memo(function Row({
   const style = stateStyles[item.state];
   const [name, rest] = splitName(item.name, item.derived);
   const figure = uptimeFigure(item, t);
-  const shown = decodeBeats(item.beats.slice(-beats));
-  const failed = shown.filter((beat) => beat === "down").length;
-  const slow = shown.filter((beat) => beat === "slow").length;
+  // The row's latest checks, each with when it ran and how long it took, for the hover over one.
+  const shown = useMemo(() => {
+    const times = decodeBeatTimes(item.beatTimes);
+    const latencies = decodeBeatLatencies(item.beatMs);
+    return decodeBeats(item.beats)
+      .map((state, i) => ({ state, at: times[i], ms: latencies[i] }))
+      .slice(-beats);
+  }, [item.beats, item.beatTimes, item.beatMs, beats]);
+  const failed = shown.filter((beat) => beat.state === "down").length;
+  const slow = shown.filter((beat) => beat.state === "slow").length;
   // An ongoing outage counts how long it has lasted, in the row itself.
   const downSince = item.state === "down" ? item.downSince : null;
   const [before, after] = t("monitorsList.list.card.downFor").split("{duration}");
@@ -172,13 +179,18 @@ export const Row = memo(function Row({
           {downSince === null && <span className="sr-only">, {t(style.label)}</span>}
         </span>
         <BeatStrip
-          // A paused monitor's last checks are history, not its state: they are idle grey.
-          beats={shown.map((beat) => ({ state: item.state === "paused" ? "idle" : beat }))}
+          beats={shown}
           slots={beats}
           height={14}
           slotWidth={beatWidth(beats)}
           gap={1}
           graded
+          // A paused monitor's last checks are history, not its state: they are idle grey.
+          idle={item.state === "paused"}
+          slowAboveMs={item.slowAboveMs}
+          passing
+          // While the pointer reads the strip the row's card stays away: one hover at a time.
+          onScrub={(over) => onHover(over ? null : item.id, over ? null : ref.current)}
           label={
             slow > 0
               ? t("monitorsList.list.beats.labelSlow", { count: shown.length, failed, slow })

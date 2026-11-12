@@ -820,6 +820,76 @@ body {
     border-radius: 0;
     background: var(--line-strong);
   }
+  /* Reading one slot of a strip, with a pointer over it or the keyboard
+     on it: the others step back, as the chart's availability strip does. */
+  .slot {
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+  .beat-strip[data-scrub] > .slot:not([data-on]) {
+    opacity: 0.5;
+  }
+  /* The check that just landed rises into its place, once. */
+  .slot-new {
+    transform-origin: bottom;
+    animation: slot-rise var(--duration-slow) var(--ease-out);
+  }
+  /* What the slot in hand was: when, what it came to, its error. It is a
+     popover the strip opens by hand, so it is drawn in the top layer,
+     where no list that scrolls or skips its rendering can cut it off, and
+     the strip sets it over the slot. The surface is .pop's. It comes up
+     once with a fade and then follows from slot to slot without one. */
+  .beat-tip {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    width: max-content;
+    max-width: min(18rem, calc(100vw - var(--space-4)));
+    padding: var(--space-2) var(--space-2_5);
+    overflow: visible;
+    color: var(--ink);
+    pointer-events: none;
+    animation: beat-tip-in var(--duration-fast) var(--ease-out);
+  }
+  .beat-tip:popover-open {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0_5);
+  }
+  .beat-tip-read {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1_5);
+  }
+  .beat-tip-read > strong {
+    font-size: var(--text-dense);
+    line-height: var(--text-dense--line-height);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .beat-tip-read > span:last-child {
+    white-space: nowrap;
+  }
+  /* An error can be a page long; the hover keeps its first lines. */
+  .beat-tip-detail {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* A strip's two one-shot motions: the newest slot rising into its place
+   when a check lands, and the hover over a slot coming up. */
+@keyframes slot-rise {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes beat-tip-in {
+  from {
+    opacity: 0;
+  }
 }
 
 /* The heartbeat of an ongoing outage, on the --beat clock: two beats, then

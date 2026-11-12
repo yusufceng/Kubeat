@@ -46,6 +46,12 @@ export const common = defineMessages(
     "copy.copy": "Kopyala",
     "copy.copied": "Kopyalandı",
 
+    // app/ui/beat-strip.tsx: a slot's hover, and how the keyboard walks a strip.
+    // The threshold's words are also the latency chart's, on its line.
+    "beat.slow": "Yavaş",
+    "beat.threshold": "eşik {value}",
+    "beat.keys": "Sol ve sağ ok tuşlarıyla gezinin; Escape bırakır.",
+
     // app/ui/backend-error.tsx
     "backend.cannotShow":
       "{what} gösterilemiyor. Backend başlıyor ya da yeniden başlıyor olabilir; birkaç saniye sonra sayfayı yenileyin.",
@@ -84,6 +90,10 @@ export const common = defineMessages(
     "noMonitors.viewerBody": "Monitors show up here once they are added in your namespaces. Ask an editor to add them.",
     "copy.copy": "Copy",
     "copy.copied": "Copied",
+
+    "beat.slow": "Slow",
+    "beat.threshold": "threshold {value}",
+    "beat.keys": "Use the left and right arrow keys to move through it; Escape lets go.",
 
     "backend.cannotShow":
       "{what} cannot be shown. The backend may be starting or restarting; reload the page in a few seconds.",

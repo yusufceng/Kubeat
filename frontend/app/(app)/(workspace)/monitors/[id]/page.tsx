@@ -24,6 +24,7 @@ import {
   type UptimeWindow,
 } from "@/lib/api";
 import { currentUser } from "@/lib/auth";
+import { beatState } from "@/lib/beats";
 import { config } from "@/lib/config";
 import { duration } from "@/lib/format";
 import { getT } from "@/lib/i18n/server";
@@ -323,6 +324,19 @@ async function MonitorDetail({
   const outages = incidents
     .filter((i) => i.kind === "down")
     .map(({ kind, started_at, resolved_at }) => ({ kind, started_at, resolved_at }));
+  // The latest checks as the strip draws them, oldest first: what each
+  // came to against the monitor's threshold, when, and how long it took.
+  const recent = results
+    .slice(0, config.historyLimit)
+    .toReversed()
+    .map((r) => ({
+      state: beatState(r.up, r.latency_ms, monitor.slow_above_ms),
+      at: new Date(r.checked_at).getTime(),
+      ms: r.latency_ms,
+      detail: r.up ? undefined : (r.error ?? undefined),
+    }));
+  const recentFailed = recent.filter((r) => r.state === "down").length;
+  const recentSlow = recent.filter((r) => r.state === "slow").length;
 
   const readouts: Readout[] = [
     {
@@ -462,20 +476,18 @@ async function MonitorDetail({
 
       <section aria-label={t("monitorPage.recentChecks")} className="panel p-4">
         <BeatStrip
-          beats={results
-            .slice(0, config.historyLimit)
-            .toReversed()
-            .map((r) => ({
-              state: r.up ? "ok" : "down",
-              at: new Date(r.checked_at).getTime(),
-              text: r.up ? `${Math.round(r.latency_ms).toLocaleString(t.intl)} ms` : t("monitorPage.heartbeat.failed"),
-              detail: r.up ? undefined : (r.error ?? undefined),
-            }))}
+          beats={recent}
           slots={config.historyLimit}
-          label={t("monitorPage.heartbeat.summary", {
-            shown: Math.min(results.length, config.historyLimit),
-            failed: results.slice(0, config.historyLimit).filter((r) => !r.up).length,
-          })}
+          height={36}
+          graded
+          slowAboveMs={monitor.slow_above_ms}
+          keys
+          arrivals
+          label={
+            recentSlow > 0
+              ? t("monitorsList.list.beats.labelSlow", { count: recent.length, failed: recentFailed, slow: recentSlow })
+              : t("monitorPage.heartbeat.summary", { shown: recent.length, failed: recentFailed })
+          }
         />
         <p className="mon-strip-cap">
           <span>{t.n("monitorPage.strip.ago", config.historyLimit)}</span>
@@ -555,6 +567,7 @@ async function MonitorDetail({
                 to: i.resolved_at ? new Date(i.resolved_at).getTime() : null,
               }))}
             maintenance={maintenanceSpans(maintenance, monitor)}
+            slowAboveMs={monitor.slow_above_ms}
           />
         </div>
       </section>

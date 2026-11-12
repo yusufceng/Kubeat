@@ -1436,15 +1436,6 @@
   }
 }
 
-/* The fleet strip sits at the top of the page, where a hover above it
-   would be cut off by the page's edge: there it opens below the strip.
-   Unlayered to win over the tooltip's own utility classes. */
-.fl-strip .beat-strip > .pop {
-  top: calc(100% + 6px);
-  bottom: auto;
-  z-index: 30;
-}
-
 @keyframes fl-flash {
   from {
     background: color-mix(in oklab, var(--flash, var(--accent)) 18%, transparent);

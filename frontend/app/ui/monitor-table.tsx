@@ -91,7 +91,7 @@ export async function MonitorTable({
                   </span>
                 </td>
                 <td className="fl-col-beats">
-                  <HeartbeatBar results={m.history} slots={slots} height={16} paused={!m.enabled} />
+                  <HeartbeatBar results={m.history} slots={slots} height={16} paused={!m.enabled} slowAboveMs={m.slow_above_ms} />
                 </td>
                 <td className={`fl-col-num fl-col-uptime ${m.enabled ? uptimeTone(m.uptime_percent, tones) : "text-ink-3"}`}>
                   {uptime(m.uptime_percent, t)}
