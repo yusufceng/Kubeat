@@ -329,7 +329,7 @@ export const monitorsList = defineMessages(
     "monitorsList.list.row.uptime": "{uptime} uptime",
     "monitorsList.list.row.noUptime": "no uptime",
     "monitorsList.list.beats.label": "{failed} of the last {count} checks failed",
-    "monitorsList.list.beats.labelSlow": "{failed} of the last {count} checks failed, {slow} were slow",
+    "monitorsList.list.beats.labelSlow": "{failed} of the last {count} checks failed, {slow} slow",
     "monitorsList.list.cert.expired": "The certificate has expired",
     "monitorsList.list.cert.left.one": "The certificate expires in {count} day",
     "monitorsList.list.cert.left.other": "The certificate expires in {count} days",

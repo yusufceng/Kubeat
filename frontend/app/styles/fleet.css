@@ -18,11 +18,13 @@
     flex-direction: column;
     min-height: 0;
   }
+  /* 34, 30 and 34px at the default size, in rem so that they grow with the
+     type they hold. */
   @media (width < 64rem), (pointer: coarse) {
     .fl-list {
-      --row: 34px;
-      --head: 30px;
-      --ctl: 34px;
+      --row: 2.125rem;
+      --head: 1.875rem;
+      --ctl: 2.125rem;
     }
   }
 
@@ -137,10 +139,10 @@
 
   /* The state filter: a row of tabs at the toolbar's foot. A state is its
      own glyph and how many monitors are in it; its word is the tab's name
-     and its title, so the row fits in any language, and the word of the
-     one that is on is written at the row's end. The tab that is on stands
-     on the toolbar's line. A state no monitor is in keeps its shape and
-     gives up its color: red in this row means something is down. */
+     and its tip, so the row fits in any language and with any count. The
+     tab that is on stands on the toolbar's line. A state no monitor is in
+     keeps its shape and gives up its color: red in this row means
+     something is down. */
   .fl-states {
     display: flex;
     gap: var(--space-0_5);
@@ -182,17 +184,31 @@
     border-radius: 2px 2px 0 0;
     background: var(--ink);
   }
-  .fl-states-name {
-    overflow: hidden;
-    align-self: center;
-    min-width: 0;
-    margin-left: auto;
-    padding: 0 var(--space-2);
-    color: var(--ink-3);
-    font-size: var(--text-xs);
-    line-height: var(--text-xs--line-height);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  /* A glyph tab's word, under the tab (the look is .rail-tip's, in
+     globals.css). A pointer that can hover shows it, and so does the
+     keyboard's focus; a finger's tap would leave it standing on the list. */
+  .fl-tab-tip {
+    top: calc(100% + var(--space-1));
+    left: 50%;
+    translate: -50% -4px;
+  }
+  .fl-states button:focus-visible .fl-tab-tip {
+    opacity: 1;
+    translate: -50% 0;
+  }
+  @media (hover: hover) {
+    .fl-states button:hover .fl-tab-tip {
+      opacity: 1;
+      translate: -50% 0;
+    }
+  }
+  /* Under a finger the tabs share the row, each as wide a target as the
+     row can give. */
+  @media (width < 64rem), (pointer: coarse) {
+    .fl-states button {
+      flex: 1;
+      justify-content: center;
+    }
   }
 
   /* A filter that is on: its value and a way to take it off. */
@@ -419,9 +435,9 @@
   .fl-name-text {
     min-width: 0;
     overflow: hidden;
-    font-size: 13px;
+    font-size: var(--text-dense);
     font-weight: 530;
-    line-height: 18px;
+    line-height: var(--text-dense--line-height);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -429,8 +445,8 @@
     flex: none;
     color: var(--ink-3);
     font-family: var(--font-plex), ui-monospace, monospace;
-    font-size: 11px;
-    line-height: 14px;
+    font-size: var(--text-micro);
+    line-height: var(--text-micro--line-height);
   }
   /* What takes the kind's place when the row has something to say: how long
      an outage has lasted, how long a degraded monitor takes to answer. A
@@ -450,6 +466,12 @@
   .fl-fact-warn {
     color: var(--warn-ink);
   }
+  /* On a hovered or an open row the amber has a tinted ground under it,
+     and takes a little of the ink to keep its contrast (4.5:1). */
+  .fl-row:hover .fl-fact-warn,
+  .fl-row[data-active] .fl-fact-warn {
+    color: color-mix(in oklab, var(--warn-ink) 85%, var(--ink));
+  }
   /* The name carries the state too, by its weight: an outage's stands out
      of the list, a paused monitor's steps back. */
   .fl-row[data-state="down"] .fl-name-text {
@@ -459,9 +481,9 @@
     color: var(--ink-2);
   }
   .fl-uptime {
-    font-size: 12px;
+    font-size: var(--text-xs);
     font-weight: 500;
-    line-height: 16px;
+    line-height: var(--text-xs--line-height);
     font-stretch: 92%;
     font-variant-numeric: tabular-nums;
     text-align: right;
@@ -1399,6 +1421,19 @@
 .fl-search input:focus-visible,
 .fl-palette-search input:focus-visible {
   outline: none;
+}
+
+/* Under a forced palette (see globals.css) what is drawn as a background
+   keeps its colors here too: a namespace's health, the squares of the
+   cluster map, the bar of the open row and the line under the tab that
+   is on. */
+@media (forced-colors: active) {
+  .fl-health i,
+  .fl-sq,
+  .fl-row[data-active]::before,
+  .fl-states button[aria-pressed="true"]::after {
+    forced-color-adjust: none;
+  }
 }
 
 /* The fleet strip sits at the top of the page, where a hover above it

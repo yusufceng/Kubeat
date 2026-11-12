@@ -497,7 +497,7 @@ body {
 
   /* A section of the rail: an icon in a 32px tile, 8px from each edge of
      the rail. The current one is in full ink on a neutral tile, with a bar
-     at the rail's edge: the bar is the rail's one blue mark. */
+     at the rail's edge: the bar is the rail's one blue mark, 20px of it. */
   .rail-item {
     position: relative;
     display: grid;
@@ -523,8 +523,8 @@ body {
     content: "";
     position: absolute;
     left: calc(var(--space-2) * -1);
-    top: var(--space-2);
-    bottom: var(--space-2);
+    top: var(--space-1_5);
+    bottom: var(--space-1_5);
     width: 2px;
     border-radius: 0 2px 2px 0;
     background: var(--accent);
@@ -552,13 +552,13 @@ body {
     border-color: var(--ink-3);
     color: var(--ink);
   }
-  /* The name of a rail item, beside it on hover and on keyboard focus. */
-  .rail-tip {
+  /* The word for a control that is only a picture (an icon of the rail, a
+     state tab of the list), shown on hover and on keyboard focus. Where it
+     stands and which way it comes in is the control's own rule. */
+  .rail-tip,
+  .fl-tab-tip {
     position: absolute;
-    left: calc(100% + var(--space-3));
-    top: 50%;
     z-index: 60;
-    translate: -4px -50%;
     white-space: nowrap;
     pointer-events: none;
     opacity: 0;
@@ -574,6 +574,12 @@ body {
     transition:
       opacity var(--duration-fast) var(--ease-out),
       translate var(--duration-fast) var(--ease-out);
+  }
+  /* A rail item's is beside it. */
+  .rail-tip {
+    left: calc(100% + var(--space-3));
+    top: 50%;
+    translate: -4px -50%;
   }
   .rail-item:hover .rail-tip,
   .rail-item:focus-visible .rail-tip {
@@ -732,18 +738,23 @@ body {
     border: 1.5px solid var(--down);
     border-radius: 2px;
   }
+  /* The ring at rest is a hairline in almost full color: it has to read
+     as a part of the sign (3:1 on a panel and on a hovered row), and a
+     thin line leaves the diamond the room to stay a diamond. */
   .glyph-down.glyph-live::before {
-    opacity: 0.4;
+    border-width: 1px;
+    opacity: 0.8;
   }
   .glyph-down.glyph-live::after {
     opacity: 0;
     animation: glyph-pulse var(--beat) var(--ease-signal) infinite;
   }
   /* In a label of its own (a chip, a pill, a card's head) the ring takes
-     its room from the words beside it. Rows, feeds and tables leave this
-     off: their glyphs share a column, beating or not. */
+     its room from the words beside it: with this much its corner, and not
+     the diamond's, lines up with the text around. Rows, feeds and tables
+     leave this off: their glyphs share a column, beating or not. */
   .glyph-down.glyph-live.glyph-room {
-    margin-inline: calc(var(--g, 10px) * 0.2);
+    margin-inline: calc(var(--g, 10px) * 0.4);
   }
   .glyph-warn {
     background: linear-gradient(90deg, var(--warn) 50%, transparent 50%);
@@ -878,5 +889,19 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* A forced palette (a contrast theme of the system) repaints every
+   background with its own, and a state that is drawn as a background
+   would go with it: the glyphs, the slots of a strip and the bar of the
+   rail's current section keep the colors they were given. */
+@media (forced-colors: active) {
+  .glyph,
+  .glyph::before,
+  .glyph::after,
+  .slot,
+  .rail-item[aria-current="page"]::before {
+    forced-color-adjust: none;
   }
 }

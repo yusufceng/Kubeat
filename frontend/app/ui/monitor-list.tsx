@@ -245,13 +245,15 @@ export function MonitorList({
     }
   }
 
-  // "All" is a word; a state is the glyph its monitors wear in the rows below.
+  // A state is the glyph its monitors wear in the rows below. "All" is a
+  // word, and so is "idle": paused, pending and in maintenance are three
+  // glyphs, and one of them would stand for the wrong two.
   const filters: { key: ListFilter; label: string; glyph?: GlyphKind }[] = [
     { key: "all", label: t("monitorsList.filter.all") },
     { key: "up", label: t("monitorsList.filter.up"), glyph: "up" },
     { key: "down", label: t("monitorsList.filter.down"), glyph: "down" },
     { key: "degraded", label: t("monitorsList.filter.degraded"), glyph: "warn" },
-    { key: "idle", label: t("monitorsList.filter.idle"), glyph: "paused" },
+    { key: "idle", label: t("monitorsList.filter.idle") },
   ];
 
   return (
@@ -292,8 +294,8 @@ export function MonitorList({
             {tag && <FilterChip label={tag} onRemove={() => setTagFilter("")} />}
           </div>
         )}
-        {/* The glyph says the state to the eye; the name and the title say it in
-            words, and so does the row's end for the state that is on. */}
+        {/* The glyph says the state to the eye; the tab's name says it in
+            words, and so does its tip, under the pointer or the focus. */}
         <div role="group" aria-label={t("monitorsList.filter.label")} className="fl-states">
           {filters.map((f) => (
             <button
@@ -302,8 +304,7 @@ export function MonitorList({
               onClick={() => setStateFilter(f.key)}
               aria-pressed={stateFilter === f.key}
               aria-label={`${f.label} ${counts[f.key]}`}
-              title={f.glyph && f.label}
-              data-empty={(f.glyph && counts[f.key] === 0) || undefined}
+              data-empty={(f.key !== "all" && counts[f.key] === 0) || undefined}
             >
               {f.glyph ? <StatusGlyph kind={f.glyph} /> : f.label}
               <span
@@ -319,13 +320,13 @@ export function MonitorList({
               >
                 {counts[f.key]}
               </span>
+              {f.glyph && (
+                <span className="fl-tab-tip" aria-hidden>
+                  {f.label}
+                </span>
+              )}
             </button>
           ))}
-          {stateFilter !== "all" && (
-            <span className="fl-states-name" aria-hidden>
-              {filters.find((f) => f.key === stateFilter)?.label}
-            </span>
-          )}
         </div>
       </div>
 

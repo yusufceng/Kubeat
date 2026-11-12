@@ -178,12 +178,15 @@ export function Skeleton({ label }: { label: string }) {
   );
 }
 
-/** A state in words beside its glyph, in its color: "● Çalışıyor". */
+/**
+ * A state in words beside its glyph, in its color: "● Çalışıyor". The
+ * state is the service's own, as it is now, so its glyph is live.
+ */
 export function StateWords({ state, t, size = 10, className = "" }: { state: PublicState; t: T; size?: 10 | 12 | 16; className?: string }) {
   const s = serviceStates[state];
   return (
     <span className={`sp-service-state sp-state-${s.glyph} ${className}`}>
-      <StatusGlyph kind={s.glyph} size={size} live={state === "down"} />
+      <StatusGlyph kind={s.glyph} size={size} live />
       {t(s.label)}
     </span>
   );

@@ -39,3 +39,7 @@ test("a round trip keeps every check", () => {
   const states = decodeBeats(encodeBeats(history, 500));
   assert.deepEqual(states, ["down", "ok", "slow", "down"]);
 });
+
+test("a symbol it does not know is a check that passed, not an outage", () => {
+  assert.deepEqual(decodeBeats("x"), ["ok"]);
+});

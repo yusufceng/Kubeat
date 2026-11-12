@@ -78,6 +78,11 @@ test("a short span is the larger unit of the span, and nothing else", () => {
   assert.equal(spanShort(5 * DAY + 14 * HOUR, tr), "5 gün");
   assert.equal(spanShort(0, tr), "<1 sn");
   assert.equal(spanShort(-5000, en), "<1s");
+  // A unit begins where the smaller one is full, and half a second rounds up into it.
+  assert.equal(spanShort(59_500, tr), "1 dk");
+  assert.equal(spanShort(60 * SECOND, tr), "1 dk");
+  assert.equal(spanShort(60 * MINUTE, tr), "1 sa");
+  assert.equal(spanShort(24 * HOUR, tr), "1 gün");
   // Whatever the length, it opens the way the full span does.
   for (const ms of [42 * SECOND, 3 * MINUTE + 20 * SECOND, HOUR + 5 * MINUTE, 5 * DAY + 14 * HOUR, 9 * DAY]) {
     assert.ok(span(ms, tr).startsWith(spanShort(ms, tr)), `${ms} ms`);

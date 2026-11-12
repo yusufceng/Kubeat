@@ -13,10 +13,12 @@ export type SlotState = "ok" | "slow" | "down" | "partial" | "maint" | "idle" | 
 
 /**
  * How much of a graded strip's height a slot stands to: what went well
- * stays low, what was slow or partly failed stands higher, and a failure
- * fills the height.
+ * stays a step below, what was slow or partly failed stands between, and
+ * a failure fills the height. The steps are small on purpose: a healthy
+ * strip keeps the body it has ungraded (10 of a row's 14px), and the
+ * outline still breaks where something went wrong (10, 12, 14).
  */
-const GRADES: Partial<Record<SlotState, number>> = { ok: 0.57, idle: 0.57, maint: 0.57, slow: 0.79, partial: 0.79 };
+const GRADES: Partial<Record<SlotState, number>> = { ok: 0.71, idle: 0.71, maint: 0.71, slow: 0.86, partial: 0.86 };
 
 /** One slot of a strip: a check, a bucket of checks, or a day. */
 export type Beat = {
