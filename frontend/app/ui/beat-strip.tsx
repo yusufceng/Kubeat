@@ -4,11 +4,19 @@ import { useState } from "react";
 import { useT } from "@/lib/i18n/client";
 
 /**
- * What a slot shows: healthy, failed, partly failed (a bucket or a day with
- * some failures), in maintenance, a check of a monitor since paused (idle,
- * whatever it came to), or nothing known.
+ * What a slot shows: healthy, slow (a check that passed, but took longer
+ * than its monitor's threshold), failed, partly failed (a bucket or a day
+ * with some failures), in maintenance, a check of a monitor since paused
+ * (idle, whatever it came to), or nothing known.
  */
-export type SlotState = "ok" | "down" | "partial" | "maint" | "idle" | "none";
+export type SlotState = "ok" | "slow" | "down" | "partial" | "maint" | "idle" | "none";
+
+/**
+ * How much of a graded strip's height a slot stands to: what went well
+ * stays low, what was slow or partly failed stands higher, and a failure
+ * fills the height.
+ */
+const GRADES: Partial<Record<SlotState, number>> = { ok: 0.57, idle: 0.57, maint: 0.57, slow: 0.79, partial: 0.79 };
 
 /** One slot of a strip: a check, a bucket of checks, or a day. */
 export type Beat = {
@@ -32,14 +40,18 @@ export type Beat = {
 /**
  * The one way Kubeat draws time as slots, newest on the right: the
  * heartbeat of a monitor, the beats of a list row, the days of a status
- * page. Healthy slots are a calm green, failures red, partial ones amber,
- * maintenance hatched; where nothing is known there is only a baseline, so
- * a young monitor does not look like it has a long healthy past.
+ * page. Healthy slots are a calm green, failures red, slow and partial ones
+ * amber, maintenance hatched; where nothing is known there is only a
+ * baseline, so a young monitor does not look like it has a long healthy
+ * past.
  *
  * beats are oldest first; when there are fewer than slots, the strip is
  * padded on the left with slots of no data. Without slotWidth the slots
  * share the width; narrowSlots keeps only the newest that many on small
- * screens. label is read in place of the picture.
+ * screens. graded draws a slot's state as its height as well (see GRADES),
+ * so the strip reads by its outline where color does not: a calm stretch
+ * is a low even line, and trouble stands out of it. label is read in place
+ * of the picture.
  */
 export function BeatStrip({
   beats,
@@ -48,6 +60,7 @@ export function BeatStrip({
   slotWidth,
   gap = 2,
   narrowSlots,
+  graded = false,
   label,
   className = "",
 }: {
@@ -57,6 +70,7 @@ export function BeatStrip({
   slotWidth?: number;
   gap?: number;
   narrowSlots?: number;
+  graded?: boolean;
   label: string;
   className?: string;
 }) {
@@ -82,6 +96,8 @@ export function BeatStrip({
         const state = beat?.state ?? "none";
         // A part of a slot: its state from the foot up, healthy above.
         const part = beat?.level !== undefined && beat.level < 1 && (state === "down" || state === "partial");
+        // Whole pixels, so that slots of one state stand level.
+        const grade = graded ? GRADES[state] : undefined;
         return (
           <span
             key={i}
@@ -90,7 +106,7 @@ export function BeatStrip({
               width: slotWidth,
               flex: slotWidth ? undefined : "1 1 0",
               minWidth: slotWidth ? undefined : 2,
-              height: state === "none" ? baseline : undefined,
+              height: state === "none" ? baseline : grade !== undefined ? Math.round(height * grade) : undefined,
               background: part
                 ? `linear-gradient(to top, var(--${state === "down" ? "down" : "warn"}) ${Math.round(beat!.level! * 100)}%, var(--ok-bar) 0)`
                 : undefined,

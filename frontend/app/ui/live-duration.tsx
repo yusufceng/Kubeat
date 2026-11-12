@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { span } from "@/lib/format";
+import { span, spanShort } from "@/lib/format";
 import { useT } from "@/lib/i18n/client";
 
-/** Time elapsed since a moment, counting up while the page is open. */
-export function LiveDuration({ since }: { since: string }) {
+/**
+ * Time elapsed since a moment, counting up while the page is open. short
+ * keeps its largest unit alone ("3 dk"), for where a row has no room for
+ * two.
+ */
+export function LiveDuration({ since, short = false }: { since: string; short?: boolean }) {
   const [now, setNow] = useState<number | null>(null);
   const t = useT();
 
@@ -16,5 +20,5 @@ export function LiveDuration({ since }: { since: string }) {
     return () => clearInterval(id);
   }, []);
 
-  return <span>{now === null ? "…" : span(now - new Date(since).getTime(), t)}</span>;
+  return <span>{now === null ? "…" : (short ? spanShort : span)(now - new Date(since).getTime(), t)}</span>;
 }

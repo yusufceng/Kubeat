@@ -67,7 +67,7 @@ export async function MonitorTable({
               <tr key={m.id}>
                 <td>
                   <Link href={`/monitors/${m.id}`} className="fl-table-name">
-                    <StatusGlyph kind={style.glyph} live={item.state === "down"} />
+                    <StatusGlyph kind={style.glyph} live />
                     <span className="fl-name-text" title={item.name}>
                       {name}
                       {rest && <span className="text-ink-3">{rest}</span>}

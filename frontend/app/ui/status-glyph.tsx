@@ -10,9 +10,13 @@ export type GlyphKind = "up" | "down" | "warn" | "maint" | "paused" | "pending";
 export type GlyphSize = 10 | 12 | 16;
 
 /**
- * A state as its glyph (drawn in globals.css, .glyph). `live` marks an
- * outage that is still going on: the diamond wears a pulsing ring, which
- * stands still for viewers who ask for less motion.
+ * A state as its glyph (drawn in globals.css, .glyph). A state is said
+ * three ways at once, by its shape, its color and whether it moves; the
+ * stable ones stand still. `live` marks the state as the monitor's right
+ * now, which sets the two in progress moving: the diamond of an ongoing
+ * outage beats inside a ring, and the dashed ring of a monitor waiting for
+ * its first check turns. Both stand still for viewers who ask for less
+ * motion, and a past event leaves `live` off.
  *
  * Pass `label` when no visible text next to the glyph says the state; the
  * glyph then names it to screen readers and on hover. Without a label it
@@ -33,7 +37,7 @@ export function StatusGlyph({
 }) {
   return (
     <span
-      className={`glyph glyph-${kind}${live && kind === "down" ? " glyph-live" : ""} ${className}`}
+      className={`glyph glyph-${kind}${live && (kind === "down" || kind === "pending") ? " glyph-live" : ""} ${className}`}
       style={size === 10 ? undefined : ({ "--g": `${size}px` } as React.CSSProperties)}
       {...(label ? { role: "img", "aria-label": label, title: label } : { "aria-hidden": true })}
     />

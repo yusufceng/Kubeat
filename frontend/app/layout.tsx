@@ -5,6 +5,7 @@ import "./globals.css";
 import { config } from "@/lib/config";
 import { I18nProvider } from "@/lib/i18n/client";
 import { getLocale, getT } from "@/lib/i18n/server";
+import { BeatClock } from "@/app/ui/beat-clock";
 import { themeScript } from "@/app/ui/theme-toggle";
 
 // Mona Sans with its width axis, which the display sizes and the readouts
@@ -53,6 +54,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       {/* The app's frame fills the window and scrolls its panes; the bare
           pages scroll as documents do. */}
       <body>
+        <BeatClock />
         <Suspense fallback={null}>
           <Localized>{children}</Localized>
         </Suspense>

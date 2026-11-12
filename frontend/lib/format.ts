@@ -64,6 +64,23 @@ export function span(ms: number, t: T): string {
   return both(t("format.span.d", { count: Math.floor(hours / 24) }), t("format.span.h", { count: rest }), rest);
 }
 
+/**
+ * A span in its largest unit alone, for a row with room for one: 200000 ->
+ * "3 dk" / "3m", 3900000 -> "1 sa" / "1h", 482400000 -> "5 gün" / "5d".
+ * The unit is floored as span() floors its larger one, so the two never
+ * disagree on one screen.
+ */
+export function spanShort(ms: number, t: T): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds === 0) return t("format.span.lessThanSecond");
+  if (seconds < 60) return t("format.span.s", { count: seconds });
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return t("format.span.m", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return t("format.span.h", { count: hours });
+  return t("format.span.d", { count: Math.floor(hours / 24) });
+}
+
 /** CPU in Kubernetes units: 0.25 -> "250m", 1.5 -> "1,5" / "1.5", 0.0002 -> "<1m". */
 export function cpu(cores: number, t: T): string {
   if (cores > 0 && cores < 0.0005) return "<1m"; // in use, but would round to zero

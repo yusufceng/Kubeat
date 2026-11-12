@@ -130,6 +130,10 @@
 
   /* Motion: quick to start, soft to land. */
   --ease-signal: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* The clock of what is live: an ongoing outage beats once in this long.
+     It is not one of the durations: for viewers who ask for less motion a
+     duration shortens, and what runs on this clock stops. */
+  --beat: 1.6s;
 }
 
 @theme inline {
@@ -712,15 +716,34 @@ body {
     border-radius: 1.5px;
     transform: rotate(45deg) scale(0.86);
   }
-  /* An outage that is still going on wears a ring that pulses. */
+  /* An outage that is still going on has a heartbeat. The diamond stands
+     in a ring, which says "ongoing" even when nothing moves; the two beat
+     twice as one and rest, and as the first beat peaks a wave leaves the
+     ring and fades. The beat is the glyph's own scale, which leaves the
+     diamond's turn alone and carries the ring along. */
+  .glyph-down.glyph-live {
+    animation: glyph-beat var(--beat) var(--ease-signal) infinite;
+  }
+  .glyph-down.glyph-live::before,
   .glyph-down.glyph-live::after {
     content: "";
     position: absolute;
     inset: calc(var(--g, 10px) * -0.32);
     border: 1.5px solid var(--down);
     border-radius: 2px;
-    opacity: 0.45;
-    animation: glyph-pulse 1.6s var(--ease-signal) infinite;
+  }
+  .glyph-down.glyph-live::before {
+    opacity: 0.4;
+  }
+  .glyph-down.glyph-live::after {
+    opacity: 0;
+    animation: glyph-pulse var(--beat) var(--ease-signal) infinite;
+  }
+  /* In a label of its own (a chip, a pill, a card's head) the ring takes
+     its room from the words beside it. Rows, feeds and tables leave this
+     off: their glyphs share a column, beating or not. */
+  .glyph-down.glyph-live.glyph-room {
+    margin-inline: calc(var(--g, 10px) * 0.2);
   }
   .glyph-warn {
     background: linear-gradient(90deg, var(--warn) 50%, transparent 50%);
@@ -746,6 +769,10 @@ body {
   .glyph-pending {
     border: 1.5px dashed var(--ink-3);
   }
+  /* Waiting for its first check: the dashed ring turns, slowly. */
+  .glyph-pending.glyph-live {
+    animation: glyph-turn calc(var(--beat) * 2.5) linear infinite;
+  }
 
   /* BeatStrip: checks, buckets or days as slots, newest on the right. A
      slot without data is a baseline, never a grey bar that looks like one. */
@@ -763,7 +790,10 @@ body {
   .slot-down {
     background: var(--down);
   }
-  .slot-partial {
+  /* A bucket or a day with some failures; a check that passed, but slower
+     than its monitor's threshold. */
+  .slot-partial,
+  .slot-slow {
     background: var(--warn);
   }
   .slot-maint {
@@ -781,19 +811,50 @@ body {
   }
 }
 
-@keyframes glyph-pulse {
-  from {
-    transform: scale(1);
-    opacity: 0.45;
+/* The heartbeat of an ongoing outage, on the --beat clock: two beats, then
+   a rest twice as long. app/ui/beat-clock.tsx knows these two names and
+   keeps every animation of theirs in phase, so a screen has one pulse. */
+@keyframes glyph-beat {
+  0%,
+  34%,
+  100% {
+    scale: 1;
   }
-  to {
+  7% {
+    scale: 1.18;
+  }
+  15% {
+    scale: 1;
+  }
+  23% {
+    scale: 1.09;
+  }
+}
+/* The wave leaves the ring as the first beat peaks and is gone by the rest. */
+@keyframes glyph-pulse {
+  0%,
+  6% {
+    transform: scale(1);
+    opacity: 0;
+  }
+  7% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  70%,
+  100% {
     transform: scale(1.6);
     opacity: 0;
   }
 }
+@keyframes glyph-turn {
+  to {
+    rotate: 1turn;
+  }
+}
 
-/* Motion is a courtesy: without it, the pulse stands still as a ring and
-   nothing tweens. */
+/* Motion is a courtesy: without it, the heartbeat stands still as a
+   diamond in its ring, the dashed ring does not turn and nothing tweens. */
 @media (prefers-reduced-motion: reduce) {
   /* The duration tokens collapse too, for what the rule below cannot
      reach: a delay written with one, a ::backdrop, a script. A script
@@ -805,7 +866,9 @@ body {
     --duration-base: 0.01ms;
     --duration-slow: 0.01ms;
   }
-  .glyph-down.glyph-live::after {
+  .glyph-live,
+  .glyph-live::before,
+  .glyph-live::after {
     animation: none;
   }
   *,

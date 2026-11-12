@@ -3345,3 +3345,15 @@ erişilen bir kurulumda `KubeatSignInSourceDegraded` kuralı hop değerini düze
 README "Sayaç ve kural" → "Port-forward"ta. Kurulum notu ve kural metni bu durumu ayırmaz.
 Tetikleyici: `NOTES.txt`'ye dokunan bir sonraki madde ya da yalnız port-forward'la erişilen bir
 kurulumun bulgusu.
+
+## Arayüzde hareketi durdurma ayarı (frontend revizyonu, adım 3)
+
+2026-11-12'de eklendi (frontend revizyonu, adım 3). Süren bir kesintinin elması atar, ilk kontrolünü
+bekleyen monitor'ün kesikli halkası döner; ikisi de kendiliğinden başlar ve beş saniyeden uzun sürer.
+Bugün bunları durdurmanın yolu işletim sisteminin "hareketi azalt" ayarıdır
+(`prefers-reduced-motion`): açıkken ikisi de durur, durum şekil ve renkle okunur. WCAG 2.2.2 ise
+durdurma düzeneğinin sayfanın kendisinde olmasını bekler; kullanıcı menüsünde tema ve dilin yanına
+bir "hareket" seçeneği bunu karşılar. Yapılmadı: yeni bir ayar ve onu taşıyan bir çerez ister, adımın
+kapsamı ise görsel tasarımdı. Tetikleyici: bir erişilebilirlik denetimi ya da VPAT isteği, ya da
+sürekli dönen üçüncü bir hareketin eklenmesi. Maliyeti düşük: sürekli hareketlerin hepsi
+`frontend/app/globals.css`'te `--beat` saatine bağlı kurallarda, tek sınıfla (`.glyph-live`) açılır.

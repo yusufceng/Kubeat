@@ -22,7 +22,7 @@ export function StateChip({
       className={`inline-flex h-6 items-center gap-[7px] whitespace-nowrap rounded-sm px-[9px] text-[12.5px] leading-none font-semibold tabular-nums ${className}`}
       style={{ background: tone.soft, color: tone.ink, boxShadow: `inset 0 0 0 1px ${tone.line}` }}
     >
-      <StatusGlyph kind={kind} live={live} />
+      <StatusGlyph kind={kind} live={live} className="glyph-room" />
       {/* One flex item, so that the words and a live duration keep their spaces. */}
       <span>{children}</span>
     </span>

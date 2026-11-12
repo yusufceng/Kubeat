@@ -432,6 +432,32 @@
     font-size: 11px;
     line-height: 14px;
   }
+  /* What takes the kind's place when the row has something to say: how long
+     an outage has lasted, how long a degraded monitor takes to answer. A
+     figure, so it is set as the readouts are. */
+  .fl-fact {
+    flex: none;
+    font-size: var(--text-xs);
+    font-weight: 550;
+    line-height: var(--text-xs--line-height);
+    font-stretch: 92%;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .fl-fact-down {
+    color: var(--down-ink);
+  }
+  .fl-fact-warn {
+    color: var(--warn-ink);
+  }
+  /* The name carries the state too, by its weight: an outage's stands out
+     of the list, a paused monitor's steps back. */
+  .fl-row[data-state="down"] .fl-name-text {
+    font-weight: 620;
+  }
+  .fl-row[data-state="paused"] .fl-name-text {
+    color: var(--ink-2);
+  }
   .fl-uptime {
     font-size: 12px;
     font-weight: 500;
