@@ -4,7 +4,7 @@
 # exactly what it was built from; Dependabot proposes the updates, moving the
 # digest and the tag together. Node's major version is the runtime image's
 # (nodejs-24-minimal): change both together.
-FROM --platform=$BUILDPLATFORM node:24.22.2-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS build
+FROM --platform=$BUILDPLATFORM node:24.22.3-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
