@@ -15,7 +15,7 @@ ARG TARGETARCH
 # modernc.org/sqlite is pure Go, so the binary is static.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/server ./cmd/server
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:1793579023@sha256:dfa0eb04abc59221544e74862432496add1f491f915c9b531880f91affc0e12c
+FROM registry.access.redhat.com/ubi9/ubi-minimal:1795198241@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352
 COPY --from=build /out/server /usr/local/bin/server
 # OpenShift runs the container with an arbitrary UID in group 0, so the data
 # directory is owned by group 0 and group-writable.
